@@ -251,6 +251,18 @@ def main():
             return f"loads: {page.locator('#loads li').all_inner_texts()} | {text.splitlines()[0]}"
         run.step("strength with two load cases", load_cases)
 
+        def marked_faces():
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            before = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")
+            # Mark the stem end (the flat face pointing -Z as modelled) "on the bed".
+            stem = page.evaluate("async () => (await fdm.call('regions')).regions.filter((r) => r.kind === 'flat')"
+                                 ".sort((a, b) => a.normal[2] - b.normal[2])[0].id")
+            run.act(lambda: page.evaluate(f"() => {{ fdm.state.selectedRegion = {stem}; document.getElementById('mark-bed').click(); }}"))
+            after = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")
+            assert after == [0, 0, 1] and after != before, f"marking the stem end for the bed: {before} -> {after}"
+            return f"best up {before} -> {after}; marks: {page.locator('#marks li').all_inner_texts()}"
+        run.step("marked face steers orientation", marked_faces)
+
         def cancel():
             run.act(lambda: page.click("[data-sample=enclosure]"))
             before = page.evaluate("() => fdm.state.options.length")

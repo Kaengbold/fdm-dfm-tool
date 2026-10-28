@@ -87,6 +87,7 @@ const state = {
   regionInfo: [],
   selectedRegion: -1,
   loads: [],
+  marks: [], // faces the user marked: {region, kind: "clean" | "bed"}
   strength: null,
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
@@ -189,7 +190,8 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], strength: null, overrides: {} });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {} });
+  renderMarks();
   viewer.framed = false;
   const [x, y, z] = info.size_mm.map((v) => v.toFixed(1));
   const body = info.bodies.length ? ` (${info.bodies[info.body].name})` : "";
@@ -220,7 +222,7 @@ function showUnitHint(hint) {
 async function findOrientations(withLoads = false) {
   const loads = withLoads && readyForStrength() ? state.loads : undefined;
   await busy(loads ? "Finding the best orientation for printing and strength…" : "Finding the best orientation…", async () => {
-    const r = await call("orientations", { profile: profile(), loads });
+    const r = await call("orientations", { profile: profile(), loads, faces: faceMarks() });
     state.options = [...r.orientations, r.as_loaded];
     renderOptions();
     await selectOption(0);
@@ -249,7 +251,7 @@ async function runCheck() {
   // let an older result (or an older orientation's result) overwrite the newer one.
   const token = ++checkToken;
   await busy("Checking printability…", async () => {
-    const result = await call("check", { up: activeOption().up, profile: profile(), mode: mode() });
+    const result = await call("check", { up: activeOption().up, profile: profile(), mode: mode(), faces: faceMarks() });
     if (token !== checkToken) return;
     if (!result?.findings) throw new Error("The analysis returned no result — please try again");
     state.check = result;
@@ -421,7 +423,7 @@ function recolor() {
   const option = activeOption();
   if (!option) return;
   if (state.showHeat && state.strength) return viewer.colorByHeat(state.strength.face_heat);
-  const roles = new Map(state.loads.map((l) => [l.region, l.kind]));
+  const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.map((l) => [l.region, l.kind])]);
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions) return null;
     const r = state.faceRegions[f];
@@ -467,6 +469,40 @@ function addLoad(load) {
   renderLoads();
   recolor();
 }
+
+// ---------- marked faces (critical faces) ----------
+/** {clean: [region ids], bed: [...]} for the engine, or undefined when nothing is marked. */
+function faceMarks() {
+  if (!state.marks?.length) return undefined;
+  const of = (kind) => state.marks.filter((m) => m.kind === kind).map((m) => m.region);
+  return { clean: of("clean"), bed: of("bed") };
+}
+
+const MARK_LABEL = { clean: "Keep clean (no support marks)", bed: "On the bed" };
+
+function setMark(kind) {
+  const region = state.selectedRegion;
+  state.marks = state.marks.filter((m) => m.region !== region && !(kind === "bed" && m.kind === "bed")).concat({ region, kind });
+  state.selectedRegion = -1;
+  $("pick-panel").hidden = true;
+  renderMarks();
+  findOrientations(Boolean(state.strength)); // keep strength in the ranking if it was checked
+}
+
+function renderMarks() {
+  $("marks").replaceChildren(
+    ...(state.marks ?? []).map((m, i) =>
+      el("li", { className: m.kind }, el("span", { textContent: MARK_LABEL[m.kind] }),
+        el("button", { textContent: "×", title: "Remove", onclick: () => {
+          state.marks.splice(i, 1);
+          renderMarks();
+          findOrientations(Boolean(state.strength)); // keep strength in the ranking if it was checked
+        } })),
+    ),
+  );
+}
+$("mark-clean").onclick = () => setMark("clean");
+$("mark-bed").onclick = () => setMark("bed");
 
 $("as-fixed").onclick = () => addLoad({ region: state.selectedRegion, kind: "fixed" });
 $("as-load").onclick = () =>

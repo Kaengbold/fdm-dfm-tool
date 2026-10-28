@@ -10,6 +10,7 @@
   --accent: #3e63dd;
   --fixed: #0090ff;
   --force: #8e4ec6;
+  --clean: #12a594;
   font-family: system-ui, sans-serif;
   color: var(--text);
 }
@@ -222,3 +223,9 @@ main canvas { display: block; }
 .why-lower { margin: 4px 0 0; font-size: 12px; color: var(--muted); font-style: italic; }
 .edit-params { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 6px 0; }
 .edit-params input { width: 4.5em; }
+.marks { list-style: none; padding: 0; margin: 4px 0; font-size: 13px; }
+.marks li { display: flex; justify-content: space-between; align-items: center; padding: 2px 0; }
+.marks li.clean::before, .marks li.bed::before { content: ""; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+.marks li.clean::before { background: var(--clean); }
+.marks li.bed::before { background: var(--bed); }
+.marks li span { flex: 1; }

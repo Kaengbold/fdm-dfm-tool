@@ -12,7 +12,7 @@ browser, no install, your files never leave your computer.
 | | |
 |---|---|
 | **Input** | STL, 3MF or STEP (exact CAD faces). Files with several parts let you pick one; parts exported in inches or metres get a one-click rescale |
-| **Orientation** | Ranks build directions by supports, bed contact, height — and strength if you add loads; checks the build volume and turns the part to fit |
+| **Orientation** | Ranks build directions by supports (sliced: bridges, supports landing on the part), bed contact, height — and strength if you add loads; click faces to keep them clean of support marks or put them on the bed; says why other options rank lower; checks the build volume and turns the part to fit |
 | **Printability** | Pseudo-slices the part: overhangs vs. bridges, thin walls, sharp bed corners, tipping, slender features, small hot layers, material/printer issues |
 | **Explanations** | Every finding has a plain-language *why* and fixes, filtered by what you can change: *just print it* / *the design* / *both* |
 | **Slicer settings** | Recommended OrcaSlicer / Bambu Studio settings, exported in a 3MF together with the oriented part |

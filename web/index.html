@@ -87,6 +87,10 @@
           <p class="hint" id="pick-hint">Click a face on the part, then say whether it's <b>held</b> (screwed, glued, clamped) or <b>loaded</b>.</p>
           <div id="pick-panel" hidden>
             <p class="hint">Selected: <span id="pick-info"></span></p>
+            <div class="row">
+              <button id="mark-clean" title="Orientations that put supports on this face rank lower">Keep this face clean</button>
+              <button id="mark-bed" title="Only orientations with this face on the bed are recommended">Put this face on the bed</button>
+            </div>
             <button id="as-fixed">Held here</button>
             <div class="row">
               <input id="kg" type="number" value="2" min="0.1" step="0.5" aria-label="Load in kg" /> kg
@@ -102,6 +106,7 @@
             </div>
             <p class="hint">Loads in the same case act together. Use separate cases for different situations (e.g. hanging vs. being knocked sideways) — the weakest one counts.</p>
           </div>
+          <ul id="marks" class="marks"></ul>
           <ul id="loads" class="loads"></ul>
           <div class="actions">
             <button id="run-strength" class="primary" disabled>Check strength</button>

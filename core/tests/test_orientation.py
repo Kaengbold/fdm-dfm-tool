@@ -131,3 +131,22 @@ def test_score_breakdown_explains_lower_options():
     assert "why_lower" not in first
     assert all(o["why_lower"].startswith(("Ranked lower", "Almost")) for o in rest)
     assert "support" in rest[0]["why_lower"]
+
+
+def test_marked_faces_steer_orientation_and_check():
+    """Mushroom: best is cap down. Marking the cap 'clean' or the stem end 'on the bed' flips it."""
+    api.load(sample("mushroom"), "mushroom")
+    regions = api.regions()["regions"]
+    best = api.orientations()["orientations"][0]
+    assert np.allclose(best["up"], [0, 0, -1], atol=1e-6)
+    stem_end = min((r for r in regions if r["kind"] == "flat"), key=lambda r: r["normal"][2])["id"]  # faces -Z
+    cap_top = max((r for r in regions if r["kind"] == "flat"), key=lambda r: r["normal"][2])["id"]  # faces +Z
+    on_bed = api.orientations(faces={"bed": [stem_end]})["orientations"][0]
+    assert np.allclose(on_bed["up"], [0, 0, 1], atol=1e-6)
+    assert any("sits on the bed" in x for x in on_bed["reasons"])
+    # Cap down puts its underside on supports; marking the underside clean makes that a problem.
+    underside = [r["id"] for r in regions if r["normal"][2] < -0.5 and r["id"] != stem_end]
+    if underside:
+        found = api.check([0, 0, 1], {}, "print", faces={"clean": underside})["findings"]
+        assert any(f["rule"] == "support_marks" and f["severity"] == "problem" for f in found)
+    assert cap_top != stem_end

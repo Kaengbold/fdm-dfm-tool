@@ -40,7 +40,10 @@ ready.then(
 
 // Methods that need scipy; it is a big download, so it's fetched on first use.
 const NEEDS_SCIPY = new Set(["regions", "strength", "strength_options", "design"]);
-const needsScipy = (method, args) => NEEDS_SCIPY.has(method) || (method === "orientations" && args?.loads?.length);
+// Loads and marked faces need face regions (scipy) too.
+const marksFaces = (args) => args?.faces && (args.faces.clean?.length || args.faces.bed?.length);
+const needsScipy = (method, args) =>
+  NEEDS_SCIPY.has(method) || (method === "orientations" && (args?.loads?.length || marksFaces(args))) || (method === "check" && marksFaces(args));
 
 onmessage = async ({ data: { id, method, args, data } }) => {
   try {

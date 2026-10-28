@@ -9,7 +9,7 @@ const css = (v) => new THREE.Color(getComputedStyle(document.documentElement).ge
 const CLASS_COLORS = ["--ok", "--borderline", "--support", "--bed"].map(css);
 const SEVERITY_COLORS = { problem: css("--support"), warn: css("--borderline"), info: css("--accent") };
 
-export const REGION_COLORS = { fixed: css("--fixed"), force: css("--force"), selected: css("--accent") };
+export const REGION_COLORS = { fixed: css("--fixed"), force: css("--force"), selected: css("--accent"), clean: css("--clean"), bed: css("--bed") };
 
 export class Viewer {
   constructor(el) {

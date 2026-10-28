@@ -111,11 +111,12 @@ def _info() -> dict:
     }
 
 
-def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | None = None) -> dict:
+def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | None = None, faces: dict | None = None) -> dict:
     """Best build directions for the loaded part, plus how it scores as loaded.
 
     With ``loads``, candidates are also ranked by strength: a weak orientation is
-    penalised even when it prints more easily.
+    penalised even when it prints more easily. ``faces`` = {"clean": [region ids],
+    "bed": [region ids]}: faces that should stay free of support marks / sit on the bed.
     """
     s = _require()
     p = Profile.from_dict(profile)
@@ -123,6 +124,12 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     progress.report(0, "Scoring directions")
     candidates = find_orientations(s.mesh, settings, top=3 * top)  # extra, some get filtered out below
     as_loaded = evaluate(s.mesh, [0, 0, 1], settings)
+    marked = _marked_faces(faces)
+    if marked:
+        # Lying on a face the user wants on the bed may not be among the generic best: add it.
+        candidates += [evaluate(s.mesh, -_region_normal(s.mesh, m), settings) for m in marked["bed"]]
+        for r in [*candidates, as_loaded]:
+            _face_penalty(s.mesh, r, marked, settings)
     progress.report(0.2, "Scoring directions")
     safety = {}
     if loads:
@@ -141,6 +148,8 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
         with stage(0.2, 0.95):
             _rank_by_weak_spots(s.mesh, candidates, p, extra=[as_loaded])
 
+    if marked:
+        candidates.sort(key=lambda r: r.score)
     # Hide options that don't sit on any flat face or are far worse than the best — unless
     # nothing better exists (e.g. a sphere). Users shouldn't have to wade through bad choices.
     flat = [r for r in candidates if r.bed_area > 0]
@@ -183,6 +192,7 @@ WORSE = {
     "bed": "has less contact with the bed",
     "weak": "has more weak spots along the layers",
     "strength": "is weaker under your load",
+    "faces": "doesn't keep to the faces you marked",
 }
 
 
@@ -193,6 +203,47 @@ def why_lower(terms: dict[str, float], best: dict[str, float], min_gap: float = 
     if not worse:
         return "Almost as good as the recommended option"
     return "Ranked lower: " + " and ".join(worse)
+
+
+CLEAN_FACE_WEIGHT = 3.0  # full penalty when a "clean" face is all supported (a strong preference)
+BED_FACE_WEIGHT = 10.0  # a face the user wants on the bed isn't on it (an instruction: beats everything else)
+
+
+def _marked_faces(faces: dict | None) -> dict | None:
+    """Triangle masks for the user's marked faces (regions), or None if nothing is marked."""
+    if not faces or not (faces.get("clean") or faces.get("bed")):
+        return None
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    return {kind: [s.regions == r for r in faces.get(kind, [])] for kind in ("clean", "bed")}
+
+
+def _region_normal(mesh: Mesh, mask: np.ndarray) -> np.ndarray:
+    normals, areas = mesh.normals_and_areas()
+    n = (normals[mask] * areas[mask, None]).sum(axis=0)
+    return n / np.linalg.norm(n)
+
+
+def _face_penalty(mesh: Mesh, r, marked: dict, settings: OrientationSettings) -> None:
+    from .orientation import BED, NEEDS_SUPPORT
+
+    _, areas = mesh.normals_and_areas()
+    classes = classify_faces(mesh, r.up, settings)
+    penalty, notes = 0.0, []
+    for m in marked["clean"]:
+        frac = areas[m & (classes == NEEDS_SUPPORT)].sum() / areas[m].sum()
+        penalty += CLEAN_FACE_WEIGHT * frac
+        if frac > 0.05:
+            notes.append(f"Supports would touch a face you want clean ({frac:.0%} of it)")
+    for m in marked["bed"]:
+        frac = areas[m & (classes == BED)].sum() / areas[m].sum()
+        penalty += BED_FACE_WEIGHT * (1 - frac)
+        notes.append("The face you picked sits on the bed" if frac > 0.9 else "The face you want on the bed is not on the bed")
+    r.penalize("faces", penalty)
+    r.reasons += notes
 
 
 SCAR_WEIGHT = 1.0  # support resting on the part: rough marks on a visible surface, hard to remove
@@ -404,13 +455,15 @@ def _to_print_frame(mesh: Mesh, r: np.ndarray, point) -> list[float]:
     return (r @ np.asarray(point) + shift).tolist()
 
 
-def check(up, profile: dict | None = None, mode: str = "print") -> dict:
-    """Run all printability checks for one orientation, explain them and recommend settings."""
+def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None) -> dict:
+    """Run all printability checks for one orientation, explain them and recommend settings.
+    ``faces`` as in ``orientations``: support on a face marked clean becomes a problem."""
     s = _require()
     p = Profile.from_dict(profile)
     rotation, fit = print_rotation(s.mesh, up, p.printer["bed"])
     oriented = orient(s.mesh, rotation)
     result = run_checks(oriented, p)
+    result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
     if not fit["fits"]:
         result["findings"].insert(0, {"rule": "exceeds_build_volume", "severity": "problem", "bbox": None, "metrics": fit,
                                       "detail": f"Doesn't fit the {p.printer['name']}: {fit['reason']}"})
@@ -428,6 +481,29 @@ def check(up, profile: dict | None = None, mode: str = "print") -> dict:
         "settings": recommend_settings(p, result["findings"], result["stats"]) if mode != "design" else [],
         "z_strength_factor": result["z_strength_factor"],
     }
+
+
+def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotation: np.ndarray) -> list[dict]:
+    """Support marks on a face the user wants clean: the one place they matter most."""
+    if not marked or not marked["clean"]:
+        return []
+    from .orientation import NEEDS_SUPPORT
+
+    _, areas = mesh.normals_and_areas()
+    classes = classify_faces(mesh, up, orientation_settings(p))
+    placed = mesh.triangles @ rotation.T  # same placement as orient(): centred on x/y, lowest point at z = 0
+    lo, hi = placed.reshape(-1, 3).min(axis=0), placed.reshape(-1, 3).max(axis=0)
+    placed = placed + [-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]]
+    out = []
+    for m in marked["clean"]:
+        hit = m & (classes == NEEDS_SUPPORT)
+        if areas[hit].sum() < 0.05 * areas[m].sum():
+            continue
+        pts = placed[hit].reshape(-1, 3)
+        out.append({"rule": "support_marks", "severity": "problem", "impact": "surface",
+                    "bbox": [pts.min(axis=0).tolist(), pts.max(axis=0).tolist()], "metrics": {"area": float(areas[hit].sum())},
+                    "detail": f"Supports would touch the face you want clean (~{areas[hit].sum():.0f} mm²) — pick another orientation or accept marks there"})
+    return out
 
 
 def explain_finding(finding: dict, mode: str = "both") -> dict:

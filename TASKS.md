@@ -15,7 +15,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 ## Orientation
 
 - [x] **T-010 P1** Refine the top ~5 orientations with the pseudo-slicer: true first-layer area, supports that land on the part vs. the bed, support volume. · files: `orientation.py`, `api.py` · owner: Claude (`task/T-010-refine`) — `refine.py`; bridges within the material's limit need no support; scars on the part are penalised and named in the reasons. Slicing budget scales with mesh size.
-- [ ] **T-011 P2** "Critical faces": let the user mark faces that must be flat on the bed / vertical / not touched by supports (cosmetic); use them in the ranking. · owner: —
+- [x] **T-011 P2** "Critical faces": let the user mark faces that must be flat on the bed / vertical / not touched by supports (cosmetic); use them in the ranking. · owner: Claude (`task/T-011-critical-faces`) — "Keep clean" and "On the bed" (click a face); `faces` in `orientations`/`check`. Left: "must be vertical".
 - [x] **T-012 P2** Show *why* an option lost (score breakdown) in the UI. · owner: Claude (`task/T-012-score-breakdown`) — `score_terms` per option (support/height/bed/weak/strength) and a plain `why_lower` line.
 
 ## Printability checks & knowledge base
@@ -33,7 +33,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [x] **T-100 P1** Horizontal holes as features in the checks (diameter, sag, fit). · owner: Claude (`task/T-100-sideways-holes`) — `holes.py` cuts across the hole axis (no scipy needed); closes / undersized / new `sideways_hole_oval` (replaces bridge-sag at the hole). Fit with fasteners → T-022/T-023.
 - [~] **T-101 P2** Trapped support in *blind* channels/pockets open on one side (only fully closed cavities are detected now). · owner: Claude (`task/T-101-blind-channels`) — sideways holes too wide to bridge that are blind or longer than 4× their diameter → `trapped_support`. Left: non-round blind pockets/slots.
 - [ ] **T-102 P2** Engraved/raised text legibility on top and side faces (stroke width, depth vs nozzle/layer height). · owner: —
-- [ ] **T-103 P2** Support marks on faces the user marks as visible/critical → raise severity (needs T-011). · owner: —
+- [x] **T-103 P2** Support marks on faces the user marks as visible/critical → raise severity (needs T-011). · owner: Claude (`task/T-011-critical-faces`) — support on a clean face is a *problem* finding with its own box.
 - [ ] **T-104 P2** Calibrate warping lengths (`thresholds.yaml`) with real prints per material/enclosure. · owner: —
 - [ ] **T-105 P2** "Strength" goal: use the voxel simulation automatically when loads are known; heuristics (pins/necks) otherwise. · owner: —
 - [x] **T-106 P3** Shrinkage per material → expected size error for long parts (shape impact). · owner: Claude (`task/T-026-presets-fasteners`) — `shrinkage_pct` per material, `shrinkage_size_error` finding.
