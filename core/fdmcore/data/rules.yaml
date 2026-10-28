@@ -328,6 +328,26 @@ rules:
     sources:
     - Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA
     - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
+  shrinkage_size_error:
+    title: Long Part Comes Out Short
+    why: Plastic shrinks as it cools from printing temperature, so a long part ends up a little smaller than in
+      CAD — about 0.3% for PLA and up to 0.8% or more for ABS, ASA and PC. On a 200 mm part that's up to 1.6 mm,
+      enough that it no longer fits its mating part.
+    fixes:
+    - domain: slicer
+      text: Set the filament's shrinkage compensation in the slicer (OrcaSlicer, Filament settings, Shrinkage) to the
+        value measured on a calibration print, or scale the part up by the shrinkage percentage.
+    - domain: geometry
+      text: Leave clearance at long mating edges, or add the expected shrinkage to the critical dimensions in CAD.
+    - domain: process
+      text: Print a test bar of the same material, measure it and use that shrinkage; it varies by brand and colour.
+    tags:
+    - shrinkage
+    - tolerances
+    - dimensions
+    sources:
+    - Prusa Knowledge Base — dimensional accuracy and shrinkage articles (help.prusa3d.com)
+    - Polymaker PolyLite ABS / ASA technical data sheets (shrinkage values)
   gap_fuses:
     title: Moving Clearance Gap Fuses Shut
     why: The CAD model shows separate moving components in a print-in-place hinge or bearing, but clearances narrower

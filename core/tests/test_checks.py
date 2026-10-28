@@ -234,3 +234,33 @@ def test_teardrop_edit_clears_sideways_hole():
     cutters = [np.frombuffer(e["cutter"], "<f4").reshape(-1, 3, 3) for e in api.design([0, 0, 1])["edits"]]
     api.load(to_binary_stl(subtract(api._session.mesh, cutters)), "l_bracket_dfm")
     assert "sideways_hole_oval" not in {f["rule"] for f in api.check([0, 0, 1], {}, "both")["findings"]}
+
+
+def test_fastener_sized_holes_get_hole_sizes():
+    found = rules_for("l_bracket")  # Ø6 vertical hole = M6 nominal
+    f = found["small_hole_undersized"]
+    assert f["metrics"]["fastener"] == "M6" and "Ø6.6 mm" in f["detail"] and "Ø8.0 mm" in f["detail"]
+
+
+def test_shrinkage_on_long_abs_part():
+    long_bar = api.load(to_stl_box([200, 20, 10]), "bar")
+    assert long_bar["size_mm"][0] == 200
+    abs_ = {f["rule"]: f for f in api.check([0, 0, 1], {"material": "abs"}, "print")["findings"]}
+    assert abs_["shrinkage_size_error"]["metrics"]["short_mm"] == pytest.approx(1.6)
+    assert abs_["shrinkage_size_error"]["severity"] == "warn"
+    pla = {f["rule"] for f in api.check([0, 0, 1], {"material": "pla"}, "print")["findings"]}
+    assert "shrinkage_size_error" in pla  # 0.6 mm at 0.3 %
+
+
+def to_stl_box(size):
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * size
+    f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
+    return to_binary_stl(Mesh(v[np.array(f)]))
+
+
+@pytest.mark.parametrize("material", ["pla_plus", "asa", "pc", "tpu_95a"])
+def test_new_materials_run(material):
+    found = rules_for("enclosure", material=material, printer="creality_k1c")
+    assert isinstance(found, dict)

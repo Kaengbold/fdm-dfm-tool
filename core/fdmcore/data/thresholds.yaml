@@ -38,6 +38,11 @@ warping:
     petg: {none: 85, passive: 100, heated: 100}
     abs: {none: 45, passive: 75, heated: 115}
     pa_cf: {none: 85, passive: 110, heated: 140}
+    # T-026 materials, scaled from their shrinkage like the ones above (estimates, see T-104).
+    pla_plus: {none: 110, passive: 110, heated: 110}
+    asa: {none: 55, passive: 85, heated: 120}
+    pc: {none: 40, passive: 70, heated: 110}
+    tpu_95a: {none: 140, passive: 140, heated: 140}
   sharp_corner_max_deg: 100       # convex corners sharper than this lift first [problem_warping_and_corner_lifting]
   fillet_radius_mm: 3.0           # suggested corner radius [problem_warping_and_corner_lifting]
   brim_width_mm: 8                # [corner_mouse_ears_vs_brim]
@@ -57,3 +62,21 @@ stability:
 
 cooling:
   small_layer_area_mm2: 100       # [problem_overhang_curl_and_small_layer_overheating]
+
+fasteners:
+  # Metric screws. Clearance: ISO 273 close / medium series. Nuts: ISO 4032 (across flats, max height).
+  # pilot: hole to screw straight into printed plastic (~0.8 × d); insert: heat-set insert hole
+  # (Ruthex standard inserts). Values gathered with Gemini, checked against the standards' tables.
+  M2:   {d: 2.0, clearance_close_mm: 2.2, clearance_normal_mm: 2.4, pilot_mm: 1.6, insert_hole_mm: 3.2, nut_af_mm: 4.0, nut_thickness_mm: 1.6}
+  M2.5: {d: 2.5, clearance_close_mm: 2.7, clearance_normal_mm: 2.9, pilot_mm: 2.1, insert_hole_mm: 3.6, nut_af_mm: 5.0, nut_thickness_mm: 2.0}
+  M3:   {d: 3.0, clearance_close_mm: 3.2, clearance_normal_mm: 3.4, pilot_mm: 2.5, insert_hole_mm: 4.0, nut_af_mm: 5.5, nut_thickness_mm: 2.4}
+  M4:   {d: 4.0, clearance_close_mm: 4.3, clearance_normal_mm: 4.5, pilot_mm: 3.4, insert_hole_mm: 5.6, nut_af_mm: 7.0, nut_thickness_mm: 3.2}
+  M5:   {d: 5.0, clearance_close_mm: 5.3, clearance_normal_mm: 5.5, pilot_mm: 4.3, insert_hole_mm: 6.4, nut_af_mm: 8.0, nut_thickness_mm: 4.7}
+  M6:   {d: 6.0, clearance_close_mm: 6.4, clearance_normal_mm: 6.6, pilot_mm: 5.2, insert_hole_mm: 8.0, nut_af_mm: 10.0, nut_thickness_mm: 5.2}
+  match_tol_mm: 0.1   # a hole within this of a screw's nominal size is "modelled at screw size"
+
+shrinkage:
+  # Parts shrink as they cool (linear %, per material in presets.yaml). Report when the longest
+  # dimension comes out this much short. Rough: depends on brand, infill and part shape.
+  report_from_mm: 0.3
+  warn_from_mm: 0.6

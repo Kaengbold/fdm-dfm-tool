@@ -23,10 +23,10 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [~] **T-020 P1** (12 new rules + thresholds now sourced from `research/sourced_*.yaml`; remaining: verify the 404/unreachable links in `research/url_check.txt`, review older rules) Turn `research/fdm_knowledge.md` (unverified) into sourced rules: verify each claim against the sources gathered with `research/RESEARCH_PROMPT.md`, then update `rules.yaml` wording and thresholds. · files: `data/rules.yaml` · owner: —
 - [ ] **T-021 P2** New check: embossed/debossed text and small details below printable size (per nozzle). · owner: —
 - [ ] **T-022 P2** New checks for fits: press-fit / sliding-fit clearances, pin–hole pairs; suggest tolerances. · owner: —
-- [ ] **T-023 P2** Threads & fasteners: detect small holes meant for screws, suggest heat-set inserts / nut traps / correct pilot diameters. · owner: —
+- [~] **T-023 P2** Threads & fasteners: detect small holes meant for screws, suggest heat-set inserts / nut traps / correct pilot diameters. · owner: Claude (`task/T-026-presets-fasteners`) — holes modelled at M2–M6 nominal size get clearance / pilot / insert sizes (`thresholds.yaml` fasteners). Left: nut traps (hex holes), wall thickness around inserts.
 - [x] **T-024 P2** (done as `bridge_sag`) Horizontal hole droop as an *info* finding even when the bridge is short (link to the teardrop edit). · owner: —
 - [ ] **T-025 P3** Seam / cosmetic surface hints, ironing suggestion for flat tops. · owner: —
-- [ ] **T-026 P2** More presets: Creality K1/K2/Ender-3 V3, Elegoo, Anycubic; materials TPU, ASA, PC, PLA+. Cite sources. · files: `data/presets.yaml` · owner: —
+- [~] **T-026 P2** More presets: Creality K1/K2/Ender-3 V3, Elegoo, Anycubic; materials TPU, ASA, PC, PLA+. Cite sources. · files: `data/presets.yaml` · owner: Claude (`task/T-026-presets-fasteners`) — added (Gemini draft, hand-checked); entries marked `verify` in presets.yaml still need a spec-page check; warping lengths for new materials are scaled estimates.
 
 ## Findings model (impact-based) — follow-ups
 
@@ -36,7 +36,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-103 P2** Support marks on faces the user marks as visible/critical → raise severity (needs T-011). · owner: —
 - [ ] **T-104 P2** Calibrate warping lengths (`thresholds.yaml`) with real prints per material/enclosure. · owner: —
 - [ ] **T-105 P2** "Strength" goal: use the voxel simulation automatically when loads are known; heuristics (pins/necks) otherwise. · owner: —
-- [ ] **T-106 P3** Shrinkage per material → expected size error for long parts (shape impact). · owner: —
+- [x] **T-106 P3** Shrinkage per material → expected size error for long parts (shape impact). · owner: Claude (`task/T-026-presets-fasteners`) — `shrinkage_pct` per material, `shrinkage_size_error` finding.
 
 ## Strength
 

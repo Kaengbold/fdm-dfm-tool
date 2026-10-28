@@ -60,6 +60,58 @@ printers:
     speed: fast
     multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
 
+  # Added in T-026 from manufacturer spec pages (values gathered with Gemini, cross-checked by hand;
+  # entries marked "verify" are less certain — corrections welcome).
+  creality_k1c:
+    name: Creality K1C
+    bed: [220, 220, 250]
+    enclosure: passive
+    hardened_nozzle: true    # steel-tipped nozzle stock
+    speed: fast
+    multi_material: none     # verify: CFS support for the K1 series
+  creality_k2_plus:
+    name: Creality K2 Plus
+    bed: [350, 350, 350]
+    enclosure: heated        # active chamber heater
+    hardened_nozzle: true
+    speed: fast
+    multi_material: optional # CFS (sold as the Combo)
+  creality_ender3_v3_se:
+    name: Creality Ender-3 V3 SE
+    bed: [220, 220, 250]
+    enclosure: none
+    hardened_nozzle: false
+    speed: medium
+    multi_material: none
+  creality_ender3_v3_ke:
+    name: Creality Ender-3 V3 KE
+    bed: [220, 220, 240]
+    enclosure: none
+    hardened_nozzle: false   # verify
+    speed: fast
+    multi_material: none
+  elegoo_centauri_carbon:
+    name: Elegoo Centauri Carbon
+    bed: [256, 256, 256]
+    enclosure: passive
+    hardened_nozzle: true
+    speed: fast
+    multi_material: none     # verify: multi-colour add-on
+  anycubic_kobra_3:
+    name: Anycubic Kobra 3
+    bed: [250, 250, 260]
+    enclosure: none
+    hardened_nozzle: false
+    speed: fast
+    multi_material: optional # ACE Pro
+  prusa_xl:
+    name: Prusa XL (single tool)
+    bed: [360, 360, 360]
+    enclosure: none
+    hardened_nozzle: false   # verify: depends on nozzle fitted
+    speed: fast
+    multi_material: optional # extra toolheads
+
 materials:
   # max_overhang_deg / max_bridge_mm: lower end of the ranges in research/sourced_A1_geometry_rules.yaml
   # [overhang_angle_by_material, bridging_length_by_material]
@@ -77,6 +129,7 @@ materials:
     tensile_xy_mpa: 50
     modulus_xy_mpa: 3200
     density_g_cm3: 1.24
+    shrinkage_pct: 0.3       # typical linear shrinkage after cooling
   petg:
     name: PETG
     max_overhang_deg: 45
@@ -90,6 +143,7 @@ materials:
     tensile_xy_mpa: 45
     modulus_xy_mpa: 2000
     density_g_cm3: 1.27
+    shrinkage_pct: 0.4       # typical linear shrinkage after cooling
   abs:
     name: ABS
     max_overhang_deg: 40
@@ -103,6 +157,7 @@ materials:
     tensile_xy_mpa: 38
     modulus_xy_mpa: 2100
     density_g_cm3: 1.04
+    shrinkage_pct: 0.8       # typical linear shrinkage after cooling
   pa_cf:
     name: PA-CF (carbon fibre nylon)
     max_overhang_deg: 45
@@ -116,6 +171,65 @@ materials:
     tensile_xy_mpa: 70
     modulus_xy_mpa: 4500
     density_g_cm3: 1.1
+    shrinkage_pct: 0.3       # typical linear shrinkage after cooling
+
+  # Added in T-026 (typical TDS values: Polymaker, eSUN, Prusament; rough, for estimates only).
+  pla_plus:
+    name: PLA+
+    max_overhang_deg: 55
+    max_bridge_mm: 35
+    min_layer_time_s: 8
+    warp_risk: low
+    abrasive: false
+    hygroscopic: low
+    max_flow_mm3s: 20
+    z_strength_factor: {none: 0.6, passive: 0.6, heated: 0.6}  # verify: tougher than PLA, layer bond similar
+    tensile_xy_mpa: 50
+    modulus_xy_mpa: 2600
+    density_g_cm3: 1.24
+    shrinkage_pct: 0.3
+  asa:
+    name: ASA
+    max_overhang_deg: 45
+    max_bridge_mm: 15
+    min_layer_time_s: 10
+    warp_risk: high
+    abrasive: false
+    hygroscopic: low
+    max_flow_mm3s: 18
+    z_strength_factor: {none: 0.35, passive: 0.55, heated: 0.7}
+    tensile_xy_mpa: 40
+    modulus_xy_mpa: 2000
+    density_g_cm3: 1.07
+    shrinkage_pct: 0.6
+  pc:
+    name: PC (polycarbonate)
+    max_overhang_deg: 40
+    max_bridge_mm: 10
+    min_layer_time_s: 10
+    warp_risk: high
+    abrasive: false
+    hygroscopic: medium
+    max_flow_mm3s: 15
+    z_strength_factor: {none: 0.3, passive: 0.5, heated: 0.7}
+    tensile_xy_mpa: 60
+    modulus_xy_mpa: 2300
+    density_g_cm3: 1.2
+    shrinkage_pct: 0.8
+  tpu_95a:
+    name: TPU 95A (flexible)
+    max_overhang_deg: 40
+    max_bridge_mm: 8
+    min_layer_time_s: 12
+    warp_risk: low
+    abrasive: false
+    hygroscopic: medium
+    max_flow_mm3s: 6         # flexible filament jams when pushed fast
+    z_strength_factor: {none: 0.85, passive: 0.85, heated: 0.85}  # layers bond very well
+    tensile_xy_mpa: 30
+    modulus_xy_mpa: 60       # verify: varies a lot by brand; the strength check is not meant for TPU
+    density_g_cm3: 1.21
+    shrinkage_pct: 0.5
 
 nozzles:
   "0.2": {line_width: 0.22, layer_height: 0.1}

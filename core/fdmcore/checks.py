@@ -58,6 +58,7 @@ RULE_IMPACT = {
     "single_line_wall": "weak",
     "enclosure_recommended": "shape",
     "turned_to_fit": "info",
+    "shrinkage_size_error": "shape",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
 SEVERITY_ORDER = {"problem": 0, "warn": 1, "info": 2}
@@ -138,6 +139,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
     stats = _estimate(layers, profile)
     findings += _cooling_findings(layers, stats["layer_times"], profile, T)
     findings += _profile_findings(layers, profile)
+    findings += _shrinkage_findings(mesh, profile, T)
 
     for f in findings:
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
@@ -401,8 +403,28 @@ def _hole_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
                                 f"Ø{d:.1f} mm hole at {_zrange(r)} — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up", r, profile))
         else:
             out.append(_finding("small_hole_undersized", "warn",
-                                f"Ø{d:.1f} mm hole prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling", r, profile))
+                                f"Ø{d:.1f} mm hole prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling"
+                                + fastener_advice(d, T), r, profile, **_fastener(d, T)))
     return out
+
+
+def _fastener(d: float, T: dict) -> dict:
+    """{"fastener": "M3"} when the hole is modelled at a metric screw's nominal size."""
+    F = T["fasteners"]
+    for name, f in F.items():
+        if isinstance(f, dict) and abs(d - f["d"]) <= F["match_tol_mm"]:
+            return {"fastener": name}
+    return {}
+
+
+def fastener_advice(d: float, T: dict) -> str:
+    """Hole sizes for the usual ways of fastening, when the hole is exactly screw-sized."""
+    name = _fastener(d, T).get("fastener")
+    if not name:
+        return ""
+    f = T["fasteners"][name]
+    return (f". Looks like a hole for an {name} screw: for the screw to pass through, model it Ø{f['clearance_normal_mm']} mm; "
+            f"to screw into the plastic, Ø{f['pilot_mm']} mm; for a heat-set insert, Ø{f['insert_hole_mm']} mm")
 
 
 def _sideways_hole_findings(mesh: Mesh, profile: Profile, T: dict, findings: list[dict]) -> list[dict]:
@@ -423,14 +445,14 @@ def _sideways_hole_findings(mesh: Mesh, profile: Profile, T: dict, findings: lis
         elif d < B["sag_from_mm"]:
             lo, hi = H["typical_undersize_mm"]
             out.append(_finding("small_hole_undersized", "warn",
-                                f"Sideways Ø{d:.1f} mm hole {where} prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling",
-                                bbox=h["bbox"], **metrics))
+                                f"Sideways Ø{d:.1f} mm hole {where} prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling"
+                                + fastener_advice(d, T), bbox=h["bbox"], **metrics, **_fastener(d, T)))
         else:
             lo, hi = B["sag_mm"] if d < B["large_sag_from_mm"] else (0.4, 1.0)
             out.append(_finding("sideways_hole_oval", "warn",
                                 f"Sideways Ø{d:.1f} mm hole {where}: its top sags {lo}–{hi} mm, so it prints oval "
-                                f"(about Ø{d - hi:.1f}–{d - lo:.1f} mm top to bottom) — a Ø{d:.0f} pin or bolt won't slide in",
-                                bbox=h["bbox"], sag_mm=[lo, hi], **metrics))
+                                f"(about Ø{d - hi:.1f}–{d - lo:.1f} mm top to bottom) — a Ø{d:.0f} pin or bolt won't slide in"
+                                + fastener_advice(d, T), bbox=h["bbox"], sag_mm=[lo, hi], **metrics, **_fastener(d, T)))
     holes = [f["bbox"] for f in out if f["rule"] == "sideways_hole_oval"]
     kept = [f for f in findings if not (f["rule"] == "bridge_sag" and f["bbox"] and any(_inside(f["bbox"], b) for b in holes))]
     return kept + out
@@ -440,6 +462,24 @@ def _inside(box, outer, tol: float = 1.0) -> bool:
     """Box centre inside ``outer`` (both [[x0,y0,z0],[x1,y1,z1]]), with some slack."""
     c = (np.asarray(box[0]) + np.asarray(box[1])) / 2
     return bool(np.all(c >= np.asarray(outer[0]) - tol) and np.all(c <= np.asarray(outer[1]) + tol))
+
+
+def _shrinkage_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
+    """Long parts come out measurably short: plastic shrinks as it cools."""
+    pct = profile.material.get("shrinkage_pct")
+    if not pct:
+        return []
+    S = T["shrinkage"]
+    lo, hi = mesh.bounds()
+    length = float(max(hi - lo))
+    short = length * pct / 100
+    if short < S["report_from_mm"]:
+        return []
+    sev = "warn" if short >= S["warn_from_mm"] else "info"
+    return [_finding("shrinkage_size_error", sev,
+                     f"{profile.material['name']} shrinks about {pct}% as it cools: the {length:.0f} mm length comes out "
+                     f"roughly {short:.1f} mm short — matters if it has to fit something", bbox=[lo.tolist(), hi.tolist()],
+                     shrinkage_pct=pct, length_mm=round(length, 1), short_mm=round(short, 2))]
 
 
 def _first_layer_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
