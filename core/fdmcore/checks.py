@@ -453,6 +453,13 @@ def _sideways_hole_findings(mesh: Mesh, profile: Profile, T: dict, findings: lis
                                 f"Sideways Ø{d:.1f} mm hole {where}: its top sags {lo}–{hi} mm, so it prints oval "
                                 f"(about Ø{d - hi:.1f}–{d - lo:.1f} mm top to bottom) — a Ø{d:.0f} pin or bolt won't slide in"
                                 + fastener_advice(d, T), bbox=h["bbox"], sag_mm=[lo, hi], **metrics, **_fastener(d, T)))
+        # Too wide to bridge: the slicer supports the roof. In a blind or long narrow tunnel that
+        # support can't be reached to pull it out.
+        if d > profile.material["max_bridge_mm"] and (not h["through"] and h["length"] > d or h["length"] > B["tunnel_ratio"] * d):
+            kind = "blind" if not h["through"] else "long"
+            out.append(_finding("trapped_support", "warn",
+                                f"Sideways Ø{d:.0f} mm hole {where} ({kind}, ~{h['length']:.0f} mm deep) needs support inside, "
+                                f"and it can't be reached to pull it out", bbox=h["bbox"], **metrics))
     holes = [f["bbox"] for f in out if f["rule"] == "sideways_hole_oval"]
     kept = [f for f in findings if not (f["rule"] == "bridge_sag" and f["bbox"] and any(_inside(f["bbox"], b) for b in holes))]
     return kept + out

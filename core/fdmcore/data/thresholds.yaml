@@ -23,6 +23,7 @@ bridges:
   sag_from_mm: 4.0                # hole/slot tops wider than this sag 0.2–0.4 mm [horizontal_hole_teardrop_flat_top]
   sag_mm: [0.2, 0.4]
   large_sag_from_mm: 8.0          # flat roofs wider than this sag 0.4–1.0 mm [mistake_18_large_horizontal_circular_holes]
+  tunnel_ratio: 4.0               # supported sideways hole longer than this × its diameter: support can't be pulled out
 
 first_layer:
   zone_mm: 0.6                    # bottom layers affected by squish / elephant foot

@@ -38,7 +38,7 @@ def horizontal_holes(mesh: Mesh, min_d: float = 0.5, max_d: float = 40.0) -> lis
 
         found = [(*c, h) for h in lo + step * (np.arange(PLANES) + 0.5) + 1.1e-4
                  for c in rings_at(h) if min_d <= 2 * c[2] <= max_d]
-        out += [h for h in _merge(found, frame, step) if _is_cylinder(h, rings_at)]
+        out += [h for h in _merge(found, frame, step, lo, hi) if _is_cylinder(h, rings_at)]
     return out
 
 
@@ -92,7 +92,7 @@ def _round_ring(pts: np.ndarray) -> tuple[float, float, float] | None:
     return (float(cx), float(cy), r) if dev.max() <= ROUND_TOL * r else None
 
 
-def _merge(found: list[tuple], frame: np.ndarray, step: float) -> list[dict]:
+def _merge(found: list[tuple], frame: np.ndarray, step: float, lo: float, hi: float) -> list[dict]:
     """One hole per (centre, size) seen on the cuts. Gaps are allowed: a through hole crossed by
     other holes or pockets is still one hole to drill or fit a pin into."""
     holes: list[dict] = []
@@ -111,14 +111,16 @@ def _merge(found: list[tuple], frame: np.ndarray, step: float) -> list[dict]:
         h0, h1 = hole["h0"] - step / 2, hole["h1"] + step / 2
         mid = hole["cx"] * u + hole["cy"] * z + (h0 + h1) / 2 * d
         ends = [hole["cx"] * u + hole["cy"] * z + h * d for h in (h0, h1)]
-        lo = np.minimum(*ends) - r * np.abs(u) - r * z
-        hi = np.maximum(*ends) + r * np.abs(u) + r * z
+        box_lo = np.minimum(*ends) - r * np.abs(u) - r * z
+        box_hi = np.maximum(*ends) + r * np.abs(u) + r * z
         out.append({
             "cx": hole["cx"], "cy": hole["cy"], "h0": hole["h0"], "h1": hole["h1"], "radii": hole["rs"],  # cut frame
             "center": mid.tolist(),
             "axis": d.tolist(),
             "diameter": 2 * r,
             "length": float(h1 - h0),
-            "bbox": [lo.tolist(), hi.tolist()],
+            "bbox": [box_lo.tolist(), box_hi.tolist()],
+            # Seen on the first and last cut: open at both ends (a blind hole stops inside the part).
+            "through": bool(hole["h0"] - lo < step and hi - hole["h1"] < step),
         })
     return out

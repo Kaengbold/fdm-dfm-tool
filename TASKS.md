@@ -31,7 +31,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 ## Findings model (impact-based) — follow-ups
 
 - [x] **T-100 P1** Horizontal holes as features in the checks (diameter, sag, fit). · owner: Claude (`task/T-100-sideways-holes`) — `holes.py` cuts across the hole axis (no scipy needed); closes / undersized / new `sideways_hole_oval` (replaces bridge-sag at the hole). Fit with fasteners → T-022/T-023.
-- [ ] **T-101 P2** Trapped support in *blind* channels/pockets open on one side (only fully closed cavities are detected now). · owner: —
+- [~] **T-101 P2** Trapped support in *blind* channels/pockets open on one side (only fully closed cavities are detected now). · owner: Claude (`task/T-101-blind-channels`) — sideways holes too wide to bridge that are blind or longer than 4× their diameter → `trapped_support`. Left: non-round blind pockets/slots.
 - [ ] **T-102 P2** Engraved/raised text legibility on top and side faces (stroke width, depth vs nozzle/layer height). · owner: —
 - [ ] **T-103 P2** Support marks on faces the user marks as visible/critical → raise severity (needs T-011). · owner: —
 - [ ] **T-104 P2** Calibrate warping lengths (`thresholds.yaml`) with real prints per material/enclosure. · owner: —

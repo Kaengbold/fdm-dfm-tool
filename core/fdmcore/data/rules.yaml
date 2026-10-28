@@ -254,10 +254,10 @@ rules:
     - Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA
     - Slant 3D — Stop Using Slicer Supports | Design for 3D Printing — https://www.youtube.com/watch?v=_R2E8VwyNz0
   trapped_support:
-    title: Trapped Support Inside Closed Cavity
-    why: The CAD model shows a hollow internal pocket or blind cavity, but any support generated inside will be
-      sealed in forever with no way to pull it out, leaving loose rattling debris that adds dead weight or jams
-      internal moving mechanisms.
+    title: Support Trapped Where It Can't Be Removed
+    why: The CAD model shows a hollow internal pocket, a blind hole or a long narrow tunnel, but any support
+      generated inside is sealed in or out of reach, with no way to pull it out. It leaves loose rattling debris,
+      adds dead weight, blocks the hole or jams internal moving mechanisms.
     fixes:
     - domain: geometry
       text: Redesign the cavity ceiling with self-supporting 45-degree chamfers, arched domes, or teardrop profiles

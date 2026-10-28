@@ -281,3 +281,20 @@ def test_sideways_hole_vs_sphere_cavity():
     tri = mesh.vert_properties[:, :3][mesh.tri_verts].astype(float)
     found = horizontal_holes(orient(Mesh(tri), np.eye(3)))
     assert [round(h["diameter"], 1) for h in found] == [6.0]
+
+
+@pytest.mark.parametrize("length, through, trapped", [(40, False, True), (30, True, False), (100, True, True)])
+def test_support_trapped_in_blind_or_long_sideways_hole(length, through, trapped):
+    """Ø20 sideways hole in PETG (bridges ≤ 15 mm) needs support inside; it's stuck if the hole
+    is blind or a long tunnel."""
+    m3d = pytest.importorskip("manifold3d")
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    M = m3d.Manifold
+    block_x = length if through else length + 20
+    hole = M.cylinder(length + (20 if through else 0), 10, 10, 128).rotate([0, 90, 0])
+    part = M.cube([block_x, 40, 40]) - hole.translate([-10 if through else -1, 20, 20])
+    mesh = part.to_mesh()
+    api.load(to_binary_stl(Mesh(mesh.vert_properties[:, :3][mesh.tri_verts].astype(float))), "block")
+    found = {f["rule"]: f for f in api.check([0, 0, 1], {"material": "petg"}, "print")["findings"]}
+    assert ("trapped_support" in found) == trapped, found.get("trapped_support", {}).get("detail")
