@@ -1,0 +1,178 @@
+"""MCP server: lets an AI agent (Claude Code, Codex, Claude Desktop, …) operate the tool.
+
+Runs locally over stdio with the user's own agent subscription — the tool itself
+never talks to an AI provider. Every tool maps onto fdmcore.api, the same API the
+web app uses.
+
+    pip install -e "core[local]"
+    claude mcp add fdm-dfm -- python -m fdmcore.mcp_server
+
+Typical agent flow: load_part -> find_orientations -> check_print -> (list_faces ->
+check_strength -> strength_options) -> suggest_design_changes -> apply_design_changes
+-> export_3mf.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+from mcp.server.mcpserver import MCPServer
+
+from . import api
+from .mesh import to_binary_stl
+
+server = MCPServer(
+    name="fdm-dfm",
+    instructions=(
+        "Design-for-FDM assistant. Load one part (STL), then analyse printability, orientation, "
+        "strength and design changes. Directions ('up') are unit vectors in the part's own coordinates "
+        "that will point up on the printer. Faces for loads come from list_faces. Strength results are "
+        "rough indications: aim for a safety factor of 2 or more. Explain findings to the user in plain language."
+    ),
+)
+
+
+def _profile(printer: str, material: str, nozzle: str) -> dict:
+    return {"printer": printer, "material": material, "nozzle": nozzle}
+
+
+def _clean(value):
+    """Drop binary payloads (meant for the 3D viewer) from results."""
+    if isinstance(value, dict):
+        return {k: _clean(v) for k, v in value.items() if not isinstance(v, (bytes, bytearray))}
+    if isinstance(value, list):
+        return [_clean(v) for v in value]
+    return value
+
+
+@server.tool()
+def list_presets() -> dict:
+    """Available printers, materials and nozzles (ids to pass to other tools)."""
+    p = api.get_presets()
+    return {
+        "printers": {k: v["name"] for k, v in p["printers"].items()},
+        "materials": {k: v["name"] for k, v in p["materials"].items()},
+        "nozzles": list(p["nozzles"]),
+    }
+
+
+@server.tool()
+def load_part(path: str) -> dict:
+    """Load an STL file (single part, millimetres). Replaces any previously loaded part."""
+    p = Path(path).expanduser()
+    return _clean(api.load(p.read_bytes(), p.name))
+
+
+@server.tool()
+def find_orientations(
+    printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", loads: list[dict] | None = None
+) -> dict:
+    """Rank print orientations. With loads (see check_strength), strength is included in the ranking."""
+    return _clean(api.orientations(_profile(printer, material, nozzle), loads=loads or None))
+
+
+@server.tool()
+def check_print(
+    up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", mode: str = "both"
+) -> dict:
+    """Printability findings, rough print time/filament and recommended slicer settings for one orientation.
+    mode: 'print' (can't change the model), 'design' (can't change slicer settings) or 'both'."""
+    return _clean(api.check(up, _profile(printer, material, nozzle), mode))
+
+
+@server.tool()
+def list_faces() -> list[dict]:
+    """Faces (regions) of the part with id, flat/curved, area, normal and centroid — use ids for loads."""
+    return api.regions()["regions"]
+
+
+@server.tool()
+def check_strength(
+    up: list[float],
+    loads: list[dict],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    walls: int = 2,
+    infill: float = 0.15,
+) -> dict:
+    """Rough strength check. loads: [{"region": id, "kind": "fixed"},
+    {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z]}].
+    Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
+    return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill))
+
+
+@server.tool()
+def strength_options(
+    up: list[float],
+    loads: list[dict],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    walls: int = 2,
+    infill: float = 0.15,
+) -> list[dict]:
+    """Safety factor with more walls, more infill and the strongest orientation."""
+    return api.strength_options(up, loads, _profile(printer, material, nozzle), walls, infill)
+
+
+@server.tool()
+def suggest_design_changes(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Detected holes/bosses and suggested geometry edits (teardrop holes, corner chamfers) for this orientation."""
+    return _clean(api.design(up, _profile(printer, material, nozzle)))
+
+
+@server.tool()
+def apply_design_changes(
+    up: list[float],
+    edit_ids: list[str],
+    output_path: str,
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+) -> dict:
+    """Apply suggested edits (ids from suggest_design_changes), save the modified STL and load it."""
+    from .booleans import subtract
+
+    edits = {e["id"]: e for e in api.design(up, _profile(printer, material, nozzle))["edits"]}
+    unknown = [i for i in edit_ids if i not in edits]
+    if unknown:
+        raise ValueError(f"Unknown edit ids: {unknown}")
+    cutters = [np.frombuffer(edits[i]["cutter"], "<f4").reshape(-1, 3, 3) for i in edit_ids]
+    mesh = subtract(api._require().mesh, cutters)
+    out = Path(output_path).expanduser()
+    out.write_bytes(to_binary_stl(mesh))
+    return {"saved": str(out), **_clean(api.load(out.read_bytes(), out.name))}
+
+
+@server.tool()
+def export_3mf(
+    up: list[float],
+    output_path: str,
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    settings: dict[str, str] | None = None,
+) -> str:
+    """Write the oriented part as 3MF with slicer settings (recommended ones unless overridden)."""
+    prof = _profile(printer, material, nozzle)
+    merged = {r["key"]: r["value"] for r in api.check(up, prof)["settings"]}
+    merged.update(settings or {})
+    out = Path(output_path).expanduser()
+    out.write_bytes(api.export(up, prof, merged))
+    return str(out)
+
+
+@server.tool()
+def get_report(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", mode: str = "both") -> str:
+    """Markdown report of findings, fixes and settings."""
+    return api.report(up, _profile(printer, material, nozzle), mode)
+
+
+def main():
+    server.run("stdio")
+
+
+if __name__ == "__main__":
+    main()

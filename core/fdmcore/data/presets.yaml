@@ -1,0 +1,118 @@
+# Printer, material and nozzle presets.
+# Numbers are typical values for rough estimates, not datasheet guarantees.
+# Corrections welcome — please cite a source in the PR.
+
+printers:
+  bambu_a1:
+    name: Bambu Lab A1
+    bed: [256, 256, 256]
+    enclosure: none          # none | passive | heated
+    hardened_nozzle: true    # stock hardened steel nozzle
+    speed: fast
+  bambu_a1_mini:
+    name: Bambu Lab A1 mini
+    bed: [180, 180, 180]
+    enclosure: none
+    hardened_nozzle: true
+    speed: fast
+  bambu_p1s:
+    name: Bambu Lab P1S
+    bed: [256, 256, 256]
+    enclosure: passive
+    hardened_nozzle: false   # stock stainless steel
+    speed: fast
+  bambu_x1c:
+    name: Bambu Lab X1 Carbon
+    bed: [256, 256, 256]
+    enclosure: passive
+    hardened_nozzle: true
+    speed: fast
+  bambu_h2d:
+    name: Bambu Lab H2D
+    bed: [325, 320, 325]
+    enclosure: heated
+    hardened_nozzle: true
+    speed: fast
+  prusa_mk4s:
+    name: Prusa MK4S
+    bed: [250, 210, 220]
+    enclosure: none
+    hardened_nozzle: false   # verify: depends on nozzle fitted
+    speed: medium
+  prusa_mini:
+    name: Prusa MINI+
+    bed: [180, 180, 180]
+    enclosure: none
+    hardened_nozzle: false
+    speed: medium
+  prusa_core_one:
+    name: Prusa CORE One
+    bed: [250, 220, 270]
+    enclosure: heated        # bed-heated, regulated chamber
+    hardened_nozzle: false   # verify: depends on nozzle fitted
+    speed: fast
+
+materials:
+  pla:
+    name: PLA
+    max_overhang_deg: 55
+    max_bridge_mm: 20
+    min_layer_time_s: 8
+    warp_risk: low           # low | medium | high
+    abrasive: false
+    hygroscopic: low         # low | medium | high
+    max_flow_mm3s: 20
+    # Interlayer (Z) strength as a fraction of in-plane strength, by enclosure type.
+    z_strength_factor: {none: 0.55, passive: 0.55, heated: 0.55}
+    tensile_xy_mpa: 50
+    modulus_xy_mpa: 3200
+    density_g_cm3: 1.24
+  petg:
+    name: PETG
+    max_overhang_deg: 50
+    max_bridge_mm: 10
+    min_layer_time_s: 10
+    warp_risk: low
+    abrasive: false
+    hygroscopic: medium
+    max_flow_mm3s: 15
+    z_strength_factor: {none: 0.6, passive: 0.65, heated: 0.7}
+    tensile_xy_mpa: 45
+    modulus_xy_mpa: 2000
+    density_g_cm3: 1.27
+  abs:
+    name: ABS
+    max_overhang_deg: 50
+    max_bridge_mm: 12
+    min_layer_time_s: 10
+    warp_risk: high
+    abrasive: false
+    hygroscopic: low
+    max_flow_mm3s: 18
+    z_strength_factor: {none: 0.3, passive: 0.5, heated: 0.65}
+    tensile_xy_mpa: 38
+    modulus_xy_mpa: 2100
+    density_g_cm3: 1.04
+  pa_cf:
+    name: PA-CF (carbon fibre nylon)
+    max_overhang_deg: 45
+    max_bridge_mm: 8
+    min_layer_time_s: 10
+    warp_risk: medium
+    abrasive: true
+    hygroscopic: high
+    max_flow_mm3s: 10
+    z_strength_factor: {none: 0.2, passive: 0.25, heated: 0.3}
+    tensile_xy_mpa: 70
+    modulus_xy_mpa: 4500
+    density_g_cm3: 1.1
+
+nozzles:
+  "0.2": {line_width: 0.22, layer_height: 0.1}
+  "0.4": {line_width: 0.45, layer_height: 0.2}
+  "0.6": {line_width: 0.62, layer_height: 0.3}
+  "0.8": {line_width: 0.82, layer_height: 0.4}
+
+speeds:  # mm/s, typical defaults
+  fast: {outer_wall: 200, infill: 270}
+  medium: {outer_wall: 140, infill: 200}

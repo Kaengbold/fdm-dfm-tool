@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FDM DFM Tool</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <aside>
+      <h1>FDM DFM Tool <small>pre-alpha</small></h1>
+
+      <label id="drop" class="drop">
+        <input id="file" type="file" accept=".stl" hidden />
+        <strong>Drop an STL here</strong>
+        <span>or click to choose a file</span>
+      </label>
+      <div class="samples">
+        Samples:
+        <button data-sample="mushroom">Mushroom</button>
+        <button data-sample="l_bracket">L-bracket</button>
+        <button data-sample="hook">Hook</button>
+        <button data-sample="test_block">Test block</button>
+      </div>
+
+      <div class="presets">
+        <label>Printer <select id="printer"></select></label>
+        <label>Material <select id="material"></select></label>
+        <label>Nozzle <select id="nozzle"></select></label>
+      </div>
+
+      <div class="mode" role="radiogroup" aria-label="What can you change?">
+        <span>What can you change?</span>
+        <div>
+          <label><input type="radio" name="mode" value="print" checked /> Just print it</label>
+          <label><input type="radio" name="mode" value="design" /> The design</label>
+          <label><input type="radio" name="mode" value="both" /> Both</label>
+        </div>
+      </div>
+
+      <p id="status" class="status">Loading engine… (first visit downloads ~15 MB)</p>
+
+      <section id="results" hidden>
+        <h2>Orientation</h2>
+        <ol id="options" class="cards"></ol>
+
+        <h2>Findings <small id="stats"></small></h2>
+        <ol id="findings" class="findings"></ol>
+
+        <h2>Strength <small>optional — will it hold?</small></h2>
+        <div class="strength">
+          <p class="hint" id="pick-hint">Click a face on the part, then say whether it's <b>held</b> (screwed, glued, clamped) or <b>loaded</b>.</p>
+          <div id="pick-panel" hidden>
+            <p class="hint">Selected: <span id="pick-info"></span></p>
+            <button id="as-fixed">Held here</button>
+            <div class="row">
+              <input id="kg" type="number" value="2" min="0.1" step="0.5" aria-label="Load in kg" /> kg
+              <select id="dir" aria-label="Load direction">
+                <option value="push">pushing on the face</option>
+                <option value="pull">pulling the face</option>
+                <option value="down">hanging down (−Z as modelled)</option>
+              </select>
+              <button id="as-load">Load here</button>
+            </div>
+          </div>
+          <ul id="loads" class="loads"></ul>
+          <div class="actions">
+            <button id="run-strength" class="primary" disabled>Check strength</button>
+          </div>
+          <div id="strength-result"></div>
+        </div>
+
+        <div id="design-block">
+          <h2>Design changes <small>shown in red on the part</small></h2>
+          <p class="hint" id="features-summary">Let the tool suggest geometry changes for this orientation.</p>
+          <ol id="edits" class="edits"></ol>
+          <div class="actions">
+            <button id="suggest-design">Suggest design changes</button>
+            <button id="apply-edits" class="primary" hidden>Apply selected changes</button>
+          </div>
+        </div>
+
+        <div id="settings-block">
+          <h2>Slicer settings</h2>
+          <table id="settings"></table>
+        </div>
+
+        <div class="actions">
+          <button id="dl-3mf" class="primary">Download 3MF for OrcaSlicer / Bambu Studio</button>
+          <button id="dl-stl">Download STL (oriented for printing)</button>
+          <button id="dl-stl-model">Download STL (as modelled, incl. design changes)</button>
+          <button id="copy-report">Copy report (for sharing or an AI chat)</button>
+        </div>
+      </section>
+
+      <ul class="legend">
+        <li><i style="background: var(--ok)"></i>Prints fine</li>
+        <li><i style="background: var(--borderline)"></i>May droop</li>
+        <li><i style="background: var(--support)"></i>Needs support</li>
+        <li><i style="background: var(--bed)"></i>On the bed</li>
+      </ul>
+    </aside>
+    <main id="viewer"></main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

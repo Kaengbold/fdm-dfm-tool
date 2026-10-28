@@ -1,0 +1,350 @@
+# Knowledge base: what each finding means and how to fix it.
+# Detection lives in code (fdmcore/checks.py); this file only explains and suggests.
+# Each fix has a domain: geometry (edit the CAD model), slicer (settings), process (printer/material/handling).
+# First draft generated with an LLM and reviewed by hand — corrections welcome.
+rules:
+  unsupported_overhang:
+    title: Steep Overhangs Without Support
+    why: Melted plastic is extruded into mid-air without anything underneath to hold it up. The hot strands sag,
+      curl, or turn into messy plastic spaghetti.
+    fixes:
+    - domain: geometry
+      text: Add 45-degree chamfers under the overhang (not round fillets — their flat top still needs support) so
+        every layer rests on the one below.
+    - domain: slicer
+      text: Turn on tree supports to prop up the overhang with branches that snap off cleanly after printing.
+      settings:
+        enable_support: '1'
+        support_type: tree(auto)
+        support_threshold_angle: '45'
+    - domain: slicer
+      text: Lower the layer height so each new layer steps outward in smaller, better-supported increments.
+      settings:
+        layer_height: '0.12'
+    tags:
+    - overhang
+    - support
+    - drooping
+    - surface-quality
+  long_bridge:
+    title: Long Unsupported Bridge Span
+    why: The printer tries to stretch molten plastic across a large empty gap. Across long distances, the hot strands
+      droop under gravity and leave a rough, stringy bottom surface.
+    fixes:
+    - domain: geometry
+      text: Break up the span in CAD by adding an arch, 45-degree angled supports, or a center pillar.
+    - domain: slicer
+      text: Slow down bridge print speed and run the part cooling fan at full blast to freeze strands before they
+        sag.
+      settings:
+        bridge_speed: '25'
+        fan_max_speed: 100%
+    - domain: slicer
+      text: Enable supports directly beneath the open span so the bridging layers have a surface to rest on.
+      settings:
+        enable_support: '1'
+        support_type: tree(auto)
+    tags:
+    - bridge
+    - sagging
+    - cooling
+    - gap
+  short_bridge:
+    title: Short Horizontal Bridge or Hole
+    why: Horizontal hole ceilings and short slots must bridge across open air. If printed as a flat circle or rectangle,
+      the very top strands can sag slightly into the opening.
+    fixes:
+    - domain: geometry
+      text: Model round horizontal holes as teardrop or diamond shapes so the ceiling slopes self-support at 45
+        degrees.
+    - domain: geometry
+      text: Add a one-layer thick sacrificial bridge diaphragm inside the hole opening that can easily be cut out
+        after printing.
+    - domain: slicer
+      text: Increase cooling fan power to maximum to freeze short bridging strands instantly across the opening.
+      settings:
+        fan_max_speed: 100%
+        bridge_speed: '30'
+    tags:
+    - bridge
+    - holes
+    - teardrop
+    - sacrificial-bridge
+  thin_wall:
+    title: Thin Wall Printing With Single Perimeter
+    why: This wall is barely thicker than one nozzle stroke, so the slicer cannot fit standard inner and outer walls.
+      This leaves the wall brittle, full of pinholes, or easily snapped along layer seams.
+    fixes:
+    - domain: geometry
+      text: Thicken the wall in CAD to at least 1.2 mm so it fits at least two to three full perimeter passes.
+    - domain: slicer
+      text: Switch the wall generator to Arachne to automatically vary extrusion width and fill thin gaps solidly.
+      settings:
+        wall_generator: arachne
+    - domain: slicer
+      text: Increase your wall loop count to ensure any section with enough room gets printed as solid perimeters.
+      settings:
+        wall_loops: '3'
+    tags:
+    - thin-wall
+    - strength
+    - arachne
+    - perimeters
+  too_thin_to_print:
+    title: Feature Too Thin to Extrude
+    why: This detail is narrower than your printer nozzle's extrusion width. The slicer completely ignores it during
+      slicing, so it will simply be missing from your finished print.
+    fixes:
+    - domain: geometry
+      text: Thicken the feature in your CAD model to at least 0.45 mm so a standard nozzle can trace it.
+    - domain: slicer
+      text: Turn on the Arachne wall generator to dynamically taper extrusion lines down to finer widths.
+      settings:
+        wall_generator: arachne
+    - domain: process
+      text: Swap to a smaller 0.2 mm nozzle assembly to resolve ultra-fine features and tiny text.
+    tags:
+    - missing-features
+    - fine-detail
+    - nozzle-size
+    - arachne
+  small_bed_contact:
+    title: Small Bed Contact Area
+    why: The model has very little surface area touching the build plate compared to its overall volume. The weak
+      grip easily breaks loose mid-print, causing a failed print.
+    fixes:
+    - domain: geometry
+      text: Orient or redesign the model in CAD to create a broad, flat bottom surface for better adhesion.
+    - domain: slicer
+      text: Add an outer brim to extend the first layer footprint and anchor the part firmly to the build plate.
+      settings:
+        brim_type: outer_only
+        brim_width: '5'
+    - domain: process
+      text: Wash the build plate thoroughly with warm water and dish soap to remove oily fingerprints that ruin
+        adhesion.
+    tags:
+    - adhesion
+    - bed-contact
+    - brim
+    - detachment
+  sharp_bed_corners:
+    title: Sharp Corners on Build Plate
+    why: Sharp 90-degree corners concentrate cooling stress as the plastic shrinks. This high tension pulls the
+      corner tips upward off the build sheet, causing warped bottoms.
+    fixes:
+    - domain: geometry
+      text: Add small 2 mm to 5 mm round fillets to bottom corners in CAD to spread out cooling stress evenly.
+    - domain: geometry
+      text: Add flat, one-layer-thick circular helper discs (mouse ears) to the sharp corners in CAD to hold them
+        down flat.
+    - domain: slicer
+      text: Add an outer brim around the print to help hold sharp corner tips down against shrinkage forces.
+      settings:
+        brim_type: outer_only
+        brim_width: '6'
+    tags:
+    - warping
+    - sharp-corners
+    - bed-adhesion
+    - mouse-ears
+  tipping_risk:
+    title: Tall Part Tipping Risk
+    why: The part is tall and top-heavy relative to its narrow footprint on the print bed. As the bed shakes and
+      the nozzle pushes against upper layers, the model can snap off the plate and tip over.
+    fixes:
+    - domain: geometry
+      text: Rotate the part so it lies flat on its broadest side rather than standing upright.
+    - domain: slicer
+      text: Add a wide brim to anchor the base securely against leverage from tall movements.
+      settings:
+        brim_type: outer_only
+        brim_width: '10'
+    - domain: slicer
+      text: Turn on tree supports to physically brace the tall structure against wobbling while printing.
+      settings:
+        enable_support: '1'
+        support_type: tree(auto)
+    tags:
+    - tipping
+    - stability
+    - orientation
+    - brim
+  tall_thin_feature:
+    title: Tall and Slender Feature Wobble
+    why: A long, skinny pin or spire bends and wobbles back and forth as the nozzle pushes molten plastic onto it.
+      This vibration creates messy layer lines, blobbing, or total failure.
+    fixes:
+    - domain: geometry
+      text: Thicken the pin or add gussets and ribs around the base to stiffen it against bending forces.
+    - domain: slicer
+      text: Turn on tree supports around the tall column to physically brace it as it grows upward.
+      settings:
+        enable_support: '1'
+        support_type: tree(auto)
+    - domain: slicer
+      text: Print it slower and let the slicer slow down small layers so the thin tip can cool and doesn't get pushed
+        around.
+      settings:
+        slow_down_for_layer_cooling: '1'
+    tags:
+    - wobble
+    - slender
+    - tall-feature
+    - stability
+  small_layers_cooling:
+    title: Small Layer Area Lacks Cooling Time
+    why: Tiny tips and spires take only a second to print per layer. The nozzle stays right over the hot spot, turning
+      the plastic into a melting, drooping blob before it can solidify.
+    fixes:
+    - domain: slicer
+      text: Increase the minimum layer time setting so the printer slows down and lets tiny cross-sections cool.
+      settings:
+        slow_down_for_layer_cooling: '1'
+        slow_down_layer_time: '8'
+        fan_max_speed: 100%
+    - domain: process
+      text: Print two copies of the model or add a sacrificial throwaway tower on the bed to give each layer time
+        to cool.
+    - domain: geometry
+      text: Avoid needle-thin vertical tips in CAD by rounding or blunting the top apex.
+    tags:
+    - cooling
+    - small-layers
+    - overheating
+    - blobs
+  warping_material:
+    title: Large Part Prone to Warping
+    why: Materials like ABS, ASA, and PA-CF shrink noticeably as they cool from printing temperature. Across large
+      footprints, the cumulative pulling force lifts the corners clean off the build sheet.
+    fixes:
+    - domain: slicer
+      text: Add a wide brim around the footprint to clamp down outer edges against thermal shrinkage.
+      settings:
+        brim_type: outer_only
+        brim_width: '8'
+    - domain: slicer
+      text: Switch to Gyroid infill at moderate density to balance internal shrinkage forces in all directions.
+      settings:
+        sparse_infill_density: 15%
+        sparse_infill_pattern: gyroid
+    - domain: process
+      text: Pre-heat your print bed for 10 minutes before starting so the build plate temperature stabilizes completely.
+    tags:
+    - warping
+    - shrinkage
+    - abs
+    - bed-adhesion
+  enclosure_recommended:
+    title: Warping-Prone Material on Open Printer
+    why: Temperature-sensitive filaments like ABS or ASA need hot ambient air around the print. Cold room drafts
+      make the upper layers contract rapidly, splitting layer seams and lifting the bottom.
+    fixes:
+    - domain: process
+      text: Place the printer inside an enclosure tent or closed cabinet to trap heat and block room drafts.
+    - domain: process
+      text: Switch to an easier material like PETG or PLA that prints reliably in open room air without warping.
+    - domain: slicer
+      text: Add an outer brim and lower cooling fan speeds to keep the printed plastic as warm as possible.
+      settings:
+        brim_type: outer_only
+        brim_width: '8'
+        fan_max_speed: 20%
+    - domain: geometry
+      text: Round all sharp exterior base corners with large fillets in CAD to relieve draft-induced lifting tension.
+    tags:
+    - enclosure
+    - drafts
+    - abs
+    - delamination
+  hardened_nozzle_required:
+    title: Abrasive Filament Needs Hardened Nozzle
+    why: Filaments infused with carbon fiber, glass, glow-in-the-dark powder, or metal are abrasive. Standard brass
+      nozzles wear out quickly, widening the hole and ruining print precision.
+    fixes:
+    - domain: process
+      text: Swap out your stock brass nozzle for a hardened steel or ruby nozzle before loading abrasive filaments.
+    - domain: process
+      text: Switch to an unreinforced standard filament like neat PLA or PETG if you only have a brass nozzle.
+    tags:
+    - nozzle
+    - abrasive
+    - carbon-fiber
+    - wear
+  dry_filament:
+    title: Moisture-Sensitive Filament Needs Drying
+    why: Filaments like Nylon, PA-CF, TPU, and PETG absorb water directly out of humid air. The water boils inside
+      the hot nozzle, causing loud popping, severe stringing, and weak prints.
+    fixes:
+    - domain: process
+      text: Dry the filament spool in a dedicated filament dryer or food dehydrator before starting the print.
+    - domain: process
+      text: Feed the filament directly from an active heated drybox during long print sessions.
+    - domain: process
+      text: Store opened spools inside an airtight bin packed with fresh silica gel desiccant packs.
+    tags:
+    - moisture
+    - drying
+    - stringing
+    - nylon
+  larger_nozzle_option:
+    title: Chunky Part Could Print Faster with 0.6mm
+    why: Large, thick-walled parts take many hours when printed with a standard 0.4 mm nozzle. Thick walls force
+      the printer to make endless perimeter passes with little structural benefit.
+    fixes:
+    - domain: process
+      text: Install a 0.6 mm nozzle on your printer to lay down wider paths and dramatically cut print time.
+    - domain: slicer
+      text: Increase layer height and wall thickness to push more plastic and speed up large prints.
+      settings:
+        layer_height: '0.28'
+        wall_loops: '3'
+    - domain: geometry
+      text: Thicken thin internal ribs to at least 1.8 mm so a larger nozzle can fill them in fewer passes.
+    tags:
+    - nozzle-size
+    - print-speed
+    - efficiency
+    - thick-walls
+  elephant_foot:
+    title: Elephant Foot Flare on First Layers
+    why: The weight of upper layers and heat from the build plate squish the initial bottom layers outward. This
+      creates a flared bottom rim that ruins precise dimensional fits.
+    fixes:
+    - domain: slicer
+      text: Enable elephant foot compensation in your slicer to pull the first-layer outline inward.
+      settings:
+        elefant_foot_compensation: '0.15'
+    - domain: geometry
+      text: Add a 0.5 mm by 45-degree chamfer around the bottom edges in CAD to absorb the initial squish.
+    - domain: process
+      text: Lower your heated bed temperature by 5 to 10 degrees to prevent the lower plastic layers from softening
+        and bulging.
+    tags:
+    - elephant-foot
+    - dimensional-accuracy
+    - first-layer
+    - tolerances
+  layer_strength:
+    title: Weak Layer Orientation and Strength
+    why: 3D prints are much weaker between layer lines than along the direction plastic strands are laid down. Pulling
+      forces that pull layers apart can snap functional parts under light loads.
+    fixes:
+    - domain: geometry
+      text: Reorient the model so pulling stress runs parallel along the extrusion lines, not across layer seams.
+    - domain: slicer
+      text: Increase wall loops and top/bottom shells to add dense solid outer perimeters where stress concentrates.
+      settings:
+        wall_loops: '4'
+        top_shell_layers: '5'
+        bottom_shell_layers: '5'
+    - domain: slicer
+      text: Increase infill density and choose Gyroid pattern to distribute internal loads evenly in all directions.
+      settings:
+        sparse_infill_density: 25%
+        sparse_infill_pattern: gyroid
+    tags:
+    - strength
+    - layer-adhesion
+    - orientation
+    - infill

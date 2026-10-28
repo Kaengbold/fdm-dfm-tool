@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fdmcore"
+version = "0.1.0"
+description = "Design-for-FDM analysis engine: orientation, printability, rough strength, design fixes"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.10"
+# Keep the core Pyodide-compatible: numpy, shapely, pyyaml (+ scipy for strength/features).
+dependencies = ["numpy>=1.24", "shapely>=2.0", "pyyaml>=6"]
+
+[project.optional-dependencies]
+strength = ["scipy>=1.11"]
+local = ["scipy>=1.11", "mcp>=2.3", "manifold3d>=3.0"]
+dev = ["pytest", "scipy>=1.11", "trimesh", "manifold3d>=3.0", "mcp>=2.3"]
+
+[project.scripts]
+fdm-dfm-mcp = "fdmcore.mcp_server:main"
+
+[tool.setuptools.packages.find]
+include = ["fdmcore*"]
+
+[tool.setuptools.package-data]
+fdmcore = ["data/*.yaml", "manifest.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
