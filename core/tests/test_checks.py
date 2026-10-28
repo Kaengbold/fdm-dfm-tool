@@ -264,3 +264,20 @@ def to_stl_box(size):
 def test_new_materials_run(material):
     found = rules_for("enclosure", material=material, printer="creality_k1c")
     assert isinstance(found, dict)
+
+
+def test_sideways_hole_vs_sphere_cavity():
+    """A hollow sphere cuts as circles too, but it isn't a hole; a through hole crossed by a
+    vertical hole is still one hole."""
+    m3d = pytest.importorskip("manifold3d")
+    from fdmcore.holes import horizontal_holes
+    from fdmcore.mesh import Mesh
+
+    M = m3d.Manifold
+    part = M.cube([80, 30, 40]) - M.sphere(10, 96).translate([60, 15, 25])
+    part = part - M.cylinder(100, 3, 3, 96).rotate([0, 90, 0]).translate([-10, 15, 8])
+    part = part - M.cylinder(100, 2, 2, 64).translate([30, 15, -10])
+    mesh = part.to_mesh()
+    tri = mesh.vert_properties[:, :3][mesh.tri_verts].astype(float)
+    found = horizontal_holes(orient(Mesh(tri), np.eye(3)))
+    assert [round(h["diameter"], 1) for h in found] == [6.0]

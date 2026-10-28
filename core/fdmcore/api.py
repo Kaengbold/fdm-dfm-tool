@@ -511,7 +511,8 @@ def dispatch(method: str, args_json: str = "{}", data: bytes | None = None):
     ``data`` carries file bytes for ``load``."""
     args = json.loads(args_json)
     if data is not None:
-        args["data"] = data
+        # A JS Uint8Array from the worker: bytes(proxy) would copy element by element (~10 s for 30 MB).
+        args["data"] = data.to_bytes() if hasattr(data, "to_bytes") else data
     return _plain(METHODS[method](**args))
 
 

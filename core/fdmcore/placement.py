@@ -17,7 +17,7 @@ from .orientation import rotation_to_z
 def print_rotation(mesh: Mesh, up, bed) -> tuple[np.ndarray, dict]:
     """Rotation into print orientation and a fit report for a bed ``[x, y, z]`` (mm)."""
     r0 = rotation_to_z(up)
-    pts = np.unique(np.round(mesh.triangles.reshape(-1, 3) @ r0.T, 3), axis=0)
+    pts = mesh.triangles.reshape(-1, 3) @ r0.T
     size = pts.max(axis=0) - pts.min(axis=0)
     bx, by, bz = bed
     fit = {"fits": True, "turned_deg": 0.0, "size_mm": size.tolist(), "bed_mm": list(bed)}

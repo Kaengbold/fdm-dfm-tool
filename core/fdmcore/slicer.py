@@ -19,6 +19,9 @@ from .mesh import Mesh
 
 # Slice planes are nudged off round numbers so they don't hit vertices exactly.
 _Z_JITTER = 1.37e-4
+# Outlines are simplified to this (mm). Far below a printed line, but fine CAD exports carry
+# thousands of points per circle, and every later shapely operation scales with point count.
+SIMPLIFY_MM = 0.01
 
 
 @dataclass
@@ -66,27 +69,22 @@ def section(tris: np.ndarray, z: float) -> BaseGeometry:
     pts = lo[..., :2] + t[..., None] * (hi[..., :2] - lo[..., :2])
     ok = crossing.sum(axis=1) == 2
     segs = pts[ok][crossing[ok]].reshape(-1, 2, 2)
-    return _segments_to_solid(segs)
+    t = tris[ok]
+    normals = np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0])[:, :2]
+    return _segments_to_solid(segs, normals)
 
 
-def _segments_to_solid(segs: np.ndarray) -> BaseGeometry:
-    merged = shapely.line_merge(shapely.multilinestrings(shapely.linestrings(segs)))
-    lines = list(getattr(merged, "geoms", [merged]))
-    rings = []
-    for line in lines:
-        coords = np.asarray(line.coords)
-        if len(coords) < 4:
-            continue
-        if not line.is_ring:
-            # Small gaps come from dirty meshes; close them, drop anything badly open.
-            if np.linalg.norm(coords[0] - coords[-1]) > 0.05:
-                continue
-            coords = np.vstack([coords, coords[:1]])
-        poly = Polygon(coords)
-        if not poly.is_valid:
-            poly = poly.buffer(0)
-        if poly.area > 1e-6:
-            rings.append(poly)
+def _segments_to_solid(segs: np.ndarray, normals: np.ndarray | None = None) -> BaseGeometry:
+    polys = _chain_rings(segs, normals) if normals is not None else None
+    if polys is None:
+        polys = _merge_rings(segs)  # open or inconsistently wound mesh: slower, more forgiving
+    if len(polys) == 0:
+        return Polygon()
+    polys = shapely.simplify(polys, SIMPLIFY_MM, preserve_topology=False)  # invalid results are repaired below
+    bad = ~shapely.is_valid(polys)
+    if bad.any():
+        polys[bad] = shapely.buffer(polys[bad], 0)
+    rings = [g for g in polys if g.area > 1e-6]
     if not rings:
         return Polygon()
     solid = _even_odd(rings)
@@ -95,6 +93,68 @@ def _segments_to_solid(segs: np.ndarray) -> BaseGeometry:
     if not solid.is_empty and not solid.is_valid:
         solid = shapely.union_all(parts(shapely.make_valid(solid)))
     return solid
+
+
+def _chain_rings(segs: np.ndarray, normals: np.ndarray) -> np.ndarray | None:
+    """Closed loops from cut segments, fully vectorised; None if the loops don't close cleanly.
+
+    Each segment is turned so the solid lies on its left (from the triangle's outward normal);
+    then every point starts exactly one segment and "next segment" is a permutation whose
+    cycles are the loops. Loop membership and order come from pointer jumping (log n passes)."""
+    n = len(segs)
+    if n < 3:
+        return None
+    d = segs[:, 1] - segs[:, 0]
+    flip = d[:, 0] * -normals[:, 1] + d[:, 1] * normals[:, 0] < 0
+    segs = np.where(flip[:, None, None], segs[:, ::-1], segs)
+    pts = np.ascontiguousarray(segs.reshape(-1, 2))
+    _, ids = np.unique(pts.view(np.dtype((np.void, 16))).ravel(), return_inverse=True)
+    ids = ids.reshape(-1, 2)
+    start, end = ids[:, 0], ids[:, 1]
+    first = np.full(ids.max() + 1, -1)
+    first[start] = np.arange(n)
+    if np.bincount(start).max() > 1:
+        return None
+    nxt = first[end]
+    if (nxt < 0).any():
+        return None
+    rounds = int(np.ceil(np.log2(n))) + 1
+    label, jump = np.arange(n), nxt.copy()
+    for _ in range(rounds):  # label = smallest segment index in the loop
+        label = np.minimum(label, label[jump])
+        jump = jump[jump]
+    # Cut each loop before its leader and count steps to that end: larger = earlier in the loop.
+    last = nxt == label[nxt]
+    step = np.where(last, np.arange(n), nxt)
+    dist = (~last).astype(np.int64)
+    for _ in range(rounds):
+        dist = dist + dist[step]
+        step = step[step]
+    order = np.lexsort((-dist, label))
+    lab = label[order]
+    keep = np.bincount(lab)[lab] >= 3
+    order, lab = order[keep], lab[keep]
+    if len(order) == 0:
+        return np.array([], dtype=object)
+    _, ring_index = np.unique(lab, return_inverse=True)
+    rings = shapely.linearrings(segs[order, 0], indices=ring_index.ravel())
+    return np.asarray(shapely.polygons(rings))
+
+
+def _merge_rings(segs: np.ndarray) -> np.ndarray:
+    merged = shapely.line_merge(shapely.multilinestrings(shapely.linestrings(segs)))
+    out = []
+    for line in getattr(merged, "geoms", [merged]):
+        coords = np.asarray(line.coords)
+        if len(coords) < 4:
+            continue
+        if not line.is_ring:
+            # Small gaps come from dirty meshes; close them, drop anything badly open.
+            if np.linalg.norm(coords[0] - coords[-1]) > 0.05:
+                continue
+            coords = np.vstack([coords, coords[:1]])
+        out.append(Polygon(coords))
+    return np.array(out, dtype=object)
 
 
 def _even_odd(polys: list[BaseGeometry]) -> BaseGeometry:

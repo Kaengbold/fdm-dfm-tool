@@ -31,16 +31,28 @@ def horizontal_holes(mesh: Mesh, min_d: float = 0.5, max_d: float = 40.0) -> lis
         lo, hi = float(t.min()), float(t.max())
         step = (hi - lo) / PLANES
         tmin, tmax = t.min(axis=1), t.max(axis=1)
-        found = []
-        for h in lo + step * (np.arange(PLANES) + 0.5) + 1.1e-4:
+
+        def rings_at(h: float) -> list[tuple[float, float, float]]:
             g = section(tri[(tmin < h) & (tmax > h)], float(h))
-            for poly in parts(g):
-                for ring in poly.interiors:
-                    c = _round_ring(np.asarray(ring.coords)[:-1, :2])
-                    if c and min_d <= 2 * c[2] <= max_d:
-                        found.append((c[0], c[1], c[2], h))
-        out += _merge(found, frame, step)
+            return [c for poly in parts(g) for ring in poly.interiors if (c := _round_ring(np.asarray(ring.coords)[:-1, :2]))]
+
+        found = [(*c, h) for h in lo + step * (np.arange(PLANES) + 0.5) + 1.1e-4
+                 for c in rings_at(h) if min_d <= 2 * c[2] <= max_d]
+        out += [h for h in _merge(found, frame, step) if _is_cylinder(h, rings_at)]
     return out
+
+
+def _is_cylinder(hole: dict, rings_at) -> bool:
+    """A sphere or cone also cuts as a circle, but its radius changes along the axis: cut again a
+    bit to each side of the first and last cut. No ring there is fine (the hole ends, e.g. a thin plate)."""
+    r = hole["diameter"] / 2
+    if max(hole["radii"]) - min(hole["radii"]) > 0.04 * r:
+        return False
+    for h in (hole["h0"] - 0.4 * r, hole["h0"] + 0.4 * r, hole["h1"] - 0.4 * r, hole["h1"] + 0.4 * r):
+        for cx, cy, r2 in rings_at(h):
+            if abs(cx - hole["cx"]) < 0.3 * r and abs(cy - hole["cy"]) < 0.3 * r and abs(r2 - r) > 0.04 * r:
+                return False
+    return True
 
 
 def _axis_angles(mesh: Mesh) -> list[float]:
@@ -81,12 +93,12 @@ def _round_ring(pts: np.ndarray) -> tuple[float, float, float] | None:
 
 
 def _merge(found: list[tuple], frame: np.ndarray, step: float) -> list[dict]:
-    """One hole per (centre, size) seen on consecutive cuts."""
+    """One hole per (centre, size) seen on the cuts. Gaps are allowed: a through hole crossed by
+    other holes or pockets is still one hole to drill or fit a pin into."""
     holes: list[dict] = []
     for cx, cy, r, h in sorted(found, key=lambda f: f[3]):
         for hole in holes:
-            if abs(hole["cx"] - cx) < 0.3 * r and abs(hole["cy"] - cy) < 0.3 * r and abs(hole["r"] - r) < 0.2 * r \
-                    and h - hole["h1"] < 1.5 * step:
+            if abs(hole["cx"] - cx) < 0.3 * r and abs(hole["cy"] - cy) < 0.3 * r and abs(hole["r"] - r) < 0.2 * r:
                 hole["h1"] = h
                 hole["rs"].append(r)
                 break
@@ -102,6 +114,7 @@ def _merge(found: list[tuple], frame: np.ndarray, step: float) -> list[dict]:
         lo = np.minimum(*ends) - r * np.abs(u) - r * z
         hi = np.maximum(*ends) + r * np.abs(u) + r * z
         out.append({
+            "cx": hole["cx"], "cy": hole["cy"], "h0": hole["h0"], "h1": hole["h1"], "radii": hole["rs"],  # cut frame
             "center": mid.tolist(),
             "axis": d.tolist(),
             "diameter": 2 * r,
