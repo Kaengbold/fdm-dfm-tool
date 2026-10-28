@@ -16,7 +16,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 - [ ] **T-010 P1** Refine the top ~5 orientations with the pseudo-slicer: true first-layer area, supports that land on the part vs. the bed, support volume. · files: `orientation.py`, `api.py` · owner: —
 - [ ] **T-011 P2** "Critical faces": let the user mark faces that must be flat on the bed / vertical / not touched by supports (cosmetic); use them in the ranking. · owner: —
-- [ ] **T-012 P2** Show *why* an option lost (score breakdown) in the UI. · owner: —
+- [x] **T-012 P2** Show *why* an option lost (score breakdown) in the UI. · owner: Claude (`task/T-012-score-breakdown`) — `score_terms` per option (support/height/bed/weak/strength) and a plain `why_lower` line.
 
 ## Printability checks & knowledge base
 

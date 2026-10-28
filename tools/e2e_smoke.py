@@ -182,6 +182,8 @@ def main():
                 assert up == shown, f"check is for {up} but option shows {shown}"
                 seen[up] = tuple(findings(page))
             assert len(set(seen.values())) > 1, f"findings never changed between orientations: {seen}"
+            why = page.locator("#options .why-lower").all_inner_texts()
+            assert why and all(w.startswith(("Ranked lower", "Almost")) for w in why), f"no score explanation: {why}"
             return f"{len(seen)} orientations, {len(set(seen.values()))} different finding sets"
         run.step("orientation switch updates findings", orientation_updates_findings)
 

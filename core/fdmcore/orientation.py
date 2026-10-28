@@ -49,6 +49,12 @@ class OrientationResult:
     bed_area: float  # mm²
     height: float  # mm
     reasons: list[str] = field(default_factory=list)
+    # Score split into parts (sum == score), so the UI can say why an option ranks lower.
+    terms: dict[str, float] = field(default_factory=dict)
+
+    def penalize(self, term: str, value: float) -> None:
+        self.terms[term] = self.terms.get(term, 0.0) + value
+        self.score += value
 
 
 def classify_faces(mesh: Mesh, up, settings: OrientationSettings | None = None) -> np.ndarray:
@@ -192,13 +198,13 @@ def _score(
         bed_area = (areas[:, None] * bed).sum(axis=0)
 
         bed_frac = bed_area / L**2
-        score = (
-            s.w_support_area * support_area / L**2
-            + s.w_support_volume * support_vol / L**3
-            + s.w_height * height / L
-            - s.w_bed_contact * np.minimum(bed_frac, 1.0)
-            + s.w_small_bed * np.clip(1.0 - bed_frac / s.good_bed_fraction, 0.0, 1.0)
-        )
+        terms = {
+            "support": s.w_support_area * support_area / L**2 + s.w_support_volume * support_vol / L**3,
+            "height": s.w_height * height / L,
+            "bed": s.w_small_bed * np.clip(1.0 - bed_frac / s.good_bed_fraction, 0.0, 1.0)
+            - s.w_bed_contact * np.minimum(bed_frac, 1.0),
+        }
+        score = sum(terms.values())
         for k in range(len(U)):
             results.append(
                 OrientationResult(
@@ -208,6 +214,7 @@ def _score(
                     support_volume=float(support_vol[k]),
                     bed_area=float(bed_area[k]),
                     height=float(height[k]),
+                    terms={name: float(v[k]) for name, v in terms.items()},
                 )
             )
     return results

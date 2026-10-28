@@ -269,6 +269,7 @@ function renderOptions() {
         { onclick: () => selectOption(i) },
         el("strong", { textContent: o.label }, i === 0 ? el("span", { className: "tag", textContent: "Recommended" }) : ""),
         el("ul", {}, ...o.reasons.map((r) => el("li", { textContent: r }))),
+        o.why_lower ? el("p", { className: "why-lower", textContent: o.why_lower }) : "",
       ),
     ),
   );
@@ -648,7 +649,7 @@ function summarizeState() {
 // What the AI may do: the same actions as the UI. Shared by all providers.
 const aiActions = {
   get_current_analysis: async () => summarizeState(),
-  list_orientations: async () => state.options.map((o, i) => ({ index: i, label: o.label, up: round(o.up, 3), reasons: o.reasons })),
+  list_orientations: async () => state.options.map((o, i) => ({ index: i, label: o.label, up: round(o.up, 3), reasons: o.reasons, why_lower: o.why_lower })),
   select_orientation: async ({ index }) => {
     if (!state.options[index]) throw new Error(`No orientation ${index}`);
     await selectOption(index);

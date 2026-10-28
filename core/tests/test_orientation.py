@@ -116,3 +116,18 @@ def test_typical_parts_orientation(name, expected_up):
     options = api.orientations()["orientations"]
     assert any(np.allclose(options[0]["up"], e, atol=1e-6) for e in expected_up), options[0]["up"]
     assert all(o["bed_area_mm2"] > 0 for o in options), "options without bed contact should be hidden"
+
+
+def test_score_breakdown_explains_lower_options():
+    from pathlib import Path
+
+    from fdmcore import api
+
+    api.load((Path(__file__).resolve().parents[2] / "web" / "samples" / "hook.stl").read_bytes(), "hook")
+    r = api.orientations({"goal": "strength"})
+    first, *rest = r["orientations"]
+    for o in [first, *rest, r["as_loaded"]]:
+        assert sum(o["score_terms"].values()) == pytest.approx(o["score"], abs=0.01)
+    assert "why_lower" not in first
+    assert all(o["why_lower"].startswith(("Ranked lower", "Almost")) for o in rest)
+    assert "support" in rest[0]["why_lower"]

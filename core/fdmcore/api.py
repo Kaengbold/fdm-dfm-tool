@@ -135,10 +135,11 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
         for r, sf in zip([*candidates, as_loaded], sfs):
             safety[id(r)] = float(sf)
             r.reasons.append(_strength_reason(sf, verdict(sf)))
-        candidates.sort(key=lambda r: r.score + STRENGTH_WEIGHT * max(0.0, 2.0 - safety[id(r)]))
+            r.penalize("strength", STRENGTH_WEIGHT * max(0.0, 2.0 - float(sf)))
+        candidates.sort(key=lambda r: r.score)
     elif p.goal == "strength":
         with stage(0.2, 0.95):
-            _rank_by_weak_spots(s.mesh, candidates, p)
+            _rank_by_weak_spots(s.mesh, candidates, p, extra=[as_loaded])
 
     # Hide options that don't sit on any flat face or are far worse than the best — unless
     # nothing better exists (e.g. a sphere). Users shouldn't have to wade through bad choices.
@@ -161,12 +162,34 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     candidates = candidates[:top]
 
     def pack(r, label):
-        return _pack(s.mesh, r, label, settings, placed[id(r)][0], safety.get(id(r)))
+        out = _pack(s.mesh, r, label, settings, placed[id(r)][0], safety.get(id(r)))
+        if candidates and r is not candidates[0]:
+            out["why_lower"] = why_lower(r.terms, candidates[0].terms)
+        return out
 
     return {
         "as_loaded": pack(as_loaded, "As loaded"),
         "orientations": [pack(r, f"Option {i + 1}") for i, r in enumerate(candidates)],
     }
+
+
+# How each score part reads when an option is worse on it than the recommended one.
+WORSE = {
+    "support": "needs more support",
+    "height": "prints taller (takes longer)",
+    "bed": "has less contact with the bed",
+    "weak": "has more weak spots along the layers",
+    "strength": "is weaker under your load",
+}
+
+
+def why_lower(terms: dict[str, float], best: dict[str, float], min_gap: float = 0.05) -> str:
+    """Plain-language reason an option ranks below the recommended one, biggest difference first."""
+    gaps = sorted(((terms.get(k, 0.0) - best.get(k, 0.0), k) for k in WORSE), reverse=True)
+    worse = [WORSE[k] for gap, k in gaps if gap > min_gap][:2]
+    if not worse:
+        return "Almost as good as the recommended option"
+    return "Ranked lower: " + " and ".join(worse)
 
 
 def _placement(mesh: Mesh, r, p: Profile):
@@ -194,21 +217,21 @@ def orientation_settings(p: Profile) -> OrientationSettings:
 WEAK_SPOT_PENALTY = 1.0  # per weak finding (upright pin, neck, single-line wall) when the goal is strength
 
 
-def _rank_by_weak_spots(mesh: Mesh, candidates: list, p: Profile, check_top: int = 6):
+def _rank_by_weak_spots(mesh: Mesh, candidates: list, p: Profile, extra: list = (), check_top: int = 6):
     """Without loads, 'strength' means: avoid orientations that print pins upright or make necks.
-    Runs a quick check on the best few candidates and re-sorts them."""
-    for i, r in enumerate(candidates[:check_top]):
+    Runs a quick check on the best few candidates (and ``extra``, e.g. as-loaded) and re-sorts them."""
+    todo = [*candidates[:check_top], *extra]
+    for i, r in enumerate(todo):
         rotation, _ = print_rotation(mesh, r.up, p.printer["bed"])
-        with stage(i / check_top, (i + 1) / check_top):
+        with stage(i / len(todo), (i + 1) / len(todo)):
             found = run_checks(orient(mesh, rotation), p, max_layers=50)["findings"]
         weak = [f for f in found if f["impact"] == "weak"]
-        r.score += WEAK_SPOT_PENALTY * min(len(weak), 3)
+        r.penalize("weak", WEAK_SPOT_PENALTY * min(len(weak), 3))
         if weak:
             r.reasons.append(f"{len(weak)} weak spot(s) in this orientation (e.g. {weak[0]['rule'].replace('_', ' ')})")
         else:
             r.reasons.append("No weak spots along the layers")
-    head = sorted(candidates[:check_top], key=lambda r: r.score)
-    candidates[:check_top] = head
+    candidates[:check_top] = sorted(candidates[:check_top], key=lambda r: r.score)
 
 
 def orientation(up, profile: dict | None = None, label: str = "Custom") -> dict:
@@ -231,6 +254,7 @@ def _pack(mesh: Mesh, r, label: str, settings: OrientationSettings, rotation: np
         "height_mm": r.height,
         "safety_factor": safety,
         "reasons": r.reasons,
+        "score_terms": {k: round(v, 3) for k, v in r.terms.items()},
         "face_classes": classify_faces(mesh, r.up, settings).tobytes(),
     }
 
