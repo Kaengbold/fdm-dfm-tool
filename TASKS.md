@@ -35,7 +35,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-102 P2** Engraved/raised text legibility on top and side faces (stroke width, depth vs nozzle/layer height). · owner: —
 - [x] **T-103 P2** Support marks on faces the user marks as visible/critical → raise severity (needs T-011). · owner: Claude (`task/T-011-critical-faces`) — support on a clean face is a *problem* finding with its own box.
 - [ ] **T-104 P2** Calibrate warping lengths (`thresholds.yaml`) with real prints per material/enclosure. · owner: —
-- [ ] **T-105 P2** "Strength" goal: use the voxel simulation automatically when loads are known; heuristics (pins/necks) otherwise. · owner: —
+- [x] **T-105 P2** "Strength" goal: use the voxel simulation automatically when loads are known; heuristics (pins/necks) otherwise. · owner: Claude (`task/T-011-critical-faces`) — the UI sends loads with every re-rank when the goal is Strength.
 - [x] **T-106 P3** Shrinkage per material → expected size error for long parts (shape impact). · owner: Claude (`task/T-026-presets-fasteners`) — `shrinkage_pct` per material, `shrinkage_size_error` finding.
 
 ## Strength
@@ -76,6 +76,8 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-081 P3** Mobile/tablet layout. · owner: —
 - [ ] **T-082 P3** German translation (UI + rules). · owner: —
 - [ ] **T-090 P3** Fusion 360 add-in using the same engine. · owner: —
+
+- [ ] **T-111 P2** Findings UI: an impact group "Will fail" can contain a TIP-severity card (e.g. small bed contact that a brim fixes), which reads as a contradiction. Show the severity the group implies, or move fixed-by-setting items to a "needs a setting" note. · owner: —
 
 ## Done
 

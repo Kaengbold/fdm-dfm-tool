@@ -220,7 +220,8 @@ function showUnitHint(hint) {
 }
 
 async function findOrientations(withLoads = false) {
-  const loads = withLoads && readyForStrength() ? state.loads : undefined;
+  // With the Strength goal, known loads always count (the simulation beats the pin/neck heuristics).
+  const loads = (withLoads || profile().goal === "strength") && readyForStrength() ? state.loads : undefined;
   await busy(loads ? "Finding the best orientation for printing and strength…" : "Finding the best orientation…", async () => {
     const r = await call("orientations", { profile: profile(), loads, faces: faceMarks() });
     state.options = [...r.orientations, r.as_loaded];
