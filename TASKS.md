@@ -79,6 +79,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Done
 
+- [x] **T-110 P1** Fix GEOS topology exception in Pyodide on real models; dynamic goal presets (walls/infill/layer height); camera focus & 3D highlight on clicked findings; orientation box clearing; WIP yellow frames on unfinished features. · owner: Antigravity (branch `task/T-110-ux-fixes`)
 - [x] Phase 0–2: engine, Pyodide app, orientation, pseudo-slicer checks, knowledge base, settings, 3MF/STL export, voxel FEA strength, strength-aware orientation.
 - [x] Phase 3 (partial): hole detection, teardrop + corner chamfer edits with ghost preview.
 - [x] Phase 4: MCP server, copy-report, Ask-AI panel (Anthropic + Gemini, own key).
