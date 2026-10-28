@@ -65,7 +65,8 @@ button {
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 12px; width: 100%; }
 
-.presets { display: grid; grid-template-columns: 1fr 1fr 80px; gap: 8px; }
+.presets { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px; gap: 8px; }
+.presets select { width: 100%; min-width: 0; }
 .presets label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
 select { font: inherit; font-size: 13px; padding: 4px; border: 1px solid #d0d5dd; border-radius: 6px; background: #fff; }
 
@@ -81,17 +82,17 @@ select { font: inherit; font-size: 13px; padding: 4px; border: 1px solid #d0d5dd
 h2 small { font-weight: 400; color: var(--muted); }
 
 .cards, #options { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
-#options li {
+#options > li {
   border: 1px solid #e0e1e6;
   border-radius: 8px;
   padding: 10px 12px;
   cursor: pointer;
   font-size: 13px;
 }
-#options li.active { border-color: var(--accent); background: #edf2fe; }
-#options li strong { display: block; margin-bottom: 4px; }
-#options li ul { margin: 0; padding-left: 16px; color: var(--muted); }
-#options li .tag { float: right; font-size: 11px; color: var(--bed); font-weight: 600; text-transform: uppercase; }
+#options > li.active { border-color: var(--accent); background: #edf2fe; }
+#options > li strong { display: block; margin-bottom: 4px; }
+#options > li ul { margin: 0; padding-left: 16px; color: var(--muted); }
+#options > li .tag { float: right; font-size: 11px; color: var(--bed); font-weight: 600; text-transform: uppercase; }
 
 .findings { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .findings > li { border: 1px solid #e0e1e6; border-left: 4px solid var(--accent); border-radius: 6px; padding: 6px 10px; }
@@ -142,3 +143,39 @@ main canvas { display: block; }
 .edits { list-style: none; padding: 0; margin: 0 0 6px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
 .edits label { display: flex; gap: 8px; align-items: flex-start; border: 1px solid #e0e1e6; border-radius: 6px; padding: 6px 8px; cursor: pointer; }
 .edits small { display: block; color: var(--muted); }
+
+.ai { border: 1px solid #e0e1e6; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.ai summary { cursor: pointer; font-weight: 600; }
+.ai summary small { font-weight: 400; color: var(--muted); }
+.ai-config { display: grid; gap: 6px; margin: 8px 0; }
+.ai-config label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.ai-config label.toggle { flex-direction: row; }
+.ai-config input[type=password] { font: inherit; padding: 4px; border: 1px solid #d0d5dd; border-radius: 6px; }
+.ai-log { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; margin-bottom: 6px; }
+.ai-log .msg { padding: 6px 8px; border-radius: 6px; white-space: pre-wrap; }
+.ai-log .user { background: #edf2fe; align-self: flex-end; }
+.ai-log .assistant { background: #f1f3f5; }
+.ai-log .tool { color: var(--muted); font-size: 11px; }
+.ai-form { display: flex; gap: 6px; }
+.ai-form textarea { flex: 1; font: inherit; font-size: 13px; padding: 4px; border: 1px solid #d0d5dd; border-radius: 6px; resize: vertical; }
+.ai-form button { width: auto; }
+
+.impact-groups { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
+.impact > details > summary.impact-head { cursor: pointer; font-size: 13px; font-weight: 700; padding: 2px 0 6px; }
+.impact.fails .impact-head { color: var(--support); }
+.impact.shape .impact-head { color: #b25c00; }
+.impact.weak .impact-head { color: #8e4ec6; }
+.impact.info .impact-head { color: var(--muted); }
+.places { margin: 6px 0 2px; padding-left: 16px; }
+.places .place { cursor: pointer; font-weight: 600; }
+.places .place:hover { color: var(--accent); }
+.nozzles { font-size: 13px; margin-bottom: 12px; }
+.nozzles summary { cursor: pointer; color: var(--accent); }
+#nozzle-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+#nozzle-table td, #nozzle-table th { border-bottom: 1px solid #eceef0; padding: 4px 2px; text-align: left; vertical-align: top; font-size: 12px; }
+#nozzle-table tr.current { background: #edf2fe; }
+#mm-row { margin-top: -8px; }
+
+/* Inactive orientation cards collapse to their first reason so the findings stay in view. */
+#options > li:not(.active) ul li:nth-child(n + 2) { display: none; }
+#options > li:not(.active) { padding: 6px 12px; }

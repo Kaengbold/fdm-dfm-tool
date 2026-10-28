@@ -1,0 +1,59 @@
+# Detection thresholds. Every number names the research rule it comes from
+# (research/sourced_*.yaml, ids in brackets). Change numbers here, not in code.
+# Sizes ending in _nozzle are multiples of the nozzle diameter.
+
+features:
+  vanish_below_nozzle: 0.75       # features narrower than this don't print at all [min_wall_thickness_and_arachne: min_arachne]
+  rough_below_nozzle: 1.5         # positive features narrower than this print partially / rough [min_wall_thickness_and_arachne, text_embossing_debossing_limits]
+  single_wall_below_nozzle: 2.0   # walls thinner than this get only one perimeter -> weak [min_wall_thickness_and_arachne]
+  single_wall_min_height_mm: 5    # only report single-perimeter walls that stand at least this tall
+
+gaps:
+  fuse_below_mm: 0.2              # slots/clearances narrower than this fuse shut [slant3d_internal_micro_voids_3x_strength, mechanical_clearances_by_fit]
+
+holes:
+  vertical_min_mm: 1.5            # smaller vertical holes close up (0.4 nozzle) [vertical_hole_shrinkage_polyholes]
+  vertical_min_nozzle: 3.5        # scaled for other nozzles: max(vertical_min_mm * nozzle/0.4, this * nozzle)
+  undersize_up_to_mm: 6.0         # holes up to this size print 0.15–0.3 mm undersized [vertical_hole_shrinkage_polyholes]
+  typical_undersize_mm: [0.15, 0.3]
+  xy_hole_compensation_mm: 0.1    # [vertical_hole_shrinkage_polyholes]
+  circularity_min: 0.85           # 4πA/P² above this counts as a round hole
+
+bridges:
+  sag_from_mm: 4.0                # hole/slot tops wider than this sag 0.2–0.4 mm [horizontal_hole_teardrop_flat_top]
+  sag_mm: [0.2, 0.4]
+  large_sag_from_mm: 8.0          # flat roofs wider than this sag 0.4–1.0 mm [mistake_18_large_horizontal_circular_holes]
+
+first_layer:
+  zone_mm: 0.6                    # bottom layers affected by squish / elephant foot
+  detail_min_mm: 0.65             # strokes/gaps on the bed side narrower than this get squashed or closed [text_embossing_debossing_limits, problem_elephant_foot]
+  elephant_foot_mm: [0.1, 0.25]   # bulge per side [problem_elephant_foot]
+
+warping:
+  # Footprint length (mm, longest side of an island on the bed) where corner lifting becomes likely.
+  # From shrinkage rates (PLA 0.2–0.4 %, PETG 0.3–0.5 %, ABS 0.6–0.9 %, PA-CF 0.3–0.5 %) calibrated to
+  # "ABS on an open printer: risky from ~40–50 mm" [problem_warping_and_corner_lifting, mistake_23_printing_abs_asa_pc_on_open_printer].
+  risk_length_mm:
+    pla: {none: 110, passive: 110, heated: 110}
+    petg: {none: 85, passive: 100, heated: 100}
+    abs: {none: 45, passive: 75, heated: 115}
+    pa_cf: {none: 85, passive: 110, heated: 140}
+  sharp_corner_max_deg: 100       # convex corners sharper than this lift first [problem_warping_and_corner_lifting]
+  fillet_radius_mm: 3.0           # suggested corner radius [problem_warping_and_corner_lifting]
+  brim_width_mm: 8                # [corner_mouse_ears_vs_brim]
+
+pins:
+  max_width_mm: 8.0               # upright pins/posts thinner than this break along layers [mistake_01_z_axis_tension_orientation]
+  min_aspect: 3.0                 # ... when height >= this × width
+  wobble_aspect: 10.0             # this slender wobbles and prints rough
+
+necks:
+  area_ratio: 0.3                 # a layer with < 30 % of the area above and below is a weak neck
+  window_mm: 10.0
+
+stability:
+  tip_aspect: 4.0                 # height / base width [problem_bed_adhesion_moisture_heat_creep_ringing]
+  min_bed_contact_mm2: 150        # [problem_bed_adhesion_moisture_heat_creep_ringing]
+
+cooling:
+  small_layer_area_mm2: 100       # [problem_overhang_curl_and_small_layer_overheating]

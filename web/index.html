@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FDM DFM Tool</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="style.css" />
     <script type="importmap">
       {
@@ -19,22 +20,37 @@
       <h1>FDM DFM Tool <small>pre-alpha</small></h1>
 
       <label id="drop" class="drop">
-        <input id="file" type="file" accept=".stl" hidden />
-        <strong>Drop an STL here</strong>
+        <input id="file" type="file" accept=".stl,.step,.stp" hidden />
+        <strong>Drop an STL or STEP file here</strong>
         <span>or click to choose a file</span>
       </label>
+      <label id="body-pick" class="setting" hidden>This file has several bodies — analyse <select id="body"></select></label>
       <div class="samples">
         Samples:
         <button data-sample="mushroom">Mushroom</button>
         <button data-sample="l_bracket">L-bracket</button>
         <button data-sample="hook">Hook</button>
         <button data-sample="test_block">Test block</button>
+        <button data-sample="detail_plate">Small details</button>
+        <button data-sample="enclosure">Enclosure</button>
+        <button data-sample="dumbbell">Neck</button>
       </div>
 
       <div class="presets">
         <label>Printer <select id="printer"></select></label>
         <label>Material <select id="material"></select></label>
         <label>Nozzle <select id="nozzle"></select></label>
+      </div>
+      <label class="toggle" id="mm-row"><input id="multi-material" type="checkbox" /> Multi-material (AMS / MMU) available</label>
+
+      <div class="mode" role="radiogroup" aria-label="Optimise for">
+        <span>Optimise for</span>
+        <div>
+          <label><input type="radio" name="goal" value="balanced" checked /> Balanced</label>
+          <label><input type="radio" name="goal" value="strength" /> Strength</label>
+          <label><input type="radio" name="goal" value="speed" /> Speed</label>
+          <label><input type="radio" name="goal" value="material" /> Material</label>
+        </div>
       </div>
 
       <div class="mode" role="radiogroup" aria-label="What can you change?">
@@ -53,7 +69,11 @@
         <ol id="options" class="cards"></ol>
 
         <h2>Findings <small id="stats"></small></h2>
-        <ol id="findings" class="findings"></ol>
+        <ol id="findings" class="impact-groups"></ol>
+        <details id="nozzle-block" class="nozzles">
+          <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
+          <table id="nozzle-table"></table>
+        </details>
 
         <h2>Strength <small>optional — will it hold?</small></h2>
         <div class="strength">
@@ -100,6 +120,27 @@
           <button id="copy-report">Copy report (for sharing or an AI chat)</button>
         </div>
       </section>
+
+      <details id="ai-block" class="ai" hidden>
+        <summary>Ask AI <small>with your own API key</small></summary>
+        <div class="ai-config">
+          <label>Provider
+            <select id="ai-provider">
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="gemini">Google (Gemini)</option>
+            </select>
+          </label>
+          <label>API key <input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-..." /></label>
+          <label>Model <select id="ai-model"></select></label>
+          <label class="toggle"><input id="ai-remember" type="checkbox" /> Remember key on this computer</label>
+        </div>
+        <div id="ai-log" class="ai-log"></div>
+        <form id="ai-form" class="ai-form">
+          <textarea id="ai-input" rows="2" placeholder="e.g. Will this hold 5 kg? How can it print without supports?"></textarea>
+          <button class="primary">Send</button>
+        </form>
+        <p class="hint">The key goes only from this browser to the provider (api.anthropic.com or generativelanguage.googleapis.com); usage is billed to your account there. The assistant can change orientation, loads, settings and apply design edits when you ask.</p>
+      </details>
 
       <ul class="legend">
         <li><i style="background: var(--ok)"></i>Prints fine</li>

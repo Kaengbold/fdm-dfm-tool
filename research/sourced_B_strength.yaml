@@ -1,0 +1,85 @@
+- id: walls_vs_infill_vs_top_bottom_strength
+  title: Increasing wall loops boosts strength 2–3x more than infill
+  applies_when: Functional part under bending, tension, or torsion where `wall_loops` <= 2 and `sparse_infill_density` > 25%
+  why: In bending and torsion, peak normal and shear stresses occur at the outer skin of the cross-section (beam moment of inertia scales with distance cubed from the neutral axis). Adding continuous outer perimeters places 100% dense aligned material right at the high-stress skin, whereas increasing internal infill adds disconnected struts near the low-stress core.
+  fixes:
+    - domain: slicer
+      text: Increase `wall_loops` to 4–6 and top/bottom shell layers to 5–6 before raising `sparse_infill_density` above 20–25%.
+      settings: {wall_loops: "4", top_shell_layers: "5", bottom_shell_layers: "5", sparse_infill_density: "20%"}
+  numbers: "CNC Kitchen measured tensile/bending tests (PLA): Increasing infill from 20% to 50% (at 2 perimeters) increases strength by ~25% while increasing weight by +28%; increasing perimeters from 2 to 4 (at 20% infill) increases strength by +55% to +70% for the same or lower weight increase (+22%). Above 50–60% infill, strength gains per gram plateau sharply."
+  exceptions: "Pure Z-axis compressive crushing loads on large flat plates (e.g., hydraulic press tooling or coasters under heavy point loads), where high infill density (40–80%) directly supports the top skin against buckling."
+  sources:
+    - "CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints — (Full article & video 06:10–10:45) — Measured tensile and bending strength per gram for walls vs infill"
+    - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — (Section: Perimeters) — 'The strength of a model is mostly defined by the number of perimeters (not the infill). If you want a stronger print, increase the number of perimeters.'"
+  confidence: high
+
+- id: interlayer_z_strength_and_process_variables
+  title: Z-axis interlayer strength is 35–80% of XY and process-driven
+  applies_when: Principal tensile or bending stress vector has a component > 25° out of the XY build plane
+  why: "FDM parts are orthotropic laminates: XY strength comes from continuous entangled polymer chains, while Z strength relies on thermal reptation (interdiffusion of polymer chains across the layer boundary while the interface remains above Tg / crystal melt temperature)."
+  fixes:
+    - domain: geometry
+      text: Orient the part so the primary tensile and bending loads run parallel to the XY build plate (within 0–20°).
+    - domain: slicer
+      text: Print at the upper end of the filament's nozzle temperature range, reduce part cooling fan speed, use wider line widths (120–150% of nozzle diameter), and use thinner-to-moderate layer heights (0.15–0.20 mm on 0.4 mm nozzle).
+      settings: {outer_wall_line_width: "0.55", inner_wall_line_width: "0.60", layer_height: "0.16"}
+    - domain: process
+      text: Print in an enclosed or actively heated chamber (45–65°C for ABS/ASA/PA/PC) to keep the substrate layer warm and extend polymer interdiffusion time.
+  numbers: "Typical Z-to-XY tensile strength ratio (Z/XY %): PLA = 55–75% (Bambu PLA Basic ~35 MPa Z vs ~55 MPa XY in CNC Kitchen tests); PETG = 50–68% (Bambu PETG Basic 35 MPa Z / 51 MPa XY = 68.6%; Bambu PETG-HF 23 MPa Z / 34 MPa XY = 67.6%; CNC Kitchen 32 MPa Z / 55 MPa XY = 58%, up to 93% only at 15 mm/s with 0–30% fan); ABS = 45–65%; ASA = 55–70% (Bambu ASA 31 MPa Z / 37 MPa XY); TPU 95A = 70–85% (excellent interlayer fusion); PA6 / PA12 = 60–75%; PA-CF / PET-CF = 35–55% (fibers align strictly in XY and do not cross Z-layers); PC = 55–68% (Polymaker PolyMax PC-FR 46 MPa Z / 67 MPa XY = 68.6%). Process effects measured by CNC Kitchen: (1) Nozzle temp: Z strength peaks near top of recommended range (e.g., PETG 18 MPa at 200°C -> 32 MPa at 245°C -> drops to 24 MPa at 260°C due to microbubbles/degradation). (2) Fan speed: 0% fan gives +20% to +35% higher Z strength than 100% fan. (3) Layer height: thinner layers (0.10–0.15 mm on 0.4 mm nozzle) yield higher Z strength than thick layers (>0.28 mm, where Z strength drops by 25–40% due to circular cross-section and reduced contact width). (4) Line width: 0.60–0.80 mm width on a 0.4 mm nozzle increases radial squeezing pressure and boosts Z strength by +15–25%. (5) Heated chamber: 55–60°C chamber increases ABS/ASA/PC Z-strength by +20–40% and reduces residual warpage stress."
+  exceptions: "Overheating above the polymer's thermal degradation threshold or printing wet filament at high temperatures creates steam microbubbles at the interface, reducing Z strength."
+  sources:
+    - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion — (Full article) — Measured Z vs XY tensile strength across temperatures for PLA & PETG"
+    - "CNC Kitchen — Transparent FDM 3D Prints are Clearly Stronger! — https://www.cnckitchen.com/blog/transparent-fdm-3d-prints-are-clearly-stronger — (Full article) — PETG Z-adhesion from 65% to 93% via fan and flow control"
+    - "CNC Kitchen — Extrusion Width - The magic parameter for strong 3D prints? — https://www.cnckitchen.com/blog/extrusion-width-the-magic-parameter-for-strong-3d-prints — (Full article) — 150–200% line width increases Z layer bond area"
+    - "CNC Kitchen — 3D Printing Layer Height: How much does it matter for strength? — https://www.cnckitchen.com/blog/3d-printing-layer-height-how-much-does-it-matter-for-strength — (Full article) — Strength drop when layer height exceeds 60% of nozzle diameter"
+    - "CNC Kitchen — Does a HEATED CHAMBER make your 3D prints STRONGER? — https://www.cnckitchen.com/blog/does-a-heated-chamber-make-your-3d-prints-stronger — (Full article) — Chamber temperature impact on interlayer bond"
+  confidence: high
+
+- id: infill_pattern_strength_to_weight
+  title: "Infill pattern selection: Gyroid/Cubic vs Grid vs Lightning"
+  applies_when: "`sparse_infill_density` > 0% on a functional or aesthetic part"
+  why: 2D extruded patterns (Rectilinear, Grid, Triangles, Honeycomb) only resist loads cleanly in the XY plane and self-intersect on the same layer (Grid/Triangles), causing nozzle scraping. 3D isotropic patterns (Gyroid, Cubic, 3D Honeycomb) distribute shear and compressive loads in all three axes without same-layer nozzle collisions.
+  fixes:
+    - domain: slicer
+      text: Use `gyroid` or `cubic` for functional parts under multi-axis loads, `adaptivecubic` or `supportcubic` for large parts needing top-surface support with low weight, and `lightning` strictly for non-structural visual models.
+      settings: {sparse_infill_pattern: "gyroid", sparse_infill_density: "15%"}
+  numbers: "CNC Kitchen measured strength-to-weight comparison at equal filament weight: Rectilinear/Aligned Rectilinear oriented along the load axis = 100% (highest unidirectional strength/weight); Honeycomb/Grid/Triangles = ~90–95% in XY but poor out-of-plane shear and Grid scrapes over its own crossings; Cubic & Gyroid = ~85–90% unidirectional XY strength of aligned rectilinear, but +30–50% higher multi-axial / Z-compression / shear resistance and zero same-layer nozzle crossings. Adaptive Cubic / Support Cubic reduces infill weight by 30–50% vs uniform Cubic while maintaining top-skin support. Lightning infill uses 60–80% less infill material than Grid but adds ~0% structural core strength."
+  exceptions: "When load direction is strictly known and unidirectional in XY, `rectilinear` or `alignedrectilinear` aligned with the principal stress vector gives the highest stiffness per gram."
+  sources:
+    - "CNC Kitchen — Testing 3D Printed Infill Patterns for their Strength — https://www.cnckitchen.com/blog/testing-3d-printed-infill-patterns-for-their-strength — (Full article & video 04:30–12:15) — Tensile and compression strength per gram across infill patterns"
+    - "Prusa Knowledge Base — Infill patterns — https://help.prusa3d.com/article/infill-patterns_177130 — (Full article) — Mechanical properties, nozzle crossing behavior, and print time of every infill pattern"
+  confidence: high
+
+- id: annealing_shrinkage_and_gains
+  title: Annealing semi-crystalline polymers boosts HDT and stiffness
+  applies_when: Part requires heat deflection temperature (HDT) > 65°C (PLA) or reduced creep/internal stress (PA6, PA12, PET-CF, PC)
+  why: Rapid cooling on the print bed quenches semi-crystalline polymers (PLA, PA6, PA12, PET) in an amorphous or low-crystallinity state and locks in residual thermal stresses in amorphous polymers (ABS, ASA, PC). Heating above Tg (but below melting temperature Tm) allows crystal lamellae to grow and relaxes internal stresses.
+  fixes:
+    - domain: process
+      text: Anneal PA6/PA6-CF at 90–110°C for 4–6 hours (or PC at 110–120°C for 2 hours), and only anneal PLA (80–100°C for 30–60 min) if using an annealing-grade HT-PLA or packing the part tightly in dry fine salt/plaster.
+    - domain: geometry
+      text: Pre-scale CAD or slicer X/Y and Z dimensions to compensate for anisotropic annealing shrinkage when annealing standard PLA.
+  numbers: "PLA (unpacked oven annealing at 90–100°C): Crystallinity rises from ~10% to >40%, HDT increases from ~55°C to 110–140°C, flexural modulus increases +15–25%, but anisotropic shrinkage is severe: XY shrinks by 2.5–5.0% and Z expands by +1.0–2.5% (often warping thin parts >10% unless packed in dry salt/plaster). PA6 / PA6-CF & PA12 / PA12-CF (annealed at 90–110°C for 4–6 h): Dimensional change is < 0.3–0.5%, HDT increases to 180–215°C, tensile/bending stiffness increases +15–30%, and PA6 creep under static load is reduced (though moisture conditioning still lowers PA6 stiffness by ~59% vs dry state; PA12 retains stiffness when wet). PC (stress-relief anneal at 110–120°C for 2 h): Relieves residual stress to prevent environmental stress cracking (ESC) with <0.3% shrinkage."
+  exceptions: "Amorphous polymers (ABS, ASA, standard PETG, PC) cannot crystallize during annealing; heating them above Tg without salt packing simply warps them (though packed salt/plaster remelting of 100% infill PETG at 200°C increased Z-strength from 30 to 41 MPa in CNC Kitchen tests)."
+  sources:
+    - "CNC Kitchen — Annealing 3D prints in Plaster — https://www.cnckitchen.com/blog/annealing-3d-prints-in-plaster — (Full article) — Remelting/annealing PETG and PLA in plaster"
+    - "CNC Kitchen — Carbon Fiber Nylon in 3D Printing: PA6 vs PA12 Tested — https://www.cnckitchen.com/blog/carbon-fiber-nylon-in-3d-printing-pa6-vs-pa12-tested — (Full article) — Annealing deformation (<0.5% PA vs >10% PLA), creep, and moisture conditioning"
+    - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — (Section: Annealing) — Official annealing purpose and guidelines"
+  confidence: high
+
+- id: fiber_filled_anisotropy_and_tradeoffs
+  title: Chopped carbon/glass fibers boost XY stiffness but lower Z strength
+  applies_when: Filament is carbon-fiber (CF) or glass-fiber (GF) filled (PLA-CF, PETG-CF, ABS-GF, ASA-CF, PA6-CF, PAHT-CF, PPA-CF)
+  why: Chopped fibers (typically 100–400 um long, 10–20 wt%) align parallel to the extrusion direction inside the nozzle due to shear flow. They dramatically increase XY tensile modulus (stiffness) and reduce thermal shrinkage/warping, but fibers never cross the Z-layer boundary—reducing polymer-to-polymer contact area and lowering Z-axis tensile and impact strength.
+  fixes:
+    - domain: geometry
+      text: Use CF/GF filaments when you need high XY bending stiffness, low warping on large flat parts, high HDT, and matte surface finish—never when the primary failure mode is Z-axis layer delamination or high-energy Z impact.
+    - domain: process
+      text: Print CF/GF filaments with a hardened steel, tungsten carbide, or ruby nozzle (0.4 mm minimum, 0.6 mm recommended to prevent fiber bridging clogs) and handle raw filament/sanded dust with gloves.
+  numbers: "Measured stiffness & strength changes vs neat base polymer: Bending modulus (XY stiffness) increases by +50% to +250% (e.g., Bambu PA6-CF = 5460 MPa, PPA-CF = 9860 MPa vs neat PA ~1500–2000 MPa). Warping/shrinkage drops by 40–70%. However, Z-axis tensile and impact strength often drops by 15–40% compared to neat resin: e.g., Polymaker PolyLite PLA-CF has 31.2 MPa XY tensile strength and only 15.1 MPa Z tensile strength (48% of XY); Bambu ASA vs ASA-CF XY impact drops from 57.5 kJ/m² to 27.8 kJ/m²."
+  exceptions: "In high-shrinkage semi-crystalline polymers like PA6 and PPA printed without a heated chamber, adding CF prevents inter-layer warping micro-cracks so effectively that practical large-part structural integrity improves."
+  sources:
+    - "Polymaker — PolyLite PLA-CF Technical Data Sheet — https://shop.polymaker.com/products/polylite-pla-cf — (TDS table) — XY tensile 31.2 MPa vs Z tensile 15.1 MPa"
+    - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide & PET-CF / PPA-CF / PA6-CF Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — (Properties tables & Safety) — XY vs Z impact and bending modulus values, 0.6 mm hardened nozzle requirement, and microscopic fiber barb warning"
+    - "CNC Kitchen — Does Carbon Fiber make 3D Prints stronger? — https://www.youtube.com/watch?v=64dd03814yU — (04:15–11:30) — Stiffness vs ultimate strength and Z-adhesion reduction in CF filaments"
+  confidence: high

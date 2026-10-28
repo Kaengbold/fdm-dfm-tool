@@ -1,0 +1,91 @@
+- id: material_pla
+  title: PLA (Polylactic Acid) parameters and XY/Z tensile strength
+  applies_when: Material is selected as PLA or PLA+ / PLA Basic
+  why: PLA has the highest XY stiffness and easiest overhang/bridging performance of common desktop filaments, but suffers from a low heat deflection temperature (~55°C), brittle failure mode, and high creep under sustained static loads.
+  fixes:
+    - domain: slicer
+      text: Print PLA at 200–230°C nozzle, 50–60°C bed, 100% part cooling fan, and keep the enclosure door/lid open to prevent heat creep.
+      settings: {nozzle_temperature: "220", hot_plate_temp: "55", fan_max_speed: "100%"}
+  numbers: "Nozzle temp: 190–230°C (215–225°C for high-speed / maximum Z-strength). Bed temp: 50–60°C (or 35–45°C on Cool Plate). Enclosure: Not required (open door/top if chamber > 35°C). Drying: 50–55°C for 4–8 h. Abrasive: No (except PLA-CF, PLA-GF, Glow-in-the-dark, and heavy matte white/marble TiO2/mineral fills). Warping risk: Very Low. Fan: 100% (off layer 1). Tensile Strength: XY = 35–60 MPa, Z = 25–42 MPa (Bambu PLA Basic TDS: 35 +/- 4 MPa; Polymaker PolyLite PLA TDS: 46.6 MPa XY; CNC Kitchen measured dasFilament PLA: ~60 MPa XY, ~38–44 MPa Z = 63–73% Z/XY ratio)."
+  exceptions: "Silk PLA has significantly weaker Z-layer adhesion (~35–45% of XY, ~18–24 MPa Z) due to elastomer/TPU-like sheen modifiers that swell upon extrusion."
+  sources:
+    - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion — PLA XY (~60 MPa) vs Z (~38–44 MPa) tensile tests"
+    - "Bambu Lab — PLA Basic Technical Data Sheet — https://www.voxelfactory.com/products/bambu-lab-basic-pla-1-75mm-1kg — Tensile strength 35 +/- 4 MPa, Bending strength 76 +/- 5 MPa"
+  confidence: high
+
+- id: material_petg
+  title: PETG parameters and XY/Z tensile strength
+  applies_when: Material is selected as PETG or PETG-HF
+  why: PETG offers higher temperature resistance (Tg ~80°C, HDT ~70°C), chemical resistance, and ductile impact toughness than PLA without needing a heated chamber, but is hygroscopic, sticky when molten, and bonds aggressively to smooth PEI/glass.
+  fixes:
+    - domain: slicer
+      text: Print PETG at 235–255°C nozzle, 70–85°C bed, 20–50% cooling fan (higher fan lowers Z-strength; increase to 70–100% only on overhangs/bridges), and dry before printing.
+      settings: {nozzle_temperature: "245", hot_plate_temp: "75", fan_min_speed: "20%", fan_max_speed: "50%", overhang_fan_speed: "90%"}
+  numbers: "Nozzle temp: 230–260°C (245–255°C for max Z-strength). Bed temp: 70–85°C (use release agent/glue on smooth PEI or glass; textured PEI releases directly once cooled). Enclosure: Optional (passive enclosure helps large parts avoid drafts). Drying: 65°C for 6–8 h. Abrasive: No (unless PETG-CF/GF). Warping risk: Low to Medium. Fan: 20–50% normal, 80–100% bridges/overhangs. Tensile Strength: Bambu PETG Basic TDS: XY = 51 +/- 1 MPa, Z = 35 +/- 6 MPa (Z/XY = 68.6%); Bambu PETG-HF TDS: XY = 34 +/- 4 MPa, Z = 23 +/- 4 MPa (Z/XY = 67.6%); Polymaker PolyLite PETG TDS: XY = 50.8 MPa, Z = 42.8 MPa; CNC Kitchen measured PETG: XY = 52–55 MPa, Z = 32–34 MPa (58–65% Z/XY, reaching 54 MPa / 93% Z/XY only with slow 15 mm/s transparent settings at <=30% fan)."
+  exceptions: "High-flow modified PETG (e.g., PETG-HF) trades ~30% tensile strength (34 MPa XY / 23 MPa Z) for higher print speeds and reduced stringing."
+  sources:
+    - "Bambu Lab — PETG HF & PETG Basic Technical Data Sheets — https://store.bblcdn.com/3a230e260a3a47c2b0db0156e07eef91.pdf — PETG-HF XY 34 MPa / Z 23 MPa; PETG Basic XY 51 MPa / Z 35 MPa"
+    - "Polymaker — PolyLite PETG Technical Data Sheet — https://shop.polymaker.com/products/polylite-translucent-petg — ISO 527 XY 50.8 MPa, Z 42.8 MPa"
+    - "CNC Kitchen — Transparent FDM 3D Prints are Clearly Stronger! — https://www.cnckitchen.com/blog/transparent-fdm-3d-prints-are-clearly-stronger — PETG XY 52 MPa vs Z 34 MPa reference and fan speed impact"
+  confidence: high
+
+- id: material_abs_and_asa
+  title: ABS and ASA parameters and XY/Z tensile strength
+  applies_when: Material is selected as ABS or ASA
+  why: ABS and ASA provide high heat resistance (Tg ~100–105°C, HDT ~95–100°C), low creep, and high impact durability (with ASA adding UV/weather resistance via acrylate rubber instead of butadiene), but exhibit high thermal shrinkage (0.6–0.9%) and emit styrene VOCs/UFPs.
+  fixes:
+    - domain: slicer
+      text: Print ABS/ASA in an enclosed printer (chamber >= 45–60°C) at 245–270°C nozzle, 90–110°C bed, with 10–30% part cooling fan (50–80% on bridges/overhangs) and activated-carbon/HEPA filtration.
+      settings: {nozzle_temperature: "260", hot_plate_temp: "100", fan_min_speed: "15%", fan_max_speed: "30%", overhang_fan_speed: "70%"}
+  numbers: "Nozzle temp: 240–270°C. Bed temp: 90–110°C. Enclosure: Required (chamber 45–65°C prevents warping and Z-splitting; VOC/styrene ventilation required). Drying: 70–80°C for 6–8 h. Abrasive: No (unless ABS-GF / ASA-CF). Warping risk: High. Fan: 0–30% in warm chamber (up to 70% on overhangs). Tensile Strength: Polymaker PolyLite ABS TDS: XY = 33.4 MPa, Z = 29.7 MPa (Z/XY = 88.9% in warm chamber); Bambu ASA TDS: XY = 37 +/- 3 MPa, Z = 31 +/- 4 MPa (Z/XY = 83.8%; XY impact 57.5 kJ/m² vs Z impact 4.9 kJ/m²); Prusament ASA TDS: XY = 42 MPa, Z = ~28–32 MPa."
+  exceptions: "Small ABS/ASA parts (< 40 mm footprint) can print with a draft shield and brim on an open printer, but Z-layer impact strength drops sharply without an enclosure."
+  sources:
+    - "Polymaker — PolyLite ABS Technical Data Sheet — https://shop.polymaker.com/products/polylite-abs — ISO 527 Tensile strength XY 33.4 MPa, Z 29.7 MPa"
+    - "Bambu Lab — ASA Technical Data Sheet & ASA-CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — ASA Z-tensile 31 +/- 4 MPa, XY/Z impact 57.5 / 4.9 kJ/m², styrene safety warning"
+  confidence: high
+
+- id: material_tpu_95a
+  title: TPU 95A (Thermoplastic Polyurethane) parameters and strength
+  applies_when: Material is selected as TPU 95A (flexible elastomer)
+  why: TPU 95A has extreme impact toughness, abrasion resistance, and one of the highest Z-to-XY interlayer adhesion ratios (~75–85%) of any FDM material, but its low buckling stiffness causes extruder jams at high volumetric flow rates and elastic sagging on bridges.
+  fixes:
+    - domain: slicer
+      text: Limit `filament_max_volumetric_speed` to 3.0–3.5 mm³/s (~30–45 mm/s at 0.2 mm layer), disable AMS feeding, dry before every print, and use glue stick as a release agent on smooth/textured PEI so the print does not tear the bed coating.
+      settings: {nozzle_temperature: "230", hot_plate_temp: "40", filament_max_volumetric_speed: "3.2", retract_length: "0.8", fan_max_speed: "100%"}
+  numbers: "Nozzle temp: 220–240°C. Bed temp: 30–50°C (or unheated with glue stick). Enclosure: Not required. Drying: 55–70°C for 8 h (highly hygroscopic; strings badly when wet). Abrasive: No. Warping risk: Very Low. Fan: 50–100%. Tensile Strength (at break, >400% elongation): XY = 29–39 MPa, Z = 22–32 MPa (Z/XY = 75–85%; Bambu TPU 95A HF TDS: ~29–35 MPa tensile at break, >500% elongation)."
+  exceptions: "High-flow TPU 95A HF can print up to 6–12 mm³/s on short direct-drive extruders."
+  sources:
+    - "Bambu Lab Wiki — TPU 95A Printing Guide — https://wiki.bambulab.com/en/knowledge-sharing/tpu-printing-guide — Volumetric speed limits, drying, and release agent requirements"
+  confidence: high
+
+- id: material_pa_and_pacf
+  title: PA (Nylon 6 / 12) and PA-CF parameters and XY/Z tensile strength
+  applies_when: Material is selected as PA6, PA12, PA6-CF, PAHT-CF (PA12-CF), or PPA-CF
+  why: Polyamides offer exceptional wear resistance, fatigue life, and toughness, and adding carbon fiber (PA-CF) eliminates neat Nylon's severe warping while doubling or tripling XY stiffness. However, PA absorbs moisture rapidly from air (boiling during extrusion if wet and dropping PA6 stiffness by ~59% after moisture equilibrium).
+  fixes:
+    - domain: process
+      text: Dry PA/PA-CF at 80–90°C for 8–12 hours prior to printing and feed directly from an active drybox (< 15% RH) through a >= 0.4–0.6 mm hardened steel nozzle in an enclosed chamber.
+    - domain: slicer
+      text: Print PA/PA-CF at 270–300°C nozzle, 80–100°C bed with glue stick, and 0–20% cooling fan to maximize interlayer crystalline entanglement.
+      settings: {nozzle_temperature: "290", hot_plate_temp: "90", fan_min_speed: "0%", fan_max_speed: "20%"}
+  numbers: "Nozzle temp: 260–300°C (PPA-CF 280–310°C). Bed temp: 80–100°C (glue required). Enclosure: Required (chamber 45–65°C). Drying: 80–90°C for 8–12 h (blast oven) or 70–80°C for 12+ h (filament dryer). Abrasive: Neat PA = No; PA-CF / PA-GF = Highly Abrasive (Hardened steel / Tungsten carbide nozzle required, 0.6 mm recommended). Warping risk: Neat PA = Very High; PA-CF = Low. Fan: 0–20%. Tensile & Bending Strength: Bambu PA6-CF (Dry): XY Tensile ~102 MPa, Z Tensile ~48 MPa (Bending modulus 5460 MPa dry, drops ~59% when moisture-conditioned at 3 wt% water); Bambu PAHT-CF (PA12-CF, Dry): XY Tensile ~92 MPa, Z Tensile ~43–50 MPa (Bending modulus 4230 MPa, only ~0.7 wt% moisture absorption); Bambu PPA-CF: Bending strength 208 MPa dry / 202 MPa wet, Bending modulus 9860 MPa."
+  exceptions: "PA6-CF becomes significantly more impact-resistant (absorbing >50% of Charpy hammer energy) once moisture-conditioned, at the cost of losing ~59% of its dry bending stiffness; choose PA12-CF (PAHT-CF) or PPA-CF when dimensional and stiffness stability in humid environments is required."
+  sources:
+    - "CNC Kitchen — Carbon Fiber Nylon in 3D Printing: PA6 vs PA12 Tested — https://www.cnckitchen.com/blog/carbon-fiber-nylon-in-3d-printing-pa6-vs-pa12-tested — Dry vs moisture-conditioned stiffness, impact, and creep of PA6-CF vs PA12-CF"
+    - "Bambu Lab Wiki & Store — PAHT-CF, PA6-CF, PPA-CF Guides & Datasheets — https://wiki.bambulab.com/en/filament/petcf_ppacf — Stiffness, Z-impact, nozzle compatibility, and drying specs"
+  confidence: high
+
+- id: material_pc
+  title: PC (Polycarbonate) parameters and XY/Z tensile strength
+  applies_when: Material is selected as PC or PC-FR
+  why: Polycarbonate is one of the strongest, toughest, and most heat-resistant (Tg ~113–147°C, HDT 110–135°C) unreinforced thermoplastics available for FDM, but has extreme warping force and high sensitivity to moisture and chemical stress cracking.
+  fixes:
+    - domain: slicer
+      text: Print PC at 270–290°C nozzle, 100–115°C bed with glue, 0–20% fan inside a 50–65°C chamber, and keep `wall_loops` <= 3–4 and `sparse_infill_density` <= 25% Gyroid on large parts to prevent warping the spring-steel build plate off the magnet.
+      settings: {nozzle_temperature: "280", hot_plate_temp: "110", fan_min_speed: "0%", fan_max_speed: "15%", brim_type: "outer_only", brim_width: "10"}
+  numbers: "Nozzle temp: 260–300°C. Bed temp: 100–115°C. Enclosure: Strictly Required (50–65°C chamber). Drying: 80°C for 8 h. Abrasive: No (unless PC-CF). Warping risk: Very High. Fan: 0–20%. Tensile Strength: Polymaker PolyMax PC-FR TDS: XY = 67 MPa, Z = 46 MPa (Z/XY = 68.7%); Bambu PC FR TDS: XY = 60 +/- 4 MPa; Bambu Standard PC: XY ~66 MPa, Z ~43 MPa."
+  exceptions: "PC/ABS or PC/PBT blends print at slightly lower temperatures (255–270°C) with lower warping, at the expense of a lower HDT (~95–105°C)."
+  sources:
+    - "Polymaker — PolyMax PC-FR Technical Data Sheet — https://shop.polymaker.com/products/polymax-pc-fr — ISO 527 XY Tensile 67 MPa, Z Tensile 46 MPa"
+    - "Bambu Lab — Bambu PC FR Datasheet — https://www.indus3design.com/en/3d-printing-materials/fff/bambu-lab-pc-fr/ — ISO 527 XY Tensile 60 +/- 4 MPa, HDT 113°C"
+  confidence: high

@@ -98,3 +98,21 @@ def test_api_orientations_payload():
     for o in [r["as_loaded"], *r["orientations"]]:
         assert len(o["face_classes"]) == faces
         assert o["reasons"]
+
+
+@pytest.mark.parametrize(
+    "name, expected_up",
+    [
+        ("enclosure", [[0, 0, 1]]),  # open side up
+        ("phone_stand", [[0, 1, 0], [0, -1, 0]]),  # lying on the big extruded side
+        ("cable_clip", [[0, 0, 1], [0, 0, -1]]),  # flat on its side
+        ("mushroom", [[0, 0, -1]]),
+        ("hook", [[1, 0, 0], [-1, 0, 0]]),
+    ],
+)
+@pytest.mark.skipif(not SAMPLES.exists(), reason="run tools/make_samples.py")
+def test_typical_parts_orientation(name, expected_up):
+    api.load(sample(name), name)
+    options = api.orientations()["orientations"]
+    assert any(np.allclose(options[0]["up"], e, atol=1e-6) for e in expected_up), options[0]["up"]
+    assert all(o["bed_area_mm2"] > 0 for o in options), "options without bed contact should be hidden"

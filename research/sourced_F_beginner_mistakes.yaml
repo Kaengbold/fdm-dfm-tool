@@ -1,0 +1,418 @@
+- id: mistake_01_z_axis_tension_orientation
+  title: "#1: Orienting thin pins, clips, or brackets with load along Z"
+  applies_when: Thin elongated feature (aspect ratio > 3:1, diameter/thickness < 8 mm) has its longitudinal axis parallel to Z-axis
+  why: Beginners stand tall pins, snap clips, and L-brackets upright to save bed space or avoid supports, placing the weakest interlayer bonds (Z-axis) directly across the bending fracture plane.
+  fixes:
+    - domain: geometry
+      text: Rotate the part 90° (or 45° with a sacrificial fin) so perimeter loops run continuously along the length of the pin, clip, or both legs of the L-bracket.
+  numbers: "Standing pins and clips break at 35–60% of the bending load of flat-printed counterparts and fail brittlely without warning."
+  exceptions: "Purely decorative spires with zero mechanical load."
+  sources:
+    - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion — Standing vs lying tensile strength"
+  confidence: high
+
+- id: mistake_02_zero_clearance_mating_parts
+  title: "#2: Designing 0.0 mm net-fit clearance on mating CAD parts"
+  applies_when: Two mating parts have identical nominal CAD dimensions (e.g., 10.00 mm shaft inside a 10.00 mm hole)
+  why: Beginners model mating parts with exact 1:1 dimensions in CAD; due to hole shrinkage and layer surface texture, a 10.0 mm printed shaft will never fit inside a 10.0 mm printed hole without filing.
+  fixes:
+    - domain: geometry
+      text: Add 0.10 mm radial clearance (0.20 mm on diameter) for snug fits and 0.15–0.20 mm radial clearance (0.30–0.40 mm on diameter) for sliding fits.
+  numbers: "Required diametral clearance: 0.15–0.25 mm (press/snug), 0.30–0.40 mm (sliding), 0.40–0.60 mm (print-in-place)."
+  exceptions: "Intentional interference press-fits using elastic grip fins or soft TPU bushings."
+  sources:
+    - "Maker's Muse — Why your 3D prints don't fit together — https://www.youtube.com/watch?v=TYuLVN3YHw8 — Clearance rules for hobbyist CAD"
+  confidence: high
+
+- id: mistake_03_high_infill_instead_of_walls
+  title: "#3: Increasing infill to 50–100% instead of adding wall loops"
+  applies_when: "`sparse_infill_density` >= 50% while `wall_loops` <= 2"
+  why: Hobbyists wanting a "strong part" crank infill to 60–100% while leaving walls at the default 2 loops, wasting filament and print time while leaving the high-stress outer skin thin.
+  fixes:
+    - domain: slicer
+      text: Increase `wall_loops` to 4–6 and keep `sparse_infill_density` at 15–25% Gyroid or Cubic.
+      settings: {wall_loops: "4", sparse_infill_density: "20%", sparse_infill_pattern: "gyroid"}
+  numbers: "4 walls + 20% infill is ~30% stronger in bending and prints faster with less plastic than 2 walls + 50% infill."
+  exceptions: "Pure Z-axis compressive anvil loads or transparent solid PETG prints."
+  sources:
+    - "CNC Kitchen — INFILL pattern and SHELLS — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints — Shell count vs infill percentage strength data"
+  confidence: high
+
+- id: mistake_04_fillets_on_bottom_bed_edge
+  title: "#4: Putting fillets instead of chamfers on bottom bed edges"
+  applies_when: Bottom edge at Z = 0 has a convex fillet radius > 0.4 mm
+  why: Beginners apply "Fillet all edges" in CAD; the bottom of the fillet starts at a ~75–85° overhang on layer 1–2, creating a curled, rough, stringy ring around the base of the part.
+  fixes:
+    - domain: geometry
+      text: Use a 45° chamfer on all bottom build-plate edges, or transition from a 45° bottom chamfer into a tangent fillet above 1.5 mm height.
+  numbers: "First layer of a R2.0 mm fillet overhangs at 74° from vertical."
+  exceptions: "None on FDM build plates."
+  sources:
+    - "Slant 3D / Rahix — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/ — Bottom fillet overhang failure"
+  confidence: high
+
+- id: mistake_05_grid_infill_nozzle_scraping
+  title: "#5: Using Grid infill and suffering nozzle collisions"
+  applies_when: "`sparse_infill_pattern` is set to `\"grid\"` or `\"triangles\"` at density >= 15%"
+  why: Grid infill extrudes intersecting lines at the exact same Z height on every single layer, building up double-height bumps at every crossover that the nozzle loudly scrapes across and can knock tall parts off the bed.
+  fixes:
+    - domain: slicer
+      text: Change `sparse_infill_pattern` from `"grid"` to `"gyroid"`, `"cubic"`, or `"rectilinear"` (which alternates direction on odd/even layers without same-layer crossings).
+      settings: {sparse_infill_pattern: "gyroid"}
+  numbers: "Grid crosses itself 100% of the time on the same layer; Gyroid and Rectilinear have 0 same-layer self-intersections."
+  exceptions: "None; Rectilinear or Gyroid strictly outperforms Grid in print reliability."
+  sources:
+    - "Prusa Knowledge Base — Infill patterns — https://help.prusa3d.com/article/infill-patterns_177130 — Explanation of same-layer crossing accumulation in Grid infill"
+  confidence: high
+
+- id: mistake_06_pla_in_hot_car_or_under_creep
+  title: "#6: Using PLA for car interiors, outdoor sun, or constant-load clamps"
+  applies_when: Material is PLA and application involves ambient temp > 50°C or continuous static clamping/spring tension
+  why: PLA has a glass transition temperature of ~55–60°C (softening rapidly on a car dashboard in summer) and creeps continuously under static room-temperature loads until screws loosen or brackets sag.
+  fixes:
+    - domain: process
+      text: Switch to PETG (up to ~70°C), ASA (up to ~95°C + UV resistance), or PC / PA-CF for car interiors and constant-tension clamps.
+  numbers: "Car interiors reach 60–85°C in direct sunlight; PLA HDT at 0.45 MPa is ~55°C. Under 25% of ultimate tensile load at 23°C, PLA creeps significantly within days."
+  exceptions: "Annealed HT-PLA in low-stress thermal applications."
+  sources:
+    - "CNC Kitchen — Carbon Fiber Nylon in 3D Printing: PA6 vs PA12 Tested — https://www.cnckitchen.com/blog/carbon-fiber-nylon-in-3d-printing-pa6-vs-pa12-tested — Bolt and spring creep tests"
+  confidence: high
+
+- id: mistake_07_uncompensated_vertical_screw_holes
+  title: "#7: Modeling nominal M3/M4 holes without shrinkage allowance"
+  applies_when: Vertical cylindrical hole diameter == exact integer fastener size (e.g., 3.00 mm for M3 clearance)
+  why: A 3.00 mm CAD hole prints at ~2.70–2.85 mm in FDM, forcing hobbyists to drill out every clearance hole.
+  fixes:
+    - domain: geometry
+      text: Model M3 clearance holes at 3.3–3.4 mm (M4 at 4.3–4.4 mm, M5 at 5.3–5.4 mm) or use a 120° polyhole/teardrop.
+    - domain: slicer
+      text: "Enable `precise_outer_wall: \"true\"` and `xy_hole_compensation: \"0.10\"`."
+      settings: {precise_outer_wall: "true", xy_hole_compensation: "0.10"}
+  numbers: "Typical vertical hole shrinkage: 0.15–0.30 mm on diameter."
+  exceptions: "When the hole is intentionally sized for a self-tapping screw (2.7 mm for M3)."
+  sources:
+    - "Nophead — Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.html — Vertical hole shrinkage measurements"
+  confidence: high
+
+- id: mistake_08_mid_air_counterbores
+  title: "#8: Printing downward-facing counterbores without bridge stacks"
+  applies_when: Stepped counterbore has its wider bore facing the build plate and transitions to a narrower bore in mid-air without supports
+  why: The inner circular perimeter of the upper hole prints in mid-air over the larger bore, dragging a spaghetti loop across the hole.
+  fixes:
+    - domain: geometry
+      text: Add a 2-layer sequential bridge stack (two orthogonal rectangular cuts) or a 0.20 mm sacrificial layer at the counterbore step.
+    - domain: slicer
+      text: "Set `counterbore_hole_bridging: \"partially_bridged\"` in OrcaSlicer."
+      settings: {counterbore_hole_bridging: "partially_bridged"}
+  numbers: "1–2 layers (0.20–0.40 mm) per bridge-stack stage."
+  exceptions: "Counterbores oriented facing upward (top of print)."
+  sources:
+    - "OrcaSlicer Wiki — Bridge counterbore hole — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_bridging — Automated counterbore bridging"
+  confidence: high
+
+- id: mistake_09_printing_wet_petg_tpu_pa
+  title: "#9: Tuning retraction endlessly on wet PETG, TPU, or Nylon"
+  applies_when: Severe stringing, popping sounds, and rough matte surfaces on PETG, TPU, PA, or PC
+  why: Beginners assume stringing on a newly opened spool is a slicer retraction problem, unaware that factory vacuum-sealed spools are frequently water-quenched during manufacturing and arrive wet.
+  fixes:
+    - domain: process
+      text: Dry the spool in a heated filament dryer (65°C for PETG/TPU, 80–90°C for PA/PC) for 6–12 hours before changing slicer retraction settings.
+  numbers: "Even 0.2–0.4 wt% moisture in PETG/TPU causes steam expansion in the nozzle melt zone that no retraction distance can stop."
+  exceptions: "Dry PLA in low-humidity climates (< 35% RH)."
+  sources:
+    - "CNC Kitchen — Transparent FDM 3D Prints are Clearly Stronger! — https://www.cnckitchen.com/blog/transparent-fdm-3d-prints-are-clearly-stronger — Microbubbles and strength loss from moisture"
+  confidence: high
+
+- id: mistake_10_tiny_printed_threads
+  title: "#10: Modeling fine 3D-printed threads smaller than M6"
+  applies_when: Helical ISO thread pitch < 1.0 mm or nominal diameter < 6.0 mm (M2, M3, M4, M5)
+  why: An M3 thread has a 0.5 mm pitch—only 2.5 layers tall at 0.20 mm layer height—meaning the 60° thread flanks have severe overhangs and poor resolution that strip immediately.
+  fixes:
+    - domain: geometry
+      text: Use brass heat-set inserts, embedded hex nut traps, or direct self-tapping smooth/trilobular pilot holes for M2–M5 fasteners.
+  numbers: "Minimum reliable printed thread size at 0.16–0.20 mm layer height: M6x1.0 (M8x1.25+ preferred, using a stubby 90° flank trapezoidal/ACME profile instead of 60° ISO)."
+  exceptions: "0.2 mm nozzle at 0.06–0.08 mm layer height can resolve M4/M5 threads with low stripping strength."
+  sources:
+    - "CNC Kitchen — Threaded Inserts in 3D Prints — https://www.cnckitchen.com/blog/tipps-amp-tricks-fr-gewindeeinstze-im-3d-druck-3a862 — Pull-out comparison of inserts vs printed threads"
+  confidence: high
+
+- id: mistake_11_floating_bottom_bosses_unflat_base
+  title: "#11: Accidentally leaving a 0.2–1.0 mm step on the bottom face"
+  applies_when: 90% of the part's bottom surface sits at Z = 0.2–2.0 mm while only a tiny boss or lip touches Z = 0.0 mm
+  why: A protruding screw boss, text emboss, or unaligned sketch on the underside raises the entire body off the build plate into mid-air, causing the whole base to print on terrible supports or fail on layer 2.
+  fixes:
+    - domain: geometry
+      text: Make the bottom build-plate face completely coplanar (flush) and recess any bottom text or bosses inward by at least 0.4 mm.
+    - domain: slicer
+      text: Use the "Lay on Face" tool or cut 0.5 mm off the bottom in the slicer.
+  numbers: "Any bottom step > 0.05 mm lifts the adjacent face off the build plate in the slicer."
+  exceptions: "Intentional 1-layer (0.20 mm) bridged recesses."
+  sources:
+    - "Slant 3D — 9 Design Rules for 3D Printing — https://www.youtube.com/watch?v=AD6L13tB1bE — Always ensure a flat, continuous reference plane on the bed"
+  confidence: high
+
+- id: mistake_12_unchamfered_90deg_cantilevers
+  title: "#12: Designing 90° horizontal ledges that require tall support towers"
+  applies_when: Horizontal ledge or boss protrudes > 3 mm from a vertical wall at a 90° angle
+  why: A 90° outward ledge in mid-air requires supports that scar the underside and waste material, whereas adding a 45° chamfer/gusset beneath the ledge prints cleanly without supports and strengthens the joint.
+  fixes:
+    - domain: geometry
+      text: Add a 45° chamfer or triangular gusset under every protruding ledge or mounting tab on vertical walls.
+  numbers: "Converting a 90° overhang to a 45° chamfer reduces support material for that feature to 0 g."
+  exceptions: "When a mating square part must flush-seat directly beneath the ledge."
+  sources:
+    - "Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA — Chamfering wall bosses"
+  confidence: high
+
+- id: mistake_13_thin_walls_non_multiple_of_nozzle
+  title: "#13: Modeling walls thinner than 0.8 mm or with hollow gap-fill voids"
+  applies_when: Wall thickness < 0.8 mm on a 0.4 mm nozzle (or ~1.4 mm with Classic generator)
+  why: A 0.35 mm CAD wall disappears completely when sliced with a 0.4 mm nozzle, and a 1.4 mm wall under Classic perimeter generation leaves a tiny 0.16 mm central gap that shakes the printer violently with zig-zag gap fill.
+  fixes:
+    - domain: geometry
+      text: Design thin walls at >= 0.85 mm (2 perimeters) or integer multiples of line width (0.85, 1.25, 1.65, 2.05 mm).
+    - domain: slicer
+      text: "Enable `wall_generator: \"arachne\"`."
+      settings: {wall_generator: "arachne"}
+  numbers: "0.4 mm nozzle minimum reliable 2-wall thickness = 0.80–0.85 mm."
+  exceptions: "\"Vase mode (`spiral_mode: \"true\"`), where a single 0.5–0.8 mm perimeter is printed continuously from a solid CAD body.\""
+  sources:
+    - "Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769 — Variable line width elimination of gap fill"
+  confidence: high
+
+- id: mistake_14_heat_set_inserts_into_2_walls
+  title: "#14: Melting brass heat-set inserts into parts with only 2 walls"
+  applies_when: Heat-set insert hole is sliced with `wall_loops` == 2 and `sparse_infill_density` <= 20%
+  why: A typical M3/M4 insert knurl is 0.4–0.6 mm deep per side; with only 2 walls (0.8 mm), the hot brass melts right through the wall into empty infill pockets, resulting in crooked inserts and < 40% pull-out strength.
+  fixes:
+    - domain: slicer
+      text: Set `wall_loops` to >= 4–5 (or add a modifier mesh around the hole) so the boss has at least 1.6–2.0 mm of solid perimeters.
+      settings: {wall_loops: "4"}
+  numbers: "Minimum solid wall thickness around insert bore: 1.6 mm (M2/M3) to 2.4 mm (M4/M5)."
+  exceptions: "Thin plates where a press-in hex nut trap is used instead."
+  sources:
+    - "CNC Kitchen — Are Our Heat-Set Insert Datasheets Wrong? — https://www.cnckitchen.com/blog/are-our-heat-set-insert-datasheets-wrong — 'It is important to print these samples with a lot of walls and infill. Otherwise, during testing, the plastic itself fails before the insert gets pulled out.'"
+  confidence: high
+
+- id: mistake_15_sharp_internal_corners_stress_concentration
+  title: "#15: Leaving sharp 90° internal corners on loaded L-brackets and shafts"
+  applies_when: Concave internal 90° corner has radius < 0.5 mm on a load-bearing part
+  why: Sharp internal corners multiply local tensile stress by 2x–3x (stress concentration factor Kt) and coincide with the perimeter/layer boundary, guaranteeing a crack initiates right at the sharp corner.
+  fixes:
+    - domain: geometry
+      text: Add a generous internal fillet (R >= 2.0–5.0 mm) or dog-bone relief at all internal 90° load-bearing corners.
+  numbers: "Increasing internal corner fillet from R0.2 mm to R3.0 mm on a 10 mm bracket reduces peak corner stress by > 50%."
+  exceptions: "When a sharp-cornered mating block must seat flush into the corner (use an undercut dog-bone fillet instead)."
+  sources:
+    - "Rahix — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/ — Force flow lines around sharp vs filleted corners"
+  confidence: high
+
+- id: mistake_16_printing_pla_enclosed_heat_creep
+  title: "#16: Printing PLA with the enclosure door and top glass closed"
+  applies_when: Material is PLA in an enclosed printer (Bambu X1C/P1S, Voron, Prusa Core One) with bed temp >= 55°C and print duration > 1 hour
+  why: A 55–60°C bed heats the closed chamber above 40°C; PLA softens above ~50°C inside the extruder gears and cold end, flattening into an accordion plug that jams the extruder mid-print.
+  fixes:
+    - domain: process
+      text: Open the front door/top glass lid when printing PLA, or use a cool plate at 35–45°C bed temperature.
+  numbers: "Chamber temperatures > 38–42°C trigger PLA heat-creep clogs during retraction-heavy prints."
+  exceptions: "High-temperature materials (ABS, ASA, PC, PA) where a closed hot chamber is mandatory."
+  sources:
+    - "Bambu Lab Wiki — Heat Creep Troubleshooting — https://wiki.bambulab.com/en/x1/troubleshooting/extruder-clog — Open door/top glass requirement for PLA"
+  confidence: high
+
+- id: mistake_17_low_resolution_stl_facets
+  title: "#17: Exporting coarse STL meshes instead of STEP or fine chordal STLs"
+  applies_when: Curved cylindrical surfaces have visible flat facets (angle tolerance > 10° or chordal deviation > 0.05 mm)
+  why: Input-shaped modern printers accurately reproduce every flat triangle in a low-poly STL export, turning cylinders into visible polygons and prevented the slicer from generating smooth G2/G3 arc moves.
+  fixes:
+    - domain: geometry
+      text: Export directly as STEP (`.step`/`.stp`) for OrcaSlicer/Bambu Studio/PrusaSlicer, or set STL export chordal deviation <= 0.01 mm and angle tolerance <= 2°.
+    - domain: slicer
+      text: "Enable `arc_fitting: \"true\"` in OrcaSlicer to convert fine faceted curves into smooth G2/G3 arcs."
+      settings: {arc_fitting: "true", resolution: "0.012"}
+  numbers: "STEP import in OrcaSlicer triangulates at fine resolution automatically and pairs with `resolution: 0.012 mm`."
+  exceptions: "Intentional low-poly artistic models."
+  sources:
+    - "OrcaSlicer Wiki — Quality Settings: Precision (Arc fitting & Resolution) — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_precision — G2/G3 arc fitting and STEP file handling"
+  confidence: high
+
+- id: mistake_18_large_horizontal_circular_holes
+  title: "#18: Printing horizontal circular bores > 8 mm without teardrop or roof"
+  applies_when: Horizontal circular bore diameter > 8 mm parallel to XY plane
+  why: The top arch of a large horizontal cylinder transitions through a steep >65° overhang before bridging at the very top, drooping inward by 0.4–1.0 mm and blocking bearings or shafts.
+  fixes:
+    - domain: geometry
+      text: Add a 90°/120° teardrop point or a truncated flat-top bridge roof 0.3 mm above the nominal top of the circle.
+  numbers: "Horizontal circular bores > 8 mm go out-of-round by 0.4–1.0 mm in Z without a teardrop or flat roof."
+  exceptions: "When supports are placed inside the bore and post-machined/reamed out."
+  sources:
+    - "Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/ — Teardrop vs flat roof horizontal holes"
+  confidence: high
+
+- id: mistake_19_tiny_serif_embossed_text
+  title: "#19: Using small serif fonts (< 4 mm) on top horizontal faces"
+  applies_when: Text on XY face has character height < 5 mm or serif strokes < 0.45 mm wide
+  why: The thin serifs and narrow crossbars of serif fonts (like Times New Roman) are narrower than a 0.42 mm extrusion line, causing the slicer to drop half the letters into illegible blobs.
+  fixes:
+    - domain: geometry
+      text: Use bold sans-serif fonts >= 5–6 mm tall on XY faces (debossed 0.4–0.6 mm deep) or move smaller text (down to 3.5 mm) onto a vertical Z wall.
+    - domain: slicer
+      text: "Enable `wall_generator: \"arachne\"` and `only_one_wall_top: \"true\"`."
+      settings: {wall_generator: "arachne", only_one_wall_top: "true"}
+  numbers: "Min stroke width on 0.4 mm nozzle >= 0.45 mm."
+  exceptions: "0.2 mm nozzle prints."
+  sources:
+    - "Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac — Minimum font sizes and orientation"
+  confidence: high
+
+- id: mistake_20_layer_height_over_75pct_nozzle
+  title: "#20: Setting layer height > 75% of nozzle diameter (e.g., 0.36 mm on 0.4 mm)"
+  applies_when: "`layer_height` > 0.75 * `nozzle_diameter` (e.g., > 0.30 mm on a 0.4 mm nozzle without increasing line width)"
+  why: When layer height approaches the nozzle diameter, the extruded cross-section becomes nearly circular instead of a flat stadium shape, reducing inter-layer contact width to a narrow line and dropping Z-strength by > 35%.
+  fixes:
+    - domain: slicer
+      text: Keep `layer_height` between 25% and 70% of nozzle diameter (0.10–0.28 mm for a 0.4 mm nozzle), or increase `line_width` to >= 1.5x `layer_height` (e.g., 0.60 mm width for 0.32 mm layer height).
+      settings: {layer_height: "0.20", line_width: "0.45"}
+  numbers: "Rule of thumb: `layer_height` <= 0.75 * `nozzle_diameter` AND `line_width` >= 1.5 * `layer_height`."
+  exceptions: "Using a larger 0.6 mm or 0.8 mm nozzle."
+  sources:
+    - "CNC Kitchen — 3D Printing Layer Height: How much does it matter for strength? — https://www.cnckitchen.com/blog/3d-printing-layer-height-how-much-does-it-matter-for-strength — Delamination when layer height exceeds ~75% of nozzle width"
+    - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — Layer height vs nozzle diameter limits"
+  confidence: high
+
+- id: mistake_21_abrasive_cf_gf_on_brass_nozzle
+  title: "#21: Printing CF, GF, or Glow-in-the-dark filament with a brass nozzle"
+  applies_when: Filament contains carbon fiber, glass fiber, or strontium aluminate glow pigment and printer nozzle is brass or 0.2 mm diameter
+  why: Hard fibers and glow crystals ream out a soft brass 0.4 mm nozzle orifice to > 0.6 mm in less than 250–500 g of filament, ruining dimensional accuracy, while 0.2 mm nozzles clog immediately from fiber bridging.
+  fixes:
+    - domain: process
+      text: Install a hardened steel, tungsten carbide, or diamond nozzle of >= 0.4 mm (0.6 mm recommended) before printing any CF, GF, or Glow filament.
+  numbers: "250 g of glow-in-the-dark or CF filament wears a standard brass nozzle diameter by +0.15 to +0.30 mm."
+  exceptions: "Standard unfilled pigments (though heavy matte white TiO2 wears brass slowly over several kilograms)."
+  sources:
+    - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — 'Hardened steel nozzle only; 0.6 mm nozzle recommended; not compatible with 0.2 mm nozzle.'"
+    - "CNC Kitchen — Nozzle Wear Tested — https://www.youtube.com/watch?v=9A4_fW3fC7c — Measured brass nozzle erosion from abrasive filaments"
+  confidence: high
+
+- id: mistake_22_shallow_top_domes_stair_stepping
+  title: "#22: Printing shallow top slopes (5–20° from horizontal) at 0.20 mm layers"
+  applies_when: Top surface slopes at 70–85° from vertical (5–20° from horizontal)
+  why: Shallow top slopes or domes produce wide, ugly topographic contour steps ("stair-stepping") and expose internal infill if top shell layers are too few.
+  fixes:
+    - domain: geometry
+      text: Reorient the curved face vertically in XY so the nozzle traces a smooth continuous curve, or replace shallow top fillets with a steeper 45° chamfer.
+    - domain: slicer
+      text: Enable Variable Layer Height (down to 0.08 mm on the top dome) and keep `ensure_vertical_shell_thickness` enabled.
+      settings: {ensure_vertical_shell_thickness: "enabled", top_shell_layers: "6"}
+  numbers: "At 0.20 mm layer height, a 10° slope from horizontal creates visible horizontal terrace steps 1.13 mm wide; dropping layer height to 0.08 mm narrows steps to 0.45 mm."
+  exceptions: "Flat horizontal top faces (0° slope), which can be ironed smooth."
+  sources:
+    - "Prusa Knowledge Base — Layers and perimeters (Ensure vertical shell thickness) — https://help.prusa3d.com/article/layers-and-perimeters_1748 — Prevents gaps on shallow sloping top surfaces"
+  confidence: high
+
+- id: mistake_23_printing_abs_asa_pc_on_open_printer
+  title: "#23: Printing large ABS, ASA, or PC parts on an open bedslinger"
+  applies_when: Material is ABS, ASA, PC, or PA, part dimension > 50 mm, and printer is unenclosed
+  why: Room air drafts cool upper layers 80°C below Tg while the 100°C bed keeps the bottom warm, causing severe corner peeling and horizontal mid-part cracking.
+  fixes:
+    - domain: process
+      text: Enclose the printer (or use a temporary tent/draft shield) or substitute PETG / PLA-Pro / PET-CF if no enclosure is available.
+  numbers: "ABS/ASA Tg ~100–105°C requires ambient air >= 45°C around tall parts to prevent delamination."
+  exceptions: "\"Very small parts (< 35 mm) printed with a 2-wall draft shield (`draft_shield: \"enabled\"`).\""
+  sources:
+    - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — 'Requires an enclosed printer; not compatible with P1P / A1 series.'"
+  confidence: high
+
+- id: mistake_24_zero_support_z_distance_single_material
+  title: "#24: Setting Support Top Z Distance to 0.0 mm with the same material"
+  applies_when: "`support_top_z_distance` < 0.10 mm when support interface uses the same filament as the model"
+  why: Beginners lower `support_top_z_distance` to 0.0 mm hoping for a cleaner underside, which disables bridging flow and welds the support structure permanently into the model.
+  fixes:
+    - domain: slicer
+      text: Keep `support_top_z_distance` at 0.16–0.24 mm (roughly 1 layer height) for single-material prints; only use `0.0 mm` when using a dedicated breakaway/soluble interface material (e.g., PETG support interface for PLA, or vice versa).
+      settings: {support_top_z_distance: "0.20", support_bottom_z_distance: "0.20"}
+  numbers: "Single-material `support_top_z_distance`: 0.15–0.20 mm (PLA), 0.20–0.25 mm (PETG, which bonds more strongly to itself)."
+  exceptions: "Multi-material soluble (PVA/BVOH) or dissimilar (PLA-on-PETG) support interfaces where `0.0 mm` Z-distance is intended."
+  sources:
+    - "Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698 — 'Setting this [Top contact Z distance] to 0 will prevent PrusaSlicer from using bridge flow and speed for the first object layer. Values between 50-75% of the layer height seem to work well.'"
+  confidence: high
+
+- id: mistake_25_curved_bridges_in_mid_air
+  title: "#25: Designing curved overhanging arches or circular ledges in XY"
+  applies_when: Unsupported horizontal overhang follows a curved arc in the XY plane
+  why: A bridge only works when the nozzle moves in a straight line between two anchored points; if the nozzle moves along an arc in mid-air, tensile pull draws the molten strand straight across the chord like a bowstring.
+  fixes:
+    - domain: geometry
+      text: Chamfer curved horizontal overhangs at 45° beneath the arc, or break circular bridges into straight polygon segments supported at vertices.
+  numbers: "Any unsupported curved perimeter with sagitta > 0.4 mm pulls inward into a straight chord during bridging."
+  exceptions: "When full snug or tree supports are placed directly beneath the curved perimeter."
+  sources:
+    - "Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/ — Sequential straight-chord bridging mechanics"
+  confidence: high
+
+- id: mistake_26_petg_or_tpu_direct_on_smooth_pei
+  title: "#26: Printing PETG or TPU directly on clean smooth PEI or bare glass"
+  applies_when: Material is PETG, TPU, or PC and build plate is Smooth PEI or bare borosilicate glass without release agent
+  why: PETG and TPU form a chemical/molecular bond with smooth PEI and glass at printing temperatures so strong that removing the cooled part rips chunks of PEI film or glass shards off the build plate.
+  fixes:
+    - domain: process
+      text: Use a Textured PEI plate for PETG/TPU, or apply a thin barrier layer of PVP glue stick / hairspray / Windex on Smooth PEI or glass as a release agent.
+  numbers: "Textured PEI releases PETG cleanly once bed cools below 40°C; Smooth PEI requires glue stick barrier."
+  exceptions: "PLA, which prints directly on clean Smooth PEI without glue."
+  sources:
+    - "Prusa Knowledge Base — PETG & Flexible materials — https://help.prusa3d.com/article/petg_2059 — Warning against printing PETG/TPU on smooth PEI without a separating agent"
+  confidence: high
+
+- id: mistake_27_exceeding_max_volumetric_speed
+  title: "#27: Cranking print speed mm/s past the hotend's volumetric melt limit"
+  applies_when: "`print_speed * layer_height * line_width` > `filament_max_volumetric_speed`"
+  why: Beginners copy a 300 mm/s speed profile onto a 0.6 mm nozzle or thick 0.28 mm layer height; the hotend cannot melt plastic fast enough to reach the core of the filament, resulting in cold, matte, under-extruded prints with terrible Z-adhesion and extruder clicking.
+  fixes:
+    - domain: slicer
+      text: Set an accurate `filament_max_volumetric_speed` in the filament profile after running OrcaSlicer's Max Flowrate Calibration test, and let MVS cap linear speeds automatically.
+      settings: {filament_max_volumetric_speed: "15"}
+  numbers: "Typical safe `filament_max_volumetric_speed` (0.4 mm standard brass/steel nozzle): Standard V6/MK3 = 11–15 mm³/s (PLA), 8–10 mm³/s (PETG); Bambu X1/P1/A1 standard hotend = 18–22 mm³/s (PLA), 12–16 mm³/s (PETG/ABS), 3.0–3.5 mm³/s (TPU 95A); High-Flow CHT/E3D ObXidian = 28–38 mm³/s (PLA)."
+  exceptions: "Small models where acceleration limits prevent the toolhead from ever reaching the requested linear speed."
+  sources:
+    - "Prusa Knowledge Base — Max volumetric speed — https://help.prusa3d.com/article/max-volumetric-speed_127176 — 'Max speed = MVS / cross-section area... Signs of MVS being too high: extruder clicking, under-extrusion at high speeds, poor layer adhesion.'"
+  confidence: high
+
+- id: mistake_28_touching_pei_plate_with_bare_fingers
+  title: "#28: Cleaning PEI with IPA only instead of dish soap after touching it"
+  applies_when: First layer peels up or fails to stick in localized fingerprint-sized patches on the build plate
+  why: Skin oils (sebum) from bare fingers are only smeared thin across textured PEI crevices by 70–99% Isopropyl Alcohol (IPA) once the alcohol evaporates, leaving a non-stick film.
+  fixes:
+    - domain: process
+      text: Wash the removable PEI spring-steel sheet at the sink with plain Dawn/dish soap (no moisturizers), warm water, and a clean sponge, and handle it only by the edges.
+  numbers: "Surfactant soap micelles lift and rinse nonpolar skin lipids completely off PEI, restoring 100% first-layer adhesion."
+  exceptions: "Quick dust wipe-downs between prints when the plate has not been touched by bare hands (where 99% IPA is fine)."
+  sources:
+    - "Bambu Lab Wiki — How to clean the PEI Textured Plate — https://wiki.bambulab.com/en/filament-acc/acc/pei-plate-clean-guide — Why dish soap and warm water outperform alcohol for skin oils"
+  confidence: high
+
+- id: mistake_29_print_in_place_flat_horizontal_gaps
+  title: "#29: Designing print-in-place hinges with flat horizontal Z gaps"
+  applies_when: Print-in-place rotating hinge or bearing has flat horizontal faces separated in Z instead of 45° conical tapers
+  why: A flat horizontal gap inside a print-in-place joint requires bridging directly over the lower part at only a 0.2–0.3 mm Z gap, causing the bridge to droop and fuse the hinge solid while leaving sloppy axial play.
+  fixes:
+    - domain: geometry
+      text: Design print-in-place pins and knuckles using opposing 45° cones (double-conical journals) with a 0.20–0.30 mm normal clearance gap so every surface prints as a self-supporting 45° slope.
+  numbers: "45° conical print-in-place journals with 0.25 mm clearance require zero bridging and capture both radial and axial movement."
+  exceptions: "Short bridged captive links (like chain mail links) where a 0.4–0.6 mm Z gap is acceptable."
+  sources:
+    - "Maker's Muse — How to Design Print-in-Place Hinges — https://www.youtube.com/watch?v=fbSQvJJjw2Q — (02:00–07:30) — 45° conical journal geometry vs flat stepped pins"
+  confidence: high
+
+- id: mistake_30_tall_slender_parts_parallel_to_bedslinger_y
+  title: "#30: Orienting tall, thin plates perpendicular to the Y-axis on bedslingers"
+  applies_when: Tall flat plate (height > 80 mm, thickness < 8 mm) is oriented with its thin dimension parallel to the Y-axis on a moving-bed printer (Prusa MK4, Bambu A1, Ender 3)
+  why: On a bedslinger, the entire build plate accelerates back and forth along the Y-axis; a tall thin plate oriented broadside to Y acts like a flexible diving board, wobbling at the top and producing severe Z-banding or detaching from the bed.
+  fixes:
+    - domain: slicer
+      text: Rotate tall thin parts on moving-bed printers so their longest base dimension is aligned parallel to the Y-axis (bed motion axis), and add mouse ears or a brim.
+      settings: {brim_type: "outer_only", brim_width: "8"}
+  numbers: "Aligning a 100 x 10 mm plate parallel to Y instead of X increases its bending moment of inertia (I = b*h³/12) along the bed acceleration axis by 100x."
+  exceptions: "CoreXY and Delta printers (where the bed only moves slowly in Z or stays stationary)."
+  sources:
+    - "Prusa Knowledge Base — Tall and thin objects — https://help.prusa3d.com/article/skirt-and-brim_133969 — Aligning long axis with Y bed travel on moving-bed printers"
+  confidence: high

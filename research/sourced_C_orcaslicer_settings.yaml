@@ -1,0 +1,133 @@
+- id: orca_wall_loops_and_infill_density
+  title: wall_loops and sparse_infill_density
+  applies_when: Configuring structural shell vs core density in OrcaSlicer / Bambu Studio / PrusaSlicer
+  why: "`wall_loops` sets the number of concentric perimeter outlines per layer, providing the primary bending and tensile strength; `sparse_infill_density` sets the internal support grid percentage."
+  fixes:
+    - domain: slicer
+      text: Set `wall_loops` to 2 for visual prints, 3–4 for general functional parts, and 5–6 for high-load mechanical brackets or heat-set insert bosses; set `sparse_infill_density` to 10–15% for visual prints and 20–35% for functional parts.
+      settings: {wall_loops: "4", sparse_infill_density: "20%"}
+  numbers: "Typical values: `wall_loops`: 2 (default visual), 3–6 (functional). `sparse_infill_density`: 10–15% (default), 20–40% (functional), >50% (rarely cost-effective unless printing solid 100% for transparent PETG or annealing). Slicer key equivalents: OrcaSlicer/Bambu Studio = `wall_loops`, `sparse_infill_density`; PrusaSlicer = `perimeters`, `fill_density`."
+  exceptions: "High `wall_loops` (>4) and high `sparse_infill_density` (>40%) in ABS, ASA, PC, or PA significantly increase cumulative thermal contraction force and cause severe bed warping ('Higher infill density and more shell layers increase the risk of warping' — Bambu Lab Wiki)."
+  sources:
+    - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — 'Defines the minimum number of outlines that form the wall of a model. Original Prusa profiles always use a minimum of two perimeters. The strength of a model is mostly defined by the number of perimeters (not the infill).'"
+    - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — 'Higher infill density and more shell layers increase the risk of warping.'"
+  confidence: high
+
+- id: orca_support_type_and_threshold_angle
+  title: support_type and support_threshold_angle
+  applies_when: Model contains downward-facing overhangs exceeding the material's self-supporting threshold or floating islands
+  why: "`support_type` selects between rectilinear/snug pillar supports (`normal(auto)`) and branching organic supports (`tree(auto)`). `support_threshold_angle` defines the maximum overhang angle from vertical (in OrcaSlicer/Bambu Studio) before supports are generated."
+  fixes:
+    - domain: slicer
+      text: "Use `tree(auto)` for organic models, figurines, and reaching around part geometry from the build plate; use `normal(auto)` with `Support Style: Snug` for large flat horizontal overhangs and bridges."
+      settings: {enable_support: "true", support_type: "tree(auto)", support_threshold_angle: "30", support_top_z_distance: "0.20"}
+  numbers: "Typical `support_threshold_angle` in OrcaSlicer/Bambu Studio (measured from vertical, 0° = vertical wall): 30° (default, supports overhangs > 60° from vertical / < 30° from horizontal), 40–45° for ABS/PA/PC. CRITICAL DIFFERENCE: In OrcaSlicer/Bambu Studio, `support_threshold_angle` is measured from the horizontal plane in the UI tooltip description or triggers for overhangs shallower than that angle from horizontal (30° default = supports faces within 0–30° of horizontal, i.e., >60° from vertical), matching PrusaSlicer's `support_material_threshold` ('The Overhang threshold value represents the most horizontal slope (measured from the horizontal plane) that you can print without support material (90=vertical)'). `support_top_z_distance`: 0.16–0.24 mm (50–100% of layer height; 0.0 mm only for soluble/breakaway multi-material interfaces)."
+  exceptions: "Setting `support_top_z_distance` to 0 with single-material printing fuses the support permanently to the model and disables bridge flow on the first supported layer."
+  sources:
+    - "Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698 — 'The Overhang threshold value represents the most horizontal slope (measured from the horizontal plane) that you can print without support material (90=vertical)... Values between 50-75% of the layer height seem to work well [for Top contact Z distance].'"
+    - "OrcaSlicer Wiki — Support settings — https://github.com/SoftFever/OrcaSlicer/wiki/support_settings — Tree vs Normal support types and Z-distances"
+  confidence: high
+
+- id: orca_brim_type_and_elefant_foot
+  title: brim_type and elefant_foot_compensation
+  applies_when: First-layer adhesion, corner warping, or first-layer dimensional accuracy on Z = 0 is critical
+  why: "`brim_type` adds single-layer sacrificial flanges around the base to resist peeling; `elefant_foot_compensation` shrinks the first N layers inward in XY to cancel out first-layer squish bulge."
+  fixes:
+    - domain: slicer
+      text: "Use `brim_type: \"mouse_ear\"` for sharp-cornered functional parts or `\"outer_only\"` (5–10 mm width) for tall/small-footprint parts, and set `elefant_foot_compensation: \"0.15\"` for functional parts without bottom chamfers."
+      settings: {brim_type: "mouse_ear", brim_width: "6", elefant_foot_compensation: "0.15", elefant_foot_compensation_layers: "1"}
+  numbers: "Typical values: `elefant_foot_compensation`: 0.10–0.20 mm (default 0.15 mm on many profiles, 0.0 mm when using a raft or when part has a 45° bottom chamfer). `brim_width`: 5–10 mm.Note: When using an outer brim together with `elefant_foot_compensation`, the brim attaches at the compensated (inset) boundary so the part still detaches without an elephant foot bulge. Slicer keys: OrcaSlicer/Bambu Studio = `brim_type`, `elefant_foot_compensation` (note spelling `elefant`), `elefant_foot_compensation_layers`; PrusaSlicer = `brim_width` (no native mouse_ear type in older PS; uses helper discs), `elefant_foot_compensation`."
+  exceptions: "Setting `elefant_foot_compensation` > 0.25 mm on parts with thin first-layer walls (< 1.0 mm) or small text on the build plate can erase the first layer of thin features entirely."
+  sources:
+    - "Prusa Knowledge Base — Elephant foot compensation — https://help.prusa3d.com/article/elephant-foot-compensation_114487 — Mechanism and thin-wall warning"
+    - "OrcaSlicer Wiki — Quality Settings: Precision — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_precision — Multi-layer elephant foot compensation (`elefant_foot_compensation_layers`)"
+  confidence: high
+
+- id: orca_wall_generator_and_detect_thin_wall
+  title: wall_generator (Arachne vs Classic) and detect_thin_wall
+  applies_when: Slicing models with thin walls, fine text, sharp wedges, or precise concave corners
+  why: "`wall_generator: \"arachne\"` dynamically adjusts extrusion width to fill variable-thickness geometry without gap-fill rattle; `\"classic\"` uses constant extrusion widths and relies on `detect_thin_wall` to capture single-extrusion walls."
+  fixes:
+    - domain: slicer
+      text: "Use `wall_generator: \"arachne\"` as the default for 95% of prints, and only switch to `\"classic\"` (with `detect_thin_wall: \"true\"` if needed) when severe overhang curling occurs on variable-width perimeters or concave corner accuracy is paramount."
+      settings: {wall_generator: "arachne", detect_thin_wall: "false"}
+  numbers: "\"Arachne defaults in OrcaSlicer: `min_bead_width: \"85%\"`, `min_feature_size: \"25%\"`, `wall_transition_angle: \"10\"`. Note: `detect_thin_wall` is greyed out and ignored whenever `wall_generator` is set to `\"arachne\"`. Slicer keys: identical in OrcaSlicer, Bambu Studio, and PrusaSlicer (`wall_generator` / `perimeter_generator`).\""
+  exceptions: "On steep overhangs near thin walls, Arachne can generate an unusually wide or narrow outer perimeter whose stepover ratio fails; switching to `classic` restores uniform perimeter width."
+  sources:
+    - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — 'This feature [Detect thin walls] is automatically disabled if the Arachne perimeter generator is active, as it already automatically adjusts for thin walls.'"
+  confidence: high
+
+- id: orca_seam_position_and_scarf_seams
+  title: seam_position and Scarf joint seam settings
+  applies_when: Visible Z-seam line mars cylindrical/curved surfaces or weakens thin-walled shells
+  why: Every closed perimeter loop has a start/stop point (`seam_position`). Standard seams leave a vertical scar or zits, whereas a scarf seam ramps Z-height and extrusion flow over a sloped distance (`seam_slope_type`) so the start and end overlap smoothly.
+  fixes:
+    - domain: slicer
+      text: "Use `seam_position: \"aligned\"` (default) to hide seams in concave/convex sharp corners, and enable `seam_slope_type: \"contour\"` (Scarf seam) with `scarf_angle_threshold: \"155\"` for smooth cylindrical parts that lack corners."
+      settings: {seam_position: "aligned", seam_slope_type: "contour", seam_slope_conditional: "true", scarf_angle_threshold: "155", seam_slope_steps: "10", seam_slope_start_height: "10%", staggered_inner_seams: "true", wipe_on_loops: "true", seam_gap: "10%"}
+  numbers: "\"Options for `seam_position`: `nearest`, `aligned`, `back`, `random`. OrcaSlicer Scarf Seam keys: `seam_slope_type` (`none`, `contour`, `all`), `seam_slope_conditional: \"true\"`, `scarf_angle_threshold: \"155\"`, `seam_slope_start_height: \"10%\"`, `seam_slope_entire_loop: \"false\"`, `seam_slope_min_length: \"20\"`, `seam_slope_steps: \"10\"`. PrusaSlicer 2.8+ equivalents: `scarf_joint_placement`, `scarf_joint_only_on_smooth_perimeters`, `max_scarf_joint_segment_length` (inverse of `seam_slope_steps`).\""
+  exceptions: "Scarf seams can leave smears or under-extruded troughs if Pressure Advance / Linear Advance is poorly calibrated, or on steep overhangs and silk PLA."
+  sources:
+    - "Prusa Knowledge Base — Seam position — https://help.prusa3d.com/article/seam-position_151069 — 'The Scarf seams overlap extrusions at the end and start of the perimeter loop, hiding visible seams on smooth perimeters... Note that using scarf seams increases print time, and is less effective in sharp corners and overhangs.'"
+    - "OrcaSlicer Wiki — Quality settings: Seam — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_seam — Official Scarf seam, `seam_gap`, and `wipe_on_loops` parameters"
+  confidence: high
+
+- id: orca_overhang_reverse_and_extra_perimeters
+  title: overhang_reverse, extra_perimeters_on_overhangs, make_overhang_printable
+  applies_when: Printing steep overhangs (45–65° from vertical) or unsupported internal cavities
+  why: "`overhang_reverse` alternates perimeter winding direction (CW/CCW) every second layer so upward overhang curling does not accumulate on one side. `extra_perimeters_on_overhangs` adds anchoring loops over steep slopes. `make_overhang_printable` alters part geometry in the slicer by chamfering steep overhangs to a printable angle."
+  fixes:
+    - domain: slicer
+      text: Enable `overhang_reverse` and `extra_perimeters_on_overhangs` for steep overhangs, and only enable `make_overhang_printable` when geometric modification of downward faces is acceptable.
+      settings: {overhang_reverse: "true", overhang_reverse_threshold: "50%", extra_perimeters_on_overhangs: "true", make_overhang_printable: "false", make_overhang_printable_angle: "55"}
+  numbers: "\"`overhang_reverse_threshold`: `\"50%\"` (or angle in degrees; triggers on layers where overhang exceeds threshold). `make_overhang_printable_angle`: `45`–`60°` (default `55°`). Note: `overhang_reverse` and `make_overhang_printable` are native to OrcaSlicer (ported from Cura/PrusaSlicer PRs) and are absent or named differently in older PrusaSlicer/Bambu Studio versions (`extra_perimeters_on_overhangs` is shared with PrusaSlicer).\""
+  exceptions: "`overhang_reverse` can create slight alternating sheen bands (glossy/matte lines) on glossy filaments like Silk PLA or PETG because cooling time and shear direction alternate per layer. `make_overhang_printable` physically changes the CAD shape (turns horizontal holes into teardrops and adds conical slopes under flat ledges), breaking mating assemblies if unchecked."
+  sources:
+    - "OrcaSlicer GitHub / Wiki — Quality Settings: Overhangs (`overhang_reverse`) — https://github.com/SoftFever/OrcaSlicer/pull/2413 — Implementation of alternating perimeter direction on odd layers"
+    - "OrcaSlicer Wiki — Make overhang printable — https://github.com/SoftFever/OrcaSlicer/wiki/strength_settings_walls — Geometric chamfering of overhangs and hole options"
+  confidence: high
+
+- id: orca_precise_outer_wall_and_only_one_wall_top
+  title: precise_outer_wall and only_one_wall_top
+  applies_when: Dimensional tolerance (< +/-0.10 mm) or smooth top-surface aesthetics/lettering are required
+  why: Normally, the outer wall overlaps slightly with the adjacent inner wall to bond them, which pushes the outer wall outward whenever inner wall count or infill meets it. `precise_outer_wall` sets the outer-to-inner wall overlap to zero. `only_one_wall_top` prints a single perimeter around top horizontal faces so monotonic top infill fills cleanly right up to the edge.
+  fixes:
+    - domain: slicer
+      text: "Enable `precise_outer_wall: \"true\"` and `only_one_wall_top: \"true\"` (or `\"topmost\"`) on almost all functional and aesthetic prints."
+      settings: {precise_outer_wall: "true", only_one_wall_top: "true"}
+  numbers: "`precise_outer_wall` sets outer-to-inner wall overlap to 0% (OrcaSlicer exclusive; not in stock PrusaSlicer, which uses `external_perimeters_first` for a similar goal with worse overhang quality). `only_one_wall_top` reduces visible concentric multi-wall rings on flat top faces and increases space for top lettering (`Single perimeter on top surfaces` in PrusaSlicer)."
+  exceptions: "\"On tall, stepped parts where higher sections sit on top of a flat intermediate terrace, setting `only_one_wall_top` to `\"all top surfaces\"` instead of `\"topmost\"` can slightly weaken the perimeter anchor beneath the upper boss.\""
+  sources:
+    - "OrcaSlicer Wiki — Precise wall — https://github.com/SoftFever/OrcaSlicer/wiki/Precise-wall — 'The Precise Wall is a distinctive feature introduced by OrcaSlicer, aimed at improving the dimensional accuracy of prints and minimizing layer inconsistencies by slightly increasing the spacing between the outer wall and the inner wall. When this feature is enabled in OrcaSlicer, the overlap between the outer wall and its adjacent inner wall is set to zero.'"
+    - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — 'This option forces a single perimeter on top or first layers to achieve a cleaner, more uniform aesthetic finish without sacrificing the object's structural rigidity.'"
+  confidence: high
+
+- id: orca_ironing_bridge_flow_and_small_area_flow
+  title: ironing_type, bridge_flow, and small_area_infill_flow_compensation
+  applies_when: Tuning top-surface finish, bridge tension, or over-extruded ridges on tiny top islands
+  why: "`ironing_type` makes a second hot-nozzle pass over flat top surfaces at 10–25% flow to melt away extrusion lines. `bridge_flow` scales extrusion volume on unsupported bridges. `small_area_infill_flow_compensation` reduces flow on tiny solid infill regions where nozzle overlap and deceleration cause over-extrusion buildup."
+  fixes:
+    - domain: slicer
+      text: "Enable `small_area_infill_flow_compensation` to prevent nozzle scraping on narrow top walls, keep `bridge_flow` at 0.85–0.95 for crisp bridges, and enable `ironing_type: \"top\"` (at 15–22% flow, 30–60 mm/s) only on flat horizontal plaques or signs."
+      settings: {ironing_type: "no ironing", ironing_flow: "15%", ironing_speed: "30", bridge_flow: "0.95", small_area_infill_flow_compensation: "true"}
+  numbers: "`ironing_flow`: 10–20% (PLA 15%, PETG/ABS 15–22% on modern fast printers at 30–60 mm/s, `ironing_spacing`: 0.10–0.15 mm). `bridge_flow`: 0.85–1.00 (internal bridge flow `internal_bridge_flow` often 1.0–1.2 to anchor onto sparse infill). `small_area_infill_flow_compensation`: OrcaSlicer-exclusive curve reducing flow down to ~35% on infill strokes shorter than ~6–10 mm."
+  exceptions: "Ironing on curved or domed top surfaces creates ugly stepped terraced rings, and ironing PETG can cause molten build-up on the nozzle tip that drops burnt blobs."
+  sources:
+    - "Prusa Knowledge Base — Ironing — https://help.prusa3d.com/article/ironing_177487 — Ironing mechanism, flat-surface limitation, and PETG blobbing risk"
+    - "OrcaSlicer Wiki — Strength Settings: Small Area Flow Compensation — https://github.com/SoftFever/OrcaSlicer/wiki/strength_settings_infill — Mathematical compensation curve for short solid infill strokes"
+  confidence: high
+
+- id: orca_slow_down_for_layer_cooling
+  title: slow_down_for_layer_cooling (Minimum Layer Time)
+  applies_when: Printing small cross-section spires, chimneys, pins, or top cones where layer time < 8–12 seconds
+  why: When a layer finishes in only a few seconds, the previous layer is still molten above Tg when the nozzle returns, turning pins and spires into deformed, melty blobs.
+  fixes:
+    - domain: slicer
+      text: "Enable `slow_down_for_layer_cooling: \"true\"` in the Filament Cooling tab, set `slow_down_layer_time` to 6–10 s, and set `slow_down_min_speed` to 10–20 mm/s."
+      settings: {slow_down_for_layer_cooling: "true", slow_down_layer_time: "8", slow_down_min_speed: "15"}
+  numbers: "Typical `slow_down_layer_time`: PLA 6–8 s, PETG 8–12 s, ABS/ASA 5–10 s, TPU 8–10 s. `slow_down_min_speed`: 10–20 mm/s."
+  exceptions: "\"Enabling `slow_down_for_layer_cooling` creates sudden print-speed changes whenever cross-sectional area changes (e.g., at the top of a hole or transition to a tower), causing visible gloss/matte horizontal speed bands on outer walls. For uniform surface gloss on medium parts, many advanced users uncheck `slow_down_for_layer_cooling` (or Enable `\"Don't slow down outer walls\"` / `dont_slow_down_outer_wall: \"true\"` in OrcaSlicer).\""
+  sources:
+    - "Prusa Knowledge Base — Max volumetric speed & Cooling — https://help.prusa3d.com/article/max-volumetric-speed_127176 — 'Layer Time Cooldown: if the total layer time is too short, all speeds are reduced proportionally. The lowest speed possible is the one from Min Print Speed.'"
+    - "OrcaSlicer Wiki — Cooling Settings (`dont_slow_down_outer_wall`) — https://github.com/SoftFever/OrcaSlicer/wiki/cooling_settings — Prevents outer-wall gloss banding while still slowing inner features"
+  confidence: high

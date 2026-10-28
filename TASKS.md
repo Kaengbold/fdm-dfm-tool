@@ -1,0 +1,89 @@
+# Task checklist
+
+Rules: see [AGENTS.md](AGENTS.md). Claim a task by filling in `owner` (name + branch) before
+starting. Status: `[ ]` open · `[~]` in progress / partly done · `[x]` done.
+Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to have.
+
+## Verification (do these first — they decide what's real)
+
+- [ ] **T-001 P1** Check that OrcaSlicer applies the per-object settings in our 3MF (open an export, compare walls/infill/support/brim). Fix `export3mf.py` if not. · files: `core/fdmcore/export3mf.py` · owner: —
+- [ ] **T-002 P1** Same check for Bambu Studio and PrusaSlicer (Prusa uses `Metadata/Slic3r_PE_model.config`). · owner: —
+- [ ] **T-003 P1** Real-part corpus: collect ~20 typical hobby STLs/STEPs with known good orientations (licence permitting), add to `core/tests/corpus/`, write a regression test for top orientation + key findings. · owner: —
+- [ ] **T-004 P1** Browser performance on big parts (200k–1M triangles): measure load/orient/check/strength times, fix the worst. · owner: —
+- [ ] **T-005 P2** Manual UI review on a laptop screen and a phone; file issues as tasks. · owner: —
+
+## Orientation
+
+- [ ] **T-010 P1** Refine the top ~5 orientations with the pseudo-slicer: true first-layer area, supports that land on the part vs. the bed, support volume. · files: `orientation.py`, `api.py` · owner: —
+- [ ] **T-011 P2** "Critical faces": let the user mark faces that must be flat on the bed / vertical / not touched by supports (cosmetic); use them in the ranking. · owner: —
+- [ ] **T-012 P2** Show *why* an option lost (score breakdown) in the UI. · owner: —
+
+## Printability checks & knowledge base
+
+- [~] **T-020 P1** (12 new rules + thresholds now sourced from `research/sourced_*.yaml`; remaining: verify the 404/unreachable links in `research/url_check.txt`, review older rules) Turn `research/fdm_knowledge.md` (unverified) into sourced rules: verify each claim against the sources gathered with `research/RESEARCH_PROMPT.md`, then update `rules.yaml` wording and thresholds. · files: `data/rules.yaml` · owner: —
+- [ ] **T-021 P2** New check: embossed/debossed text and small details below printable size (per nozzle). · owner: —
+- [ ] **T-022 P2** New checks for fits: press-fit / sliding-fit clearances, pin–hole pairs; suggest tolerances. · owner: —
+- [ ] **T-023 P2** Threads & fasteners: detect small holes meant for screws, suggest heat-set inserts / nut traps / correct pilot diameters. · owner: —
+- [x] **T-024 P2** (done as `bridge_sag`) Horizontal hole droop as an *info* finding even when the bridge is short (link to the teardrop edit). · owner: —
+- [ ] **T-025 P3** Seam / cosmetic surface hints, ironing suggestion for flat tops. · owner: —
+- [ ] **T-026 P2** More presets: Creality K1/K2/Ender-3 V3, Elegoo, Anycubic; materials TPU, ASA, PC, PLA+. Cite sources. · files: `data/presets.yaml` · owner: —
+
+## Findings model (impact-based) — follow-ups
+
+- [ ] **T-100 P1** Horizontal holes as features in the checks (diameter, sag, fit) — currently only via bridge spans; reuse `features.py` cylinder fitting. · owner: —
+- [ ] **T-101 P2** Trapped support in *blind* channels/pockets open on one side (only fully closed cavities are detected now). · owner: —
+- [ ] **T-102 P2** Engraved/raised text legibility on top and side faces (stroke width, depth vs nozzle/layer height). · owner: —
+- [ ] **T-103 P2** Support marks on faces the user marks as visible/critical → raise severity (needs T-011). · owner: —
+- [ ] **T-104 P2** Calibrate warping lengths (`thresholds.yaml`) with real prints per material/enclosure. · owner: —
+- [ ] **T-105 P2** "Strength" goal: use the voxel simulation automatically when loads are known; heuristics (pins/necks) otherwise. · owner: —
+- [ ] **T-106 P3** Shrinkage per material → expected size error for long parts (shape impact). · owner: —
+
+## Strength
+
+- [ ] **T-030 P2** Several load cases at once (worst case wins). · owner: —
+- [ ] **T-031 P2** Loads on edges/points and "screw here" helper (hole → fixed). · owner: —
+- [ ] **T-032 P2** Calibrate layer-strength factors with test prints (CNC-Kitchen-style hooks), document method and results. · owner: —
+- [ ] **T-033 P3** Partial-voxel fill fractions for better accuracy on thin sections. · files: `voxel.py`, `strength.py` · owner: —
+
+## Design edits
+
+- [ ] **T-040 P2** Chamfer under flat overhangs (replace a flat ceiling edge by 45°). · files: `features.py` · owner: —
+- [ ] **T-041 P2** Thicken thin walls to 2–3 line widths. · owner: —
+- [ ] **T-042 P2** Sacrificial bridge layer for counterbores / holes starting mid-air. · owner: —
+- [ ] **T-043 P2** Adjustable edit parameters in the UI (chamfer size, teardrop angle). · owner: —
+- [ ] **T-044 P2** Feature confirm UI ("is this a hole?", tag ribs/bosses), feeding detection. · owner: —
+- [ ] **T-045 P3** Write edits back as STEP (OCCT) instead of STL for CAD users. · owner: —
+
+## Input / output
+
+- [ ] **T-050 P2** 3MF input (geometry only, multi-object → pick one). · owner: —
+- [ ] **T-051 P2** Unit sanity check (part 25.4× too small → offer inch → mm). · owner: —
+- [ ] **T-052 P3** Split multi-body STL into separate parts and let the user pick. · owner: —
+
+## AI
+
+- [ ] **T-060 P2** OpenAI provider in the Ask-AI panel (BYOK, Responses API, same tools). · files: `web/openai.js`, `web/app.js` · owner: —
+- [ ] **T-061 P2** Local "subscription bridge": in local mode, run the user's official CLI (`claude -p`, `codex exec`, `gemini -p`) headless with our MCP server attached — uses their subscription through the official client. Check each vendor's terms first. · owner: —
+- [ ] **T-062 P3** Streaming answers in the Ask-AI panel. · owner: —
+- [ ] **T-063 P2** Test the Ask-AI panel with real keys (Anthropic + Gemini), fix tool-schema issues. · owner: —
+
+## Infrastructure & UX
+
+- [ ] **T-070 P1** GitHub Actions CI: pytest + e2e smoke test (Windows runner with Edge, or Linux + Chromium). · owner: —
+- [ ] **T-071 P2** Hosting: GitHub Pages (needs a public repo or paid plan) or Cloudflare Pages. · owner: —
+- [ ] **T-072 P3** Self-host Pyodide/three/manifold/occt assets (offline use, no CDN dependency). · owner: —
+- [ ] **T-080 P1** Progress indicator + cancel for long operations. · owner: —
+- [ ] **T-081 P3** Mobile/tablet layout. · owner: —
+- [ ] **T-082 P3** German translation (UI + rules). · owner: —
+- [ ] **T-090 P3** Fusion 360 add-in using the same engine. · owner: —
+
+## Done
+
+- [x] Phase 0–2: engine, Pyodide app, orientation, pseudo-slicer checks, knowledge base, settings, 3MF/STL export, voxel FEA strength, strength-aware orientation.
+- [x] Phase 3 (partial): hole detection, teardrop + corner chamfer edits with ghost preview.
+- [x] Phase 4: MCP server, copy-report, Ask-AI panel (Anthropic + Gemini, own key).
+- [x] STEP import with CAD faces; build-volume check / turn-to-fit.
+- [x] Orientation fix for complex parts (strong penalty for no/tiny bed contact; hide bad options); typical-part regression tests.
+- [x] Browser smoke test (`tools/e2e_smoke.py`) with optional Gemini screenshot review.
+- [x] Impact-based findings (fails / shape / surface / weak / info): supports and overhangs no longer reported on their own; new checks: warping by material+enclosure, holes that close or print undersized, gaps that fuse, first-layer detail, rough fine detail, upright pins, necks, trapped support, bridge sag. Thresholds in `data/thresholds.yaml`.
+- [x] Setup: multi-material option, goal (balanced/strength/speed/material), nozzle comparison; findings grouped by impact.

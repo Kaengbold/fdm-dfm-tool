@@ -1,0 +1,279 @@
+support_marks:
+  title: Rough Surface from Support Removal
+  why: The CAD model shows a clean, flat underside, but the printed surface resting on supports will be rough, scarred, and droopy because single-material supports leave an air gap so they can break away.
+  fixes:
+  - domain: geometry
+    text: Reorient the part to eliminate the overhang, or add 45-degree chamfers and gussets beneath the ledge so it supports itself cleanly without any support material.
+  - domain: slicer
+    text: If using a multi-material system, set the support interface material to an incompatible plastic (such as PETG interface for PLA, or PLA interface for PETG) to get a smooth, near-perfect bottom surface.
+    settings:
+      enable_support: '1'
+      support_type: tree(auto)
+      support_interface_pattern: rectilinear
+  - domain: process
+    text: Use a deburring tool, scraper, or fine sandpaper to clean up rough contact pockmarks left by support removal.
+  tags:
+  - support
+  - surface-quality
+  - overhang
+  - interface
+  sources:
+  - "Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698"
+  - "Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA"
+  - "Slant 3D — Stop Using Slicer Supports | Design for 3D Printing — https://www.youtube.com/watch?v=_R2E8VwyNz0"
+
+trapped_support:
+  title: Trapped Support Inside Closed Cavity
+  why: The CAD model shows a hollow internal pocket or blind cavity, but any support generated inside will be sealed in forever with no way to pull it out, leaving loose rattling debris that adds dead weight or jams internal moving mechanisms.
+  fixes:
+  - domain: geometry
+    text: Redesign the cavity ceiling with self-supporting 45-degree chamfers, arched domes, or teardrop profiles so the internal void prints cleanly across empty air without support structures.
+  - domain: geometry
+    text: Split the model into two pieces across the hollow chamber so the inside faces point upward during printing, then join them with alignment pins or glue.
+  - domain: slicer
+    text: Turn off supports or place support blocker volumes inside the cavity so the slicer does not generate unreachable internal support towers.
+    settings:
+      enable_support: '1'
+      support_type: tree(auto)
+      support_threshold_angle: '45'
+  tags:
+  - support
+  - internal-cavity
+  - trapped-support
+  - split-part
+  sources:
+  - "Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA"
+  - "Slant 3D — 9 Design Rules for 3D Printing — https://www.youtube.com/watch?v=AD6L13tB1bE"
+  - "Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698"
+
+bridge_sag:
+  title: Sagging Bridge Ceiling in Horizontal Holes
+  why: The CAD model shows a round hole or crisp rectangular slot, but gravity pulls down molten strands bridging mid-air across a 4 to 8 mm span, causing the top ceiling to sag 0.2 to 1 mm into the opening and turning round holes into undersized ovals.
+  fixes:
+  - domain: geometry
+    text: Redesign the top of horizontal holes with a 90-degree or 120-degree teardrop peak, or add a flat-top bridge roof raised 0.3 mm above nominal diameter so bridge droop stays outside the fastener clearance.
+  - domain: slicer
+    text: Slow down bridge printing speed to let the cooling fan freeze molten strands instantly before gravity pulls them downward.
+    settings:
+      bridge_speed: '25'
+      xy_hole_compensation: '0.15'
+  - domain: process
+    text: Run a twist drill bit or round needle file through the horizontal hole after printing to clear out sagged ceiling strands.
+  tags:
+  - bridge
+  - horizontal-holes
+  - teardrop
+  - sagging
+  sources:
+  - "Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA"
+  - "Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/"
+  - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748"
+
+gap_fuses:
+  title: Moving Clearance Gap Fuses Shut
+  why: The CAD model shows separate moving components in a print-in-place hinge or bearing, but clearances narrower than 0.2 mm will weld together into a solid block because molten plastic bulges outward under extrusion pressure and bridges the gap.
+  fixes:
+  - domain: geometry
+    text: Increase the clearance gap in CAD to at least 0.3 to 0.4 mm between moving faces, and angle facing surfaces at 45 degrees so adjacent layers never bridge directly across from each other.
+  - domain: slicer
+    text: Switch to the Arachne wall generator to dynamically taper extrusion lines in tight spaces, and apply slight positive hole compensation to pull back boundaries.
+    settings:
+      wall_generator: arachne
+      xy_hole_compensation: '0.05'
+  - domain: process
+    text: Gently work the joint back and forth with pliers right after cooling to crack any tiny plastic strings bridging across the gap.
+  tags:
+  - print-in-place
+  - clearance
+  - tolerances
+  - hinges
+  sources:
+  - "Maker's Muse — Clearance and Tolerance 3D Printing Gauge — https://www.youtube.com/watch?v=TYuLVN3YHw8"
+  - "Maker's Muse — How to Design Print-in-Place Hinges — https://www.youtube.com/watch?v=fbSQvJJjw2Q"
+  - "Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/"
+
+hole_closes:
+  title: Tiny Vertical Hole Closes Up
+  why: The CAD model shows an open pinhole or wire passage, but vertical holes smaller than 1.5 mm diameter close up or disappear because nozzle surface tension drags hot plastic inward around tight circles and overlapping walls choke the opening.
+  fixes:
+  - domain: geometry
+    text: Enlarge small holes in CAD to at least 2.0 mm diameter, or model them as faceted polygons (polyholes) so the nozzle extrudes short straight segments instead of pulling loops inward.
+  - domain: slicer
+    text: Enable the Arachne wall generator to dynamically thin extrusion lines around miniature perimeters, and apply positive hole compensation.
+    settings:
+      wall_generator: arachne
+      xy_hole_compensation: '0.15'
+  - domain: process
+    text: Ream the closed hole open after printing using a small twist drill bit or a 1.5 mm pin vise.
+  - domain: process
+    text: Swap to a smaller 0.2 mm nozzle assembly that can trace tiny inner perimeters without crowding into the center of the bore.
+  tags:
+  - holes
+  - small-features
+  - polyholes
+  - nozzle-size
+  sources:
+  - "\"Nophead (Chris Palmer) — Hydraraptor: Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes."
+  - "Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769"
+
+small_hole_undersized:
+  title: Small Vertical Hole Prints Undersized
+  why: The CAD model has an exact diameter hole for a bolt or pin, but vertical holes up to 6 mm print 0.15 to 0.3 mm too small because molten plastic is pulled inward around tight curves and STL polygon export cuts across circle chords, preventing screws from fitting.
+  fixes:
+  - domain: geometry
+    text: Oversize vertical fastener holes in CAD by +0.2 to +0.3 mm (for example, design M3 clearance holes at 3.3 to 3.4 mm), or use Nophead's polyhole polygon formula.
+  - domain: slicer
+    text: Apply positive X-Y hole compensation in your slicer to automatically offset inner hole perimeters outward.
+    settings:
+      xy_hole_compensation: '0.15'
+  - domain: process
+    text: Clean out undersized holes with a drill bit sized for your fastener or use a hand reamer for a precise sliding fit.
+  tags:
+  - holes
+  - tolerances
+  - shrinkage
+  - fasteners
+  sources:
+  - "Nophead (Chris Palmer) — Hydraraptor: Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.html"
+  - "Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA"
+  - "OrcaSlicer Wiki — Precise wall — https://github.com/SoftFever/OrcaSlicer/wiki/Precise-wall"
+
+first_layer_detail:
+  title: Fine Detail Squashed on Bed Surface
+  why: The CAD model shows crisp letters, logos, or shallow grooves on the bottom face, but on the finished print they get squashed shut or blurred into illegible mush by first-layer bed squish and elephant foot bulge.
+  fixes:
+  - domain: geometry
+    text: Deboss text into the bottom face by at least 0.4 to 0.6 mm using wide, bold sans-serif fonts with stroke widths of at least 0.8 mm, or move fine logos onto top or vertical side faces.
+  - domain: slicer
+    text: Increase elephant foot compensation in your slicer to pull the first-layer perimeter inward and keep recessed lines open.
+    settings:
+      elefant_foot_compensation: '0.20'
+  - domain: process
+    text: Calibrate first-layer Z-offset and lower bed temperature by 5 degrees after the first layer so bottom plastic does not soften and bulge under the weight of upper layers.
+  tags:
+  - elephant-foot
+  - text
+  - first-layer
+  - fine-detail
+  sources:
+  - "Prusa Knowledge Base — Elephant foot compensation — https://help.prusa3d.com/article/elephant-foot-compensation_114487"
+  - "Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac"
+  - "Slant 3D — How to Design Parts for 3D Printing (Fillets & Chamfers) — https://www.youtube.com/watch?v=9JqN2aFBa2w"
+
+fine_detail_rough:
+  title: Positive Detail Too Fine for Nozzle
+  why: The CAD model features delicate text strokes, thin ribs, or pointy pins, but positive details narrower than 1.5 times nozzle width print rough, jagged, or missing entirely because a standard nozzle cannot trace both walls of such a thin feature.
+  fixes:
+  - domain: geometry
+    text: Thicken positive features and text stroke widths in CAD to at least 0.6 to 0.8 mm, and choose bold sans-serif typefaces without fine tapered tips.
+  - domain: slicer
+    text: Turn on the Arachne wall generator to dynamically taper extrusion lines down to fine tips, and lower layer height to sharpen vertical resolution.
+    settings:
+      wall_generator: arachne
+      layer_height: '0.12'
+  - domain: process
+    text: Swap to a smaller 0.2 mm nozzle assembly on your printer to lay down narrower extrusion tracks and capture miniature features cleanly.
+  tags:
+  - fine-detail
+  - text
+  - arachne
+  - nozzle-size
+  sources:
+  - "Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769"
+  - "Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac"
+  - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748"
+
+warping:
+  title: Long Base Corners Lifting from Bed
+  why: The CAD model has a flat, square base, but the printed part will lift and curl up at the corners like a banana because cooling plastic contracts along the long base and pulls sharp corners clean off the build plate.
+  fixes:
+  - domain: geometry
+    text: Round sharp exterior base corners with large fillets (3 mm radius or larger), or add circular mouse-ear pads at the corners in CAD to disperse lifting tension.
+  - domain: slicer
+    text: Add mouse-ear brims or a wide outer brim to clamp down the corners, and choose Gyroid infill at moderate density to balance internal shrinkage forces in all directions.
+    settings:
+      brim_type: mouse_ear
+      brim_width: '8'
+      sparse_infill_pattern: gyroid
+      sparse_infill_density: 15%
+  - domain: process
+    text: Enclose the printer to keep ambient air warm, preheat the bed for 10 minutes before printing, and wash the build sheet with warm water and dish soap to ensure maximum adhesion.
+  tags:
+  - warping
+  - bed-adhesion
+  - brim
+  - mouse-ears
+  sources:
+  - "CNC Kitchen — How to Prevent Warping in 3D Printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y"
+  - "OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/SoftFever/OrcaSlicer/wiki/other_settings_brim"
+  - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf"
+
+weak_upright_pin:
+  title: Upright Pin Weak Along Layer Seams
+  why: The CAD model shows a solid pin, clip, or peg, but printed standing upright it will snap off under the slightest sideways bump because horizontal layer lines run right across the narrow stem, putting weak layer seams under pure bending load.
+  fixes:
+  - domain: geometry
+    text: Reorient the part to print the pin lying flat on the build plate so continuous perimeter strands run lengthwise, add a generous fillet at the pin root, or design an internal bore to press in a steel dowel pin or screw.
+  - domain: slicer
+    text: Increase wall loops so the pin is printed entirely as solid concentric perimeters, and lower layer height to pack more bonded surface area into the column.
+    settings:
+      wall_loops: '99'
+      layer_height: '0.12'
+  - domain: process
+    text: Print at the upper end of your filament's recommended nozzle temperature and reduce cooling fan speed to improve molecular bonding between layers.
+  tags:
+  - strength
+  - orientation
+  - pins
+  - layer-adhesion
+  sources:
+  - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion"
+  - "Slant 3D — Design Unbreakable Pins with Perfect Tolerances — https://www.youtube.com/watch?v=uMA-Wt-z_BU"
+  - "Slant 3D — Make a Pin that Doesn't Break. Use Ripples — https://www.youtube.com/shorts/njTfpxL71zk"
+
+thin_neck:
+  title: High Load Concentration Across Thin Neck
+  why: The CAD model shows a narrow waist between two thicker sections, but under any real-world load the printed part will snap right across the neck because all pulling and twisting stress concentrates into just a few small layer bonds.
+  fixes:
+  - domain: geometry
+    text: Thicken the narrow neck in CAD, add triangular gusset ribs, and use large transitional fillets (3 mm radius or larger) to blend the neck smoothly into the larger sections and eliminate sharp stress-raising notches.
+  - domain: slicer
+    text: Increase wall loops so the entire narrow neck is filled with dense solid perimeters rather than sparse internal infill.
+    settings:
+      wall_loops: '6'
+      sparse_infill_pattern: gyroid
+      sparse_infill_density: 30%
+  - domain: process
+    text: Reorient the part on the bed so primary pulling and bending forces run along continuous extruded strands rather than pulling across layer lines.
+  tags:
+  - strength
+  - stress-concentration
+  - fillets
+  - perimeters
+  sources:
+  - "CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints"
+  - "Rahix — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/"
+  - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion"
+
+single_line_wall:
+  title: Fragile Wall with Single Perimeter
+  why: The CAD model shows a solid wall, but because it is thinner than two nozzle extrusion passes (under 0.8 mm on a 0.4 mm nozzle), the slicer only lays down a single flimsy bead of plastic, leaving the wall brittle, full of pinholes, and easily cracked along layer seams.
+  fixes:
+  - domain: geometry
+    text: Thicken the wall in CAD to at least 1.2 mm (or at least 0.85 mm for a 0.4 mm nozzle) so the slicer fits inner and outer perimeter loops with solid overlap.
+  - domain: slicer
+    text: Turn on the Arachne wall generator to dynamically widen extrusion paths and eliminate hollow gaps in thin sections.
+    settings:
+      wall_generator: arachne
+      wall_loops: '3'
+  - domain: process
+    text: If thin walls are required by your design, install a smaller 0.2 mm nozzle assembly so multiple perimeter passes can fit inside the narrow wall thickness.
+  tags:
+  - thin-wall
+  - perimeters
+  - strength
+  - arachne
+  sources:
+  - "Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769"
+  - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748"
+  - "CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints"

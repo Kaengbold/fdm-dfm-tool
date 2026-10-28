@@ -105,6 +105,16 @@ export class Viewer {
     });
   }
 
+  /** Screen position (CSS px, page coordinates) of triangle ``f``'s centre — for automated tests. */
+  screenPointOfFace(f) {
+    const pos = this.part.geometry.getAttribute("position");
+    const c = new THREE.Vector3();
+    for (let v = 0; v < 3; v++) c.add(new THREE.Vector3().fromBufferAttribute(pos, f * 3 + v));
+    c.divideScalar(3).project(this.camera);
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return [rect.left + ((c.x + 1) / 2) * rect.width, rect.top + ((1 - c.y) / 2) * rect.height];
+  }
+
   /** Face index under a click, or -1. */
   pick(event) {
     if (!this.part) return -1;

@@ -1,0 +1,238 @@
+- id: overhang_angle_by_material
+  title: Maximum unsupported overhang angle per material
+  applies_when: Face angle from build plate normal > 40° (or angle from horizontal < 50°) without support structures enabled
+  why: Each new perimeter loop steps outward over empty air and relies on the adjacent inner loop plus rapid cooling to solidify before gravity pulls it down. Materials with lower fan speeds or higher shrinkage curl upward and sag at shallower overhang angles.
+  fixes:
+    - domain: geometry
+      text: Reorient the part or redesign angled faces to stay within the safe overhang angle from vertical for the target filament.
+    - domain: slicer
+      text: Decrease layer height or increase line width to increase the stepover overlap ratio (w/h) between successive layers.
+      settings: {layer_height: "0.12", outer_wall_line_width: "0.50", extra_perimeters_on_overhangs: "true", overhang_reverse: "true"}
+    - domain: slicer
+      text: Enable auto-generated supports when overhang angle from vertical exceeds the material limit.
+      settings: {enable_support: "true", support_threshold_angle: "30"}
+  numbers: "Max safe overhang from vertical (0° = vertical wall) at w/h = 2.0 (0.4 mm nozzle, 0.2 mm layer): PLA 55–65° (up to 70° at 0.12 mm layer height); PETG 45–50°; ABS/ASA 40–45°; TPU 95A 45–50°; PA (Nylon) 35–45°; PA-CF 45–55° (carbon fibers stiffen the melt and reduce curl); PC 35–45°. Stepover overlap fraction = 1 - (h * tan(theta_vertical) / w); failure occurs when overlap drops below 30–50%."
+  exceptions: "Conical inside-corner overhangs or self-supporting domes can print up to 75° from vertical because adjacent perimeter segments remain in tension."
+  sources:
+    - "Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698 — (Section: Overhang threshold) — Defines overhang angles and threshold limits"
+    - "Maker's Muse — 3D Printing Overhangs: How to Print Better Without Supports — https://www.youtube.com/watch?v=nP11M1K5g0c — (03:15–07:40) — Demonstrates width-to-height (w/h) stepover physics"
+    - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — (Section: Printing Tips) — Fiber reinforcement reduces warping and overhang curl"
+  confidence: high
+
+- id: bridging_length_by_material
+  title: Maximum comfortable unsupported bridge span per material
+  applies_when: Horizontal downward-facing face (88–90° from vertical) spans between two supported pillars over a gap > 10 mm
+  why: Bridging extrudes filament in mid-air under tension between two anchor points. Without part cooling or with high melt elasticity/creep, the extruded strand sags before solidifying.
+  fixes:
+    - domain: geometry
+      text: Add a 45° chamfer, arch, or intermediate rib to keep unsupported spans below the material's comfortable bridge limit.
+    - domain: slicer
+      text: Reduce bridge flow to 0.85–0.95 to keep the extruded strand under slight tension, lower bridge speed, and maximize bridge fan speed.
+      settings: {bridge_flow: "0.90", bridge_speed: "25", thick_bridges: "false", detect_overhang_wall: "true"}
+  numbers: "Comfortable bridge span (<0.5 mm droop without supports): PLA 35–60 mm (up to 100 mm with tuned cooling); PETG 15–30 mm (sticky melt, moderate fan); ABS/ASA 10–25 mm (low fan in enclosure limits solidification); TPU 95A 5–15 mm (elastic sag); PA 10–20 mm; PA-CF 20–40 mm (high melt viscosity + fiber stiffness reduces sag); PC 10–20 mm."
+  exceptions: "Curved bridges (extruder moving along an arc in mid-air) fail immediately regardless of span length because tension pulls the strand into a straight chord."
+  sources:
+    - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — (Section: Thick bridges / Detect bridging perimeters) — Explains thin tensioned bridges vs thick bridges"
+    - "Teaching Tech — Tuning 3D print speed and bridging — https://teachingtechyt.github.io/calibration.html#bridging — (Bridging section) — Empirical bridge span and speed tuning"
+  confidence: high
+
+- id: horizontal_hole_teardrop_flat_top
+  title: Horizontal holes deform without teardrop or flat-top roof
+  applies_when: Cylindrical hole axis is within 20° of the XY plane and diameter > 3.0 mm
+  why: The top crown of a horizontal circular hole transitions through a 60° to 90° overhang, causing the upper perimeters to droop inward by 0.2–0.5 mm and creating an oval, undersized bore.
+  fixes:
+    - domain: geometry
+      text: For holes 3–12 mm in diameter, replace the top arc with a 90° or 120° teardrop point (or a truncated flat-top bridge roof for holes > 8 mm).
+    - domain: slicer
+      text: Enable Make Overhang Printable or apply X-Y hole compensation if modifying CAD is not possible.
+      settings: {make_overhang_printable: "true", make_overhang_printable_angle: "55", xy_hole_compensation: "0.15"}
+  numbers: "Unmodified horizontal holes <= 3 mm print with <0.15 mm crown sag; 4–8 mm holes sag 0.2–0.4 mm (use 90°/120° teardrop); > 8 mm holes sag > 0.5 mm (use flat-top roof 0.2–0.4 mm above nominal circle top so the bridge sag stays outside the pin clearance)."
+  exceptions: "Holes <= 2.5 mm diameter in PLA/PETG bridge across the crown quickly enough that a round profile remains functional for clearance bolts."
+  sources:
+    - "Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/ — (Section: Horizontal Holes) — 90°/120° teardrop vs flat roof geometry"
+    - "Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA — (02:10–06:45) — Teardrop vs diamond vs flat-top hole accuracy"
+  confidence: high
+
+- id: vertical_hole_shrinkage_polyholes
+  title: Vertical holes print undersized due to chordal error and pull
+  applies_when: Cylindrical hole with axis parallel to Z-axis and diameter between 1.5 mm and 25 mm
+  why: STL facet approximation inscribes a polygon inside the circle, and the extruded molten plastic is pulled inward around the tight curvature before it cools, shrinking the bore.
+  fixes:
+    - domain: geometry
+      text: Oversize vertical holes in CAD by +0.15 to +0.25 mm, or use Nophead's Polyhole polygon formula where vertices circumscribe the target diameter.
+    - domain: slicer
+      text: Enable Precise Outer Wall to eliminate outer/inner wall overlap push-out and apply positive X-Y hole compensation.
+      settings: {precise_outer_wall: "true", xy_hole_compensation: "0.10", outer_wall_first: "false"}
+  numbers: "Typical vertical hole shrinkage on 0.4 mm nozzle: 0.15–0.30 mm on diameter (largest relative error on 2–6 mm holes). Polyhole vertex count N = ceil(pi / atan(1 / (d / cos(pi/n)))) or ~max(round(pi * d), 8). OrcaSlicer Precise Wall sets outer-to-inner wall overlap to 0%."
+  exceptions: "STEP file imports sliced with native arc fitting (G2/G3) eliminate STL chordal facet error, leaving only ~0.08–0.15 mm of thermal/viscous inward pull."
+  sources:
+    - "Nophead (Chris Palmer) — Hydraraptor: Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.html — (Full article) — Derived chordal error and viscous inward pull physics"
+    - "OrcaSlicer Wiki — Precise wall — https://github.com/SoftFever/OrcaSlicer/wiki/Precise-wall — (Full page) — 'When this feature is enabled in OrcaSlicer, the overlap between the outer wall and its adjacent inner wall is set to zero.'"
+  confidence: high
+
+- id: counterbore_sacrificial_bridge_stack
+  title: Downward counterbores print cleanly with sacrificial bridges
+  applies_when: Stepped cylindrical hole along Z-axis has a larger lower bore transitioning to a smaller upper bore (floating circular inner perimeter in mid-air)
+  why: A circular inner hole perimeter cannot bridge across empty space because the nozzle moves in a circle, dragging the unanchored loop into the center of the hole.
+  fixes:
+    - domain: geometry
+      text: Use the sequential bridge-stack method (two perpendicular rectangular cuts of 1 layer height each before resuming the small circle) or a 1-layer (0.20 mm) sacrificial membrane across the hole.
+    - domain: slicer
+      text: Enable "Bridge Counterbore Hole" in OrcaSlicer to automatically generate sacrificial or two-stage bridge geometry without CAD edits.
+      settings: {counterbore_hole_bridging: "partially_bridged"}
+  numbers: "Sacrificial membrane thickness: 1 layer = 0.20 mm (punches out with bolt/allen key). Sequential two-stage bridge stack: Stage 1 cuts parallel chords tangent to the inner circle for 1–2 layers (0.2–0.4 mm); Stage 2 cuts perpendicular chords forming a square for 1–2 layers (0.2–0.4 mm); Stage 3 prints the circular hole on the supported 4-point square."
+  exceptions: "Not needed when the transition from counterbore to through-hole is tapered at a 45° countersink chamfer."
+  sources:
+    - "Maker's Muse — Secret to 3D Printing Counterbored Holes without Support — https://www.youtube.com/watch?v=am1026s43bd — (01:45–05:30) — Sequential 2-layer bridge-stack vs sacrificial layer"
+    - "OrcaSlicer Wiki — Quality Settings: Bridge Counterbore Hole — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_bridging — (Section: Bridge counterbore hole) — Native slicer implementation of Partial/Sacrificial counterbore bridging"
+  confidence: high
+
+- id: bed_contact_chamfer_vs_fillet
+  title: Use 45° chamfers, never fillets, on build-plate bottom edges
+  applies_when: Bottom edge contacting Z = 0 has a convex radius (fillet) > 0.4 mm
+  why: A bottom fillet starts tangent to the build plate at a nearly 90° overhang angle for the first 2–4 layers, resulting in curled, rough, unsupported perimeters and worsening elephant foot. A 45° chamfer steps outward at a constant printable angle and absorbs first-layer squish.
+  fixes:
+    - domain: geometry
+      text: Replace bottom-edge fillets with a 0.4–1.0 mm x 45° chamfer, or start with a 45° chamfer for the first 1.5 mm and transition tangentially into a fillet above it.
+    - domain: slicer
+      text: Set elephant foot compensation to inset the first layer by 0.15–0.20 mm if a bottom chamfer is absent.
+      settings: {elefant_foot_compensation: "0.15", elefant_foot_compensation_layers: "1"}
+  numbers: "A R2.0 mm bottom fillet has a 74° overhang on layer 1 (z = 0.2 mm) and 60° on layer 2 (z = 0.4 mm). A 0.4–0.6 mm x 45° bottom chamfer completely hides first-layer elephant foot bulge (typically 0.1–0.25 mm)."
+  exceptions: "Vertical (Z-axis) edges should use fillets rather than chamfers so the toolhead maintains constant cornering velocity."
+  sources:
+    - "Slant 3D — How to Design Parts for 3D Printing (Fillets & Chamfers) — https://www.youtube.com/watch?v=9JqN2aFBa2w — (00:45–04:10) — Why bottom fillets fail and hybrid chamfer-to-fillet works"
+    - "Rahix — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/ — (Section: Fillets) — Geometric overhang analysis of bottom fillets vs chamfers"
+  confidence: high
+
+- id: corner_mouse_ears_vs_brim
+  title: Add mouse-ear pads on sharp base corners to prevent lifting
+  applies_when: Part footprint diagonal > 80 mm with base corner internal angles <= 90° on build plate
+  why: Thermal contraction stresses concentrate at sharp 90° corners on the build plate, peeling them upward while leaving central straight edges flat. Mouse ears increase local corner adhesion area and disperse corner stress without requiring full-perimeter brim deburring.
+  fixes:
+    - domain: geometry
+      text: Add circular mouse-ear pads (10–20 mm diameter, 1–2 layers / 0.2–0.4 mm thick) at sharp bottom corners, or fillet vertical base corners to >= R3 mm.
+    - domain: slicer
+      text: Enable OrcaSlicer built-in Mouse Ear brim type.
+      settings: {brim_type: "mouse_ear", brim_ears_max_angle: "125", brim_width: "8"}
+  numbers: "Mouse ear diameter: 8–15 mm; thickness: 0.20–0.40 mm (1–2 layers); overlap into part corner: 1.5–3.0 mm."
+  exceptions: "Cylindrical parts with no base corners or parts requiring full chamber draft sealing (where a continuous outer brim is superior)."
+  sources:
+    - "OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/SoftFever/OrcaSlicer/wiki/other_settings_brim — (Section: Brim type) — Automatic corner detection and mouse ear generation"
+    - "CNC Kitchen — How to Prevent Warping in 3D Printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y — (05:20–08:10) — Corner stress concentration and mouse ear effectiveness"
+  confidence: high
+
+- id: min_wall_thickness_and_arachne
+  title: Minimum wall thickness and feature size per nozzle diameter
+  applies_when: Thin wall thickness < 2 * nozzle_diameter or positive pin/feature width < 1.5 * nozzle_diameter
+  why: Classic perimeter generators drop walls thinner than a single extrusion width and leave hollow gaps or over-extrude when wall thickness is not an integer multiple of line width. Arachne varies extrusion width dynamically (typically 50%–200% of nozzle diameter) to print odd-thickness walls cleanly.
+  fixes:
+    - domain: geometry
+      text: Design structural walls at >= 2x nozzle diameter (ideally integer multiples of line width, e.g., 0.8, 1.2, 1.6, 2.0 mm for a 0.4 mm nozzle).
+    - domain: slicer
+      text: Enable the Arachne perimeter generator to dynamically modulate line width for thin tapered features and odd-multiple walls.
+      settings: {wall_generator: "arachne", min_bead_width: "85%", min_feature_size: "25%"}
+  numbers: "Standard line width & recommended minimum 2-perimeter structural wall: 0.2 mm nozzle -> 0.22 mm line / 0.45 mm wall (min single Arachne line ~0.15 mm); 0.4 mm nozzle -> 0.42 mm line / 0.85 mm wall (min single Arachne line ~0.30 mm); 0.6 mm nozzle -> 0.62 mm line / 1.25 mm wall (min single Arachne line ~0.45 mm); 0.8 mm nozzle -> 0.82 mm line / 1.65 mm wall (min single Arachne line ~0.60 mm)."
+  exceptions: "Prusa Knowledge Base notes: 'For some functional prints where the accuracy of concave corners is important, the classic perimeter generator may be better.'"
+  sources:
+    - "Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769 — (Full article) — Variable extrusion width thresholds and functional concave corner caveat"
+    - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — (Section: Detect thin walls) — Interaction between thin walls and Arachne"
+  confidence: high
+
+- id: text_embossing_debossing_limits
+  title: Minimum text size, stroke width, depth, and orientation
+  applies_when: Surface contains raised (embossed) or recessed (debossed) text or fine surface details
+  why: Horizontal (XY top-face) text is limited by the nozzle diameter (~0.4 mm), whereas vertical (Z-wall) text is limited by layer height (~0.2 mm) in Y-height and can overhang if too deep.
+  fixes:
+    - domain: geometry
+      text: Use sans-serif bold fonts (Arial Bold, DIN, Osifont), keep stroke width >= 1.5x nozzle width on top faces, and limit vertical wall deboss/emboss depth to 0.4–0.6 mm (with 45° drafted edges if deeper).
+    - domain: slicer
+      text: Enable Arachne wall generator and set Only One Wall on Top Surfaces so top-face lettering has clean, uninterrupted outlines.
+      settings: {wall_generator: "arachne", only_one_wall_top: "true"}
+  numbers: "0.4 mm nozzle minimum readable sans-serif text height: Top/Bottom (XY) face = 5.0 mm (debossed) to 6.0 mm (embossed), minimum stroke width >= 0.45 mm (debossed) or >= 0.65 mm (embossed), Z-depth = 0.4–0.6 mm (2–3 layers at 0.2 mm). Vertical (Z) wall face = 3.0–3.5 mm minimum height, XY depth = 0.4–0.6 mm (max 0.8 mm without 45° chamfered bottom edges to prevent overhang droop)."
+  exceptions: "With a 0.2 mm nozzle, top-face text is readable down to 2.5–3.0 mm height and 0.25 mm stroke width."
+  sources:
+    - "Prusa Knowledge Base — Layers and perimeters (Only one perimeter on top) — https://help.prusa3d.com/article/layers-and-perimeters_1748 — (Section: Single perimeter on top surfaces) — Improves top-surface text clarity"
+    - "Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac — (01:10–05:50) — Side-wall vs top-face resolution and depth limits"
+  confidence: high
+
+- id: mechanical_clearances_by_fit
+  title: Radial clearance for press, sliding, and print-in-place fits
+  applies_when: Two mating surfaces or a print-in-place assembly share coaxially or planarly adjacent boundaries
+  why: Layer lines, seam bulges, corner over-extrusion, and thermal shrinkage create surface roughness (Ra ~10–25 um) and dimensional error that fuse or bind parts without radial clearance.
+  fixes:
+    - domain: geometry
+      text: Apply radial clearance based on fit type and add Slant 3D's elastic grip fins or crush ribs for repeatable press fits across varying printer calibrations.
+    - domain: slicer
+      text: Enable Precise Outer Wall and Scarf/Aligned seams pointing away from the mating interface.
+      settings: {precise_outer_wall: "true", xy_contour_compensation: "0.0", xy_hole_compensation: "0.05"}
+  numbers: "Radial clearance (per side; double for diametral clearance) on tuned CoreXY/Input-Shaped printers (Bambu X1/P1/A1, Prusa MK4/Core One): Press/interference fit = 0.00–0.05 mm radial (or +0.15 mm radial clearance with 0.3 mm crush ribs); Snug/locating fit = 0.10 mm radial (0.20 mm diametral); Sliding/running fit = 0.15–0.20 mm radial (0.30–0.40 mm diametral); Print-in-place hinge/bearing = 0.20–0.30 mm radial (min 0.15 mm tuned, 0.35 mm for budget untuned bedslingers)."
+  exceptions: "Z-axis vertical clearances between stacked print-in-place surfaces require >= 1 full layer height (0.20–0.30 mm) plus conical 45° bearing races so layers do not bridge onto each other."
+  sources:
+    - "Maker's Muse — Clearance and Tolerance 3D Printing Gauge — https://www.youtube.com/watch?v=TYuLVN3YHw8 — (02:30–08:15) — Print-in-place clearance benchmarks across printer classes"
+    - "Rahix / Slant 3D — Design for 3D-Printing (Grip Fins) — https://blog.rahix.de/design-for-3d-printing/ — (Section: Grip Fins) — Elastic grip fins vs plastic-deformation crush ribs"
+  confidence: high
+
+- id: snap_fits_and_living_hinges
+  title: Cantilever snap-fits and living hinges by orientation and material
+  applies_when: Thin flexing beam (thickness < 2.5 mm) or ultra-thin folding web (thickness < 0.6 mm) detected
+  why: Snap-fit cantilevers loaded across Z layer lines delaminate brittlely at 30–60% lower strain than XY perimeters. PLA has low yield strain (~2–3%) and high creep under sustained load, whereas PETG and PA (Nylon) tolerate higher elastic deflection and fatigue cycles.
+  fixes:
+    - domain: geometry
+      text: Orient cantilever snap-fits so the U-profile of the beam lies flat in the XY plane (continuous perimeter loops along the bending stress axis), taper beam thickness from base to tip, and add a base fillet >= 1.5x beam thickness.
+    - domain: slicer
+      text: Force continuous perimeter loops through living hinges (2 layers thick = 0.30–0.40 mm) with Arachne or Classic wall generator so no infill or travel breaks occur in the hinge web.
+      settings: {wall_loops: "99", bottom_shell_layers: "0", top_shell_layers: "0"}
+  numbers: "Max allowable bending strain for single-use / repeated snap-fits: PLA = 1.5–2.0% (repeated) / 3% (single assembly, never leave under static tension due to creep); PETG = 2.5–3.5%; ABS/ASA = 2.5–3.5%; PA6/PA12 = 4.0–6.0%. Living hinge thickness: 0.30–0.45 mm (2 layers at 0.15–0.20 mm layer height); fold immediately after printing while warm to orient polymer chains; life: PLA ~5–20 cycles, PETG ~50–150 cycles, PA/PP > 1,000 cycles."
+  exceptions: "Annular snap fits or briefly deflected low-strain latches (<1.5% strain) can be printed vertically if Z-adhesion is high and root fillets are large."
+  sources:
+    - "CNC Kitchen — Carbon Fiber Nylon in 3D Printing: PA6 vs PA12 Tested — https://www.cnckitchen.com/blog/carbon-fiber-nylon-in-3d-printing-pa6-vs-pa12-tested — (Section: Creep test) — PLA and PA6 creep under static spring load"
+    - "Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/ — (Section: Living Hinges) — Orientation and layer mechanics of printed living hinges"
+  confidence: high
+
+- id: fasteners_heat_set_inserts_and_threads
+  title: Hole sizing for heat-set inserts, self-tapping screws, and threads
+  applies_when: Cylindrical bosses, tapped holes, or helical thread geometry for M2–M8 fasteners
+  why: Heat-set inserts require displaced molten plastic to flow into opposing knurls without overflowing into the internal thread or failing to pre-seat. Printed threads smaller than M6 lack sufficient radial overhang overlap at 0.20 mm layer height.
+  fixes:
+    - domain: geometry
+      text: Size heat-set insert bores so the pilot end just pre-seats, add a 0.5 mm top entry chamfer and 1.0–1.5 mm bottom relief depth, and maintain a boss wall thickness >= 2.0–2.5 mm around the insert.
+    - domain: slicer
+      text: Increase wall loops to >= 4–5 (or use a modifier cylinder around bosses) so the hot insert melts into solid perimeters rather than sparse infill voids.
+      settings: {wall_loops: "4", sparse_infill_density: "25%"}
+  numbers: "Ruthex / CNC Kitchen standard heat-set insert nominal CAD bore diameters (add +0.1 to +0.2 mm if uncompensated for hole shrinkage): M2 = 3.2 mm bore (min depth 5.0 mm); M2.5 = 4.0 mm bore (min depth 6.5 mm); M3 = 4.0–4.2 mm bore (CNC Kitchen 2026 pull-out tests show 4.0–4.2 mm pre-seats easily while retaining full ~1200–1500 N pull-out strength; min depth 6.5 mm); M4 = 5.6 mm bore (min depth 9.0 mm); M5 = 6.4 mm bore (min depth 10.5 mm); M6 = 8.0 mm bore. Self-tapping metric machine screws directly into plastic (pilot hole = ~0.85–0.90x nominal OD): M2 = 1.75 mm, M2.5 = 2.2 mm, M3 = 2.65–2.75 mm, M4 = 3.5–3.6 mm, M5 = 4.4–4.5 mm (use trilobular/120° teardrop hole to reduce hoop stress cracking). Direct 3D-printed ISO threads: reliable >= M6 (M8+ preferred) at <= 0.16 mm layer height; for M6 and smaller, use captive hex nut traps or heat-set inserts."
+  exceptions: "McMaster-Carr tapered inserts use different bore diameters than Ruthex/CNC Kitchen/Voron-standard inserts (e.g., McMaster M3 tapered uses ~4.7 mm top / 4.4 mm bottom)."
+  sources:
+    - "CNC Kitchen — Are Our Heat-Set Insert Datasheets Wrong? — https://www.cnckitchen.com/blog/are-our-heat-set-insert-datasheets-wrong — (Full article, March 2026) — Pull-out tests across 3.6–4.6 mm bores for M3 inserts"
+    - "Ruthex — Official Thread Insert Dimensions — https://www.ruthex.de/en/products/ruthex-hss-bohrer-set-5-tlg-fur-gewindeeinsatze-m2-m2-5-m3-m4-m5-m6-din-338-bohrer-3-2-4-0-5-6-6-4-8-0-mm-fur-kunststoff-stahl-alu-kupfer-messing-uvm — Nominal bore diameters 3.2, 4.0, 5.6, 6.4, 8.0 mm"
+    - "CNC Kitchen — Threaded Inserts in 3D Prints - How strong are they? — https://www.cnckitchen.com/blog/tipps-amp-tricks-fr-gewindeeinstze-im-3d-druck-3a862 — Wall loops and installation temperature"
+  confidence: high
+
+- id: ribs_gussets_and_part_splitting
+  title: Replace support towers with ribs/gussets or split large parts
+  applies_when: Cantilevered shelves, L-brackets, or parts exceeding build volume / requiring > 20% support material mass
+  why: Support material leaves scarred bottom contact surfaces (due to the 0.15–0.25 mm Z-gap), wastes filament, and increases print failure risk. Triangular gussets convert a 90° overhang into a self-supporting 45° slope while tripling bracket bending stiffness.
+  fixes:
+    - domain: geometry
+      text: Add 45° triangular ribs/gussets beneath horizontal cantilevers, or split the part along a flat plane and join using printed dovetails, alignment dowels + cyanoacrylate/epoxy, or M3 bolts.
+    - domain: slicer
+      text: Use OrcaSlicer's Cut tool with integrated Dowel, Plug, or Snap connectors when a model cannot be printed flat in one piece.
+  numbers: "Rib thickness should be 0.6x–0.8x the main wall thickness (e.g., 1.6–2.4 mm rib on a 3.0 mm wall) to avoid internal voids or localized shrinkage sink marks, spaced at >= 2x wall thickness."
+  exceptions: "When the underside of the overhang must remain completely open for a mating component to slide underneath."
+  sources:
+    - "Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA — (01:20–06:30) — Using 45° chamfers, ribs, and part splitting instead of supports"
+    - "OrcaSlicer Wiki — Cut Tool — https://github.com/SoftFever/OrcaSlicer/wiki/cut-tool — Built-in dowel, snap, and dovetail splitting connectors"
+  confidence: high
+
+- id: slant3d_dfam_complete_ruleset
+  title: Slant 3D's 10 core Design for Mass-Production FDM rules
+  applies_when: Part is evaluated for reliable, support-free, automated or high-yield FDM printing
+  why: Slant 3D's print-farm guidelines eliminate manual post-processing (support and brim removal), prevent nozzle crashes, and normalize tolerances across machine variations.
+  fixes:
+    - domain: geometry
+      text: Apply Slant 3D's 10 geometric transformations during CAD modeling to make parts support-free, bed-stable, and tolerance-insensitive.
+  numbers: "Slant 3D's complete ruleset and reasoning: (1) Chamfer all bed-contact bottom edges at 45° (0.5–1.5 mm) — eliminates elephant foot and first-layer overhang failure that occurs with bottom fillets; to get a rounded look, start with a 45° chamfer and transition tangentially into a fillet. (2) Fillet all vertical (Z-axis) corners (min R1–2 mm) — prevents the toolhead from decelerating to a dead stop at sharp 90° corners, eliminating corner bulging/over-extrusion and speeding up prints. (3) Chamfer horizontal top/overhang edges — maintains a constant 45° stepover angle instead of the shallow variable-angle stair-stepping of top fillets. (4) Never use supports; design them out via 45° roofs, teardrop horizontal holes, or bridge-stacks — supports ruin surface finish and require manual labor. (5) Use Elastic Grip Fins instead of solid press-fit bores or rigid crush ribs — thin angled fins inside a bore flex elastically to hold shafts securely across +/-0.2 mm printer variance and allow repeated disassembly. (6) Use 120° Teardrop Vertical Screw Holes — gives self-tapping threads 3 contact arcs, prevents hoop-stress cracking, and hides the Z-seam in the sharp apex so the bore stays round. (7) Orient parts at a 45° diagonal angle (with an integrated tear-away fin/foot) for tall beams or cylinders — puts layer lines at 45° to bending loads and hides top/bottom stair-stepping. (8) Add Sacrificial Bridges / Bridge Stacks to all counterbores — enables mid-air circular bores without support material. (9) Replace sharp external corners with rounded mouse-ear profiles or slotted relief cuts — prevents thermal warping on long flat bases. (10) Round or chamfer thread roots and avoid sharp V-notches in Z — sharp internal V-grooves act as stress concentrators that initiate Z-layer delamination."
+  exceptions: "Rule 7 (45° diagonal orientation) increases Z-height and print time and should be skipped when a flat orientation already aligns perimeters with the primary tensile load."
+  sources:
+    - "Rahix — Design for 3D-Printing (synthesizing Slant 3D video series) — https://blog.rahix.de/design-for-3d-printing/ — (Full article) — Diagrams and references for Slant 3D fillets/chamfers, teardrops, grip fins, and diagonal printing"
+    - "Slant 3D — 9 Design Rules for 3D Printing — https://www.youtube.com/watch?v=AD6L13tB1bE — (Full video, 00:00–14:20) — Core DfAM rules for print farms"
+  confidence: high

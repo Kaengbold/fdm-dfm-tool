@@ -1,0 +1,151 @@
+- id: slant3d_support_fins_and_breakaway_tines
+  title: Custom CAD support fins with 0.1–0.2 mm breakaway tines
+  applies_when: Long/tall part is tilted at 45° or printed on a thin chamfered edge and requires bed anchoring without slicer supports
+  why: Auto-generated slicer supports scar surfaces, fail under lateral nozzle drag on tall tilted parts, and require tedious cleanup. A solid triangular CAD fin buttresses the part against wobble while contacting the model only through narrow "tine" teeth or a thin air gap so perimeters never fuse across the boundary.
+  fixes:
+    - domain: geometry
+      text: Model a triangular buttress fin (1.6–2.4 mm thick) separated from the part by a 0.15–0.20 mm air gap, bridged by thin 0.40–0.45 mm breakaway tines spaced every 3–5 mm (or import the fin as a touching sub-object so the slicer generates separate closed perimeter loops).
+    - domain: slicer
+      text: "Disable auto-generated slicer supports (`enable_support: \"false\"`) and let `wall_generator: \"arachne\"` trace each tine as a single hairpin loop that kisses the part's outer wall cleanly."
+      settings: {enable_support: "false", wall_generator: "arachne"}
+  numbers: "Fin main body thickness: 1.6–2.5 mm (4–6 perimeters); Gap between fin body and part: 0.15–0.25 mm; Tine width: 0.40–0.45 mm (1 extrusion width so the nozzle loops out to the tip of the tine and back without merging into the part's perimeter); Tine spacing: 2.0–5.0 mm along the supported edge; Base anchor pad thickness: 0.40 mm (2 layers)."
+  exceptions: "Extremely heavy overhangs where a single-extrusion tine cannot carry the vertical mass without buckling."
+  sources:
+    - "Slant 3D — How to Design Better Support Fins for 3D Printing — https://www.youtube.com/watch?v=vnn4XeKQobs — (01:15–06:40) — Tine loop geometry for true clean breakaway without surface scarring"
+    - "Slant 3D — You Don't Use Fins Enough — https://www.youtube.com/watch?v=6gPPAiqSkBc — (02:41–06:30) — Why flat support edges fail and how triangular support fins stabilize on-edge prints"
+    - "Slant 3D — Stop Using Slicer Supports | Design for 3D Printing — https://www.youtube.com/watch?v=_R2E8VwyNz0 — (00:50–09:15) — Replacing slicer tree/grid supports with CAD-designed breakaway supports"
+  confidence: high
+
+- id: slant3d_elastic_grip_fins_for_tolerances
+  title: Elastic grip fins instead of rigid press-fit bores
+  applies_when: Cylindrical hole or slot mates with a dowel, shaft, magnet, or bearing via friction/interference fit
+  why: Rigid round holes cannot stretch elastically across layer lines; a +/-0.15 mm printer extrusion variance turns a nominal press-fit into either a loose rattle or a cracked housing. Thin angled internal fins bend like leaf springs when a shaft is inserted, accommodating wide dimensional variations with consistent retention force.
+  fixes:
+    - domain: geometry
+      text: Oversize the main bore by +0.30 to +0.50 mm on diameter for easy entry, and add 3 to 6 angled compliant grip fins (0.80–1.00 mm thick, angled at 20–35° from the radial normal) protruding inward to create a 0.15–0.30 mm radial interference with the shaft.
+    - domain: slicer
+      text: "Enable `wall_generator: \"arachne\"` so the slicer prints each thin grip fin as a continuous, solid perimeter hairpin loop."
+      settings: {wall_generator: "arachne"}
+  numbers: "Fin thickness: 0.80–1.00 mm (1 continuous folded perimeter loop on a 0.4 mm nozzle); Fin root fillet: >= R0.5 mm; Radial interference at fin tip: 0.15–0.30 mm; Tolerable shaft/printer variance without losing grip: +/-0.25 mm (vs +/-0.05 mm for a rigid cylinder)."
+  exceptions: "High-precision concentric bearing bores where any radial eccentricity under side-load is unacceptable (use a 3-point rigid locator with 1 compliant preload tab instead)."
+  sources:
+    - "Slant 3D — How to Design a Print with Perfect Tolerance EVERY Time — https://www.youtube.com/watch?v=XKrDUnZCmQQ — (01:05–08:30) — Compliant grip fins vs crush ribs for universal machine tolerance"
+    - "Slant 3D — You Don't Use Fins Enough — https://www.youtube.com/watch?v=6gPPAiqSkBc — (00:17–02:40) — Why most grip fins fail (too stubby/radial instead of angled leaf-spring cantilevers)"
+  confidence: high
+
+- id: slant3d_eliminate_hull_shrink_lines
+  title: Eliminate outer-wall shrink lines at floor/deck transitions
+  applies_when: Hollow box, cup, or enclosure transitions from a solid bottom floor (`bottom_shell_layers`) to thinner vertical side walls
+  why: The thick solid floor contains high thermal mass and long continuous infill lines that contract significantly as they cool, pulling the outer wall inward and leaving a visible horizontal ridge ("Benchys hull line" / shrink line) at the exact Z-height where the inner floor ends.
+  fixes:
+    - domain: geometry
+      text: Cut an internal stress-relief groove (or 45° internal chamfer/taper) where the inside floor meets the vertical perimeter wall so the shrinking floor is decoupled from the outer cosmetic skin, or keep wall and floor thicknesses uniform throughout the part.
+    - domain: slicer
+      text: "Enable `precise_outer_wall: \"true\"`, match inner/outer wall cooling speeds (`dont_slow_down_outer_wall: \"true\"`), and use `gyroid` infill (10–15%) instead of solid/grid floors where possible."
+      settings: {precise_outer_wall: "true", dont_slow_down_outer_wall: "true", sparse_infill_pattern: "gyroid"}
+  numbers: "Typical uncompensated floor-to-wall shrink step: 0.08–0.25 mm inward pull at the top Z-layer of the internal floor. An internal perimeter relief trench 0.8–1.2 mm wide and 1.0–2.0 mm deep around the edge of the floor absorbs the linear contraction before it reaches the outer wall."
+  exceptions: "Vase-mode parts or open-ended tubes with no horizontal internal floor."
+  sources:
+    - "Slant 3D — How to Eliminate Shrink Lines — https://www.youtube.com/watch?v=d61u_lKFa-U — (00:40–08:50) — Internal relief grooves, gradual internal tapers, and thermal mass decoupling"
+  confidence: high
+
+- id: slant3d_internal_micro_voids_3x_strength
+  title: Force internal perimeter ribs in CAD without changing slicer settings
+  applies_when: High-load bracket, lever, or handle needs localized internal reinforcement or 3x bending strength even when sliced with default 2-wall farm settings
+  why: In print-on-demand farms or shared STL files, the designer cannot guarantee the end user will increase `wall_loops` in the slicer. Placing narrow 0.05–0.20 mm micro-slots or an array of tiny 0.5–1.0 mm vertical holes inside the CAD volume tricks any slicer into generating dense internal perimeter shells right along the load path.
+  fixes:
+    - domain: geometry
+      text: Cut internal micro-slots (0.10–0.20 mm wide) or rows of small internal holes along the tensile/bending stress paths inside the solid CAD body so the slicer automatically wraps 2–4 solid perimeter loops around each internal void, creating internal I-beam webs.
+  numbers: "Internal seed slot width: 0.10–0.20 mm (narrow enough that opposing walls touch and fuse into a solid 1.6 mm internal rib when sliced with 2 perimeters at 0.42 mm width). Increases part bending strength by 200–300% under default 2-wall / 15%-infill slicer profiles."
+  exceptions: "Transparent prints where internal perimeter seams would scatter light."
+  sources:
+    - "Slant 3D — 3x Part Strength Without Slicer Settings | Design for Mass Production 3D Printing — https://www.youtube.com/watch?v=Lq-SoGgKOcQ — (00:30–04:05) — Using internal micro-holes and seed slots to force internal slicer perimeters"
+    - "Slant 3D — Make Prints Super Strong without Slicer Settings - Compilation of Micro Features — https://www.youtube.com/watch?v=R0w4GmVX7xM — (00:00–11:20) — Internal perimeter ribs, corrugated shells, and stress-flow channels"
+  confidence: high
+
+- id: slant3d_unbreakable_pins_and_ripples
+  title: Unbreakable printed pins using flat sides, slots, and surface ripples
+  applies_when: Cylindrical alignment pin, snap-stud, or axle protrudes from a flat surface
+  why: A vertical cylindrical pin printed upright snaps effortlessly along its horizontal Z-layer lines and suffers from weak shear connection at the base surface because the pin perimeters only sit on top of the flat face's top skin.
+  fixes:
+    - domain: geometry
+      text: Sink a hollow bore or slot deep into the base below the pin (forcing the slicer to extend internal walls down into the main body like a tree root), add vertical surface ripples/flutes around the pin perimeter to double perimeter surface area and provide crush compliance, or split the pin into a flat-sided D-profile printed horizontally on the bed.
+  numbers: "Sinking a 0.5–1.0 mm internal core hole from the pin down 3–5 mm into the base body increases pin base shear/bending snap force by 2x–4x because the inner hole perimeters pass continuously across the base-to-pin interface. Adding 0.3–0.4 mm sinusoidal ripples around a vertical pin increases outer wall path length (and Z-bond area) by +30–45% while acting as built-in crush ribs."
+  exceptions: "Rotating journal axles that require a smooth cylindrical bearing surface (use a horizontally printed D-shaft or bolt instead)."
+  sources:
+    - "Slant 3D — Design Unbreakable Pins with Perfect Tolerances — https://www.youtube.com/watch?v=uMA-Wt-z_BU — (00:45–09:10) — Deep-rooted internal core holes, compliant slots, and D-profile horizontal pins"
+    - "Slant 3D — Make a Pin that Doesn't Break. Use Ripples — https://www.youtube.com/shorts/njTfpxL71zk — (00:00–00:55) — Corrugated/rippled pin perimeters for Z-strength and press-fit tolerance"
+  confidence: high
+
+- id: slant3d_glue_free_magnet_retention
+  title: Stop gluing magnets—use compliant snap pockets or side-entry slots
+  applies_when: Part incorporates permanent neodymium magnets (disc or rectangular)
+  why: Cyanoacrylate glue requires manual assembly labor, leaves white blooming residue on dark PLA/PETG, fails under impact or moisture, and pausing a print mid-job to drop in magnets ruins print-farm automation and risks striking the steel nozzle.
+  fixes:
+    - domain: geometry
+      text: Design a side-entry pocket with a thin 0.6–0.8 mm compliant retaining lip, a top-entry bore with angled elastic grip fins, or a snap-cap bridge over the magnet pocket so magnets press-click in permanently after printing with zero glue and zero mid-print pauses.
+  numbers: "Outer magnet wall thickness (between magnet and mating metal surface): 0.40–0.60 mm (1 perimeter or 2–3 bottom layers so magnetic pull force remains high); Retaining snap-lip overhang: 0.25–0.35 mm inward interference; Side-slot entry clearance: +0.15 mm on magnet thickness, -0.15 mm interference via a cantilevered spring finger on the back face."
+  exceptions: "Food-contact or autoclaved medical enclosures that require a hermetically sealed, pause-embedded internal cavity."
+  sources:
+    - "Slant 3D — Stop Gluing Magnets Into Your 3D Prints — https://www.youtube.com/watch?v=46zH3BI8-LQ — (00:30–10:15) — Compliant snap-fit magnet pockets, side-slots, and grip-fin bores vs glue and mid-print pauses"
+  confidence: high
+
+- id: slant3d_ribs_and_trusses_wall_pull
+  title: Disconnect or taper ribs and trusses to prevent outer-wall sink marks
+  applies_when: Thin structural ribs or internal truss struts join directly at 90° onto a cosmetic outer wall
+  why: In FDM, where a T-junction rib meets an outer wall, the slicer interrupts or overlaps the inner perimeters and deposits extra molten mass at the node. As the rib cools and contracts along its length, it pulls the outer wall inward, creating a vertical sink line on the outside of the part—and sharp 90° truss nodes act as stress concentrators that snap along layer lines.
+  fixes:
+    - domain: geometry
+      text: Round all truss cutouts into broad ovals/fillets (no sharp triangle vertices), keep rib thickness <= 60% of the outer wall thickness, or leave a tiny 0.10–0.15 mm air gap between the internal stiffening rib and the cosmetic outer shell so the outer perimeter prints as an uninterrupted loop while still touching the rib structurally.
+  numbers: "Air-gapped internal rib clearance: 0.08–0.15 mm (forces the slicer to run a continuous, unblemished outer perimeter loop with zero T-junction retraction/pull mark while fusing lightly against the inner rib)."
+  exceptions: "Purely internal structural brackets where external cosmetic witness lines do not matter."
+  sources:
+    - "Slant 3D — Ribs and Trusses are Made Wrong in 3D Printing — https://www.youtube.com/watch?v=OcxfQeeKn-s — (00:35–08:20) — Why traditional triangular trusses fail in FDM and how to design continuous-loop ribs"
+  confidence: high
+
+- id: slant3d_box_orientation_and_compliant_lids
+  title: Box 45° orientation, gasketless labyrinth seals, and compliant lids
+  applies_when: Designing multi-part enclosures, project boxes, or snap-on lids
+  why: Printing a deep rectangular box flat on its bottom forces tall vertical walls to rely on weak Z-layer bonds for snap latches and risks warping Across the wide base. Printing a box tilted at 45° on a chamfered bottom edge aligns layer lines diagonally across all 4 walls and allows both halves of a hinged box to print in place without supports.
+  fixes:
+    - domain: geometry
+      text: Orient boxes on a 45° chamfered corner with a breakaway fin when wall latch strength is critical, use a 3-wall V-groove tongue-and-groove labyrinth rim to shed water without a TPU gasket, and add slotted compliant spring flexures into the lid rim so it snaps reliably regardless of shrinkage.
+  numbers: "Gasketless labyrinth seal: 45° V-shaped tongue mating into a matching 45° V-groove (self-centering, self-supporting at 45° in any print orientation, blocks splash water via surface tension and tortuous path). Compliant lid rim: cut a 0.8–1.2 mm slot behind the snap bead for 15–25 mm length so the rim acts as a leaf spring with 0.3–0.5 mm deflection range."
+  exceptions: "Shallow trays (height < 20% of width) with no snap latches, which print faster flat on the build plate."
+  sources:
+    - "Slant 3D — The Correct Orientation to Print Boxes | Design for Mass Production 3D Printing — https://www.youtube.com/watch?v=-kz6aW9nsKw — (01:00–09:30) — 45° tilted box printing for isotropic corner strength and zero supports"
+    - "Slant 3D — Design Compliant Lids for Perfect Tolerance Every Time | Design for 3D Printing: Lids: Vol. 2 — https://www.youtube.com/watch?v=XKrDUnZCmQQ — Slotted compliant lid rims and flex latches"
+    - "Slant 3D — This Box Keeps Out Water Without a Seal — https://www.youtube.com/watch?v=prMUfQ9y7Rk — (00:25–04:30) — 45° V-groove labyrinth rim geometry for water resistance without rubber gaskets"
+  confidence: high
+
+- id: slant3d_cad_textures_hide_layer_lines
+  title: Add CAD rib/knurl/wave textures instead of slicer Fuzzy Skin
+  applies_when: Large vertical or slightly curved cosmetic walls show visible Z-layer lines, VFA ringing, or shrink lines
+  why: Slicer `fuzzy_skin` jitter slows down print speeds by 30–50%, shakes the motion system, and relies on specific slicer settings that don't travel with the STL/STEP file. Modeling deliberate vertical flutes, horizontal wave ribs, hex dimples, or diamond knurling directly in CAD breaks up specular light reflection and hides layer lines at full print speed.
+  fixes:
+    - domain: geometry
+      text: Apply vertical flutes, corduroy ribs (0.4–0.8 mm amplitude, 1.5–3.0 mm pitch), or 45° diamond knurling to cosmetic outer surfaces in CAD, keeping a 0.5–1.0 mm smooth border around mating faces and holes.
+  numbers: "Recommended CAD texture depth/amplitude: 0.30–0.60 mm (deep enough to shadow layer lines, shallow enough not to trigger overhang supports). Vertical flutes execute as smooth G2/G3 arcs or short chords without the violent XY micro-stuttering of slicer Fuzzy Skin."
+  exceptions: "\"When random matte stone/stucco texture is specifically desired on a single prototype via OrcaSlicer (`fuzzy_skin: \"outside\"`, `fuzzy_skin_point_distance: \"0.3\"`, `fuzzy_skin_thickness: \"0.2\"`).\""
+  sources:
+    - "Slant 3D — 10 Ways to Hide Layer Lines | Design 3D Printed Textures — https://www.youtube.com/watch?v=pUabxkiJAdE — (00:30–08:15) — 10 CAD textures (corduroy, flutes, knurls, waves, halftone) that hide layer lines without slicer settings"
+    - "Slant 3D — Layer Lines Don't Matter | Design Textures for Mass Production 3D Printing — https://www.youtube.com/watch?v=5X_DYNlCcHE — Industrial design texturing for FDM"
+  confidence: high
+
+- id: slant3d_stop_filling_build_plate_and_cad_rafts
+  title: Print sequentially or single-part vs full-plate batches; use CAD rafts
+  applies_when: Plating multiple copies of a part or anchoring tiny-footprint parts without slicer brims
+  why: Packing 20 separate parts across a build plate in layer-by-layer mode multiplies inter-part travel moves (causing stringing and seam blobs on every piece) and means a single first-layer detachment ruins all 20 parts. Furthermore, slicer brims require manual knife deburring around the entire base contour.
+  fixes:
+    - domain: geometry
+      text: For parts with small bed contact areas, model a custom "lily-pad" or "spring raft" in CAD—an outer anchor ring or pad connected to the part via 2–3 narrow single-layer (0.20 mm) bridges at easy-to-snip points rather than a continuous slicer brim.
+    - domain: slicer
+      text: "Print fewer parts per plate with automatic ejection, or set `print_sequence: \"by object\"` when printing multiple small parts on a single plate to eliminate inter-object stringing and isolate failure risk."
+      settings: {print_sequence: "by object", brim_type: "no_brim"}
+  numbers: "CAD breakaway anchor bridge thickness: 0.20 mm (1 layer height) x 0.8–1.2 mm wide, connecting the part corner to a 15 mm diameter x 0.4 mm thick bed anchor disc. Reduces post-processing deburring time from ~30–60 s (full slicer brim) to < 2 s (twist-off tab)."
+  exceptions: "Multi-color AMS prints where purging waste is amortized across a full build plate of identical parts."
+  sources:
+    - "Slant 3D — STOP Filling Your Build Plate | Design for 3D Printing — https://www.youtube.com/watch?v=1n_R8shlGcs — Why full-plate batching lowers yield and increases stringing/failure cost"
+    - "Slant 3D — 6 Rafts You Have Never Seen! | Design for Additive Manufacturing — https://www.youtube.com/watch?v=4LTkVb6rP84 — (00:20–07:45) — Spring rafts, frame rafts, and point-contact CAD anchors vs slicer brims"
+    - "Slant 3D — Brims, Rafts & Supports — The RIGHT Way to Design 3D Printed Parts — https://www.youtube.com/watch?v=3AZWuVRUh2c — Replacing slicer adhesion helpers with clean-break CAD features"
+  confidence: high

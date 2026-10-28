@@ -1,0 +1,107 @@
+- id: problem_warping_and_corner_lifting
+  title: Warping and corner lifting off the build plate
+  applies_when: Long flat base (> 80 mm) or sharp base corners (< 90°), especially with ABS, ASA, PC, PA, or high-infill PLA/PETG
+  why: As extruded layers cool from printing temperature toward ambient/bed temperature, thermal contraction creates cumulative tensile stress along the length of the part. This stress concentrates at the ends and sharp corners, overcoming bed adhesion and curling the base upward.
+  fixes:
+    - domain: geometry
+      text: Round vertical base corners (R >= 3 mm), add mouse ears, or place expansion/stress-relief slots every 40–60 mm along long thick bottom walls or ribs.
+    - domain: slicer
+      text: Enable Mouse Ear or Outer Brim, reduce `wall_loops` and `sparse_infill_density` (or switch to `gyroid` infill which has lower linear contraction stiffness), and keep the cooling fan off for the first 3–4 layers.
+      settings: {brim_type: "mouse_ear", brim_width: "8", sparse_infill_pattern: "gyroid", close_fan_the_first_x_layers: "3"}
+    - domain: process
+      text: Enclose the printer to keep chamber air at 45–60°C, clean the PEI sheet with dish soap and warm water, and apply liquid glue/3DLAC for engineering filaments.
+  numbers: "Linear thermal shrinkage rate: PLA 0.2–0.4%, PETG 0.3–0.5%, ABS/ASA 0.6–0.9%, PC 0.6–0.8%, neat PA6/PA12 1.2–2.0% (reduced to 0.3–0.5% in PA-CF)."
+  exceptions: "Flexible TPU rarely warps on its own unless printed with excessive tension on a dirty unheated bed."
+  sources:
+    - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf — 'Be aware that higher infill and wall counts increase the risk of warping due to cooling shrinkage.'"
+    - "CNC Kitchen — How to Prevent Warping in 3D Printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y — (02:15–09:40) — Stress-relief cuts, infill patterns, and chamber temperature"
+  confidence: high
+
+- id: problem_elephant_foot
+  title: Elephant foot bulge on the bottom layers
+  applies_when: Bottom face meets vertical walls at a sharp 90° angle on Z = 0
+  why: A slightly low first-layer Z-offset squishes the first layer wider than nominal to ensure bed adhesion, and a bed temperature near or above the material's Tg (e.g., > 60°C for PLA) allows the weight of upper layers to compress the softened bottom layers outward.
+  fixes:
+    - domain: geometry
+      text: Add a 0.4–0.8 mm x 45° chamfer along all bottom edges contacting the build plate.
+    - domain: slicer
+      text: Set `elefant_foot_compensation` to 0.15 mm and keep bed temperature 5–10°C below the material's glass transition temperature (Tg) after layer 1.
+      settings: {elefant_foot_compensation: "0.15", elefant_foot_compensation_layers: "1"}
+  numbers: "Typical uncompensated elephant foot outward bulge: 0.10–0.25 mm per side (shrinking bottom holes by 0.20–0.50 mm on diameter). PLA Tg ~60°C (keep bed <= 55–60°C); PETG Tg ~80°C (keep bed 70–80°C)."
+  exceptions: "Parts printed on rafts do not exhibit bed-squish elephant foot."
+  sources:
+    - "Prusa Knowledge Base — Elephant foot compensation — https://help.prusa3d.com/article/elephant-foot-compensation_114487 — Causes and slicer inset compensation"
+  confidence: high
+
+- id: problem_stringing_and_oozing
+  title: Stringing and cobwebs across open travel paths
+  applies_when: Multiple separated towers, pillars, or islands per layer requiring frequent travel moves, especially with PETG, TPU, or PA
+  why: Molten polymer in the nozzle melt zone oozes out under residual pressure and capillary forces during non-printing travel moves, and dissolved moisture boils into steam that physically pushes plastic out of the orifice.
+  fixes:
+    - domain: geometry
+      text: Group isolated bosses closer together, connect separate features with a continuous bridge/rib, or orient the part to minimize the number of separate islands per Z-slice.
+    - domain: slicer
+      text: "Enable `reduce_crossing_wall` (Avoid crossing perimeters), use spiral/slope Z-hop at 0.2–0.4 mm, lower nozzle temperature by 5–10°C, or print separate parts using `print_sequence: \"by object\"`."
+      settings: {reduce_crossing_wall: "true", z_hop_types: "Slope Lift", retract_length: "0.8"}
+    - domain: process
+      text: Dry the filament thoroughly before tuning retraction settings—wet PETG, TPU, and PA string heavily regardless of retraction distance.
+  numbers: "Direct-drive retraction length: 0.4–1.0 mm (PLA/ABS 0.6–0.8 mm; PETG/TPU 0.8–1.2 mm; Bowden 3.5–6.0 mm). Retraction speed: 30–45 mm/s."
+  exceptions: "Retracting > 1.5–2.0 mm on an all-metal direct-drive hotend pulls molten plastic into the cold heatbreak and causes heat-creep jams."
+  sources:
+    - "Prusa Knowledge Base — Stringing and oozing — https://help.prusa3d.com/article/stringing-and-oozing_1804 — Moisture, temperature, retraction, and Avoid crossing perimeters"
+    - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion — Stringing increases with nozzle temp and moisture"
+  confidence: high
+
+- id: problem_overhang_curl_and_small_layer_overheating
+  title: Overhang curling and small-layer overheating
+  applies_when: Steep overhangs (> 45° from vertical), acute overhang corners, or small-area layers (< 100 mm² cross-section)
+  why: When an overhanging perimeter cools from the top down while anchored only on one inner side, thermal contraction pulls the free outer edge upward like a bimetallic strip. On small layers, the nozzle returns before the curled edge solidifies, ramming it repeatedly.
+  fixes:
+    - domain: geometry
+      text: Replace acute overhanging corners with wide radii (R >= 3 mm), keep overhangs <= 45°, and add a sacrificial cooling tower or print 2 copies simultaneously if the model ends in a narrow spire.
+    - domain: slicer
+      text: Decrease `layer_height` (e.g., 0.12–0.16 mm via Variable Layer Height) and increase `outer_wall_line_width` (0.50 mm) to boost the w/h ratio, enable `overhang_reverse`, and enable `slow_down_for_layer_cooling`.
+      settings: {layer_height: "0.12", outer_wall_line_width: "0.50", overhang_reverse: "true", slow_down_for_layer_cooling: "true", overhang_fan_speed: "100%"}
+  numbers: "Increasing w/h ratio from 2.0 (0.4 mm width / 0.2 mm height) to 4.0 (0.48 mm width / 0.12 mm height) increases inter-layer overlap at a 60° overhang from 13.4% to 56.7%, eliminating upward curl."
+  exceptions: "Slowing print speed too low (< 8 mm/s) on tiny spires keeps the hot 220°C nozzle radiating heat directly onto the soft pin; a minimum Z-lift pause or sacrificial second object works better."
+  sources:
+    - "Prusa Knowledge Base — Variable layer height function — https://help.prusa3d.com/article/variable-layer-height-function_1750 — Lowering layer height on steep slopes to eliminate curling and stepping"
+  confidence: high
+
+- id: problem_z_seam_and_layer_splitting
+  title: Z-seam visibility and mid-print layer splitting (delamination)
+  applies_when: Smooth revolved bodies (Z-seam visibility) or tall thin walls in high-shrinkage materials like ABS/ASA/PC (layer splitting)
+  why: Smooth cylinders lack sharp corners to hide the perimeter start/stop point. Tall thin walls in high-Tg materials cool rapidly in open air, building vertical tensile shrinkage stresses that exceed the Z-layer bond strength and crack the part horizontally mid-print.
+  fixes:
+    - domain: geometry
+      text: Add a vertical rib, flute, or 0.3 mm V-groove along cylindrical bodies to give the slicer a dedicated corner for hiding the Z-seam; for ABS/ASA/PC, thicken thin tall walls and add vertical corrugations/ribs to distribute shrinkage stress.
+    - domain: slicer
+      text: "Enable Scarf seams (`seam_slope_type: \"contour\"`) and `wipe_on_loops` for smooth cylinders; for layer splitting, raise nozzle temp +10°C, use wider extrusions (0.6 mm), and lower max cooling fan speed."
+      settings: {seam_slope_type: "contour", wipe_on_loops: "true", staggered_inner_seams: "true"}
+    - domain: process
+      text: Enclose the printer (chamber temp >= 45–60°C) and block drafts to prevent tall ABS/ASA/PC/PA parts from splitting between layers.
+  numbers: "Layer splitting risk rises sharply when part height > 50 mm and ambient chamber temperature is > 50°C below the material's Tg (e.g., ABS Tg ~105°C printed in a 22°C room)."
+  exceptions: "PLA and TPU almost never split mid-print from thermal shrinkage unless dramatically under-extruded."
+  sources:
+    - "Prusa Knowledge Base — Layer separation and splitting — https://help.prusa3d.com/article/layer-separation-and-splitting_2268 — Thermal stress mechanics and enclosure/fan fixes"
+    - "Prusa Knowledge Base — Seam position — https://help.prusa3d.com/article/seam-position_151069 — Scarf joints and staggered inner seams"
+  confidence: high
+
+- id: problem_bed_adhesion_moisture_heat_creep_ringing
+  title: Poor bed adhesion, moisture defects, heat creep, and ringing
+  applies_when: First layer contact area < 150 mm² / aspect ratio height:base > 4:1 (adhesion), hygroscopic filament exposed to air (moisture), enclosed PLA printing (heat creep), or sharp 90° vertical corners (ringing)
+  why: Small bed footprints topple from nozzle leverage; absorbed water flashes to steam at ~200°C causing popping, rough matte surfaces, and hydrolyzed polymer chains; chamber temps > 38–42°C soften PLA above the heatbreak (heat creep); and sharp toolhead direction changes excite frame resonance (ringing/ghosting).
+  fixes:
+    - domain: geometry
+      text: Widen base footprints or add sacrificial connecting bridges between tall pins (adhesion), and fillet vertical XY corners to >= R1.5 mm so the toolhead maintains smooth acceleration without exciting ringing.
+    - domain: slicer
+      text: Increase `initial_layer_line_width` to 120–140% (0.50 mm) and lower `initial_layer_speed` to 20–30 mm/s for bed adhesion; reduce `outer_wall_acceleration` to <= 2000–3000 mm/s² to suppress ringing.
+      settings: {initial_layer_line_width: "0.50", initial_layer_speed: "25", outer_wall_acceleration: "2500"}
+    - domain: process
+      text: Open the top glass/front door when printing PLA in an enclosed printer to prevent heat creep, and dry hygroscopic spools in a heated dryer before printing.
+  numbers: "PLA heat creep threshold: cold-end heatsink / chamber air > 40–45°C (PLA Tg ~55–60°C softens under extruder gear compression). Moisture absorption saturation in humid air: PA6 ~2.5–3.5 wt% (drops stiffness by 59% and causes violent steam bubbling), PETG/TPU/PC ~0.3–0.6 wt% (causes stringing, pockmarks, and up to 30% Z-strength loss)."
+  exceptions: "Printers with calibrated Input Shaping (Klipper / Bambu / Prusa MK4) suppress primary ringing frequencies up to 4000–5000 mm/s², though rounding vertical CAD corners still reduces corner seam bulge."
+  sources:
+    - "CNC Kitchen — Carbon Fiber Nylon in 3D Printing: PA6 vs PA12 Tested — https://www.cnckitchen.com/blog/carbon-fiber-nylon-in-3d-printing-pa6-vs-pa12-tested — Moisture uptake (3% PA6 vs 0.7% PA12) and stiffness loss"
+    - "Bambu Lab Wiki — Filament Drying Recommendations & Heat Creep Prevention — https://wiki.bambulab.com/en/filament-acc/filament/dry-filament — Drying parameters and open-door rule for PLA"
+  confidence: high

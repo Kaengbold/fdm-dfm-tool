@@ -20,11 +20,16 @@ def presets() -> dict:
     return load_data("presets")
 
 
+GOALS = ("balanced", "strength", "speed", "material")
+
+
 @dataclass(frozen=True)
 class Profile:
     printer_id: str = "bambu_p1s"
     material_id: str = "pla"
     nozzle: str = "0.4"
+    multi_material: bool = False  # AMS / MMU / second nozzle available (support interfaces in another material)
+    goal: str = "balanced"  # what orientation and settings optimise for: see GOALS
 
     @property
     def printer(self) -> dict:
@@ -61,7 +66,11 @@ class Profile:
             printer_id=d.get("printer", cls.printer_id),
             material_id=d.get("material", cls.material_id),
             nozzle=str(d.get("nozzle", cls.nozzle)),
+            multi_material=bool(d.get("multi_material", False)),
+            goal=d.get("goal", "balanced"),
         )
+        if p.goal not in GOALS:
+            raise ValueError(f"Unknown goal: {p.goal} (use one of {', '.join(GOALS)})")
         for table, key in (("printers", p.printer_id), ("materials", p.material_id), ("nozzles", p.nozzle)):
             if key not in presets()[table]:
                 raise ValueError(f"Unknown {table[:-1]} preset: {key}")

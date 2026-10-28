@@ -1,0 +1,119 @@
+```yaml
+warping:
+  footprint_length_threshold_mm:
+    general: {min: 80, rule_id: problem_warping_and_corner_lifting}
+    abs_asa_unenclosed_max: {max: 40, rule_id: material_abs_and_asa}
+    abs_asa_pc_unenclosed_risk: {min: 50, rule_id: mistake_23_printing_abs_asa_pc_on_open_printer}
+    abs_asa_pc_unenclosed_safe: {max: 35, rule_id: mistake_23_printing_abs_asa_pc_on_open_printer}
+    layer_splitting_height_risk: {min: 50, rule_id: problem_z_seam_and_layer_splitting}
+  shrinkage_rate_pct:
+    pla: {min: 0.2, max: 0.4, rule_id: problem_warping_and_corner_lifting}
+    petg: {min: 0.3, max: 0.5, rule_id: problem_warping_and_corner_lifting}
+    abs_asa: {min: 0.6, max: 0.9, rule_id: problem_warping_and_corner_lifting}
+    pa_neat: {min: 1.2, max: 2.0, rule_id: problem_warping_and_corner_lifting}
+    pa_cf: {min: 0.3, max: 0.5, rule_id: problem_warping_and_corner_lifting}
+    pc: {min: 0.6, max: 0.8, rule_id: problem_warping_and_corner_lifting}
+  enclosure_chamber_temp_c:
+    abs_asa: {min: 45, max: 65, rule_id: material_abs_and_asa}
+    pa_pacf: {min: 45, max: 65, rule_id: material_pa_and_pacf}
+    pc: {min: 50, max: 65, rule_id: material_pc}
+    pla_max_safe: {max: 35, clog_threshold: 40, rule_id: mistake_16_printing_pla_enclosed_heat_creep}
+  corners_and_brims:
+    sharp_corner_angle_deg: {max: 90, rule_id: problem_warping_and_corner_lifting}
+    safe_fillet_radius_mm: {min: 3.0, rule_id: problem_warping_and_corner_lifting}
+    mouse_ear_diameter_mm: {min: 8, max: 15, rule_id: corner_mouse_ears_vs_brim}
+    mouse_ear_thickness_mm: {min: 0.20, max: 0.40, rule_id: corner_mouse_ears_vs_brim}
+    mouse_ear_overlap_mm: {min: 1.5, max: 3.0, rule_id: corner_mouse_ears_vs_brim}
+    brim_width_mm: {default: 8, pc: 10, rule_id: corner_mouse_ears_vs_brim}
+
+vertical_holes:
+  printable_diameter_mm: {min: 1.5, max: 25.0, rule_id: vertical_hole_shrinkage_polyholes}
+  diameter_undersize_mm:
+    stl_04_nozzle: {min: 0.15, max: 0.30, peak_range: [2.0, 6.0], rule_id: vertical_hole_shrinkage_polyholes}
+    step_arc_fitting: {min: 0.08, max: 0.15, rule_id: vertical_hole_shrinkage_polyholes}
+  cad_oversize_mm: {min: 0.15, max: 0.25, rule_id: vertical_hole_shrinkage_polyholes}
+  slicer_xy_hole_compensation_mm: {val: 0.10, rule_id: vertical_hole_shrinkage_polyholes}
+
+horizontal_holes:
+  unmodified_max_diameter_mm: {val: 3.0, max_sag_mm: 0.15, rule_id: horizontal_hole_teardrop_flat_top}
+  teardrop_range_mm: {min: 4.0, max: 8.0, sag_mm: [0.2, 0.4], angles: [90, 120], rule_id: horizontal_hole_teardrop_flat_top}
+  flat_top_roof_diameter_mm: {min: 8.0, roof_clearance_mm: [0.2, 0.4], sag_mm: [0.4, 1.0], rule_id: mistake_18_large_horizontal_circular_holes}
+  min_functional_round_diameter_mm: {val: 2.5, rule_id: horizontal_hole_teardrop_flat_top}
+
+clearances_and_gaps:
+  fusion_risk_slot_width_mm: {min: 0.10, max: 0.20, rule_id: slant3d_internal_micro_voids_3x_strength}
+  open_air_gap_mm: {min: 0.15, max: 0.25, rule_id: slant3d_support_fins_and_breakaway_tines}
+  vertical_z_gap_min_mm: {val: 0.20, rule_id: mechanical_clearances_by_fit}
+  radial_clearance_mm:
+    press_fit: {min: 0.00, max: 0.05, rule_id: mechanical_clearances_by_fit}
+    snug_locating: {val: 0.10, rule_id: mechanical_clearances_by_fit}
+    sliding_running: {min: 0.15, max: 0.20, rule_id: mechanical_clearances_by_fit}
+    print_in_place: {min: 0.20, max: 0.30, rule_id: mechanical_clearances_by_fit}
+    elastic_grip_fin_interference: {min: 0.15, max: 0.30, bore_oversize: [0.30, 0.50], rule_id: slant3d_elastic_grip_fins_for_tolerances}
+
+text_emboss_deboss:
+  stroke_width_mm_04_nozzle:
+    debossed_min: {val: 0.45, rule_id: text_embossing_debossing_limits}
+    embossed_min: {val: 0.65, rule_id: text_embossing_debossing_limits}
+    nozzle_02_min: {val: 0.25, rule_id: text_embossing_debossing_limits}
+  xy_top_bottom_face_height_mm: {deboss_min: 5.0, emboss_min: 6.0, rule_id: text_embossing_debossing_limits}
+  xy_depth_mm: {min: 0.4, max: 0.6, rule_id: text_embossing_debossing_limits}
+  z_wall_height_mm: {min: 3.0, max: 3.5, depth_max: 0.6, rule_id: text_embossing_debossing_limits}
+  first_layer_bottom_recess_mm: {min: 0.40, max_unprinted_step: 0.05, rule_id: mistake_11_floating_bottom_bosses_unflat_base}
+  elephant_foot:
+    bulge_per_side_mm: {min: 0.10, max: 0.25, rule_id: problem_elephant_foot}
+    bottom_chamfer_45deg_mm: {min: 0.4, max: 0.6, rule_id: bed_contact_chamfer_vs_fillet}
+    slicer_compensation_mm: {val: 0.15, rule_id: problem_elephant_foot}
+
+minimum_wall_per_nozzle:
+  structural_wall_ratio: {min_wall_perimeters: 2, min_wall_nozzle_mult: 2.0, rule_id: min_wall_thickness_and_arachne}
+  positive_feature_width_mult: {min_nozzle_mult: 1.5, rule_id: min_wall_thickness_and_arachne}
+  nozzle_02mm: {line_width: 0.22, min_2wall: 0.45, min_arachne: 0.15, rule_id: min_wall_thickness_and_arachne}
+  nozzle_04mm: {line_width: 0.42, min_2wall: 0.85, min_arachne: 0.30, rule_id: min_wall_thickness_and_arachne}
+  nozzle_06mm: {line_width: 0.62, min_2wall: 1.25, min_arachne: 0.45, rule_id: min_wall_thickness_and_arachne}
+  nozzle_08mm: {line_width: 0.82, min_2wall: 1.65, min_arachne: 0.60, rule_id: min_wall_thickness_and_arachne}
+
+pins_posts_clips:
+  weak_orientation_threshold:
+    aspect_ratio: {min: 3.0, rule_id: mistake_01_z_axis_tension_orientation}
+    diameter_thickness_mm: {max: 8.0, rule_id: mistake_01_z_axis_tension_orientation}
+    z_bending_strength_pct: {min: 35, max: 60, rule_id: mistake_01_z_axis_tension_orientation}
+  toppling_aspect_ratio: {max: 4.0, min_bed_contact_mm2: 150, rule_id: problem_bed_adhesion_moisture_heat_creep_ringing}
+  reinforcement:
+    core_hole_dia_mm: {min: 0.5, max: 1.0, depth_mm: [3, 5], strength_mult: [2, 4], rule_id: slant3d_unbreakable_pins_and_ripples}
+    surface_ripple_amplitude_mm: {min: 0.3, max: 0.4, z_bond_gain_pct: [30, 45], rule_id: slant3d_unbreakable_pins_and_ripples}
+  cantilever_snap_fit:
+    max_thickness_mm: 2.5
+    fillet_radius_mult: 1.5
+    max_strain_pct: {pla_repeat: 2.0, pla_single: 3.0, petg: 3.5, abs_asa: 3.5, pa: 6.0}
+    rule_id: snap_fits_and_living_hinges
+
+overhang_and_bridge_by_material:
+  overhang_angle_from_vertical_deg:
+    pla: {min: 55, max: 65, layer_012_max: 70, rule_id: overhang_angle_by_material}
+    petg: {min: 45, max: 50, rule_id: overhang_angle_by_material}
+    abs_asa: {min: 40, max: 45, rule_id: overhang_angle_by_material}
+    tpu_95a: {min: 45, max: 50, rule_id: overhang_angle_by_material}
+    pa_nylon: {min: 35, max: 45, rule_id: overhang_angle_by_material}
+    pa_cf: {min: 45, max: 55, rule_id: overhang_angle_by_material}
+    pc: {min: 35, max: 45, rule_id: overhang_angle_by_material}
+  bridge_length_mm:
+    pla: {min: 35, max: 60, tuned_max: 100, rule_id: bridging_length_by_material}
+    petg: {min: 15, max: 30, rule_id: bridging_length_by_material}
+    abs_asa: {min: 10, max: 25, rule_id: bridging_length_by_material}
+    tpu_95a: {min: 5, max: 15, rule_id: bridging_length_by_material}
+    pa_nylon: {min: 10, max: 20, rule_id: bridging_length_by_material}
+    pa_cf: {min: 20, max: 40, rule_id: bridging_length_by_material}
+    pc: {min: 10, max: 20, rule_id: bridging_length_by_material}
+
+small_layer_cooling:
+  trigger_layer_area_mm2: {max: 100, rule_id: problem_overhang_curl_and_small_layer_overheating}
+  min_print_speed_mm_s: {min: 8, rule_id: problem_overhang_curl_and_small_layer_overheating}
+  fan_speed_pct:
+    pla: {normal: 100, rule_id: material_pla}
+    petg: {normal: [20, 50], overhang_bridge: [80, 100], rule_id: material_petg}
+    abs_asa: {normal: [0, 30], overhang_bridge: [50, 70], rule_id: material_abs_and_asa}
+    tpu_95a: {normal: [50, 100], rule_id: material_tpu_95a}
+    pa_pacf: {normal: [0, 20], rule_id: material_pa_and_pacf}
+    pc: {normal: [0, 20], rule_id: material_pc}
+```

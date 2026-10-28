@@ -1,9 +1,18 @@
 """Printability checks on a sliced, oriented part.
 
-Each check emits findings: ``{rule, severity, detail, bbox, metrics}``. ``rule``
-points into ``data/rules.yaml`` for the explanation and fixes; ``detail`` is the
-part-specific sentence ("8 mm bridge at 23 mm height"). Severities:
-``problem`` (likely to fail), ``warn`` (likely to look bad / be weak), ``info``.
+The question every check answers: *will the printed part differ from the CAD model,
+and how?* Supports and overhangs within the material's limits are normal and not
+reported on their own; what matters is what they do to the part.
+
+Each finding: ``{rule, impact, severity, detail, bbox, metrics}``.
+``impact`` groups findings for the user:
+  fails   — the print (or this feature) will likely fail
+  shape   — prints, but shape or size differs from CAD (warps, shrinks, sags, closes up)
+  surface — prints, but the surface is rough or marked
+  weak    — prints, but breaks more easily than the CAD suggests
+  info    — background (stability, handling)
+``severity`` (problem / warn / info) is how likely or how bad it is.
+Explanations and fixes live in ``data/rules.yaml``; thresholds in ``data/thresholds.yaml``.
 """
 
 from __future__ import annotations
@@ -15,10 +24,41 @@ import shapely
 from shapely.geometry import Polygon
 
 from .mesh import Mesh
-from .profile import Profile
+from .profile import Profile, load_data
 from .slicer import Layer, parts, slice_mesh
 
 QUAD = 2  # buffer resolution; coarse is fine and much faster
+
+RULE_IMPACT = {
+    "exceeds_build_volume": "fails",
+    "small_bed_contact": "fails",
+    "tipping_risk": "fails",
+    "too_thin_to_print": "fails",
+    "hole_closes": "fails",
+    "gap_fuses": "fails",
+    "trapped_support": "fails",
+    "hardened_nozzle_required": "fails",
+    "warping": "shape",
+    "elephant_foot": "shape",
+    "first_layer_detail": "shape",
+    "small_hole_undersized": "shape",
+    "bridge_sag": "shape",
+    "long_bridge": "shape",
+    "small_layers_cooling": "shape",
+    "tall_thin_feature": "shape",
+    "support_marks": "surface",
+    "fine_detail_rough": "surface",
+    "dry_filament": "surface",
+    "weak_upright_pin": "weak",
+    "thin_neck": "weak",
+    "single_line_wall": "weak",
+    "enclosure_recommended": "shape",
+    "turned_to_fit": "info",
+}
+IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
+SEVERITY_ORDER = {"problem": 0, "warn": 1, "info": 2}
+# Findings that depend on the nozzle size (used to compare nozzles).
+NOZZLE_RULES = {"too_thin_to_print", "fine_detail_rough", "single_line_wall", "hole_closes", "gap_fuses", "first_layer_detail"}
 
 
 @dataclass
@@ -46,7 +86,8 @@ class Region:
 
 
 class Tracker:
-    """Links 2D pieces on consecutive layers into regions."""
+    """Links 2D pieces on consecutive layers into regions. Metrics keep the max, or the
+    min for keys starting with ``min_``."""
 
     def __init__(self, link: float):
         self.link = link
@@ -57,7 +98,8 @@ class Tracker:
             if r.kind == kind and r.last_index == layer.index - 1 and r.last.distance(piece) <= self.link:
                 r.add(piece, layer)
                 for k, v in metrics.items():
-                    r.metrics[k] = max(r.metrics.get(k, v), v)
+                    pick = min if k.startswith("min_") else max
+                    r.metrics[k] = pick(r.metrics.get(k, v), v)
                 return r
         r = Region(kind, piece, layer.index, layer.z, layer.z, list(piece.bounds), piece.area * layer.dz, dict(metrics))
         self.regions.append(r)
@@ -76,67 +118,111 @@ def orient(mesh: Mesh, rotation: np.ndarray) -> Mesh:
 
 def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
     """Slice an oriented mesh and run all checks. Returns findings + stats."""
-    lw, lh = profile.line_width, profile.layer_height
-    mat = profile.material
-    layers = slice_mesh(mesh, lh, max_layers)
-    tracker = Tracker(link=2 * lw)
+    T = load_data("thresholds")
+    layers = slice_mesh(mesh, profile.layer_height, max_layers)
+    tracker = Tracker(link=2 * profile.line_width)
+    _scan_layers(layers, profile, tracker, T)
+
     findings: list[dict] = []
-
-    _check_layers(layers, profile, tracker)
-    findings += _support_findings(tracker, profile)
-    findings += _thin_findings(tracker, profile)
-    findings += _bed_findings(layers, profile)
-    findings += _tall_thin_findings(tracker, profile)
+    findings += _support_findings(layers, tracker, profile, T)
+    findings += _feature_findings(tracker, profile, T)
+    findings += _hole_findings(tracker, profile, T)
+    findings += _first_layer_findings(layers, profile, T)
+    findings += _bed_findings(layers, profile, T)
+    findings += _weak_findings(layers, tracker, profile, T)
     stats = _estimate(layers, profile)
-    findings += _cooling_findings(layers, stats["layer_times"], profile)
-    findings += _profile_findings(layers, profile, stats, tracker)
+    findings += _cooling_findings(layers, stats["layer_times"], profile, T)
+    findings += _profile_findings(layers, profile)
 
-    order = {"problem": 0, "warn": 1, "info": 2}
-    findings.sort(key=lambda f: order[f["severity"]])
+    for f in findings:
+        f["impact"] = RULE_IMPACT.get(f["rule"], "info")
+    findings.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
     del stats["layer_times"]
-    stats.update(layers_analysed=len(layers), height_mm=float(mesh.triangles[..., 2].max()))
-    return {"findings": findings, "stats": stats, "z_strength_factor": profile.z_strength_factor, "material": mat["name"]}
+    stats.update(
+        layers_analysed=len(layers),
+        height_mm=float(mesh.triangles[..., 2].max()),
+        support_area_mm2=float(sum(r.metrics.get("area", 0) for r in tracker.of("overhang"))),
+        needs_support=any(r.volume >= 2.0 for r in tracker.of("overhang")),
+    )
+    return {"findings": findings, "stats": stats, "z_strength_factor": profile.z_strength_factor, "material": profile.material["name"]}
 
 
-def _check_layers(layers: list[Layer], profile: Profile, tracker: Tracker):
-    lw = profile.line_width
+# ---------------------------------------------------------------- layer scan
+
+
+def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dict):
+    lw, nozzle = profile.line_width, float(profile.nozzle)
     tan_lim = np.tan(np.radians(profile.material["max_overhang_deg"]))
     min_piece = max(1.0, 4 * lw * lw)
-    prev = None
+    F, G, H = T["features"], T["gaps"], T["holes"]
+    vanish, rough = F["vanish_below_nozzle"] * nozzle, F["rough_below_nozzle"] * nozzle
+    single = F["single_wall_below_nozzle"] * nozzle
+    prev = cached = None
     for layer in layers:
         g = layer.geom
         if g.is_empty:
             prev = g
             continue
-        # Unsupported area: whatever reaches further out than the overhang limit allows.
-        if prev is not None:
+        # Prismatic parts repeat the same cross-section for many layers. The same outline may start at
+        # another vertex or carry extra collinear points from layer to layer, so compare a normalised copy.
+        key = shapely.normalize(g.simplify(0.001))
+        same = cached is not None and key.equals_exact(cached[0], 1e-4)
+        # Areas that need support: reach further out than the overhang limit allows.
+        # (Nothing can overhang when the layer equals the one below.)
+        if prev is not None and not prev.is_empty and not (same and prev is cached[2]):
             reach = layer.dz * tan_lim + 0.5 * lw
-            supported = prev.buffer(reach, quad_segs=QUAD) if not prev.is_empty else prev
-            # Must reach past the supported zone, or a bridge never touches its anchors.
-            anchor_zone = prev.buffer(reach + lw, quad_segs=QUAD) if not prev.is_empty else prev
-            for piece in parts(g.difference(supported), min_piece):
+            anchor_zone = prev.buffer(reach + lw, quad_segs=QUAD)  # must reach past the supported zone
+            for piece in parts(g.difference(prev.buffer(reach, quad_segs=QUAD)), min_piece):
                 span, anchors = _bridge_span(piece, anchor_zone)
-                kind = "bridge" if anchors >= 2 else "overhang"
-                tracker.add(kind, piece, layer, span=span, area=piece.area)
-        # Thin walls: what a morphological opening with radius r removes is narrower than 2r.
-        too_thin = g.difference(_opening(g, lw / 2))
-        thin = g.difference(_opening(g, lw)).difference(too_thin.buffer(0.01))
-        for kind, geom in (("too_thin", too_thin), ("thin", thin)):
-            for piece in parts(geom, max(lw * 1.5, 0.5)):
-                width = 2 * piece.area / max(piece.length, 1e-9)  # strip of width w: A = wL, P ≈ 2L
-                tracker.add(kind, piece, layer, width=width)
-        # Slender islands, for tall-thin detection.
-        for island in parts(g, 0.01):
-            w, length = _rect_sides(island)
-            if w < 5.0 and length < 15.0:  # pin or post; long thin walls are thin_wall's job
-                tracker.add("slender", island, layer, width=w)
+                if anchors >= 2:
+                    tracker.add("bridge", piece, layer, span=span, area=piece.area)
+                else:
+                    tracker.add("overhang", piece, layer, area=piece.area, enclosed=float(_is_enclosed(piece, g)))
+        # Width/hole/pin analysis only depends on this layer's shape: reuse it while the shape repeats.
+        features = cached[1] if same else _layer_features(g, lw, vanish, rough, single, G, H, T["pins"])
+        cached = (key if not same else cached[0], features, g)
+        for kind, piece, metrics in features:
+            tracker.add(kind, piece, layer, **metrics)
         prev = g
+
+
+def _layer_features(g, lw, vanish, rough, single, G, H, P) -> list[tuple]:
+    """(kind, piece, metrics) for one layer: thin features, narrow gaps, round holes, slender islands."""
+    out = []
+    # Positive features by width: vanish < rough < single-wall (morphological openings).
+    too_thin = g.difference(_opening(g, vanish / 2))
+    below_rough = g.difference(_opening(g, rough / 2))
+    thin = below_rough.difference(too_thin.buffer(0.01))
+    wall = g.difference(_opening(g, single / 2)).difference(below_rough.buffer(0.01))
+    for kind, geom in (("too_thin", too_thin), ("rough", thin), ("single_wall", wall)):
+        out += [(kind, piece, {"width": _strip_width(piece)}) for piece in parts(geom, max(lw * 1.5, 0.5))]
+    # Negative features: slots/clearances that a closing with radius r fills are narrower than 2r.
+    for piece in parts(_closing(g, G["fuse_below_mm"] / 2).difference(g), 0.05):
+        if _strip_width(piece) > 0.02:
+            out.append(("gap", piece, {"width": _strip_width(piece)}))
+    # Round vertical holes (interior rings), for size checks.
+    for poly in parts(g):
+        for ring in poly.interiors:
+            hole = Polygon(ring)
+            d = 2 * np.sqrt(hole.area / np.pi)
+            if d <= H["undersize_up_to_mm"] and 4 * np.pi * hole.area / max(hole.length, 1e-9) ** 2 >= H["circularity_min"]:
+                out.append(("hole", hole, {"min_d": d}))
+    # Slender islands: pins/posts.
+    for island in parts(g, 0.01):
+        w, length = _rect_sides(island)
+        if w < P["max_width_mm"] and length < 2 * P["max_width_mm"]:
+            out.append(("slender", island, {"width": w, "length": length}))
+    return out
+
+
+def _is_enclosed(piece: Polygon, layer_geom) -> bool:
+    """True when the piece touches no outside edge of its layer (a roof inside a cavity)."""
+    outer = shapely.union_all([Polygon(p.exterior) for p in parts(layer_geom)]).boundary
+    return piece.boundary.distance(outer) > 0.05
 
 
 def _bridge_span(piece: Polygon, anchor_zone) -> tuple[float, int]:
     """Number of separate anchors on the layer below, and the largest gap between them."""
-    if anchor_zone.is_empty:
-        return 0.0, 0
     touch = piece.boundary.intersection(anchor_zone)
     if touch.is_empty:
         return 0.0, 0
@@ -151,6 +237,16 @@ def _bridge_span(piece: Polygon, anchor_zone) -> tuple[float, int]:
 def _opening(g, r: float):
     """Morphological opening: removes everything narrower than 2r."""
     return g.buffer(-r, quad_segs=QUAD).buffer(r * 1.05, quad_segs=QUAD)
+
+
+def _closing(g, r: float):
+    """Morphological closing: fills gaps narrower than 2r."""
+    return g.buffer(r, quad_segs=QUAD).buffer(-r * 1.05, quad_segs=QUAD)
+
+
+def _strip_width(piece: Polygon) -> float:
+    """Width of a strip-like piece: A = wL and P ≈ 2L."""
+    return 2 * piece.area / max(piece.length, 1e-9)
 
 
 def _rect_sides(poly: Polygon) -> tuple[float, float]:
@@ -178,68 +274,171 @@ def _zrange(r: Region) -> str:
     return f"{r.z0:.1f} mm" if r.z1 - r.z0 < 0.05 else f"{r.z0:.1f}–{r.z1:.1f} mm"
 
 
-def _support_findings(tracker: Tracker, profile: Profile) -> list[dict]:
+def _layer_bbox(geom, z0: float, z1: float):
+    b = geom.bounds
+    return [[b[0], b[1], z0], [b[2], b[3], z1]]
+
+
+# ---------------------------------------------------------------- supports & bridges
+
+
+def _support_findings(layers, tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
+    """Supports are normal; report what they do to the part: marks, or support that can't come out."""
     out = []
-    max_bridge = profile.material["max_bridge_mm"]
+    B = T["bridges"]
     for r in tracker.of("overhang"):
         if r.volume < 2.0:  # specks from round edges
             continue
-        out.append(_finding("unsupported_overhang", "problem",
-                            f"Overhang without support at {_zrange(r)} height", r, profile))
+        if r.metrics.get("enclosed") and _cavity_is_closed(r, layers):
+            out.append(_finding("trapped_support", "warn",
+                                f"Overhang inside a closed cavity at {_zrange(r)} — support printed there can't be removed", r, profile))
+            continue
+        sev = "info" if profile.multi_material else "warn"
+        out.append(_finding("support_marks", sev,
+                            f"Supported underside at {_zrange(r)} (~{r.metrics['area']:.0f} mm²) will be rougher than the rest", r, profile))
+    max_bridge = profile.material["max_bridge_mm"]
     for r in tracker.of("bridge"):
         span = r.metrics["span"]
-        if span <= 2 * profile.line_width:  # not a real gap
-            continue
         if span > max_bridge:
             out.append(_finding("long_bridge", "warn",
-                                f"{span:.0f} mm bridge at {r.z0:.1f} mm (comfortable for {profile.material['name']}: ≤ {max_bridge} mm)", r, profile))
-        else:
-            out.append(_finding("short_bridge", "info", f"{span:.0f} mm bridge at {r.z0:.1f} mm — usually prints fine", r, profile))
+                                f"{span:.0f} mm bridge at {r.z0:.1f} mm will sag (comfortable for {profile.material['name']}: ≤ {max_bridge} mm)", r, profile))
+        elif span >= B["sag_from_mm"]:
+            lo, hi = B["sag_mm"] if span < B["large_sag_from_mm"] else (0.4, 1.0)
+            out.append(_finding("bridge_sag", "info",
+                                f"{span:.0f} mm wide hole/slot top at {r.z0:.1f} mm sags about {lo}–{hi} mm", r, profile))
     return out
 
 
-def _thin_findings(tracker: Tracker, profile: Profile) -> list[dict]:
+def _cavity_is_closed(r: Region, layers: list[Layer]) -> bool:
+    """Walk down from an enclosed roof: closed when the void below ends in a floor before the bed
+    and never opens to the side."""
+    roof = Polygon(r.last.exterior) if r.last.geom_type == "Polygon" else r.last
+    for layer in reversed(layers[: r.last_index]):
+        if layer.z >= r.z0:
+            continue
+        filled = shapely.union_all([Polygon(p.exterior) for p in parts(layer.geom)]) if not layer.geom.is_empty else Polygon()
+        void = roof.difference(layer.geom)
+        if void.area < 0.05 * roof.area:
+            return True  # reached a floor
+        if void.difference(filled).area > 0.05 * void.area:
+            return False  # opens to the outside
+    return False  # open to the bed
+
+
+# ---------------------------------------------------------------- feature size
+
+
+def _feature_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
     out = []
-    lw = profile.line_width
-    for kind, rule, sev in (("too_thin", "too_thin_to_print", "problem"), ("thin", "thin_wall", "warn")):
-        for r in tracker.of(kind):
-            if r.z1 - r.z0 < 2 * profile.layer_height and r.volume < 1.0:
-                continue
-            out.append(_finding(rule, sev, f"Section about {r.metrics['width']:.2f} mm thin ({r.metrics['width'] / lw:.1f} line widths) "
-                                f"at {_zrange(r)}", r, profile))
+    nozzle = float(profile.nozzle)
+    F = T["features"]
+    for r in tracker.of("too_thin"):
+        if r.z1 - r.z0 < 2 * profile.layer_height and r.volume < 1.0:
+            continue
+        out.append(_finding("too_thin_to_print", "problem",
+                            f"About {r.metrics['width']:.2f} mm thin at {_zrange(r)} — too thin for a {profile.nozzle} mm nozzle "
+                            f"(needs more than ~{F['vanish_below_nozzle'] * nozzle:.2f} mm), it won't print", r, profile))
+    for r in tracker.of("rough"):
+        if r.volume < 1.0:
+            continue
+        out.append(_finding("fine_detail_rough", "info",
+                            f"Detail about {r.metrics['width']:.2f} mm wide at {_zrange(r)} prints rough or incomplete "
+                            f"(under {F['rough_below_nozzle'] * nozzle:.2f} mm)", r, profile))
+    for r in tracker.of("single_wall"):
+        if r.z1 - r.z0 < F["single_wall_min_height_mm"]:
+            continue
+        out.append(_finding("single_line_wall", "info",
+                            f"Wall about {r.metrics['width']:.2f} mm thick, {r.z1 - r.z0:.0f} mm tall — only one line of plastic, easy to break", r, profile))
+    fuse = T["gaps"]["fuse_below_mm"]
+    for r in tracker.of("gap"):
+        if r.z1 - r.z0 < 2 * profile.layer_height and r.volume < 0.2:
+            continue
+        out.append(_finding("gap_fuses", "problem",
+                            f"Gap about {r.metrics['width']:.2f} mm at {_zrange(r)} — narrower than {fuse} mm fuses shut", r, profile))
     return out
 
 
-def _bed_findings(layers: list[Layer], profile: Profile) -> list[dict]:
+def _hole_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
+    out = []
+    H = T["holes"]
+    nozzle = float(profile.nozzle)
+    min_d = max(H["vertical_min_mm"] * nozzle / 0.4, H["vertical_min_nozzle"] * nozzle)
+    lo, hi = H["typical_undersize_mm"]
+    for r in tracker.of("hole"):
+        if r.z1 - r.z0 < 3 * profile.layer_height:
+            continue
+        d = r.metrics["min_d"]
+        if d < min_d:
+            out.append(_finding("hole_closes", "problem",
+                                f"Ø{d:.1f} mm hole at {_zrange(r)} — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up", r, profile))
+        else:
+            out.append(_finding("small_hole_undersized", "warn",
+                                f"Ø{d:.1f} mm hole prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling", r, profile))
+    return out
+
+
+def _first_layer_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
+    """Fine detail on the bed side (text, logos, small gaps) gets squashed by the first layers."""
+    FL = T["first_layer"]
+    r = FL["detail_min_mm"] / 2
+    pieces = []
+    for layer in layers:
+        if layer.z > FL["zone_mm"]:
+            break
+        g = layer.geom
+        if g.is_empty:
+            continue
+        pieces += parts(g.difference(_opening(g, r)), 0.3)  # thin strokes
+        pieces += parts(_closing(g, r).difference(g), 0.3)  # narrow engraved lines / gaps
+    if not pieces:
+        return []
+    u = shapely.union_all(pieces)
+    return [_finding("first_layer_detail", "warn",
+                     f"Fine detail (under {FL['detail_min_mm']} mm) on the bed side, ~{u.area:.0f} mm² — text or edges here get squashed",
+                     bbox=_layer_bbox(u, 0.0, FL["zone_mm"]))]
+
+
+# ---------------------------------------------------------------- bed contact
+
+
+def _bed_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
     out = []
     first = layers[0].geom
     mat = profile.material
+    lh = profile.layer_height
     if first.is_empty:
-        return [_finding("small_bed_contact", "problem", "Nothing touches the bed in this orientation", bbox=None)]
+        return [_finding("small_bed_contact", "problem", "Nothing touches the bed in this orientation")]
     height = layers[-1].z
     max_area = max(l.geom.area for l in layers)
-    b = first.bounds
-    bed_bbox = [[b[0], b[1], 0.0], [b[2], b[3], profile.layer_height]]
+    bed_bbox = _layer_bbox(first, 0.0, lh)
+    S = T["stability"]
 
-    if first.area < 0.15 * max_area or first.area < 40:
+    if first.area < 0.15 * max_area or (first.area < S["min_bed_contact_mm2"] and height > 20):
         out.append(_finding("small_bed_contact", "warn" if first.area < 40 else "info",
-                            f"Only {first.area:.0f} mm² touches the bed (largest layer {max_area:.0f} mm²)",
-                            bbox=bed_bbox, bed_area=first.area))
+                            f"Only {first.area:.0f} mm² touches the bed (largest layer {max_area:.0f} mm²)", bbox=bed_bbox, bed_area=first.area))
     width = _min_width(first.convex_hull)
-    if width > 0 and height / width > 4:
+    if width > 0 and height / width > S["tip_aspect"]:
         out.append(_finding("tipping_risk", "warn", f"{height:.0f} mm tall on a base only {width:.0f} mm wide", bbox=bed_bbox))
 
-    corners = _sharp_corners(first)
-    if corners:
-        sev = {"high": "warn", "medium": "warn", "low": "info"}[mat["warp_risk"]]
-        pts = np.array(corners)
-        out.append(_finding("sharp_bed_corners", sev,
-                            f"{len(corners)} sharp corner(s) on the bed — these lift first with {mat['name']}",
-                            bbox=[[*pts.min(axis=0), 0.0], [*pts.max(axis=0), profile.layer_height]], points=corners))
-    span = max(b[2] - b[0], b[3] - b[1])
-    if mat["warp_risk"] != "low" and span > 80:
-        out.append(_finding("warping_material", "warn" if mat["warp_risk"] == "high" else "info",
-                            f"{span:.0f} mm long footprint in {mat['name']} — large flat bases tend to warp", bbox=bed_bbox))
+    # Warping: long footprints in shrinking materials lift at their corners.
+    W = T["warping"]
+    limit = W["risk_length_mm"].get(profile.material_id, {}).get(profile.enclosure)
+    if limit:
+        for island in parts(first, 1.0):
+            length = _rect_sides(island)[1]
+            ratio = length / limit
+            corners = _sharp_corners(island, W["sharp_corner_max_deg"])
+            if ratio < 0.7 and not (corners and ratio >= 0.4 and mat["warp_risk"] != "low"):
+                continue
+            sev = "problem" if ratio >= 1.3 else "warn" if ratio >= 0.7 else "info"
+            where = f", worst at {len(corners)} sharp corner(s)" if corners else ""
+            out.append(_finding("warping", sev,
+                                f"{length:.0f} mm long base in {mat['name']} ({profile.printer['name']}) — corners likely lift{where}",
+                                bbox=_layer_bbox(island, 0.0, lh), points=corners, length_mm=length, risk_length_mm=limit))
+    if any(len(p.interiors) for p in parts(first)):
+        lo, hi = T["first_layer"]["elephant_foot_mm"]
+        out.append(_finding("elephant_foot", "info",
+                            f"Holes and bottom edges at the bed bulge {lo}–{hi} mm (elephant foot) — holes there come out tight", bbox=bed_bbox))
     return out
 
 
@@ -261,14 +460,56 @@ def _sharp_corners(geom, max_angle=100.0, min_edge=2.0) -> list[list[float]]:
     return found
 
 
-def _tall_thin_findings(tracker: Tracker, profile: Profile) -> list[dict]:
+# ---------------------------------------------------------------- weakness
+
+
+def _weak_findings(layers: list[Layer], tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
     out = []
+    P, N = T["pins"], T["necks"]
     for r in tracker.of("slender"):
-        h = r.z1 - r.z0
-        w = r.metrics["width"]
-        if h > 10 and h > 6 * w:
-            out.append(_finding("tall_thin_feature", "warn", f"Slender feature ~{w:.1f} mm wide and {h:.0f} mm tall", r, profile))
+        h, w = r.z1 - r.z0, r.metrics["width"]
+        if h >= P["wobble_aspect"] * w and h > 10:
+            out.append(_finding("tall_thin_feature", "warn", f"Slender feature ~{w:.1f} mm wide and {h:.0f} mm tall wobbles while printing", r, profile))
+        if h >= P["min_aspect"] * w and r.metrics["length"] < 2 * P["max_width_mm"] and _free_top(r, layers):
+            out.append(_finding("weak_upright_pin", "warn",
+                                f"Pin/post ~{w:.1f} mm wide stands {h:.0f} mm upright — the layers run across it, so it snaps easily", r, profile))
+    # Necks: a layer much smaller than the part above and below it.
+    areas = np.array([l.geom.area for l in layers])
+    zs = np.array([l.z for l in layers])
+    neck = []
+    for i in range(1, len(layers) - 1):
+        below = areas[(zs < zs[i]) & (zs >= zs[i] - N["window_mm"])]
+        above = areas[(zs > zs[i]) & (zs <= zs[i] + N["window_mm"])]
+        if len(below) and len(above) and 0 < areas[i] < N["area_ratio"] * min(below.max(), above.max()):
+            neck.append(i)
+    for run in _runs(neck):
+        i = min(run, key=lambda k: areas[k])
+        g = layers[i].geom
+        out.append(_finding("thin_neck", "warn",
+                            f"Narrow neck at {zs[i]:.1f} mm ({areas[i]:.0f} mm² between bigger sections) — everything above hangs on a few layers",
+                            bbox=_layer_bbox(g, layers[run[0]].z, layers[run[-1]].z)))
     return out
+
+
+def _free_top(r: Region, layers: list[Layer]) -> bool:
+    """A pin sticks out: nothing continues above its top. (Ribs between slots join material above.)"""
+    if r.last_index + 1 >= len(layers):
+        return True
+    above = layers[r.last_index + 1].geom.intersection(r.last.buffer(0.2, quad_segs=QUAD))
+    return above.area < 0.2 * r.last.area
+
+
+def _runs(idx: list[int]) -> list[list[int]]:
+    runs: list[list[int]] = []
+    for i in idx:
+        if runs and i == runs[-1][-1] + 1:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    return runs
+
+
+# ---------------------------------------------------------------- time, cooling, setup
 
 
 def _estimate(layers: list[Layer], profile: Profile) -> dict:
@@ -296,14 +537,15 @@ def _estimate(layers: list[Layer], profile: Profile) -> dict:
     return {"print_time_min": total / 60 * 1.15, "filament_g": grams, "layer_times": times}
 
 
-def _cooling_findings(layers, times, profile: Profile) -> list[dict]:
-    """Short layers in a part whose other layers are much bigger: a local hot spot.
+def _cooling_findings(layers, times, profile: Profile, T: dict) -> list[dict]:
+    """Short layers in a part whose other layers are much bigger: a local hot spot that deforms.
     (A part that is small everywhere is handled by the slicer's minimum layer time.)"""
     limit = profile.material["min_layer_time_s"]
     max_area = max(l.geom.area for l in layers)
+    small = T["cooling"]["small_layer_area_mm2"]
     out, run = [], []
     for layer, t in zip(layers, times):
-        if 0 < t < limit and layer.index > 0 and layer.geom.area < 0.25 * max_area:
+        if 0 < t < limit and layer.index > 0 and layer.geom.area < min(0.25 * max_area, small):
             run.append(layer)
             continue
         out += _cooling_run(run, profile)
@@ -317,11 +559,11 @@ def _cooling_run(run, profile) -> list[dict]:
     b = np.array([l.geom.bounds for l in run])
     bbox = [[b[:, 0].min(), b[:, 1].min(), run[0].z], [b[:, 2].max(), b[:, 3].max(), run[-1].z]]
     return [_finding("small_layers_cooling", "info",
-                     f"Layers at {run[0].z:.1f}–{run[-1].z:.1f} mm print in under {profile.material['min_layer_time_s']} s each",
+                     f"Small layers at {run[0].z:.1f}–{run[-1].z:.1f} mm get little time to cool — tips can droop or blob",
                      bbox=bbox)]
 
 
-def _profile_findings(layers, profile: Profile, stats: dict, tracker: Tracker) -> list[dict]:
+def _profile_findings(layers, profile: Profile) -> list[dict]:
     out = []
     mat, prn = profile.material, profile.printer
     if mat["warp_risk"] != "low" and profile.enclosure == "none":
@@ -332,12 +574,5 @@ def _profile_findings(layers, profile: Profile, stats: dict, tracker: Tracker) -
                             f"{mat['name']} wears out the standard {prn['name']} nozzle — fit a hardened one first"))
     if mat["hygroscopic"] != "low":
         out.append(_finding("dry_filament", "warn" if mat["hygroscopic"] == "high" else "info",
-                            f"{mat['name']} absorbs moisture — dry it before printing"))
-    thin = tracker.of("thin") + tracker.of("too_thin")
-    if profile.nozzle == "0.4" and stats["filament_g"] > 60 and not thin:
-        out.append(_finding("larger_nozzle_option", "info",
-                            f"About {stats['print_time_min'] / 60:.1f} h with a 0.4 mm nozzle; a 0.6 mm nozzle could save roughly a third"))
-    if any(len(p.interiors) for p in parts(layers[0].geom)):
-        out.append(_finding("elephant_foot", "info", "Holes touch the bed — the first layers squish slightly and can make them tight",
-                            bbox=[[*layers[0].geom.bounds[:2], 0.0], [*layers[0].geom.bounds[2:], profile.layer_height]]))
+                            f"{mat['name']} absorbs moisture — wet filament prints stringy, bubbly and weak"))
     return out

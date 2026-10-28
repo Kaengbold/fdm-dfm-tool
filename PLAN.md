@@ -174,12 +174,14 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 
 | Phase | Status | Notes |
 |---|---|---|
-| 0 — Spikes | ✅ done | Pyodide engine, orientation, overhang map; STEP import **not yet** |
-| 1 — "Just print it" | ✅ done | Presets, pseudo-slicer checks (16 rules), KB, settings, 3MF/STL export, report |
+| 0 — Spikes | ✅ done | Pyodide engine, orientation, overhang map, STEP import (occt-import-js, exact CAD faces) |
+| 1 — "Just print it" | ✅ done | Presets, pseudo-slicer checks (18 rules incl. build volume / turn-to-fit), KB, settings, 3MF/STL export, report |
 | 2 — Strength | ✅ done | Face regions, voxel FEA (two-level multigrid CG), anisotropic material, strength-aware orientation, "make it stronger" options |
 | 3 — Design fixes | 🟡 partial | Hole/boss recognition, teardrop + corner chamfer edits with ghost preview and manifold-3d booleans. Missing: feature confirm UI, more edits (chamfer under overhangs, thicken walls), STEP output |
-| 4 — AI & agents | 🟡 partial | MCP server (11 tools, local mode), copy-report. Missing: BYOK chat in browser |
+| 4 — AI & agents | ✅ done | MCP server (11 tools, local mode), copy-report, in-browser "Ask AI" with own Anthropic key and 10 UI-operating tools. Not yet: other providers (OpenAI) |
 | 5 — Ecosystem | ⏳ | Fusion add-in, community presets/rules, calibration prints, GitHub Pages hosting |
+
+Research notes: `research/fdm_knowledge.md` (Gemini, unverified) — source for future rules.
 
 Known gaps: UI only verified by syntax checks + engine runs under Pyodide/Node (needs a real browser pass);
 3MF per-object settings need confirming in OrcaSlicer/Bambu Studio; print-time model is rough; voxel FEA

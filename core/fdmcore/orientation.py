@@ -34,8 +34,10 @@ class OrientationSettings:
     w_support_volume: float = 1.0
     w_height: float = 0.15
     w_bed_contact: float = 0.5
-    w_small_bed: float = 1.0
-    min_bed_fraction: float = 0.02  # bed area / L² below this = tippy part
+    # Hobbyist parts should sit on a real flat face: no/tiny bed contact means brims, rafts or
+    # supports just to hold the part, poor first layers and a tilted part that's hard to slice.
+    w_small_bed: float = 3.0
+    good_bed_fraction: float = 0.15  # bed area / L² at which the small-contact penalty reaches zero
 
 
 @dataclass
@@ -195,7 +197,7 @@ def _score(
             + s.w_support_volume * support_vol / L**3
             + s.w_height * height / L
             - s.w_bed_contact * np.minimum(bed_frac, 1.0)
-            + s.w_small_bed * (bed_frac < s.min_bed_fraction)
+            + s.w_small_bed * np.clip(1.0 - bed_frac / s.good_bed_fraction, 0.0, 1.0)
         )
         for k in range(len(U)):
             results.append(

@@ -38,27 +38,32 @@ def test_slice_sampling_caps_layers():
     assert layers[0].z == pytest.approx(0.1, abs=1e-3)
 
 
-def test_mushroom_overhang_and_flip():
-    assert "unsupported_overhang" in rules_for("mushroom")
-    assert "unsupported_overhang" not in rules_for("mushroom", up=(0, 0, -1))
+def test_mushroom_support_marks_and_flip():
+    assert "support_marks" in rules_for("mushroom")
+    assert "support_marks" not in rules_for("mushroom", up=(0, 0, -1))
 
 
 def test_test_block_findings():
     found = rules_for("test_block")
-    assert {"too_thin_to_print", "thin_wall", "long_bridge"} <= set(found)
-    assert found["long_bridge"]["metrics"]["span"] == pytest.approx(23, abs=1.5)
-    assert "unsupported_overhang" not in found
+    assert {"too_thin_to_print", "fine_detail_rough", "bridge_sag"} <= set(found)
+    # 23 mm is within PLA's comfortable bridge length: it sags a little, it isn't a "long bridge".
+    assert found["bridge_sag"]["metrics"]["span"] == pytest.approx(23, abs=1.5)
+    assert "long_bridge" not in found
+    assert "long_bridge" in rules_for("test_block", material="abs")
 
 
 def test_hook_upright_is_tippy():
     found = rules_for("hook")
-    assert {"tipping_risk", "unsupported_overhang"} <= set(found)
+    assert {"tipping_risk", "support_marks"} <= set(found)
 
 
-def test_bed_corners_counted():
-    found = rules_for("l_bracket", material="abs")
-    assert len(found["sharp_bed_corners"]["metrics"]["points"]) == 4
-    assert found["sharp_bed_corners"]["severity"] == "warn"
+def test_warping_depends_on_material_and_enclosure():
+    found = rules_for("l_bracket", material="abs", printer="prusa_mk4s")
+    assert len(found["warping"]["metrics"]["points"]) == 4
+    assert found["warping"]["severity"] == "problem"
+    assert "warping" not in rules_for("l_bracket", material="pla")
+    heated = rules_for("l_bracket", material="abs", printer="bambu_h2d")
+    assert heated.get("warping", {}).get("severity") != "problem"
 
 
 def test_profile_findings():
@@ -108,12 +113,10 @@ def test_dispatch():
 
 
 def test_knowledge_base_covers_all_rules():
+    from fdmcore.checks import RULE_IMPACT
+
     rules = load_data("rules")["rules"]
-    emitted = {"unsupported_overhang", "long_bridge", "short_bridge", "thin_wall", "too_thin_to_print",
-               "small_bed_contact", "sharp_bed_corners", "tipping_risk", "tall_thin_feature", "small_layers_cooling",
-               "warping_material", "enclosure_recommended", "hardened_nozzle_required", "dry_filament",
-               "larger_nozzle_option", "elephant_foot"}
-    assert emitted <= set(rules)
+    assert set(RULE_IMPACT) <= set(rules)
     for rid, rule in rules.items():
         domains = {f["domain"] for f in rule["fixes"]}
         assert domains <= {"geometry", "slicer", "process"}, rid
@@ -133,3 +136,78 @@ def test_manifest_lists_all_engine_files():
     actual = {str(p.relative_to(PKG)).replace("\\", "/") for p in PKG.rglob("*") if p.suffix in (".py", ".yaml")}
     actual -= {"mcp_server.py", "booleans.py"}  # local mode only
     assert listed == actual, "update core/fdmcore/manifest.json (see tools/make_manifest.py)"
+
+
+def _bar(length, width, angle_deg=0.0):
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    x, y = length / 2, width / 2
+    c, s = np.cos(np.radians(angle_deg)), np.sin(np.radians(angle_deg))
+    v = np.array([[sx * x, sy * y, z] for sx in (-1, 1) for sy in (-1, 1) for z in (0, 10)])
+    v[:, :2] = v[:, :2] @ np.array([[c, s], [-s, c]])
+    quads = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)]
+    tris = [(a, b, c_) for a, b, c_, d in quads] + [(a, c_, d) for a, b, c_, d in quads]
+    return to_binary_stl(Mesh(v[np.array(tris)][:, ::-1]))
+
+
+def test_build_volume():
+    api.load(_bar(240, 20), "bar")
+    rules = lambda printer: {f["rule"] for f in api.check([0, 0, 1], {"printer": printer})["findings"]}  # noqa: E731
+    assert "exceeds_build_volume" in rules("bambu_a1_mini")
+    assert "exceeds_build_volume" not in rules("bambu_p1s")
+
+
+def test_turned_to_fit():
+    # 248 x 20 bar at 60°: its bounding box is 225 mm deep, too deep for a 250 x 210 bed until turned straight.
+    api.load(_bar(248, 20, 60), "bar")
+    found = {f["rule"]: f for f in api.check([0, 0, 1], {"printer": "prusa_mk4s"})["findings"]}
+    assert "turned_to_fit" in found and "exceeds_build_volume" not in found
+    o = api.orientations({"printer": "prusa_mk4s"})["orientations"][0]
+    assert any("Turned" in r for r in o["reasons"])
+
+
+def test_cad_face_ids_replace_guessed_regions():
+    data = (SAMPLES / "hook.stl").read_bytes()
+    n = load_stl(data).face_count
+    api.load(data, "hook.step", face_ids=[i // 2 for i in range(n)])  # pretend every 2 triangles are one CAD face
+    regions = api.regions()["regions"]
+    assert len(regions) == (n + 1) // 2
+    with pytest.raises(ValueError):
+        api.load(data, "hook.step", face_ids=[0, 1])
+
+
+def test_detail_plate_small_features():
+    found = rules_for("detail_plate")
+    assert {"hole_closes", "gap_fuses", "small_hole_undersized", "first_layer_detail", "weak_upright_pin"} <= set(found)
+    holes = sorted(f["metrics"]["min_d"] for f in api.check([0, 0, 1], {}, "both")["findings"] if f["rule"] == "small_hole_undersized")
+    assert holes == [pytest.approx(3.0, abs=0.1), pytest.approx(5.0, abs=0.1)]
+    # A 0.2 mm nozzle can print the Ø1 hole.
+    assert "hole_closes" not in rules_for("detail_plate", nozzle="0.2")
+
+
+def test_neck_and_free_pins():
+    assert "thin_neck" in rules_for("dumbbell")
+    # Ribs between the enclosure's vent slots join material above: not pins.
+    assert "weak_upright_pin" not in rules_for("enclosure")
+
+
+def test_every_finding_has_an_impact():
+    from fdmcore.checks import IMPACT_ORDER
+
+    for name in ("detail_plate", "hook", "test_block"):
+        api.load((SAMPLES / f"{name}.stl").read_bytes(), name)
+        assert all(f["impact"] in IMPACT_ORDER for f in api.check([0, 0, 1], {}, "both")["findings"])
+
+
+def test_compare_nozzles():
+    api.load((SAMPLES / "detail_plate.stl").read_bytes(), "detail_plate")
+    rows = {r["nozzle"]: r for r in api.compare_nozzles([0, 0, 1])}
+    assert rows["0.8"]["print_time_min"] < rows["0.2"]["print_time_min"]
+    assert len(rows["0.8"]["issues"]) > len(rows["0.2"]["issues"])
+    assert rows["0.4"]["current"]
+
+
+def test_goal_changes_settings():
+    api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
+    walls = lambda goal: {s["key"]: s["value"] for s in api.check([1, 0, 0], {"goal": goal})["settings"]}["wall_loops"]  # noqa: E731
+    assert int(walls("strength")) > int(walls("speed"))

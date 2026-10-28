@@ -9,54 +9,64 @@ printers:
     enclosure: none          # none | passive | heated
     hardened_nozzle: true    # stock hardened steel nozzle
     speed: fast
+    multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   bambu_a1_mini:
     name: Bambu Lab A1 mini
     bed: [180, 180, 180]
     enclosure: none
     hardened_nozzle: true
     speed: fast
+    multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   bambu_p1s:
     name: Bambu Lab P1S
     bed: [256, 256, 256]
     enclosure: passive
     hardened_nozzle: false   # stock stainless steel
     speed: fast
+    multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   bambu_x1c:
     name: Bambu Lab X1 Carbon
     bed: [256, 256, 256]
     enclosure: passive
     hardened_nozzle: true
     speed: fast
+    multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   bambu_h2d:
     name: Bambu Lab H2D
     bed: [325, 320, 325]
     enclosure: heated
     hardened_nozzle: true
     speed: fast
+    multi_material: builtin       # none | optional (AMS/MMU add-on) | builtin
   prusa_mk4s:
     name: Prusa MK4S
     bed: [250, 210, 220]
     enclosure: none
     hardened_nozzle: false   # verify: depends on nozzle fitted
     speed: medium
+    multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   prusa_mini:
     name: Prusa MINI+
     bed: [180, 180, 180]
     enclosure: none
     hardened_nozzle: false
     speed: medium
+    multi_material: none       # none | optional (AMS/MMU add-on) | builtin
   prusa_core_one:
     name: Prusa CORE One
     bed: [250, 220, 270]
     enclosure: heated        # bed-heated, regulated chamber
     hardened_nozzle: false   # verify: depends on nozzle fitted
     speed: fast
+    multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
 
 materials:
+  # max_overhang_deg / max_bridge_mm: lower end of the ranges in research/sourced_A1_geometry_rules.yaml
+  # [overhang_angle_by_material, bridging_length_by_material]
   pla:
     name: PLA
     max_overhang_deg: 55
-    max_bridge_mm: 20
+    max_bridge_mm: 35
     min_layer_time_s: 8
     warp_risk: low           # low | medium | high
     abrasive: false
@@ -69,8 +79,8 @@ materials:
     density_g_cm3: 1.24
   petg:
     name: PETG
-    max_overhang_deg: 50
-    max_bridge_mm: 10
+    max_overhang_deg: 45
+    max_bridge_mm: 15
     min_layer_time_s: 10
     warp_risk: low
     abrasive: false
@@ -82,8 +92,8 @@ materials:
     density_g_cm3: 1.27
   abs:
     name: ABS
-    max_overhang_deg: 50
-    max_bridge_mm: 12
+    max_overhang_deg: 40
+    max_bridge_mm: 10
     min_layer_time_s: 10
     warp_risk: high
     abrasive: false
@@ -96,7 +106,7 @@ materials:
   pa_cf:
     name: PA-CF (carbon fibre nylon)
     max_overhang_deg: 45
-    max_bridge_mm: 8
+    max_bridge_mm: 20
     min_layer_time_s: 10
     warp_risk: medium
     abrasive: true

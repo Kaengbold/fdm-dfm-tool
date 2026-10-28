@@ -1,4 +1,7 @@
+import { Assistant, MODELS } from "./assistant.js";
+import { GeminiAssistant, listGeminiModels } from "./gemini.js";
 import { stlBytes, subtract } from "./geometry.js";
+import { readStep } from "./step.js";
 import { REGION_COLORS, Viewer } from "./viewer.js";
 
 const $ = (id) => document.getElementById(id);
@@ -54,7 +57,16 @@ const state = {
   edits: [], // suggested design edits: {id, title, description, cutter: Float32Array, selected}
 };
 
-const profile = () => ({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value });
+// Debug/test hook: lets automated browser tests and devtools inspect the app.
+globalThis.fdm = { state, viewer, call: (...args) => call(...args) };
+
+const profile = () => ({
+  printer: $("printer").value,
+  material: $("material").value,
+  nozzle: $("nozzle").value,
+  multi_material: $("multi-material").checked,
+  goal: document.querySelector("input[name=goal]:checked").value,
+});
 const mode = () => document.querySelector("input[name=mode]:checked").value;
 const activeOption = () => state.options[state.active];
 
@@ -63,21 +75,46 @@ function setStatus(text, isError = false) {
   $("status").classList.toggle("error", isError);
 }
 
+// Busy bookkeeping on <body data-busy data-done> lets automated tests wait for the app to settle.
+let busyCount = 0;
+let doneCount = 0;
+
 async function busy(text, fn) {
   setStatus(text);
+  document.body.dataset.busy = ++busyCount;
   try {
     return await fn();
   } catch (err) {
     setStatus(err.message, true);
     throw err;
+  } finally {
+    document.body.dataset.busy = --busyCount;
+    document.body.dataset.done = ++doneCount;
   }
 }
 
 // ---------- flow ----------
-async function loadFile(name, bytes) {
+/** Entry point for user files: STEP goes through OpenCascade first, STL straight to the engine. */
+async function openFile(name, bytes) {
+  $("body-pick").hidden = true;
+  if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes);
+  const bodies = await busy("Reading STEP file (first time downloads ~8 MB)…", () => readStep(bytes));
+  if (!bodies.length) return setStatus("No solid bodies found in this STEP file.", true);
+  const pick = async (i) => loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds);
+  if (bodies.length > 1) {
+    $("body").replaceChildren(
+      ...bodies.map((b, i) => el("option", { value: i, textContent: `${b.name} (${Math.round(b.volume / 1000)} cm³)` })),
+    );
+    $("body").onchange = () => pick(Number($("body").value));
+    $("body-pick").hidden = false;
+  }
+  await pick(0);
+}
+
+async function loadFile(name, bytes, faceIds = null) {
   await busy("Reading part…", async () => {
     await engineReady;
-    const info = await call("load", { name }, bytes);
+    const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
     state.name = name;
     // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
     state.triangles = new Float32Array(info.triangles.slice().buffer);
@@ -107,16 +144,26 @@ async function selectOption(i) {
   state.strength = null;
   state.showHeat = false;
   $("strength-result").replaceChildren();
+  $("nozzle-block").open = false; // orientation-specific
   clearEdits();
   recolor();
   await runCheck();
 }
 
+let checkToken = 0;
+
 async function runCheck() {
+  // Only the latest request may update the UI: clicks during a running check would otherwise
+  // let an older result (or an older orientation's result) overwrite the newer one.
+  const token = ++checkToken;
   await busy("Checking printability…", async () => {
-    state.check = await call("check", { up: activeOption().up, profile: profile(), mode: mode() });
+    const result = await call("check", { up: activeOption().up, profile: profile(), mode: mode() });
+    if (token !== checkToken) return;
+    if (!result?.findings) throw new Error("The analysis returned no result — please try again");
+    state.check = result;
     renderCheck();
     $("design-block").hidden = mode() === "print";
+    $("ai-block").hidden = false;
     setStatus(state.summary);
     $("results").hidden = false;
   });
@@ -139,29 +186,70 @@ function renderOptions() {
 const SEVERITY_LABEL = { problem: "Problem", warn: "Warning", info: "Tip" };
 const DOMAIN_LABEL = { geometry: "Design", slicer: "Slicer", process: "Printer & material" };
 
+// Findings are grouped by how the print differs from the CAD model; "info" starts collapsed.
+const IMPACTS = [
+  ["fails", "Will fail"],
+  ["shape", "Shape or size will differ from your CAD"],
+  ["surface", "Surface quality"],
+  ["weak", "Weaker than it looks"],
+  ["info", "Good to know"],
+];
+const SEVERITY_RANK = { problem: 0, warn: 1, info: 2 };
+
+function renderImpactGroups(findings) {
+  const groups = [];
+  for (const [impact, label] of IMPACTS) {
+    const inGroup = findings.map((f, i) => ({ f, i })).filter(({ f }) => f.impact === impact);
+    if (!inGroup.length) continue;
+    // Same rule found several times (e.g. 4 small holes) -> one card listing each place.
+    const byRule = new Map();
+    for (const item of inGroup) byRule.set(item.f.rule, [...(byRule.get(item.f.rule) ?? []), item]);
+    const cards = [...byRule.values()].map((items) => findingCard(findings, items));
+    groups.push(
+      el(
+        "li",
+        { className: `impact ${impact}` },
+        el(
+          "details",
+          { open: impact !== "info" },
+          el("summary", { className: "impact-head", textContent: `${label} (${byRule.size})` }),
+          el("ol", { className: "findings" }, ...cards),
+        ),
+      ),
+    );
+  }
+  return groups;
+}
+
+function findingCard(findings, items) {
+  const first = items[0].f;
+  const worst = items.reduce((a, b) => (SEVERITY_RANK[b.f.severity] < SEVERITY_RANK[a.f.severity] ? b : a)).f.severity;
+  const fixes = first.fixes.map((fx) =>
+    el("li", {}, el("span", { className: `chip ${fx.domain}`, textContent: DOMAIN_LABEL[fx.domain] }), " ", fx.text),
+  );
+  const places = items.map(({ f, i }) =>
+    el("li", { className: "place", textContent: f.detail, onclick: () => viewer.showFindings(findings, i), title: "Show on the part" }),
+  );
+  return el(
+    "li",
+    { className: worst },
+    el(
+      "details",
+      { ontoggle: (e) => e.target.open && viewer.showFindings(findings, items[0].i) },
+      el("summary", {}, el("span", { className: "sev", textContent: SEVERITY_LABEL[worst] }), " ", first.title, items.length > 1 ? ` ×${items.length}` : ""),
+      items.length > 1 ? el("ul", { className: "places" }, ...places) : el("p", { className: "detail", textContent: first.detail }),
+      el("p", { className: "why", textContent: first.why }),
+      fixes.length ? el("ul", { className: "fixes" }, ...fixes) : el("p", { className: "why", textContent: "No fixes for this mode." }),
+    ),
+  );
+}
+
 function renderCheck() {
+  if (!state.check) return;
   const { findings, stats } = state.check;
   $("stats").textContent = `≈${fmtTime(stats.print_time_min)} · ≈${Math.round(stats.filament_g)} g`;
   $("findings").replaceChildren(
-    ...(findings.length
-      ? findings.map((f, i) => {
-          const fixes = f.fixes.map((fx) =>
-            el("li", {}, el("span", { className: `chip ${fx.domain}`, textContent: DOMAIN_LABEL[fx.domain] }), " ", fx.text),
-          );
-          return el(
-            "li",
-            { className: f.severity },
-            el(
-              "details",
-              { ontoggle: (e) => e.target.open && viewer.showFindings(findings, i) },
-              el("summary", {}, el("span", { className: "sev", textContent: SEVERITY_LABEL[f.severity] }), " ", f.title),
-              el("p", { className: "detail", textContent: f.detail }),
-              el("p", { className: "why", textContent: f.why }),
-              fixes.length ? el("ul", { className: "fixes" }, ...fixes) : el("p", { className: "why", textContent: "No fixes for this mode." }),
-            ),
-          );
-        })
-      : [el("li", { className: "ok", textContent: "No issues found in this orientation." })]),
+    ...(findings.length ? renderImpactGroups(findings) : [el("li", { className: "ok", textContent: "Should print as designed in this orientation." })]),
   );
   viewer.showFindings(findings);
   renderSettings();
@@ -279,8 +367,8 @@ const MODE_TEXT = {
   material: "The plastic itself is the limit. More walls or infill, or a thicker design, help most.",
 };
 
-$("run-strength").onclick = async () => {
-  await busy("Simulating the load…", async () => {
+async function runStrength() {
+  return busy("Simulating the load…", async () => {
     const { walls, infill } = currentWallsInfill();
     const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), walls, infill });
     state.strength = r;
@@ -290,8 +378,10 @@ $("run-strength").onclick = async () => {
     viewer.mark(r.critical_point_print);
     renderStrength();
     setStatus(state.summary);
+    return r;
   });
-};
+}
+$("run-strength").onclick = runStrength;
 
 function renderStrength() {
   const r = state.strength;
@@ -318,7 +408,7 @@ function renderStrength() {
 }
 
 async function showStrengthOptions() {
-  await busy("Trying alternatives (a few seconds)…", async () => {
+  return busy("Trying alternatives (a few seconds)…", async () => {
     const { walls, infill } = currentWallsInfill();
     const opts = await call("strength_options", { up: activeOption().up, loads: state.loads, profile: profile(), walls, infill });
     $("strength-options").replaceChildren(
@@ -332,6 +422,7 @@ async function showStrengthOptions() {
       ),
     );
     setStatus(state.summary);
+    return opts;
   });
 }
 
@@ -362,8 +453,8 @@ function showSelectedGhosts() {
   $("apply-edits").hidden = !state.edits.some((e) => e.selected);
 }
 
-$("suggest-design").onclick = async () => {
-  await busy("Looking for design improvements…", async () => {
+async function suggestDesign() {
+  return busy("Looking for design improvements…", async () => {
     const r = await call("design", { up: activeOption().up, profile: profile() });
     const holes = r.features.filter((f) => f.type === "hole");
     $("features-summary").textContent = holes.length
@@ -384,18 +475,193 @@ $("suggest-design").onclick = async () => {
     );
     showSelectedGhosts();
     setStatus(state.summary);
+    return r;
   });
-};
+}
+$("suggest-design").onclick = suggestDesign;
 
-$("apply-edits").onclick = async () => {
-  await busy("Applying design changes…", async () => {
+async function applyEdits() {
+  return busy("Applying design changes…", async () => {
     const cutters = state.edits.filter((e) => e.selected).map((e) => e.cutter);
     const soup = await subtract(state.triangles, cutters);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     await loadFile(name, stlBytes(soup));
     setStatus(`${state.summary} — design changes applied. Download the STL to bring them back into your CAD.`);
   });
+}
+$("apply-edits").onclick = applyEdits;
+
+// ---------- AI assistant (bring your own key) ----------
+const round = (v, d = 2) => (Array.isArray(v) ? v.map((x) => round(x, d)) : typeof v === "number" ? Number(v.toFixed(d)) : v);
+
+function summarizeState() {
+  const o = activeOption();
+  const s = state.strength;
+  return {
+    part: state.summary,
+    profile: profile(),
+    mode: mode(),
+    orientation: o && { index: state.active, label: o.label, up: round(o.up, 3), reasons: o.reasons },
+    findings: state.check?.findings.map((f) => ({ severity: f.severity, rule: f.rule, title: f.title, detail: f.detail })),
+    estimate: state.check && { print_time_min: Math.round(state.check.stats.print_time_min), filament_g: Math.round(state.check.stats.filament_g) },
+    settings: Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value])),
+    loads: state.loads,
+    strength: s && { safety_factor: round(s.safety_factor), verdict: s.verdict, mode: s.mode, walls: s.walls, infill: s.infill },
+  };
+}
+
+// What the AI may do: the same actions as the UI. Shared by all providers.
+const aiActions = {
+  get_current_analysis: async () => summarizeState(),
+  list_orientations: async () => state.options.map((o, i) => ({ index: i, label: o.label, up: round(o.up, 3), reasons: o.reasons })),
+  select_orientation: async ({ index }) => {
+    if (!state.options[index]) throw new Error(`No orientation ${index}`);
+    await selectOption(index);
+    return summarizeState();
+  },
+  list_faces: async () => {
+    await ensureRegions();
+    return state.regionInfo.map((r) => ({ id: r.id, kind: r.kind, area_mm2: Math.round(r.area_mm2), normal: round(r.normal), centroid: round(r.centroid, 1) }));
+  },
+  set_loads: async ({ loads }) => {
+    await ensureRegions();
+    for (const l of loads) if (!state.regionInfo[l.region]) throw new Error(`Unknown face ${l.region}`);
+    state.loads = loads.map((l) =>
+      l.kind === "fixed" ? { region: l.region, kind: "fixed" } : { region: l.region, kind: "force", kg: l.kg ?? 1, direction: l.direction ?? "push" },
+    );
+    renderLoads();
+    recolor();
+    return { loads: state.loads };
+  },
+  check_strength: async () => {
+    if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
+    const r = await runStrength();
+    return { safety_factor: round(r.safety_factor), verdict: r.verdict, mode: r.mode, bends_mm: round(r.max_displacement_mm, 1), walls: r.walls, infill: r.infill };
+  },
+  strength_options: async () => {
+    if (!state.strength) throw new Error("Run check_strength first");
+    return (await showStrengthOptions()).map((o) => ({ ...o, safety_factor: round(o.safety_factor) }));
+  },
+  suggest_design_changes: async () => {
+    const r = await suggestDesign();
+    return {
+      features: r.features.map((f) => ({ type: f.type, diameter_mm: round(f.diameter, 1), axis: round(f.axis), full_circle: f.full_circle })),
+      edits: r.edits.map((e) => ({ id: e.id, title: e.title, description: e.description })),
+    };
+  },
+  apply_design_changes: async ({ ids }) => {
+    if (!state.edits.length) await suggestDesign();
+    const unknown = ids.filter((id) => !state.edits.some((e) => e.id === id));
+    if (unknown.length) throw new Error(`Unknown edit ids: ${unknown.join(", ")}`);
+    state.edits.forEach((e) => (e.selected = ids.includes(e.id)));
+    await applyEdits();
+    return summarizeState();
+  },
+  set_slicer_settings: async ({ settings }) => {
+    Object.assign(state.overrides, settings);
+    renderSettings();
+    return Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value]));
+  },
 };
+
+const PROVIDERS = {
+  anthropic: {
+    assistant: new Assistant(aiActions),
+    storage: "fdmdfm.anthropicKey",
+    placeholder: "sk-ant-...",
+    keyHelp: "console.anthropic.com -> API keys",
+    models: async () => MODELS,
+  },
+  gemini: {
+    assistant: new GeminiAssistant(aiActions),
+    storage: "fdmdfm.geminiKey",
+    placeholder: "AIza...",
+    keyHelp: "aistudio.google.com -> Get API key",
+    models: (key) => listGeminiModels(key),
+  },
+};
+const provider = () => PROVIDERS[$("ai-provider").value];
+
+async function refreshModels() {
+  const p = provider();
+  const key = $("ai-key").value.trim();
+  if (!key && p !== PROVIDERS.anthropic) {
+    $("ai-model").replaceChildren(el("option", { value: "", textContent: "Enter your key to load models" }));
+    return;
+  }
+  try {
+    const models = await p.models(key);
+    $("ai-model").replaceChildren(...models.map((m) => el("option", { value: m.id, textContent: m.label })));
+  } catch (err) {
+    $("ai-model").replaceChildren(el("option", { value: "", textContent: "Could not load models" }));
+    aiLog("tool", err.message);
+  }
+}
+
+function switchProvider() {
+  const p = provider();
+  $("ai-key").placeholder = p.placeholder;
+  $("ai-key").value = localStorage.getItem(p.storage) ?? "";
+  $("ai-remember").checked = Boolean(localStorage.getItem(p.storage));
+  refreshModels();
+}
+
+const rememberKey = () =>
+  $("ai-remember").checked ? localStorage.setItem(provider().storage, $("ai-key").value) : localStorage.removeItem(provider().storage);
+$("ai-provider").onchange = switchProvider;
+$("ai-remember").onchange = rememberKey;
+$("ai-key").onchange = () => {
+  rememberKey();
+  refreshModels();
+};
+switchProvider();
+
+function aiLog(cls, text) {
+  const node = el("div", { className: `msg ${cls}`, textContent: text });
+  $("ai-log").append(node);
+  node.scrollIntoView({ block: "nearest" });
+}
+
+const TOOL_LABEL = {
+  get_current_analysis: "reading the analysis",
+  list_orientations: "comparing orientations",
+  select_orientation: "switching orientation",
+  list_faces: "looking at the faces",
+  set_loads: "setting loads",
+  check_strength: "running the strength check",
+  strength_options: "trying stronger options",
+  suggest_design_changes: "looking for design changes",
+  apply_design_changes: "applying design changes",
+  set_slicer_settings: "changing slicer settings",
+};
+
+$("ai-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("ai-input").value.trim();
+  const apiKey = $("ai-key").value.trim();
+  if (!text) return;
+  if (!apiKey) return aiLog("tool", `Enter your API key first (${provider().keyHelp}).`);
+  if (!$("ai-model").value) return aiLog("tool", "Pick a model first.");
+  $("ai-input").value = "";
+  aiLog("user", text);
+  const button = $("ai-form").querySelector("button");
+  button.disabled = true;
+  try {
+    await provider().assistant.ask(text, { apiKey, model: $("ai-model").value }, (ev) =>
+      ev.type === "text" ? aiLog("assistant", ev.text) : aiLog("tool", `... ${TOOL_LABEL[ev.name] ?? ev.name}`),
+    );
+  } catch (err) {
+    aiLog("tool", `Error: ${err.message}`);
+  } finally {
+    button.disabled = false;
+  }
+};
+$("ai-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("ai-form").requestSubmit();
+  }
+});
 
 // ---------- presets ----------
 async function initPresets() {
@@ -408,22 +674,62 @@ async function initPresets() {
   fill("material", Object.entries(p.materials).map(([k, v]) => [k, v.name]), "pla");
   fill("nozzle", Object.keys(p.nozzles).map((k) => [k, `${k} mm`]), "0.4");
   viewer.setBed(p.printers[$("printer").value].bed);
+  syncMultiMaterial();
   setStatus("Ready — drop an STL or try a sample.");
 }
 initPresets().catch((err) => setStatus(`Engine failed to start: ${err.message}`, true));
 
-for (const id of ["printer", "material", "nozzle"]) {
+/** Multi-material checkbox follows the printer: none = off, built-in = on, optional add-on = user's choice. */
+function syncMultiMaterial() {
+  const mm = state.presets.printers[$("printer").value].multi_material;
+  const box = $("multi-material");
+  box.disabled = mm !== "optional";
+  if (mm !== "optional") box.checked = mm === "builtin";
+  $("mm-row").title = { none: "This printer has no multi-material option", builtin: "Built in on this printer", optional: "AMS / MMU add-on" }[mm];
+}
+
+async function compareNozzles() {
+  await busy("Comparing nozzle sizes…", async () => {
+    const rows = await call("compare_nozzles", { up: activeOption().up, profile: profile() });
+    $("nozzle-table").replaceChildren(
+      el("tr", {}, ...["Nozzle", "Time", "Problems with this nozzle", ""].map((t) => el("th", { textContent: t }))),
+      ...rows.map((r) =>
+        el(
+          "tr",
+          { className: r.current ? "current" : "" },
+          el("td", { textContent: `${r.nozzle} mm` }),
+          el("td", { textContent: `≈${fmtTime(r.print_time_min)}` }),
+          el("td", { textContent: r.issues.length ? [...new Set(r.issues.map((i) => i.title))].join("; ") : "none" }),
+          el("td", {}, r.current ? "current" : el("button", {
+            textContent: "Use",
+            onclick: () => {
+              $("nozzle").value = r.nozzle;
+              $("nozzle").onchange();
+            },
+          })),
+        ),
+      ),
+    );
+    setStatus(state.summary);
+  });
+}
+$("nozzle-block").ontoggle = (e) => e.target.open && state.triangles && compareNozzles();
+
+for (const id of ["printer", "material", "nozzle", "multi-material"]) {
   $(id).onchange = () => {
     viewer.setBed(state.presets.printers[$("printer").value].bed);
+    syncMultiMaterial();
+    $("nozzle-block").open = false; // comparison belongs to the old setup
     if (state.triangles) findOrientations();
   };
 }
 document.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () => state.triangles && runCheck()));
+document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () => state.triangles && findOrientations()));
 
 // ---------- input ----------
 $("file").onchange = async (e) => {
   const file = e.target.files[0];
-  if (file) loadFile(file.name, new Uint8Array(await file.arrayBuffer()));
+  if (file) openFile(file.name, new Uint8Array(await file.arrayBuffer()));
 };
 const drop = $("drop");
 for (const ev of ["dragenter", "dragover"]) drop.addEventListener(ev, (e) => (e.preventDefault(), drop.classList.add("over")));
@@ -431,7 +737,7 @@ for (const ev of ["dragleave", "drop"]) drop.addEventListener(ev, () => drop.cla
 drop.addEventListener("drop", async (e) => {
   e.preventDefault();
   const file = e.dataTransfer.files[0];
-  if (file) loadFile(file.name, new Uint8Array(await file.arrayBuffer()));
+  if (file) openFile(file.name, new Uint8Array(await file.arrayBuffer()));
 });
 document.querySelectorAll("[data-sample]").forEach((btn) => {
   btn.onclick = async () => {
@@ -441,7 +747,7 @@ document.querySelectorAll("[data-sample]").forEach((btn) => {
 });
 
 // ---------- output ----------
-const baseName = () => state.name.replace(/\.stl$/i, "");
+const baseName = () => state.name.replace(/\.(stl|step|stp)$/i, "");
 
 function download(bytes, filename, type) {
   const a = el("a", { href: URL.createObjectURL(new Blob([bytes], { type })), download: filename });
