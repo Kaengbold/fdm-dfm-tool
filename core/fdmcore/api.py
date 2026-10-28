@@ -15,13 +15,14 @@ Modes decide which fixes are shown:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from .checks import orient, run_checks
 from .export3mf import export_3mf
-from .mesh import Mesh, load_stl
+from .formats import read_bodies, unit_hint
+from .mesh import Mesh
 from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z
 from .placement import print_rotation
 from .profile import Profile, load_data, presets
@@ -36,6 +37,8 @@ class Session:
     name: str
     regions: np.ndarray | None = None  # region id per triangle, computed on demand
     load_case: tuple | None = None  # (loads json, prepared LoadCase) cache
+    bodies: list = field(default_factory=list)  # (name, Mesh) per body in the file
+    body: int = 0  # which body is loaded
 
 
 _session: Session | None = None
@@ -52,25 +55,57 @@ def get_presets() -> dict:
 
 
 def load(data: bytes, name: str = "part", face_ids: list[int] | None = None) -> dict:
-    """Load an STL; returns mesh info and the triangles for display.
+    """Load an STL or 3MF; returns mesh info and the triangles for display.
 
     ``face_ids`` (one per triangle, e.g. CAD faces from a STEP file) replace the
-    guessed face regions with exact ones.
+    guessed face regions with exact ones. Files with several bodies load the largest;
+    ``bodies`` lists them all so the user can switch with ``select_body``.
     """
     global _session
-    mesh = load_stl(bytes(data))
-    _session = Session(mesh, name)
+    bodies = read_bodies(bytes(data))
     if face_ids is not None:
-        if len(face_ids) != mesh.face_count:
+        if len(bodies) > 1 or len(face_ids) != bodies[0][1].face_count:
             raise ValueError("face_ids must have one entry per triangle")
-        _session.regions = np.unique(np.asarray(face_ids), return_inverse=True)[1].ravel()
-    lo, hi = mesh.bounds()
+        regions = np.unique(np.asarray(face_ids), return_inverse=True)[1].ravel()
+    else:
+        regions = None
+    _session = Session(bodies[0][1], name, regions, bodies=bodies)
+    return _info()
+
+
+def select_body(index: int) -> dict:
+    """Analyse another body of a multi-body file."""
+    s = _require()
+    if not 0 <= index < len(s.bodies):
+        raise ValueError("No such body")
+    s.mesh, s.body, s.regions, s.load_case = s.bodies[index][1], index, None, None
+    return _info()
+
+
+def scale(factor: float) -> dict:
+    """Rescale the loaded part (e.g. inch -> mm). Every body is scaled, so switching keeps the units."""
+    s = _require()
+    if not 1e-4 <= factor <= 1e4:
+        raise ValueError("Scale factor out of range")
+    s.bodies = [(n, Mesh(m.triangles * factor)) for n, m in s.bodies]
+    s.mesh, s.load_case = s.bodies[s.body][1], None
+    return _info()
+
+
+def _info() -> dict:
+    s = _require()
+    lo, hi = s.mesh.bounds()
+    size = hi - lo
+    biggest_bed = max(max(p["bed"]) for p in presets()["printers"].values())
     return {
-        "name": name,
-        "faces": mesh.face_count,
-        "volume_mm3": abs(mesh.volume()),
-        "size_mm": (hi - lo).tolist(),
-        "triangles": mesh.triangles.astype("<f4").tobytes(),
+        "name": s.name,
+        "faces": s.mesh.face_count,
+        "volume_mm3": abs(s.mesh.volume()),
+        "size_mm": size.tolist(),
+        "triangles": s.mesh.triangles.astype("<f4").tobytes(),
+        "body": s.body,
+        "bodies": [{"name": n, "faces": m.face_count, "volume_mm3": abs(m.volume())} for n, m in s.bodies] if len(s.bodies) > 1 else [],
+        "unit_hint": unit_hint(size, biggest_bed),
     }
 
 
@@ -422,6 +457,8 @@ def report(up, profile: dict | None = None, mode: str = "print") -> str:
 METHODS = {
     "presets": get_presets,
     "load": load,
+    "select_body": select_body,
+    "scale": scale,
     "orientations": orientations,
     "orientation": orientation,
     "check": check,

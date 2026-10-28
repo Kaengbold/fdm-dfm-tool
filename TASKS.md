@@ -56,9 +56,9 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Input / output
 
-- [ ] **T-050 P2** 3MF input (geometry only, multi-object → pick one). · owner: —
-- [ ] **T-051 P2** Unit sanity check (part 25.4× too small → offer inch → mm). · owner: —
-- [ ] **T-052 P3** Split multi-body STL into separate parts and let the user pick. · owner: —
+- [x] **T-050 P2** 3MF input (geometry only, multi-object → pick one). · owner: Claude (`task/T-050-input`) — `formats.py`: build items, components in other model files, units.
+- [x] **T-051 P2** Unit sanity check (part 25.4× too small → offer inch → mm). · owner: Claude (`task/T-050-input`) — hint + one-click scale for inch / metre / micron.
+- [x] **T-052 P3** Split multi-body STL into separate parts and let the user pick. · owner: Claude (`task/T-050-input`) — cavity shells stay with their body, crumbs dropped.
 
 ## AI
 
@@ -79,6 +79,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Done
 
+- [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
 - [x] **T-110 P1** Fix GEOS topology exception in Pyodide on real models; dynamic goal presets (walls/infill/layer height); camera focus & 3D highlight on clicked findings; orientation box clearing; WIP yellow frames on unfinished features. · owner: Antigravity (branch `task/T-110-ux-fixes`)
 - [x] Phase 0–2: engine, Pyodide app, orientation, pseudo-slicer checks, knowledge base, settings, 3MF/STL export, voxel FEA strength, strength-aware orientation.
 - [x] Phase 3 (partial): hole detection, teardrop + corner chamfer edits with ghost preview.

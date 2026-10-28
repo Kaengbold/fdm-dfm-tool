@@ -83,6 +83,26 @@ class Run:
         self.page.screenshot(path=str(OUT / f"{len(self.failures):02d}_{name.replace(' ', '_').replace('/', '_')[:60]}.png"))
 
 
+def _box_stl(boxes) -> bytes:
+    """Binary STL of axis-aligned boxes [(lo, size), ...] — enough for input tests."""
+    import struct
+
+    v = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+    f = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+    tris = [[[lo[k] + size * v[i][k] for k in range(3)] for i in face] for lo, size in boxes for face in f]
+    out = bytes(80) + struct.pack("<I", len(tris))
+    for t in tris:
+        out += struct.pack("<12fH", 0, 0, 0, *t[0], *t[1], *t[2], 0)
+    return out
+
+
+def test_files() -> tuple[Path, Path]:
+    plate, tiny = OUT / "two_bodies.stl", OUT / "inch_part.stl"
+    plate.write_bytes(_box_stl([((0, 0, 0), 20), ((40, 0, 0), 10)]))
+    tiny.write_bytes(_box_stl([((0, 0, 0), 2)]))
+    return plate, tiny
+
+
 def findings(page) -> list[str]:
     return page.locator("#findings .findings > li > details > summary").all_inner_texts()
 
@@ -203,6 +223,21 @@ def main():
             page.click("#as-fixed")
             return f"{info}; loads: {page.locator('#loads li').all_inner_texts()}"
         run.step("pick a face + mark fixed", pick_face)
+
+        def bodies_and_units():
+            plate, tiny = test_files()
+            run.act(lambda: page.set_input_files("#file", str(plate)))
+            assert page.locator("#body-pick").is_visible(), "no body picker for a two-body file"
+            first = page.locator("#status").inner_text()
+            run.act(lambda: page.select_option("#body", "1"))
+            second = page.locator("#status").inner_text()
+            assert first != second, f"switching body did not change the part: {first}"
+            run.act(lambda: page.set_input_files("#file", str(tiny)))
+            assert page.locator("#unit-hint").is_visible(), "no unit hint for a 2 mm part"
+            run.act(lambda: page.click("#unit-scale"))
+            assert "50.8" in page.locator("#status").inner_text(), page.locator("#status").inner_text()
+            return f"{first} -> {second}; rescaled: {page.locator('#status').inner_text()}"
+        run.step("multi-body file + unit hint", bodies_and_units)
 
         for part in args.parts:
             def load_part(part=part):

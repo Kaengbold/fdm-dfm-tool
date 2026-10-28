@@ -8,6 +8,7 @@
  "export3mf.py",
  "fea.py",
  "features.py",
+ "formats.py",
  "mesh.py",
  "orientation.py",
  "placement.py",

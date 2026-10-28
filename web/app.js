@@ -94,7 +94,7 @@ async function busy(text, fn) {
 }
 
 // ---------- flow ----------
-/** Entry point for user files: STEP goes through OpenCascade first, STL straight to the engine. */
+/** Entry point for user files: STEP goes through OpenCascade first; STL and 3MF straight to the engine. */
 async function openFile(name, bytes) {
   $("body-pick").hidden = true;
   if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes);
@@ -102,29 +102,53 @@ async function openFile(name, bytes) {
   if (!bodies.length) return setStatus("No solid bodies found in this STEP file.", true);
   const pick = async (i) => loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds);
   if (bodies.length > 1) {
-    $("body").replaceChildren(
-      ...bodies.map((b, i) => el("option", { value: i, textContent: `${b.name} (${Math.round(b.volume / 1000)} cm³)` })),
-    );
-    $("body").onchange = () => pick(Number($("body").value));
-    $("body-pick").hidden = false;
+    showBodyPicker(bodies.map((b) => ({ name: b.name, volume_mm3: b.volume })), 0, pick);
   }
   await pick(0);
+}
+
+/** Dropdown for files with several parts; ``pick(i)`` loads body i. */
+function showBodyPicker(bodies, active, pick) {
+  $("body").replaceChildren(
+    ...bodies.map((b, i) => el("option", { value: i, textContent: `${b.name} (${(b.volume_mm3 / 1000).toFixed(1)} cm³)`, selected: i === active })),
+  );
+  $("body").onchange = () => pick(Number($("body").value));
+  $("body-pick").hidden = false;
 }
 
 async function loadFile(name, bytes, faceIds = null) {
   await busy("Reading part…", async () => {
     await engineReady;
     const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
-    state.name = name;
-    // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
-    state.triangles = new Float32Array(info.triangles.slice().buffer);
-    Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], strength: null, overrides: {} });
-    viewer.framed = false;
-    const [x, y, z] = info.size_mm.map((v) => v.toFixed(1));
-    state.summary = `${name}: ${x} × ${y} × ${z} mm`;
-    renderLoads();
-    await findOrientations();
+    if (info.bodies.length) {
+      showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => partLoaded(await call("select_body", { index: i }))));
+    }
+    await partLoaded(info);
   });
+}
+
+/** Common tail after load / body switch / rescale: reset part state, then orient and check. */
+async function partLoaded(info) {
+  state.name = info.name;
+  // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
+  state.triangles = new Float32Array(info.triangles.slice().buffer);
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], strength: null, overrides: {} });
+  viewer.framed = false;
+  const [x, y, z] = info.size_mm.map((v) => v.toFixed(1));
+  const body = info.bodies.length ? ` (${info.bodies[info.body].name})` : "";
+  state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
+  showUnitHint(info.unit_hint);
+  renderLoads();
+  await findOrientations();
+}
+
+/** Parts exported in inches or metres arrive 25.4× / 1000× off; offer a one-click fix. */
+function showUnitHint(hint) {
+  $("unit-hint").hidden = !hint;
+  if (!hint) return;
+  $("unit-text").textContent = `${hint.text} — was it exported in ${hint.unit}?`;
+  $("unit-scale").textContent = `Scale ×${hint.factor} → ${hint.scaled_mm} mm`;
+  $("unit-scale").onclick = () => busy("Rescaling…", async () => partLoaded(await call("scale", { factor: hint.factor })));
 }
 
 async function findOrientations(withLoads = false) {
@@ -720,7 +744,7 @@ async function initPresets() {
   fill("nozzle", Object.keys(p.nozzles).map((k) => [k, `${k} mm`]), "0.4");
   viewer.setBed(p.printers[$("printer").value].bed);
   syncMultiMaterial();
-  setStatus("Ready — drop an STL or try a sample.");
+  setStatus("Ready — drop an STL, 3MF or STEP file, or try a sample.");
 }
 initPresets().catch((err) => setStatus(`Engine failed to start: ${err.message}`, true));
 
@@ -819,12 +843,12 @@ drop.addEventListener("drop", async (e) => {
 document.querySelectorAll("[data-sample]").forEach((btn) => {
   btn.onclick = async () => {
     const res = await fetch(`samples/${btn.dataset.sample}.stl`);
-    loadFile(`${btn.dataset.sample}.stl`, new Uint8Array(await res.arrayBuffer()));
+    openFile(`${btn.dataset.sample}.stl`, new Uint8Array(await res.arrayBuffer()));
   };
 });
 
 // ---------- output ----------
-const baseName = () => state.name.replace(/\.(stl|step|stp)$/i, "");
+const baseName = () => state.name.replace(/\.(stl|3mf|step|stp)$/i, "");
 
 function download(bytes, filename, type) {
   if (!bytes || (bytes.length === 0 && bytes.byteLength === 0)) {

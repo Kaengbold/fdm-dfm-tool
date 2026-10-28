@@ -20,11 +20,12 @@
       <h1>FDM DFM Tool <small>pre-alpha</small></h1>
 
       <label id="drop" class="drop">
-        <input id="file" type="file" accept=".stl,.step,.stp" hidden />
-        <strong>Drop an STL or STEP file here</strong>
+        <input id="file" type="file" accept=".stl,.3mf,.step,.stp" hidden />
+        <strong>Drop an STL, 3MF or STEP file here</strong>
         <span>or click to choose a file</span>
       </label>
       <label id="body-pick" class="setting" hidden>This file has several bodies — analyse <select id="body"></select></label>
+      <div id="unit-hint" class="unit-hint" hidden><span id="unit-text"></span> <button id="unit-scale"></button></div>
       <div class="samples">
         Samples:
         <button data-sample="mushroom">Mushroom</button>

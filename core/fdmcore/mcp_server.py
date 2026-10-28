@@ -59,9 +59,23 @@ def list_presets() -> dict:
 
 @server.tool()
 def load_part(path: str) -> dict:
-    """Load an STL file (single part, millimetres). Replaces any previously loaded part."""
+    """Load an STL or 3MF file (millimetres). Files with several bodies load the largest; the result lists
+    them all (``bodies``) and ``unit_hint`` warns about parts exported in inches or metres.
+    Replaces any previously loaded part."""
     p = Path(path).expanduser()
     return _clean(api.load(p.read_bytes(), p.name))
+
+
+@server.tool()
+def select_body(index: int) -> dict:
+    """Switch to another body of a multi-body file (index into ``bodies`` from load_part)."""
+    return _clean(api.select_body(index))
+
+
+@server.tool()
+def scale_part(factor: float) -> dict:
+    """Rescale the loaded part, e.g. 25.4 for a part exported in inches."""
+    return _clean(api.scale(factor))
 
 
 @server.tool()

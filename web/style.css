@@ -208,3 +208,12 @@ main canvas { display: block; }
 /* Inactive orientation cards collapse to their first reason so the findings stay in view. */
 #options > li:not(.active) ul li:nth-child(n + 2) { display: none; }
 #options > li:not(.active) { padding: 6px 12px; }
+
+.unit-hint {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.6rem;
+  border-left: 3px solid #e0a800;
+  background: #fff8e1;
+  font-size: 13px;
+}
+.unit-hint button { margin-top: 0.3rem; }

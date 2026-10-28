@@ -11,7 +11,7 @@ browser, no install, your files never leave your computer.
 
 | | |
 |---|---|
-| **Input** | STL, or STEP (exact CAD faces; multi-body files let you pick the body) |
+| **Input** | STL, 3MF or STEP (exact CAD faces). Files with several parts let you pick one; parts exported in inches or metres get a one-click rescale |
 | **Orientation** | Ranks build directions by supports, bed contact, height — and strength if you add loads; checks the build volume and turns the part to fit |
 | **Printability** | Pseudo-slices the part: overhangs vs. bridges, thin walls, sharp bed corners, tipping, slender features, small hot layers, material/printer issues |
 | **Explanations** | Every finding has a plain-language *why* and fixes, filtered by what you can change: *just print it* / *the design* / *both* |
