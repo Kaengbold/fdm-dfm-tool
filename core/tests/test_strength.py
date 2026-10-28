@@ -81,3 +81,15 @@ def test_strength_needs_fixed_and_load():
     api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
     with pytest.raises(ValueError):
         api.strength([0, 0, 1], [{"region": 0, "kind": "force", "kg": 1}])
+
+
+def test_several_load_cases_weakest_decides():
+    fixed, force = hook_loads()
+    prof = {"material": "pla"}
+    light = api.strength([1, 0, 0], [fixed, {**force, "kg": 2}], prof)["safety_factor"]
+    heavy = api.strength([1, 0, 0], [fixed, {**force, "kg": 8}], prof)["safety_factor"]
+    both = api.strength([1, 0, 0], [fixed, {**force, "kg": 2, "case": 1}, {**force, "kg": 8, "case": 2}], prof)
+    assert both["safety_factor"] == pytest.approx(heavy, rel=1e-3) and both["case"] == 2
+    assert [c["safety_factor"] for c in both["cases"]] == pytest.approx([light, heavy], rel=1e-3)
+    # Same forces in one case add up instead: weaker than either alone.
+    assert api.strength([1, 0, 0], [fixed, {**force, "kg": 2}, {**force, "kg": 8}], prof)["safety_factor"] < heavy

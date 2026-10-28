@@ -230,6 +230,27 @@ def main():
             return f"{info}; loads: {page.locator('#loads li').all_inner_texts()}"
         run.step("pick a face + mark fixed", pick_face)
 
+        def load_cases():
+            # Another visible face (different region) gets a load in case 1 and a heavier one in case 2.
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer, s = fdm.state, held = s.loads[0].region;"
+                " const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f++) { if (s.faceRegions[f] === held) continue; const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); const hit = v.pick({clientX: x, clientY: y}); if (el && el.tagName === 'CANVAS' && hit >= 0 && s.faceRegions[hit] !== held) return [x, y]; }"
+                " return [0, 0]; }"
+            )
+            for case, kg in (("1", "1"), ("2", "4")):
+                page.mouse.click(x, y)
+                page.wait_for_selector("#pick-panel:not([hidden])")
+                page.fill("#kg", kg)
+                page.select_option("#load-case", case)
+                page.click("#as-load")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            text = page.locator("#strength-result").inner_text()
+            assert "Weakest is case 2" in text, text
+            return f"loads: {page.locator('#loads li').all_inner_texts()} | {text.splitlines()[0]}"
+        run.step("strength with two load cases", load_cases)
+
         def cancel():
             run.act(lambda: page.click("[data-sample=enclosure]"))
             before = page.evaluate("() => fdm.state.options.length")

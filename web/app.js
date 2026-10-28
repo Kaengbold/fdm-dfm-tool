@@ -450,14 +450,18 @@ $("viewer").addEventListener("pointerup", async (e) => {
   await ensureRegions();
   state.selectedRegion = state.faceRegions[face];
   const info = state.regionInfo[state.selectedRegion];
-  $("pick-info").textContent = `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
+  $("pick-info").textContent = info.hole_diameter
+    ? `Ø${info.hole_diameter.toFixed(1)} mm hole — "Held here" means a screw or pin through it holds the part`
+    : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("pick-panel").hidden = false;
   state.showHeat = false;
   recolor();
 });
 
 function addLoad(load) {
-  state.loads = state.loads.filter((l) => l.region !== load.region).concat(load);
+  // One entry per face and case: a face can be loaded differently in each case, and "held" is shared.
+  const same = (l) => l.region === load.region && (l.kind === "fixed" || load.kind === "fixed" || l.case === load.case);
+  state.loads = state.loads.filter((l) => !same(l)).concat(load);
   state.selectedRegion = -1;
   $("pick-panel").hidden = true;
   renderLoads();
@@ -466,9 +470,10 @@ function addLoad(load) {
 
 $("as-fixed").onclick = () => addLoad({ region: state.selectedRegion, kind: "fixed" });
 $("as-load").onclick = () =>
-  addLoad({ region: state.selectedRegion, kind: "force", kg: Number($("kg").value), direction: $("dir").value });
+  addLoad({ region: state.selectedRegion, kind: "force", kg: Number($("kg").value), direction: $("dir").value, case: Number($("load-case").value) });
 
 const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" };
+const multiCase = () => new Set(state.loads.filter((l) => l.kind === "force").map((l) => l.case)).size > 1;
 const readyForStrength = () => state.loads.some((l) => l.kind === "fixed") && state.loads.some((l) => l.kind === "force");
 
 function renderLoads() {
@@ -477,7 +482,7 @@ function renderLoads() {
       el(
         "li",
         { className: l.kind },
-        l.kind === "fixed" ? "Held here" : `${l.kg} kg ${DIR_LABEL[l.direction]}`,
+        l.kind === "fixed" ? "Held here" : `${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${DIR_LABEL[l.direction]}`,
         el("button", {
           textContent: "×",
           title: "Remove",
@@ -536,6 +541,9 @@ function renderStrength() {
       el("p", { textContent: MODE_TEXT[r.mode] }),
       el("p", { textContent: `${r.material}, ${r.walls} walls, ${Math.round(r.infill * 100)}% infill · bends about ${r.max_displacement_mm.toFixed(1)} mm` }),
     ),
+    r.cases.length > 1
+      ? el("p", { className: "hint", textContent: `Weakest is case ${r.case} (shown). ` + r.cases.map((c) => `Case ${c.case}: ×${c.safety_factor.toFixed(1)}`).join(" · ") })
+      : "",
     el("label", { className: "toggle" }, heat, "Show stress colours (red dot = weakest spot)"),
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
     el("button", { textContent: "How can I make it stronger?", onclick: showStrengthOptions }),

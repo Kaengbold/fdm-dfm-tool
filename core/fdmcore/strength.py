@@ -2,8 +2,10 @@
 
 Loads are given on regions (see regions.py):
   {"region": 3, "kind": "fixed"}
-  {"region": 7, "kind": "force", "kg": 5, "direction": "push" | "pull" | "down" | [x, y, z]}
+  {"region": 7, "kind": "force", "kg": 5, "direction": "push" | "pull" | "down" | [x, y, z], "case": 2}
 ``down`` means -Z in the part's own (as-modelled) coordinates, like a hanging weight.
+Forces with different ``case`` numbers are separate situations (e.g. "hanging" and "being
+pulled sideways"); fixed faces hold in every case and the weakest case decides.
 
 The model: voxels with an anisotropic material whose weak axis is the build
 direction; surface voxels carry the walls, inner voxels the (much softer) infill.
@@ -33,11 +35,26 @@ class LoadCase:
     forces: np.ndarray  # (n_nodes, 3) N
     fixed: np.ndarray  # (n_nodes,) bool
     ignore: np.ndarray  # (E,) bool — elements at load/support points (stress singularities)
+    number: int = 1  # load case number (see module docstring)
 
 
-def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000) -> LoadCase:
-    grid = voxelize(mesh, target_voxels)
-    model = build_model(grid)
+def prepare_cases(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000) -> list[LoadCase]:
+    """One LoadCase per case number, all on the same voxel model."""
+    fixed = [l for l in loads if l["kind"] == "fixed"]
+    forces = [l for l in loads if l["kind"] != "fixed"]
+    numbers = sorted({int(l.get("case", 1)) for l in forces}) or [1]
+    model = build_model(voxelize(mesh, target_voxels))
+    out = []
+    for n in numbers:
+        case = prepare(mesh, region, fixed + [l for l in forces if int(l.get("case", 1)) == n], model=model)
+        case.number = n
+        out.append(case)
+    return out
+
+
+def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000, model: Model | None = None) -> LoadCase:
+    model = model or build_model(voxelize(mesh, target_voxels))
+    grid = model.grid
     normals, _ = mesh.normals_and_areas()
     forces = np.zeros((model.n_nodes, 3))
     fixed = np.zeros(model.n_nodes, dtype=bool)
@@ -101,6 +118,21 @@ def evaluate(case: LoadCase, up, profile: Profile, walls: int = 2, infill: float
     stress = element_stress(case.model, c, scale, u)
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
     return _summary(case, fi_layer, fi_plane, u, info)
+
+
+def evaluate_cases(cases: list[LoadCase], up, profile: Profile, walls: int = 2, infill: float = 0.15) -> dict:
+    """``evaluate`` for every case; the weakest one is returned, with all safety factors in ``cases``."""
+    results = [evaluate(c, up, profile, walls, infill) for c in cases]
+    k = int(np.argmin([r["safety_factor"] for r in results]))
+    worst = results[k]
+    worst["case"] = cases[k].number
+    worst["cases"] = [{"case": c.number, "safety_factor": r["safety_factor"], "verdict": r["verdict"]} for c, r in zip(cases, results)]
+    return worst
+
+
+def cases_safety(cases: list[LoadCase], ups: np.ndarray, profile: Profile, walls: int = 2, infill: float = 0.15) -> np.ndarray:
+    """Worst-case ``orientation_safety`` over all cases."""
+    return np.min([orientation_safety(c, ups, profile, walls, infill) for c in cases], axis=0)
 
 
 def orientation_safety(case: LoadCase, ups: np.ndarray, profile: Profile, walls: int = 2, infill: float = 0.15) -> np.ndarray:

@@ -126,12 +126,12 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     progress.report(0.2, "Scoring directions")
     safety = {}
     if loads:
-        from .strength import orientation_safety, verdict
+        from .strength import cases_safety, verdict
 
         case = _load_case(loads)
         ups = np.array([r.up for r in candidates] + [as_loaded.up])
         with stage(0.2, 0.95):
-            sfs = orientation_safety(case, ups, p)
+            sfs = cases_safety(case, ups, p)
         for r, sf in zip([*candidates, as_loaded], sfs):
             safety[id(r)] = float(sf)
             r.reasons.append(_strength_reason(sf, verdict(sf)))
@@ -310,32 +310,41 @@ def regions() -> dict:
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
-    return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": region_info(s.mesh, s.regions)}
+    info = region_info(s.mesh, s.regions)
+    # Name round holes, so the UI can say "held by a screw here" when one is picked.
+    from .features import detect_features
+
+    for f in detect_features(s.mesh, s.regions):
+        if f["type"] == "hole":
+            info[f["region"]]["hole_diameter"] = f["diameter"]
+    return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
 
 
 def _load_case(loads: list[dict]):
+    """Prepared load cases (list, see strength.prepare_cases), cached per load set."""
     from .regions import find_regions
-    from .strength import prepare
+    from .strength import prepare_cases
 
     s = _require()
     key = json.dumps(loads, sort_keys=True)
     if s.load_case is None or s.load_case[0] != key:
         if s.regions is None:
             s.regions = find_regions(s.mesh)
-        s.load_case = (key, prepare(s.mesh, s.regions, loads))
+        s.load_case = (key, prepare_cases(s.mesh, s.regions, loads))
     return s.load_case[1]
 
 
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int = 2, infill: float = 0.15) -> dict:
-    """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks)."""
-    from .strength import evaluate as evaluate_strength
-    from .strength import face_values
+    """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks).
+    With several load cases (``case`` on forces) the weakest decides; ``cases`` lists them all."""
+    from .strength import evaluate_cases, face_values
 
     s = _require()
     p = Profile.from_dict(profile)
-    case = _load_case(loads)
-    r = evaluate_strength(case, up, p, walls, infill)
-    heat = face_values(s.mesh, case.model.grid, case.model, r.pop("fi"))
+    cases = _load_case(loads)
+    r = evaluate_cases(cases, up, p, walls, infill)
+    model = cases[0].model
+    heat = face_values(s.mesh, model.grid, model, r.pop("fi"))
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
     r["critical_point_print"] = _to_print_frame(s.mesh, print_rotation(s.mesh, up, p.printer["bed"])[0], r["critical_point"])
     r.update(walls=walls, infill=infill, material=p.material["name"])
@@ -344,8 +353,8 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int = 2,
 
 def strength_options(up, loads: list[dict], profile: dict | None = None, walls: int = 2, infill: float = 0.15) -> list[dict]:
     """What would make it stronger? Tries more walls, more infill and the strongest orientation."""
-    from .strength import evaluate as evaluate_strength
-    from .strength import orientation_safety, verdict
+    from .strength import cases_safety, verdict
+    from .strength import evaluate_cases as evaluate_strength
 
     p = Profile.from_dict(profile)
     case = _load_case(loads)
@@ -361,7 +370,7 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
         sf = evaluate_strength(case, up, p, walls, dense)["safety_factor"]
         add(f"{dense:.0%} infill instead of {infill:.0%}", "slicer", sf, settings={"sparse_infill_density": f"{dense:.0%}"})
     axes = np.vstack([np.eye(3), -np.eye(3)])
-    sfs = orientation_safety(case, axes, p, walls, infill)
+    sfs = cases_safety(case, axes, p, walls, infill)
     best = int(np.argmax(sfs))
     if abs(float(np.dot(axes[best], np.asarray(up, float) / np.linalg.norm(up)))) < 0.99:
         add("Print in the strongest orientation", "orientation", sfs[best], up=axes[best].tolist())

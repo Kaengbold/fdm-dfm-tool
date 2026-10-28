@@ -112,7 +112,8 @@ def check_strength(
     infill: float = 0.15,
 ) -> dict:
     """Rough strength check. loads: [{"region": id, "kind": "fixed"},
-    {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z]}].
+    {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
+    Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
     return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill))
 

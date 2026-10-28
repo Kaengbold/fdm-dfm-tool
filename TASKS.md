@@ -40,8 +40,8 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Strength
 
-- [ ] **T-030 P2** Several load cases at once (worst case wins). · owner: —
-- [ ] **T-031 P2** Loads on edges/points and "screw here" helper (hole → fixed). · owner: —
+- [x] **T-030 P2** Several load cases at once (worst case wins). · owner: Claude (`task/T-030-load-cases`) — `case` on forces (UI picker, AI + MCP schemas); one voxel model, one solve per case; all safety factors listed.
+- [~] **T-031 P2** Loads on edges/points and "screw here" helper (hole → fixed). · owner: Claude (`task/T-030-load-cases`) — picked hole walls are named ("Ø3.2 mm hole — held by a screw"). Left: loads on edges/points.
 - [ ] **T-032 P2** Calibrate layer-strength factors with test prints (CNC-Kitchen-style hooks), document method and results. · owner: —
 - [ ] **T-033 P3** Partial-voxel fill fractions for better accuracy on thin sections. · files: `voxel.py`, `strength.py` · owner: —
 

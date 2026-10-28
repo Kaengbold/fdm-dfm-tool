@@ -41,7 +41,7 @@ export const TOOLS = [
   },
   {
     name: "set_loads",
-    description: "Replace the load case. Needs at least one fixed face and one force.",
+    description: "Replace the loads. Needs at least one fixed face and one force. Forces with different `case` numbers are separate situations; the weakest case decides.",
     input_schema: {
       type: "object",
       properties: {
@@ -54,6 +54,7 @@ export const TOOLS = [
               kind: { type: "string", enum: ["fixed", "force"] },
               kg: { type: "number", description: "Load in kg (force only)" },
               direction: { type: "string", enum: ["push", "pull", "down"], description: "push into the face, pull it away, or hang down (-Z as modelled)" },
+              case: { type: "integer", minimum: 1, description: "Load case number (force only, default 1)" },
             },
             required: ["region", "kind"],
             additionalProperties: false,
