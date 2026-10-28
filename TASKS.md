@@ -77,7 +77,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-082 P3** German translation (UI + rules). · owner: —
 - [ ] **T-090 P3** Fusion 360 add-in using the same engine. · owner: —
 
-- [ ] **T-111 P2** Findings UI: an impact group "Will fail" can contain a TIP-severity card (e.g. small bed contact that a brim fixes), which reads as a contradiction. Show the severity the group implies, or move fixed-by-setting items to a "needs a setting" note. · owner: —
+- [x] **T-111 P2** Findings UI: an impact group "Will fail" can contain a TIP-severity card (e.g. small bed contact that a brim fixes), which reads as a contradiction. Show the severity the group implies, or move fixed-by-setting items to a "needs a setting" note. · owner: Claude — group renamed "Can fail"; the card's severity says how likely.
 
 ## Done
 

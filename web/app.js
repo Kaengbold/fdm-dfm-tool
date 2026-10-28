@@ -284,7 +284,7 @@ const DOMAIN_LABEL = { geometry: "Design", slicer: "Slicer", process: "Printer &
 
 // Findings are grouped by how the print differs from the CAD model; "info" starts collapsed.
 const IMPACTS = [
-  ["fails", "Will fail"],
+  ["fails", "Can fail"], // severity on each card says how likely (a tip here = a setting handles it)
   ["shape", "Shape or size will differ from your CAD"],
   ["surface", "Surface quality"],
   ["weak", "Weaker than it looks"],
