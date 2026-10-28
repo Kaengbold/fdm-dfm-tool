@@ -33,6 +33,10 @@ may work here in parallel; these rules keep their work from colliding.
   `web/worker.js`). Local-only modules (`mcp_server.py`, `booleans.py`) are listed in
   `LOCAL_ONLY` in `tools/make_manifest.py`.
 - **After adding/removing an engine file, run `python tools/make_manifest.py`** — a test fails otherwise.
+- **A GEOS error in Pyodide kills the engine** (C++ exception, `try/except` can't catch it). Pyodide ships
+  an older GEOS than pip, so code that works natively can crash in the browser. Don't snap or
+  "clean" geometry speculatively; repair only invalid shapes. Run `node tools/pyodide_check.mjs`
+  after touching `slicer.py` / `checks.py` geometry code.
 - **Every API result must be JSON-friendly** (bytes allowed for arrays). `api.dispatch` converts numpy types.
 - **New findings need a `rules.yaml` entry** with at least one `slicer` or `process` fix
   (for users who can't edit the model). Facts in rules need a source in the PR description.
@@ -46,6 +50,7 @@ may work here in parallel; these rules keep their work from colliding.
 cd core && python -m pytest -q                 # engine tests (~20 s)
 python tools/e2e_smoke.py                      # browser test in headless Edge (pip install playwright)
 python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini screenshot review
+node tools/pyodide_check.mjs                   # engine in Pyodide under Node (npm install pyodide@0.27.2)
 python tools/make_samples.py                   # regenerate web/samples (needs trimesh, manifold3d)
 python -m http.server 8000                     # then open http://localhost:8000/web/
 ```

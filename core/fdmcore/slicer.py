@@ -90,12 +90,11 @@ def _segments_to_solid(segs: np.ndarray) -> BaseGeometry:
     if not rings:
         return Polygon()
     solid = _even_odd(rings)
-    if solid.is_empty:
-        return solid
-    try:
-        return shapely.set_precision(solid, 1e-4)
-    except Exception:
-        return shapely.make_valid(solid)
+    # Only repair what is broken. In Pyodide a GEOS error aborts the whole engine (try/except
+    # can't catch it), and grid-snapping every outline (set_precision) made later buffers throw.
+    if not solid.is_empty and not solid.is_valid:
+        solid = shapely.union_all(parts(shapely.make_valid(solid)))
+    return solid
 
 
 def _even_odd(polys: list[BaseGeometry]) -> BaseGeometry:
