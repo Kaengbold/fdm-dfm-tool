@@ -72,7 +72,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-070 P1** GitHub Actions CI: pytest + e2e smoke test (Windows runner with Edge, or Linux + Chromium). · owner: —
 - [ ] **T-071 P2** Hosting: GitHub Pages (needs a public repo or paid plan) or Cloudflare Pages. · owner: —
 - [ ] **T-072 P3** Self-host Pyodide/three/manifold/occt assets (offline use, no CDN dependency). · owner: —
-- [ ] **T-080 P1** Progress indicator + cancel for long operations. · owner: —
+- [x] **T-080 P1** Progress indicator + cancel for long operations. · owner: Claude (`task/T-080-progress`) — `progress.py` stages (layers, orientation search, nozzle comparison, FEA iterations); Cancel kills the worker, a new one boots and reloads the part.
 - [ ] **T-081 P3** Mobile/tablet layout. · owner: —
 - [ ] **T-082 P3** German translation (UI + rules). · owner: —
 - [ ] **T-090 P3** Fusion 360 add-in using the same engine. · owner: —

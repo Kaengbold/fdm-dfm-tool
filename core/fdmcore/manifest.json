@@ -13,6 +13,7 @@
  "orientation.py",
  "placement.py",
  "profile.py",
+ "progress.py",
  "recommend.py",
  "regions.py",
  "slicer.py",

@@ -224,6 +224,22 @@ def main():
             return f"{info}; loads: {page.locator('#loads li').all_inner_texts()}"
         run.step("pick a face + mark fixed", pick_face)
 
+        def cancel():
+            run.act(lambda: page.click("[data-sample=enclosure]"))
+            before = page.evaluate("() => fdm.state.options.length")
+            page.click("input[name=goal][value=strength] >> xpath=..")  # slow: checks several orientations
+            page.wait_for_selector("#progress:not([hidden])", timeout=30_000)
+            page.wait_for_function("() => document.getElementById('progress-bar').value > 0", timeout=30_000)
+            run.act(lambda: page.click("#cancel"), 60_000)
+            status = page.locator("#status").inner_text()
+            assert status.startswith("Cancelled"), status
+            # The restarted engine must have the part again: re-orienting works.
+            run.act(lambda: page.click("input[name=goal][value=balanced] >> xpath=.."))
+            after = page.evaluate("() => fdm.state.options.length")
+            assert after == before, f"{before} options before, {after} after restart"
+            return f"{status} | after restart: {after} options, {len(findings(page))} findings"
+        run.step("progress + cancel", cancel)
+
         def bodies_and_units():
             plate, tiny = test_files()
             run.act(lambda: page.set_input_files("#file", str(plate)))

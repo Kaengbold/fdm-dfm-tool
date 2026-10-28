@@ -16,6 +16,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
+from .progress import report
 from .voxel import VoxelGrid
 
 # Hex8 node order in natural coordinates (ξ, η, ζ) ∈ {-1, 1}³.
@@ -117,7 +118,14 @@ def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fi
     kf = k[free][:, free]
     f = forces.ravel()[free]
     m = two_level_preconditioner(kf, prolongation(model)[free])
-    uf, info = spla.cg(kf, f, rtol=rtol, maxiter=2000, M=m)
+    its = [0]
+
+    def tick(_):
+        its[0] += 1
+        if its[0] % 10 == 0:  # iteration count is unknown up front; creep towards the end
+            report(1 - 30 / (30 + its[0]), "Simulating")
+
+    uf, info = spla.cg(kf, f, rtol=rtol, maxiter=2000, M=m, callback=tick)
     u = np.zeros(n)
     u[free] = uf
     return u.reshape(-1, 3), info

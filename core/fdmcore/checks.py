@@ -25,6 +25,7 @@ from shapely.geometry import Polygon
 
 from .mesh import Mesh
 from .profile import Profile, load_data
+from .progress import report
 from .recommend import goal_plan
 from .slicer import Layer, parts, slice_mesh
 
@@ -159,7 +160,9 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
     vanish, rough = F["vanish_below_nozzle"] * nozzle, F["rough_below_nozzle"] * nozzle
     single = F["single_wall_below_nozzle"] * nozzle
     prev = cached = None
-    for layer in layers:
+    for i, layer in enumerate(layers):
+        if i % 8 == 0:
+            report(0.9 * i / len(layers), "Checking layers")
         g = layer.geom
         if g.is_empty:
             prev = g

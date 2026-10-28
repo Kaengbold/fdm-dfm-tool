@@ -1,5 +1,6 @@
 // Runs the Python engine (fdmcore) inside Pyodide, off the UI thread.
-// Protocol: {id, method, args, data?} -> {id, result} | {id, error}; plus {type: "ready"} once booted.
+// Protocol: {id, method, args, data?} -> {id, result} | {id, error}; plus {type: "ready"} once booted
+// and {type: "progress", id, fraction, text} while a call runs. To cancel, the page kills the worker.
 import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.mjs";
 
 const ENGINE = new URL("../core/fdmcore/", import.meta.url);
@@ -16,7 +17,19 @@ async function boot() {
     py.FS.writeFile(path, await res.text());
   }
   py.runPython("import sys; sys.path.insert(0, '/home/pyodide')");
+  py.pyimport("fdmcore.progress").set_sink(progress);
   return { py, dispatch: py.pyimport("fdmcore.api").dispatch };
+}
+
+let current = null; // id of the call being run
+let lastPost = 0;
+
+/** Called from Python; throttled so a fast loop doesn't flood the page. */
+function progress(fraction, text) {
+  const now = performance.now();
+  if (now - lastPost < 100) return;
+  lastPost = now;
+  postMessage({ type: "progress", id: current, fraction, text });
 }
 
 const ready = boot();
@@ -33,6 +46,8 @@ onmessage = async ({ data: { id, method, args, data } }) => {
   try {
     const { py, dispatch } = await ready;
     if (needsScipy(method, args)) await py.loadPackage("scipy");
+    current = id;
+    lastPost = 0;
     const out = dispatch(method, JSON.stringify(args ?? {}), data ?? null);
     let result = out;
     if (out?.toJs) {

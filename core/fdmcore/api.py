@@ -26,6 +26,8 @@ from .mesh import Mesh
 from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z
 from .placement import print_rotation
 from .profile import Profile, load_data, presets
+from . import progress
+from .progress import stage
 from .recommend import recommend_settings
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
@@ -118,20 +120,25 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     s = _require()
     p = Profile.from_dict(profile)
     settings = orientation_settings(p)
+    progress.report(0, "Scoring directions")
     candidates = find_orientations(s.mesh, settings, top=3 * top)  # extra, some get filtered out below
     as_loaded = evaluate(s.mesh, [0, 0, 1], settings)
+    progress.report(0.2, "Scoring directions")
     safety = {}
     if loads:
         from .strength import orientation_safety, verdict
 
         case = _load_case(loads)
         ups = np.array([r.up for r in candidates] + [as_loaded.up])
-        for r, sf in zip([*candidates, as_loaded], orientation_safety(case, ups, p)):
+        with stage(0.2, 0.95):
+            sfs = orientation_safety(case, ups, p)
+        for r, sf in zip([*candidates, as_loaded], sfs):
             safety[id(r)] = float(sf)
             r.reasons.append(_strength_reason(sf, verdict(sf)))
         candidates.sort(key=lambda r: r.score + STRENGTH_WEIGHT * max(0.0, 2.0 - safety[id(r)]))
     elif p.goal == "strength":
-        _rank_by_weak_spots(s.mesh, candidates, p)
+        with stage(0.2, 0.95):
+            _rank_by_weak_spots(s.mesh, candidates, p)
 
     # Hide options that don't sit on any flat face or are far worse than the best — unless
     # nothing better exists (e.g. a sphere). Users shouldn't have to wade through bad choices.
@@ -190,9 +197,10 @@ WEAK_SPOT_PENALTY = 1.0  # per weak finding (upright pin, neck, single-line wall
 def _rank_by_weak_spots(mesh: Mesh, candidates: list, p: Profile, check_top: int = 6):
     """Without loads, 'strength' means: avoid orientations that print pins upright or make necks.
     Runs a quick check on the best few candidates and re-sorts them."""
-    for r in candidates[:check_top]:
+    for i, r in enumerate(candidates[:check_top]):
         rotation, _ = print_rotation(mesh, r.up, p.printer["bed"])
-        found = run_checks(orient(mesh, rotation), p, max_layers=50)["findings"]
+        with stage(i / check_top, (i + 1) / check_top):
+            found = run_checks(orient(mesh, rotation), p, max_layers=50)["findings"]
         weak = [f for f in found if f["impact"] == "weak"]
         r.score += WEAK_SPOT_PENALTY * min(len(weak), 3)
         if weak:
@@ -413,9 +421,11 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
     rotation, _ = print_rotation(s.mesh, up, base.printer["bed"])
     oriented = orient(s.mesh, rotation)
     out = []
-    for nozzle in presets()["nozzles"]:
+    nozzles = list(presets()["nozzles"])
+    for i, nozzle in enumerate(nozzles):
         p = Profile.from_dict({**(profile or {}), "nozzle": nozzle})
-        r = run_checks(oriented, p, max_layers=80)
+        with stage(i / len(nozzles), (i + 1) / len(nozzles)):
+            r = run_checks(oriented, p, max_layers=80)
         issues = [explain_finding(f) for f in r["findings"] if f["rule"] in NOZZLE_RULES]
         out.append({
             "nozzle": nozzle,

@@ -12,29 +12,64 @@ const el = (tag, props = {}, ...children) => {
 };
 
 // ---------- engine (Pyodide worker) ----------
-const worker = new Worker(new URL("worker.js", import.meta.url), { type: "module" });
+// Cancelling kills the worker (Python can't be interrupted mid-call); a fresh one boots and
+// gets the current part again before any other call runs.
+let worker;
+let engineReady;
+let restoring = Promise.resolve();
 const pending = new Map();
 let nextId = 0;
 
-function call(method, args = {}, data = null) {
+class Cancelled extends Error {}
+
+function startWorker() {
+  worker = new Worker(new URL("worker.js", import.meta.url), { type: "module" });
+  engineReady = new Promise((resolve, reject) => {
+    worker.addEventListener("message", ({ data }) => {
+      if (data.type === "ready") resolve();
+      else if (data.type === "boot-error") reject(new Error(data.error));
+      else if (data.type === "progress") showProgress(data.fraction);
+      else if (pending.has(data.id)) {
+        const { resolve: ok, reject: fail } = pending.get(data.id);
+        pending.delete(data.id);
+        data.error ? fail(new Error(data.error)) : ok(data.result);
+      }
+    });
+  });
+}
+startWorker();
+
+function post(method, args = {}, data = null) {
   return new Promise((resolve, reject) => {
     const id = nextId++;
     pending.set(id, { resolve, reject });
+    showProgress(null);
     worker.postMessage({ id, method, args, data });
   });
 }
 
-const engineReady = new Promise((resolve, reject) => {
-  worker.addEventListener("message", ({ data }) => {
-    if (data.type === "ready") resolve();
-    else if (data.type === "boot-error") reject(new Error(data.error));
-    else if (pending.has(data.id)) {
-      const { resolve: ok, reject: fail } = pending.get(data.id);
-      pending.delete(data.id);
-      data.error ? fail(new Error(data.error)) : ok(data.result);
-    }
-  });
-});
+async function call(method, args = {}, data = null) {
+  await restoring;
+  return post(method, args, data);
+}
+
+function cancelEngine() {
+  worker.terminate();
+  for (const { reject } of pending.values()) reject(new Cancelled("Cancelled"));
+  pending.clear();
+  startWorker();
+  const src = state.source;
+  if (src) {
+    restoring = engineReady.then(async () => {
+      await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
+      if (src.body) await post("select_body", { index: src.body });
+      if (src.scale !== 1) await post("scale", { factor: src.scale });
+    }).catch((err) => setStatus(`Could not restart the engine: ${err.message}`, true));
+  }
+}
+
+// Cancelled work rejects up through every await; that's expected, not an error to log.
+addEventListener("unhandledrejection", (e) => e.reason instanceof Cancelled && e.preventDefault());
 
 // ---------- state ----------
 const viewer = new Viewer($("viewer"));
@@ -79,18 +114,34 @@ function setStatus(text, isError = false) {
 let busyCount = 0;
 let doneCount = 0;
 
+let progressTimer = 0;
+
 async function busy(text, fn) {
   setStatus(text);
   document.body.dataset.busy = ++busyCount;
+  // Only show the bar for work that takes a moment; quick checks would just flicker.
+  if (busyCount === 1) progressTimer = setTimeout(() => ($("progress").hidden = false), 400);
   try {
     return await fn();
   } catch (err) {
-    setStatus(err.message, true);
+    if (err instanceof Cancelled) setStatus("Cancelled — the last result stays shown.");
+    else setStatus(err.message, true);
     throw err;
   } finally {
     document.body.dataset.busy = --busyCount;
     document.body.dataset.done = ++doneCount;
+    if (!busyCount) {
+      clearTimeout(progressTimer);
+      $("progress").hidden = true;
+    }
   }
+}
+
+/** ``fraction`` 0..1 from the engine, or null for "working, amount unknown". */
+function showProgress(fraction) {
+  const bar = $("progress-bar");
+  if (fraction == null) bar.removeAttribute("value");
+  else bar.value = fraction;
 }
 
 // ---------- flow ----------
@@ -120,8 +171,13 @@ async function loadFile(name, bytes, faceIds = null) {
   await busy("Reading part…", async () => {
     await engineReady;
     const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
+    state.source = { name, bytes, faceIds, body: 0, scale: 1 }; // to restore the part after a cancel
     if (info.bodies.length) {
-      showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => partLoaded(await call("select_body", { index: i }))));
+      showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => {
+        const next = await call("select_body", { index: i });
+        state.source.body = i;
+        await partLoaded(next);
+      }));
     }
     await partLoaded(info);
   });
@@ -139,6 +195,11 @@ async function partLoaded(info) {
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
   showUnitHint(info.unit_hint);
   renderLoads();
+  // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
+  state.options = [];
+  state.check = null;
+  renderOptions();
+  $("results").hidden = true;
   await findOrientations();
 }
 
@@ -148,7 +209,11 @@ function showUnitHint(hint) {
   if (!hint) return;
   $("unit-text").textContent = `${hint.text} — was it exported in ${hint.unit}?`;
   $("unit-scale").textContent = `Scale ×${hint.factor} → ${hint.scaled_mm} mm`;
-  $("unit-scale").onclick = () => busy("Rescaling…", async () => partLoaded(await call("scale", { factor: hint.factor })));
+  $("unit-scale").onclick = () => busy("Rescaling…", async () => {
+    const next = await call("scale", { factor: hint.factor });
+    state.source.scale *= hint.factor;
+    await partLoaded(next);
+  });
 }
 
 async function findOrientations(withLoads = false) {
@@ -178,6 +243,7 @@ async function selectOption(i) {
 let checkToken = 0;
 
 async function runCheck() {
+  if (!activeOption()) return;
   // Only the latest request may update the UI: clicks during a running check would otherwise
   // let an older result (or an older orientation's result) overwrite the newer one.
   const token = ++checkToken;
@@ -826,6 +892,8 @@ document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () =>
 }));
 updateModeNote();
 updateGoalNote();
+
+$("cancel").onclick = cancelEngine;
 
 // ---------- input ----------
 $("file").onchange = async (e) => {
