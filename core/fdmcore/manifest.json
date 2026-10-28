@@ -9,6 +9,7 @@
  "fea.py",
  "features.py",
  "formats.py",
+ "holes.py",
  "mesh.py",
  "orientation.py",
  "placement.py",

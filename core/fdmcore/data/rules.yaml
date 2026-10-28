@@ -303,6 +303,31 @@ rules:
     - Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA
     - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
+  sideways_hole_oval:
+    title: Sideways Hole Prints Oval
+    why: A round hole that lies on its side prints its lower half like a normal wall, but the top half is built in
+      mid-air over the hole. Those strands sag 0.2 to 0.4 mm (more above about 8 mm), so the hole comes out shorter
+      top to bottom than in CAD and a pin, bearing or bolt of the nominal size jams.
+    fixes:
+    - domain: geometry
+      text: Give the hole a teardrop top (a 45° point instead of the round ceiling), or make it 0.3–0.4 mm taller
+        than the nominal size. The design panel can add the teardrop for you.
+    - domain: slicer
+      text: Slow down bridges and run the part fan at full speed over bridges so the ceiling strands set before they
+        sag.
+      settings:
+        bridge_speed: '25'
+    - domain: process
+      text: Print the part so the hole points up (if the rest of the part allows), or ream the hole with a drill bit
+        of the nominal size after printing.
+    tags:
+    - holes
+    - horizontal-holes
+    - bridge
+    - teardrop
+    sources:
+    - Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA
+    - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
   gap_fuses:
     title: Moving Clearance Gap Fuses Shut
     why: The CAD model shows separate moving components in a print-in-place hinge or bearing, but clearances narrower
@@ -331,7 +356,7 @@ rules:
     - Maker's Muse — How to Design Print-in-Place Hinges — https://www.youtube.com/watch?v=fbSQvJJjw2Q
     - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
   hole_closes:
-    title: Tiny Vertical Hole Closes Up
+    title: Tiny Hole Closes Up
     why: The CAD model shows an open pinhole or wire passage, but vertical holes smaller than 1.5 mm diameter close
       up or disappear because nozzle surface tension drags hot plastic inward around tight circles and overlapping
       walls choke the opening.
@@ -359,7 +384,7 @@ rules:
     - '"Nophead (Chris Palmer) — Hydraraptor: Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.'
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
   small_hole_undersized:
-    title: Small Vertical Hole Prints Undersized
+    title: Small Hole Prints Undersized
     why: The CAD model has an exact diameter hole for a bolt or pin, but vertical holes up to 6 mm print 0.15 to
       0.3 mm too small because molten plastic is pulled inward around tight curves and STL polygon export cuts across
       circle chords, preventing screws from fitting.

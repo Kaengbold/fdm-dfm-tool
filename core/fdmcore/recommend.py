@@ -87,6 +87,6 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         put("slow_down_for_layer_cooling", 1, "Slow down small layers", "Gives small layers time to cool")
     if rules & {"elephant_foot", "first_layer_detail"}:
         put("elefant_foot_compensation", 0.15, "Elephant foot compensation", "Keeps the bottom edges and holes true to size")
-    if "bridge_sag" in rules or "long_bridge" in rules:
+    if rules & {"bridge_sag", "long_bridge", "sideways_hole_oval"}:
         put("bridge_speed", 25, "Bridge speed", "Slower bridges sag less")
     return out

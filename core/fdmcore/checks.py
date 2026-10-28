@@ -23,6 +23,7 @@ import numpy as np
 import shapely
 from shapely.geometry import Polygon
 
+from .holes import horizontal_holes
 from .mesh import Mesh
 from .profile import Profile, load_data
 from .progress import report
@@ -45,6 +46,7 @@ RULE_IMPACT = {
     "first_layer_detail": "shape",
     "small_hole_undersized": "shape",
     "bridge_sag": "shape",
+    "sideways_hole_oval": "shape",
     "long_bridge": "shape",
     "small_layers_cooling": "shape",
     "tall_thin_feature": "shape",
@@ -129,6 +131,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
     findings += _support_findings(layers, tracker, profile, T)
     findings += _feature_findings(tracker, profile, T)
     findings += _hole_findings(tracker, profile, T)
+    findings = _sideways_hole_findings(mesh, profile, T, findings)
     findings += _first_layer_findings(layers, profile, T)
     findings += _bed_findings(layers, profile, T)
     findings += _weak_findings(layers, tracker, profile, T)
@@ -400,6 +403,43 @@ def _hole_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
             out.append(_finding("small_hole_undersized", "warn",
                                 f"Ø{d:.1f} mm hole prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling", r, profile))
     return out
+
+
+def _sideways_hole_findings(mesh: Mesh, profile: Profile, T: dict, findings: list[dict]) -> list[dict]:
+    """Holes lying sideways: the bottom half prints like a vertical hole, the top is a bridge that sags.
+    A sag finding for the hole replaces the generic bridge-sag finding at the same spot."""
+    H, B = T["holes"], T["bridges"]
+    nozzle = float(profile.nozzle)
+    min_d = max(H["vertical_min_mm"] * nozzle / 0.4, H["vertical_min_nozzle"] * nozzle)
+    out = []
+    for h in horizontal_holes(mesh):
+        d, (cx, cy, cz) = h["diameter"], h["center"]
+        where = f"at {cz:.1f} mm height"
+        metrics = {"diameter": round(d, 2), "axis": h["axis"], "center": h["center"]}
+        if d < min_d:
+            out.append(_finding("hole_closes", "problem",
+                                f"Sideways Ø{d:.1f} mm hole {where} — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up",
+                                bbox=h["bbox"], **metrics))
+        elif d < B["sag_from_mm"]:
+            lo, hi = H["typical_undersize_mm"]
+            out.append(_finding("small_hole_undersized", "warn",
+                                f"Sideways Ø{d:.1f} mm hole {where} prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling",
+                                bbox=h["bbox"], **metrics))
+        else:
+            lo, hi = B["sag_mm"] if d < B["large_sag_from_mm"] else (0.4, 1.0)
+            out.append(_finding("sideways_hole_oval", "warn",
+                                f"Sideways Ø{d:.1f} mm hole {where}: its top sags {lo}–{hi} mm, so it prints oval "
+                                f"(about Ø{d - hi:.1f}–{d - lo:.1f} mm top to bottom) — a Ø{d:.0f} pin or bolt won't slide in",
+                                bbox=h["bbox"], sag_mm=[lo, hi], **metrics))
+    holes = [f["bbox"] for f in out if f["rule"] == "sideways_hole_oval"]
+    kept = [f for f in findings if not (f["rule"] == "bridge_sag" and f["bbox"] and any(_inside(f["bbox"], b) for b in holes))]
+    return kept + out
+
+
+def _inside(box, outer, tol: float = 1.0) -> bool:
+    """Box centre inside ``outer`` (both [[x0,y0,z0],[x1,y1,z1]]), with some slack."""
+    c = (np.asarray(box[0]) + np.asarray(box[1])) / 2
+    return bool(np.all(c >= np.asarray(outer[0]) - tol) and np.all(c <= np.asarray(outer[1]) + tol))
 
 
 def _first_layer_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:

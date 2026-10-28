@@ -211,3 +211,26 @@ def test_goal_changes_settings():
     api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
     walls = lambda goal: {s["key"]: s["value"] for s in api.check([1, 0, 0], {"goal": goal})["settings"]}["wall_loops"]  # noqa: E731
     assert int(walls("strength")) > int(walls("speed"))
+
+
+def test_sideways_holes():
+    """The L-bracket's Ø8 hole lies sideways when upright: oval, not a generic bridge-sag tip."""
+    found = rules_for("l_bracket")
+    assert found["sideways_hole_oval"]["metrics"]["diameter"] == pytest.approx(8, abs=0.1)
+    assert "bridge_sag" not in found
+    # Detail plate on its side: the Ø1 hole closes, Ø3 prints undersized, Ø5 sags.
+    api.load((SAMPLES / "detail_plate.stl").read_bytes(), "detail_plate")
+    out = api.check([0, 1, 0], {}, "both")["findings"]
+    sideways = {f["rule"]: f["metrics"]["diameter"] for f in out if "axis" in f["metrics"]}
+    assert sideways == pytest.approx({"hole_closes": 1.0, "small_hole_undersized": 3.0, "sideways_hole_oval": 5.0}, abs=0.1)
+
+
+def test_teardrop_edit_clears_sideways_hole():
+    pytest.importorskip("manifold3d")
+    from fdmcore.booleans import subtract
+    from fdmcore.mesh import to_binary_stl
+
+    api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")
+    cutters = [np.frombuffer(e["cutter"], "<f4").reshape(-1, 3, 3) for e in api.design([0, 0, 1])["edits"]]
+    api.load(to_binary_stl(subtract(api._session.mesh, cutters)), "l_bracket_dfm")
+    assert "sideways_hole_oval" not in {f["rule"] for f in api.check([0, 0, 1], {}, "both")["findings"]}
