@@ -1,5 +1,6 @@
 import { Assistant, MODELS } from "./assistant.js";
 import { GeminiAssistant, listGeminiModels } from "./gemini.js";
+import { listOpenAIModels, OpenAIAssistant } from "./openai.js";
 import { stlBytes, subtract } from "./geometry.js";
 import { readStep } from "./step.js";
 import { REGION_COLORS, Viewer } from "./viewer.js";
@@ -591,7 +592,9 @@ function showSelectedGhosts() {
 
 async function suggestDesign() {
   return busy("Looking for design improvements…", async () => {
-    const r = await call("design", { up: activeOption().up, profile: profile() });
+    const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams() });
+    for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
+    $("edit-params").hidden = !r.edits.length;
     const holes = r.features.filter((f) => f.type === "hole");
     $("features-summary").textContent = holes.length
       ? `Found ${holes.length} hole(s): ${holes.map((h) => `Ø${h.diameter.toFixed(1)} mm`).join(", ")}.`
@@ -615,6 +618,11 @@ async function suggestDesign() {
   });
 }
 $("suggest-design").onclick = suggestDesign;
+
+/** Edit sizes from the inputs; empty until the first suggestion filled them in (engine defaults). */
+const designParams = () =>
+  Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
+document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
 async function applyEdits() {
   return busy("Applying design changes…", async () => {
@@ -714,6 +722,13 @@ const PROVIDERS = {
     placeholder: "AIza...",
     keyHelp: "aistudio.google.com -> Get API key",
     models: (key) => listGeminiModels(key),
+  },
+  openai: {
+    assistant: new OpenAIAssistant(aiActions),
+    storage: "fdmdfm.openaiKey",
+    placeholder: "sk-...",
+    keyHelp: "platform.openai.com -> API keys",
+    models: (key) => listOpenAIModels(key),
   },
 };
 const provider = () => PROVIDERS[$("ai-provider").value];

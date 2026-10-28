@@ -157,8 +157,11 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
             unique.append(r)
     candidates = unique
 
+    candidates = candidates[: top + 2]
     placed = {id(r): _placement(s.mesh, r, p) for r in [*candidates, as_loaded]}
-    candidates.sort(key=lambda r: not placed[id(r)][1]["fits"])  # stable: keeps ranking among fitting ones
+    with stage(0.95 if loads or p.goal == "strength" else 0.2, 1.0):
+        _refine(s.mesh, [*candidates, as_loaded], placed, settings, p)
+    candidates.sort(key=lambda r: (not placed[id(r)][1]["fits"], r.score))
     candidates = candidates[:top]
 
     def pack(r, label):
@@ -190,6 +193,37 @@ def why_lower(terms: dict[str, float], best: dict[str, float], min_gap: float = 
     if not worse:
         return "Almost as good as the recommended option"
     return "Ranked lower: " + " and ".join(worse)
+
+
+SCAR_WEIGHT = 1.0  # support resting on the part: rough marks on a visible surface, hard to remove
+REFINE_BUDGET = 3e7  # faces × layers for all finalists together
+
+
+def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettings, p: Profile) -> None:
+    """Re-score the finalists with sliced layers: real bed contact, real support volume, and
+    support that lands on the part instead of the bed (see refine.py)."""
+    from .orientation import _size
+    from .refine import support_stats
+
+    L = _size(mesh)
+    # Slicing cost ~ faces × layers: keep the whole refinement within a fixed budget on big parts.
+    layers = int(np.clip(REFINE_BUDGET / (mesh.face_count * len(results)), 8, 40))
+    for i, r in enumerate(results):
+        progress.report(i / len(results), "Checking supports layer by layer")
+        st = support_stats(orient(mesh, placed[id(r)][0]), p, max_layers=layers)
+        frac = st["bed_area"] / L**2
+        new = {
+            "support": settings.w_support_area * st["support_area"] / L**2
+            + settings.w_support_volume * st["support_volume"] / L**3
+            + SCAR_WEIGHT * st["scar_area"] / L**2,
+            "bed": settings.w_small_bed * float(np.clip(1.0 - frac / settings.good_bed_fraction, 0.0, 1.0))
+            - settings.w_bed_contact * min(frac, 1.0),
+        }
+        for k, v in new.items():
+            r.penalize(k, v - r.terms.get(k, 0.0))
+        r.bed_area, r.support_volume = st["bed_area"], st["support_volume"]
+        if st["scar_area"] > max(0.02 * L**2, 25.0):
+            r.reasons.append(f"Some supports stand on the part itself (~{st['scar_area']:.0f} mm² of rough marks)")
 
 
 def _placement(mesh: Mesh, r, p: Profile):
@@ -334,17 +368,23 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
     return out
 
 
-def design(up, profile: dict | None = None) -> dict:
+def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     """Detected features (holes, bosses) and suggested geometry edits for this orientation.
-    Each edit has a ``cutter`` (float32 triangles, part coordinates) to subtract from the part."""
-    from .features import design_edits, detect_features
+    Each edit has a ``cutter`` (float32 triangles, part coordinates) to subtract from the part.
+    ``params`` adjusts edit sizes (see features.PARAMS); the values used come back in ``params``."""
+    from .features import PARAMS, design_edits, detect_features, edit_params
     from .regions import find_regions
 
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
-    return {"features": detect_features(s.mesh, s.regions), "edits": design_edits(s.mesh, s.regions, up, p)}
+    return {
+        "features": detect_features(s.mesh, s.regions),
+        "edits": design_edits(s.mesh, s.regions, up, p, params),
+        "params": edit_params(params),
+        "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
+    }
 
 
 def _to_print_frame(mesh: Mesh, r: np.ndarray, point) -> list[float]:

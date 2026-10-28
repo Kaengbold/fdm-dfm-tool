@@ -14,7 +14,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Orientation
 
-- [ ] **T-010 P1** Refine the top ~5 orientations with the pseudo-slicer: true first-layer area, supports that land on the part vs. the bed, support volume. · files: `orientation.py`, `api.py` · owner: —
+- [x] **T-010 P1** Refine the top ~5 orientations with the pseudo-slicer: true first-layer area, supports that land on the part vs. the bed, support volume. · files: `orientation.py`, `api.py` · owner: Claude (`task/T-010-refine`) — `refine.py`; bridges within the material's limit need no support; scars on the part are penalised and named in the reasons. Slicing budget scales with mesh size.
 - [ ] **T-011 P2** "Critical faces": let the user mark faces that must be flat on the bed / vertical / not touched by supports (cosmetic); use them in the ranking. · owner: —
 - [x] **T-012 P2** Show *why* an option lost (score breakdown) in the UI. · owner: Claude (`task/T-012-score-breakdown`) — `score_terms` per option (support/height/bed/weak/strength) and a plain `why_lower` line.
 
@@ -50,7 +50,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-040 P2** Chamfer under flat overhangs (replace a flat ceiling edge by 45°). · files: `features.py` · owner: —
 - [ ] **T-041 P2** Thicken thin walls to 2–3 line widths. · owner: —
 - [ ] **T-042 P2** Sacrificial bridge layer for counterbores / holes starting mid-air. · owner: —
-- [ ] **T-043 P2** Adjustable edit parameters in the UI (chamfer size, teardrop angle). · owner: —
+- [x] **T-043 P2** Adjustable edit parameters in the UI (chamfer size, teardrop angle). · owner: Claude (`task/T-010-refine`) — `design(params=…)`, inputs in the design panel, MCP `params`. Chamfers on short edges are capped so two don't meet in a new sharp point.
 - [ ] **T-044 P2** Feature confirm UI ("is this a hole?", tag ribs/bosses), feeding detection. · owner: —
 - [ ] **T-045 P3** Write edits back as STEP (OCCT) instead of STL for CAD users. · owner: —
 
@@ -62,7 +62,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## AI
 
-- [ ] **T-060 P2** OpenAI provider in the Ask-AI panel (BYOK, Responses API, same tools). · files: `web/openai.js`, `web/app.js` · owner: —
+- [x] **T-060 P2** OpenAI provider in the Ask-AI panel (BYOK, Responses API, same tools). · files: `web/openai.js`, `web/app.js` · owner: Claude (`task/T-060-openai`) — tested against a mocked API only; real-key test is T-063.
 - [ ] **T-061 P2** Local "subscription bridge": in local mode, run the user's official CLI (`claude -p`, `codex exec`, `gemini -p`) headless with our MCP server attached — uses their subscription through the official client. Check each vendor's terms first. · owner: —
 - [ ] **T-062 P3** Streaming answers in the Ask-AI panel. · owner: —
 - [ ] **T-063 P2** Test the Ask-AI panel with real keys (Anthropic + Gemini), fix tool-schema issues. · owner: —

@@ -16,6 +16,7 @@
  "profile.py",
  "progress.py",
  "recommend.py",
+ "refine.py",
  "regions.py",
  "slicer.py",
  "strength.py",

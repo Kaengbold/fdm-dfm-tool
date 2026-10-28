@@ -132,9 +132,12 @@ def strength_options(
 
 
 @server.tool()
-def suggest_design_changes(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
-    """Detected holes/bosses and suggested geometry edits (teardrop holes, corner chamfers) for this orientation."""
-    return _clean(api.design(up, _profile(printer, material, nozzle)))
+def suggest_design_changes(
+    up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", params: dict | None = None
+) -> dict:
+    """Detected holes/bosses and suggested geometry edits (teardrop holes, corner chamfers) for this orientation.
+    ``params`` sets edit sizes, e.g. {"chamfer_mm": 2, "teardrop_angle_deg": 40}; ranges come back in the result."""
+    return _clean(api.design(up, _profile(printer, material, nozzle), params))
 
 
 @server.tool()
@@ -145,11 +148,12 @@ def apply_design_changes(
     printer: str = "bambu_p1s",
     material: str = "pla",
     nozzle: str = "0.4",
+    params: dict | None = None,
 ) -> dict:
-    """Apply suggested edits (ids from suggest_design_changes), save the modified STL and load it."""
+    """Apply suggested edits (ids from suggest_design_changes, same params), save the modified STL and load it."""
     from .booleans import subtract
 
-    edits = {e["id"]: e for e in api.design(up, _profile(printer, material, nozzle))["edits"]}
+    edits = {e["id"]: e for e in api.design(up, _profile(printer, material, nozzle), params)["edits"]}
     unknown = [i for i in edit_ids if i not in edits]
     if unknown:
         raise ValueError(f"Unknown edit ids: {unknown}")

@@ -206,6 +206,8 @@ def main():
             run.act(lambda: page.click("#suggest-design"))
             edits = page.locator("#edits label").all_inner_texts()
             assert any("Ø8.0" in e for e in edits), f"expected teardrop for the Ø8 hole, got {edits}"
+            run.act(lambda: page.fill("#param-teardrop_angle_deg", "30") or page.dispatch_event("#param-teardrop_angle_deg", "change"))
+            assert any("30° point" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop angle input had no effect"
             run.act(lambda: page.click("#apply-edits"))
             run.act(lambda: page.click("#suggest-design"))
             again = page.locator("#edits label").all_inner_texts()

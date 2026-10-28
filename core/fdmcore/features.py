@@ -75,9 +75,27 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
     }
 
 
-def design_edits(mesh: Mesh, region: np.ndarray, up, profile) -> list[dict]:
+# Adjustable edit sizes: default, min, max (the UI shows these as inputs).
+PARAMS = {
+    "chamfer_mm": (3.0, 0.5, 10.0),
+    "teardrop_angle_deg": (45.0, 30.0, 60.0),  # tip half-angle from vertical; 45° is the classic choice
+}
+
+
+def edit_params(params: dict | None) -> dict:
+    """Defaults filled in and values clamped to their range."""
+    out = {}
+    for k, (default, lo, hi) in PARAMS.items():
+        v = float((params or {}).get(k, default))
+        out[k] = min(max(v, lo), hi)
+    return out
+
+
+def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None) -> list[dict]:
     """Suggested geometry changes for this build direction, with cutter meshes."""
     up = np.asarray(up, float) / np.linalg.norm(up)
+    prm = edit_params(params)
+    angle = prm["teardrop_angle_deg"]
     edits = []
     for f in detect_features(mesh, region):
         axis = np.asarray(f["axis"])
@@ -86,21 +104,25 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile) -> list[dict]:
                 "id": f"teardrop-{f['region']}",
                 "rule": "short_bridge",
                 "title": f"Teardrop for the horizontal Ø{f['diameter']:.1f} mm hole",
-                "description": "Makes the top of the hole a 45° point so it prints without sagging or support.",
-                "cutter": _teardrop_cutter(f, up).astype("<f4").tobytes(),
+                "description": f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
+                "param": "teardrop_angle_deg",
+                "cutter": _teardrop_cutter(f, up, angle).astype("<f4").tobytes(),
             })
-    edits += _corner_chamfers(mesh, up, profile)
+    edits += _corner_chamfers(mesh, up, profile, prm["chamfer_mm"])
     return edits
 
 
-def _teardrop_cutter(f: dict, up: np.ndarray) -> np.ndarray:
-    """Kite-shaped prism (centre, two 45° tangent points, apex) along the hole axis."""
+def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.ndarray:
+    """Kite-shaped prism (centre, two tangent points, apex) along the hole axis. The roof
+    lines are ``angle_deg`` from vertical: they touch the circle at r·(sin θ up ± cos θ side)
+    and meet at r / sin θ above the centre."""
     axis, c, r = np.asarray(f["axis"]), np.asarray(f["center"]), f["radius"]
     u = up - (up @ axis) * axis
     u /= np.linalg.norm(u)
     s = np.cross(axis, u)
-    k = r / np.sqrt(2)
-    profile = [c - 0.5 * r * u, c + k * s + k * u, c + r * np.sqrt(2) * u, c - k * s + k * u]
+    th = np.radians(angle_deg)
+    up_k, side_k = r * np.sin(th), r * np.cos(th)
+    profile = [c - 0.5 * r * u, c + side_k * s + up_k * u, c + r / np.sin(th) * u, c - side_k * s + up_k * u]
     return _prism(profile, axis * f["length"] / 2)
 
 
@@ -121,18 +143,21 @@ def _corner_chamfers(mesh: Mesh, up: np.ndarray, profile, size: float = 3.0) -> 
     out = []
     for i, (x, y) in enumerate(corners):
         top = _corner_height(layers, np.array([x, y]))
-        e1, e2 = _corner_edges(layers[0].geom, np.array([x, y]))
+        e1, e2, edge = _corner_edges(layers[0].geom, np.array([x, y]))
         if e1 is None:
             continue
+        # Two chamfers on a short edge must not meet, or they leave a new sharp point between them.
+        cut = min(size, 0.4 * edge)
         p = np.array([x, y])
-        tri = [p + (e1 + e2) * 0.0 - (e1 + e2) * 0.5, p + e1 * size, p + e2 * size]  # extends past the corner tip
+        tri = [p - (e1 + e2) * 0.5, p + e1 * cut, p + e2 * cut]  # extends past the corner tip
         print_tris = _prism([np.array([*q, top / 2]) for q in tri], np.array([0, 0, top / 2 + 0.5]))
         part_tris = (print_tris.reshape(-1, 3) - shift) @ r  # inverse rotation: r.T @ v
         out.append({
             "id": f"chamfer-{i}",
             "rule": "sharp_bed_corners",
-            "title": f"Chamfer sharp corner {i + 1} ({size:.0f} mm)",
+            "title": f"Chamfer sharp corner {i + 1} ({cut:.1f} mm)",
             "description": "A cut-off corner shrinks less and is much less likely to lift off the bed.",
+            "param": "chamfer_mm",
             "cutter": part_tris.reshape(-1, 3, 3).astype("<f4").tobytes(),
         })
     return out
@@ -150,7 +175,7 @@ def _corner_height(layers, p, inset=0.3) -> float:
 
 
 def _corner_edges(geom, p):
-    """Unit vectors along the two outline edges leaving corner ``p``."""
+    """Unit vectors along the two outline edges leaving corner ``p``, and the shorter edge's length."""
     from shapely.geometry.polygon import orient as orient_poly
 
     from .slicer import parts
@@ -161,8 +186,9 @@ def _corner_edges(geom, p):
         i = int(np.argmin(d))
         if d[i] < 1e-3:
             e1, e2 = c[i - 1] - c[i], c[(i + 1) % len(c)] - c[i]
-            return e1 / np.linalg.norm(e1), e2 / np.linalg.norm(e2)
-    return None, None
+            l1, l2 = np.linalg.norm(e1), np.linalg.norm(e2)
+            return e1 / l1, e2 / l2, float(min(l1, l2))
+    return None, None, 0.0
 
 
 def _prism(profile: list[np.ndarray], half: np.ndarray) -> np.ndarray:
