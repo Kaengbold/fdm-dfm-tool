@@ -302,6 +302,7 @@ def check(up, profile: dict | None = None, mode: str = "print") -> dict:
         result["findings"].append({"rule": "turned_to_fit", "severity": "info", "bbox": None, "metrics": fit,
                                    "detail": f"Turned {fit['turned_deg']:.0f}° on the bed so it fits the {p.printer['name']}"})
     findings = [explain_finding(f, mode) for f in result["findings"]]
+    findings = emphasize_for_goal(findings, p.goal)
     return {
         "up": list(map(float, up)),
         "rotation": rotation.tolist(),
@@ -316,12 +317,45 @@ def check(up, profile: dict | None = None, mode: str = "print") -> dict:
 def explain_finding(finding: dict, mode: str = "both") -> dict:
     rule = load_data("rules")["rules"].get(finding["rule"], {})
     domains = MODES[mode]
+    all_fixes = rule.get("fixes", [])
     return {
         **finding,
         "title": rule.get("title", finding["rule"]),
         "why": rule.get("why", ""),
-        "fixes": [f for f in rule.get("fixes", []) if f["domain"] in domains],
+        "fixes": [f for f in all_fixes if f["domain"] in domains],
+        # Fix kinds left out by the mode, so the UI can say "more fixes if you can change the model".
+        "hidden_fixes": sorted({f["domain"] for f in all_fixes if f["domain"] not in domains}),
     }
+
+
+# How the goal shifts severity, per impact group: +1 = one step more serious, -1 = less.
+# A strong part can't afford weak spots; a fast or cheap print accepts rougher surfaces
+# and weak spots the user has been told about.
+GOAL_EMPHASIS = {
+    "strength": {"weak": +1},
+    "speed": {"weak": -1, "surface": -1},
+    "material": {"weak": -1, "surface": -1},
+}
+_SEVERITIES = ["info", "warn", "problem"]
+_GOAL_NAME = {"strength": "Strength", "speed": "Speed", "material": "Material"}
+
+
+def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
+    """Raise or lower severities to match what the user optimises for, then re-sort."""
+    from .checks import IMPACT_ORDER, SEVERITY_ORDER
+
+    shift = GOAL_EMPHASIS.get(goal, {})
+    out = []
+    for f in findings:
+        step = shift.get(f.get("impact"), 0)
+        k = _SEVERITIES.index(f["severity"])
+        new = _SEVERITIES[min(max(k + step, 0), len(_SEVERITIES) - 1)]
+        if new != f["severity"]:
+            word = "More important" if step > 0 else "Less important"
+            f = {**f, "severity": new, "goal_note": f"{word} because you optimise for {_GOAL_NAME[goal]}"}
+        out.append(f)
+    out.sort(key=lambda f: (IMPACT_ORDER.index(f.get("impact", "info")), SEVERITY_ORDER[f["severity"]]))
+    return out
 
 
 def export(up, profile: dict | None = None, settings: dict | None = None) -> bytes:

@@ -89,7 +89,13 @@ def _segments_to_solid(segs: np.ndarray) -> BaseGeometry:
             rings.append(poly)
     if not rings:
         return Polygon()
-    return _even_odd(rings)
+    solid = _even_odd(rings)
+    if solid.is_empty:
+        return solid
+    try:
+        return shapely.set_precision(solid, 1e-4)
+    except Exception:
+        return shapely.make_valid(solid)
 
 
 def _even_odd(polys: list[BaseGeometry]) -> BaseGeometry:

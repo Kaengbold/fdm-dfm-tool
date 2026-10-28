@@ -7,9 +7,9 @@ const ENGINE = new URL("../core/fdmcore/", import.meta.url);
 async function boot() {
   const py = await loadPyodide();
   await py.loadPackage(["numpy", "shapely", "pyyaml"]);
-  const files = await (await fetch(new URL("manifest.json", ENGINE))).json();
+  const files = await (await fetch(new URL(`manifest.json?v=${Date.now()}`, ENGINE))).json();
   for (const name of files) {
-    const res = await fetch(new URL(name, ENGINE));
+    const res = await fetch(new URL(`${name}?v=${Date.now()}`, ENGINE));
     if (!res.ok) throw new Error(`Could not load engine file ${name}`);
     const path = `/home/pyodide/fdmcore/${name}`;
     py.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));

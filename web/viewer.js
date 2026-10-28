@@ -140,20 +140,82 @@ export class Viewer {
     this.framed = true;
   }
 
-  /** Boxes for findings; the selected one is drawn solid, the rest faint. */
+  /** Boxes for findings; when a finding is selected, it gets a filled highlight, pin, and camera moves. */
   showFindings(findings, selected = -1) {
     this.markers.clear();
     findings.forEach((f, i) => {
-      if (!f.bbox || (selected >= 0 && i !== selected)) return;
+      if (!f.bbox) return;
       const [[x0, y0, z0], [x1, y1, z1]] = f.bbox;
       const pad = 0.5;
       const box = new THREE.Box3(new THREE.Vector3(x0 - pad, y0 - pad, z0), new THREE.Vector3(x1 + pad, y1 + pad, z1 + pad));
-      const helper = new THREE.Box3Helper(box, SEVERITY_COLORS[f.severity]);
-      helper.material.transparent = true;
-      helper.material.opacity = i === selected ? 1 : 0.35;
-      helper.material.depthTest = i !== selected;
-      this.markers.add(helper);
+      const isSel = i === selected;
+      if (selected < 0 || isSel) {
+        const helper = new THREE.Box3Helper(box, SEVERITY_COLORS[f.severity]);
+        helper.material.transparent = true;
+        helper.material.opacity = isSel ? 1 : 0.3;
+        helper.material.depthTest = !isSel;
+        this.markers.add(helper);
+      }
+      if (isSel) {
+        // Translucent filled box so the entire volume stands out vividly
+        const dx = Math.max(x1 - x0, 1);
+        const dy = Math.max(y1 - y0, 1);
+        const dz = Math.max(z1 - z0, 1);
+        const fillGeom = new THREE.BoxGeometry(dx + pad * 2, dy + pad * 2, dz + pad * 2);
+        const fillMat = new THREE.MeshBasicMaterial({
+          color: SEVERITY_COLORS[f.severity],
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+        });
+        const fillMesh = new THREE.Mesh(fillGeom, fillMat);
+        fillMesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+        this.markers.add(fillMesh);
+
+        // Prominent marker pin at the center
+        const pin = new THREE.Mesh(
+          new THREE.SphereGeometry(Math.max(1.8, Math.min(dx, dy, dz) * 0.25)),
+          new THREE.MeshBasicMaterial({ color: "#ffffff", depthTest: false })
+        );
+        pin.position.set((x0 + x1) / 2, (y0 + y1) / 2, z1 + 1.2);
+        this.markers.add(pin);
+      }
     });
+    if (selected >= 0 && findings[selected]?.bbox) {
+      this.focusFinding(findings[selected]);
+    }
+  }
+
+  focusFinding(f) {
+    if (!f?.bbox) return;
+    const [[x0, y0, z0], [x1, y1, z1]] = f.bbox;
+    const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    const span = Math.max(Math.hypot(x1 - x0, y1 - y0, z1 - z0), 20);
+
+    const startTarget = this.controls.target.clone();
+    const startPos = this.camera.position.clone();
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    if (dir.lengthSq() < 0.01) dir.set(1.2, -1.6, 1.1).normalize();
+    const endTarget = center;
+    const endPos = center.clone().add(dir.multiplyScalar(Math.max(span * 2.4, 45)));
+
+    const t0 = performance.now();
+    const dur = 350;
+    const anim = (now) => {
+      const p = Math.min((now - t0) / dur, 1);
+      const ease = p * (2 - p);
+      this.controls.target.lerpVectors(startTarget, endTarget, ease);
+      this.camera.position.lerpVectors(startPos, endPos, ease);
+      this.controls.update();
+      if (p < 1) requestAnimationFrame(anim);
+    };
+    requestAnimationFrame(anim);
+  }
+
+  resetCamera() {
+    if (this.part?.geometry?.boundingSphere) {
+      this.frame(this.part.geometry.boundingSphere);
+    }
   }
 
   clearMarkers() {

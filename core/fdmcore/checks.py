@@ -25,6 +25,7 @@ from shapely.geometry import Polygon
 
 from .mesh import Mesh
 from .profile import Profile, load_data
+from .recommend import goal_plan
 from .slicer import Layer, parts, slice_mesh
 
 QUAD = 2  # buffer resolution; coarse is fine and much faster
@@ -172,7 +173,7 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
         if prev is not None and not prev.is_empty and not (same and prev is cached[2]):
             reach = layer.dz * tan_lim + 0.5 * lw
             anchor_zone = prev.buffer(reach + lw, quad_segs=QUAD)  # must reach past the supported zone
-            for piece in parts(g.difference(prev.buffer(reach, quad_segs=QUAD)), min_piece):
+            for piece in parts(_safe_diff(g, prev.buffer(reach, quad_segs=QUAD)), min_piece):
                 span, anchors = _bridge_span(piece, anchor_zone)
                 if anchors >= 2:
                     tracker.add("bridge", piece, layer, span=span, area=piece.area)
@@ -190,14 +191,14 @@ def _layer_features(g, lw, vanish, rough, single, G, H, P) -> list[tuple]:
     """(kind, piece, metrics) for one layer: thin features, narrow gaps, round holes, slender islands."""
     out = []
     # Positive features by width: vanish < rough < single-wall (morphological openings).
-    too_thin = g.difference(_opening(g, vanish / 2))
-    below_rough = g.difference(_opening(g, rough / 2))
-    thin = below_rough.difference(too_thin.buffer(0.01))
-    wall = g.difference(_opening(g, single / 2)).difference(below_rough.buffer(0.01))
+    too_thin = _safe_diff(g, _opening(g, vanish / 2))
+    below_rough = _safe_diff(g, _opening(g, rough / 2))
+    thin = _safe_diff(below_rough, too_thin.buffer(0.01))
+    wall = _safe_diff(_safe_diff(g, _opening(g, single / 2)), below_rough.buffer(0.01))
     for kind, geom in (("too_thin", too_thin), ("rough", thin), ("single_wall", wall)):
         out += [(kind, piece, {"width": _strip_width(piece)}) for piece in parts(geom, max(lw * 1.5, 0.5))]
     # Negative features: slots/clearances that a closing with radius r fills are narrower than 2r.
-    for piece in parts(_closing(g, G["fuse_below_mm"] / 2).difference(g), 0.05):
+    for piece in parts(_safe_diff(_closing(g, G["fuse_below_mm"] / 2), g), 0.05):
         if _strip_width(piece) > 0.02:
             out.append(("gap", piece, {"width": _strip_width(piece)}))
     # Round vertical holes (interior rings), for size checks.
@@ -234,14 +235,35 @@ def _bridge_span(piece: Polygon, anchor_zone) -> tuple[float, int]:
     return float(span), len(anchors)
 
 
+def _safe_diff(a, b):
+    if a.is_empty or b.is_empty:
+        return a
+    try:
+        return a.difference(b)
+    except Exception:
+        try:
+            return shapely.set_precision(a, 1e-3).difference(shapely.set_precision(b, 1e-3))
+        except Exception:
+            try:
+                return shapely.make_valid(a).difference(shapely.make_valid(b))
+            except Exception:
+                return Polygon()
+
+
 def _opening(g, r: float):
     """Morphological opening: removes everything narrower than 2r."""
-    return g.buffer(-r, quad_segs=QUAD).buffer(r * 1.05, quad_segs=QUAD)
+    b = g.buffer(-r, quad_segs=QUAD)
+    if b.is_empty:
+        return Polygon()
+    return b.buffer(r * 1.05, quad_segs=QUAD)
 
 
 def _closing(g, r: float):
     """Morphological closing: fills gaps narrower than 2r."""
-    return g.buffer(r, quad_segs=QUAD).buffer(-r * 1.05, quad_segs=QUAD)
+    b = g.buffer(r, quad_segs=QUAD)
+    if b.is_empty:
+        return Polygon()
+    return b.buffer(-r * 1.05, quad_segs=QUAD)
 
 
 def _strip_width(piece: Polygon) -> float:
@@ -317,10 +339,10 @@ def _cavity_is_closed(r: Region, layers: list[Layer]) -> bool:
         if layer.z >= r.z0:
             continue
         filled = shapely.union_all([Polygon(p.exterior) for p in parts(layer.geom)]) if not layer.geom.is_empty else Polygon()
-        void = roof.difference(layer.geom)
+        void = _safe_diff(roof, layer.geom)
         if void.area < 0.05 * roof.area:
             return True  # reached a floor
-        if void.difference(filled).area > 0.05 * void.area:
+        if _safe_diff(void, filled).area > 0.05 * void.area:
             return False  # opens to the outside
     return False  # open to the bed
 
@@ -388,8 +410,8 @@ def _first_layer_findings(layers: list[Layer], profile: Profile, T: dict) -> lis
         g = layer.geom
         if g.is_empty:
             continue
-        pieces += parts(g.difference(_opening(g, r)), 0.3)  # thin strokes
-        pieces += parts(_closing(g, r).difference(g), 0.3)  # narrow engraved lines / gaps
+        pieces += parts(_safe_diff(g, _opening(g, r)), 0.3)  # thin strokes
+        pieces += parts(_safe_diff(_closing(g, r), g), 0.3)  # narrow engraved lines / gaps
     if not pieces:
         return []
     u = shapely.union_all(pieces)
@@ -513,9 +535,10 @@ def _runs(idx: list[int]) -> list[list[int]]:
 
 
 def _estimate(layers: list[Layer], profile: Profile) -> dict:
-    """Very rough print time and filament use."""
-    lw, lh = profile.line_width, profile.layer_height
-    walls, infill = 2, 0.15
+    """Very rough print time and filament use, with the walls / infill / layer height of the user's goal."""
+    plan = goal_plan(profile)
+    lw, lh = profile.line_width, plan["layer_height"]
+    walls, infill = plan["walls"], plan["infill"] / 100
     sp = profile.speeds
     flow_speed = profile.material["max_flow_mm3s"] / (lw * lh)  # mm/s at the volumetric limit
     # Real moves rarely reach nominal speed (acceleration, short segments, travel).

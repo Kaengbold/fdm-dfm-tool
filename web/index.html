@@ -51,6 +51,9 @@
           <label><input type="radio" name="goal" value="speed" /> Speed</label>
           <label><input type="radio" name="goal" value="material" /> Material</label>
         </div>
+        <div>
+          <p id="goal-note" class="goal-note"></p>
+        </div>
       </div>
 
       <div class="mode" role="radiogroup" aria-label="What can you change?">
@@ -61,6 +64,8 @@
           <label><input type="radio" name="mode" value="both" /> Both</label>
         </div>
       </div>
+
+      <p id="mode-note" class="mode-note"></p>
 
       <p id="status" class="status">Loading engine… (first visit downloads ~15 MB)</p>
 
@@ -76,7 +81,7 @@
         </details>
 
         <h2>Strength <small>optional — will it hold?</small></h2>
-        <div class="strength">
+        <div class="strength wip" data-wip="rough estimate, not yet checked against real test prints (T-032). Loads only on whole faces, one load case at a time.">
           <p class="hint" id="pick-hint">Click a face on the part, then say whether it's <b>held</b> (screwed, glued, clamped) or <b>loaded</b>.</p>
           <div id="pick-panel" hidden>
             <p class="hint">Selected: <span id="pick-info"></span></p>
@@ -98,7 +103,7 @@
           <div id="strength-result"></div>
         </div>
 
-        <div id="design-block">
+        <div id="design-block" class="wip" data-wip="only teardrops for sideways holes and corner chamfers so far. Thicker walls, chamfers under overhangs and adjustable sizes are still missing (T-040 to T-044).">
           <h2>Design changes <small>shown in red on the part</small></h2>
           <p class="hint" id="features-summary">Let the tool suggest geometry changes for this orientation.</p>
           <ol id="edits" class="edits"></ol>
@@ -114,14 +119,16 @@
         </div>
 
         <div class="actions">
-          <button id="dl-3mf" class="primary">Download 3MF for OrcaSlicer / Bambu Studio</button>
+          <div class="actions wip" data-wip="the part opens in the slicer, but whether OrcaSlicer / Bambu Studio pick up the settings is not verified yet (T-001, T-002). Check walls, infill and supports after opening.">
+            <button id="dl-3mf" class="primary">Download 3MF for OrcaSlicer / Bambu Studio</button>
+          </div>
           <button id="dl-stl">Download STL (oriented for printing)</button>
           <button id="dl-stl-model">Download STL (as modelled, incl. design changes)</button>
           <button id="copy-report">Copy report (for sharing or an AI chat)</button>
         </div>
       </section>
 
-      <details id="ai-block" class="ai" hidden>
+      <details id="ai-block" class="ai wip" data-wip="not tested with real API keys yet (T-063); no OpenAI option yet (T-060)." hidden>
         <summary>Ask AI <small>with your own API key</small></summary>
         <div class="ai-config">
           <label>Provider
@@ -147,6 +154,7 @@
         <li><i style="background: var(--borderline)"></i>May droop</li>
         <li><i style="background: var(--support)"></i>Needs support</li>
         <li><i style="background: var(--bed)"></i>On the bed</li>
+        <li class="legend-wip"><i></i>Yellow frame = not finished yet</li>
       </ul>
     </aside>
     <main id="viewer"></main>

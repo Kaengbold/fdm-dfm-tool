@@ -176,6 +176,35 @@ main canvas { display: block; }
 #nozzle-table tr.current { background: #edf2fe; }
 #mm-row { margin-top: -8px; }
 
+/* Features that are not finished yet: yellow frame + a label saying what is missing. */
+.wip { border: 2px solid #f5c400; border-radius: 8px; padding: 8px; background: #fffdf0; }
+.wip::before {
+  content: "Not finished yet: " attr(data-wip);
+  display: block;
+  font-size: 11px;
+  color: #6b5600;
+  background: #fff3b0;
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-bottom: 6px;
+}
+.legend-wip { font-size: 11px; color: #6b5600; margin: 0; }
+.legend-wip i { display: inline-block; width: 10px; height: 10px; border: 2px solid #f5c400; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+/* Explains what the goal / "what can you change" choice does right now. */
+.mode-note { font-size: 12px; color: var(--muted); margin: -8px 0 0; }
+.goal-note { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+
+/* Finding that is being shown on the part. */
+.findings li.selected-place, .findings > li.focused { outline: 2px solid var(--accent); outline-offset: 1px; }
+.findings > li.focused { border-color: var(--accent); background: #f8faff; }
+.findings li.selected-place { color: var(--accent); font-weight: 700; }
+.detail.clickable { cursor: pointer; }
+.detail.clickable:hover { color: var(--accent); text-decoration: underline; }
+.goal-tag { font-size: 11px; color: var(--accent); font-weight: normal; margin-left: 4px; }
+.hint-fix { font-size: 11px; color: var(--muted); font-style: italic; }
+.view-all { margin-left: 6px; font-size: 11px; padding: 1px 6px; }
+
 /* Inactive orientation cards collapse to their first reason so the findings stay in view. */
 #options > li:not(.active) ul li:nth-child(n + 2) { display: none; }
 #options > li:not(.active) { padding: 6px 12px; }

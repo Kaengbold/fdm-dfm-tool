@@ -141,6 +141,7 @@ async function selectOption(i) {
   state.active = i;
   [...$("options").children].forEach((li, k) => li.classList.toggle("active", k === i));
   state.placed = viewer.showPart(state.triangles, activeOption().rotation);
+  viewer.clearMarkers(); // remove old orientation's warning boxes immediately
   state.strength = null;
   state.showHeat = false;
   $("strength-result").replaceChildren();
@@ -227,21 +228,65 @@ function findingCard(findings, items) {
   const fixes = first.fixes.map((fx) =>
     el("li", {}, el("span", { className: `chip ${fx.domain}`, textContent: DOMAIN_LABEL[fx.domain] }), " ", fx.text),
   );
+  if (first.hidden_fixes?.length) {
+    const hiddenLabels = first.hidden_fixes.map((d) => DOMAIN_LABEL[d]).join(" / ");
+    fixes.push(el("li", { className: "hint-fix", textContent: `+ More fixes in ${hiddenLabels} (switch "What can you change?" to see them)` }));
+  }
+
+  const selectFinding = (idx, targetNode = null) => {
+    document.querySelectorAll(".findings .selected-place, .findings > li.focused").forEach((n) => n.classList.remove("selected-place", "focused"));
+    if (targetNode) targetNode.classList.add("selected-place");
+    viewer.showFindings(findings, idx);
+  };
+
   const places = items.map(({ f, i }) =>
-    el("li", { className: "place", textContent: f.detail, onclick: () => viewer.showFindings(findings, i), title: "Show on the part" }),
+    el("li", {
+      className: "place",
+      textContent: f.detail,
+      onclick: (e) => {
+        e.stopPropagation();
+        selectFinding(i, e.currentTarget);
+      },
+      title: "Click to zoom camera and highlight on the part"
+    }),
   );
-  return el(
+
+  const card = el(
     "li",
     { className: worst },
     el(
       "details",
-      { ontoggle: (e) => e.target.open && viewer.showFindings(findings, items[0].i) },
-      el("summary", {}, el("span", { className: "sev", textContent: SEVERITY_LABEL[worst] }), " ", first.title, items.length > 1 ? ` ×${items.length}` : ""),
-      items.length > 1 ? el("ul", { className: "places" }, ...places) : el("p", { className: "detail", textContent: first.detail }),
+      {
+        ontoggle: (e) => {
+          if (e.target.open) {
+            document.querySelectorAll(".findings > li.focused").forEach((n) => n.classList.remove("focused"));
+            card.classList.add("focused");
+            selectFinding(items[0].i);
+          }
+        }
+      },
+      el("summary", {
+        onclick: () => {
+          document.querySelectorAll(".findings > li.focused").forEach((n) => n.classList.remove("focused"));
+          card.classList.add("focused");
+          selectFinding(items[0].i);
+        }
+      },
+        el("span", { className: "sev", textContent: SEVERITY_LABEL[worst] }), " ",
+        first.title, items.length > 1 ? ` ×${items.length}` : "",
+        first.goal_note ? el("small", { className: "goal-tag", textContent: ` (${first.goal_note})` }) : ""
+      ),
+      items.length > 1 ? el("ul", { className: "places" }, ...places) : el("p", {
+        className: "detail clickable",
+        textContent: first.detail,
+        onclick: () => selectFinding(items[0].i),
+        title: "Click to zoom camera and highlight on the part"
+      }),
       el("p", { className: "why", textContent: first.why }),
       fixes.length ? el("ul", { className: "fixes" }, ...fixes) : el("p", { className: "why", textContent: "No fixes for this mode." }),
     ),
   );
+  return card;
 }
 
 function renderCheck() {
@@ -723,8 +768,40 @@ for (const id of ["printer", "material", "nozzle", "multi-material"]) {
     if (state.triangles) findOrientations();
   };
 }
-document.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () => state.triangles && runCheck()));
-document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () => state.triangles && findOrientations()));
+const GOAL_NOTES = {
+  balanced: "Balanced: standard walls & infill for everyday printing.",
+  strength: "Strength: 4 walls, 25% infill; weak spots and thin walls are treated as high-priority problems.",
+  speed: "Speed: fewer walls, fast grid infill, taller layers to print as fast as possible.",
+  material: "Material: minimal walls & lightning infill to save maximum filament.",
+};
+
+const MODE_NOTES = {
+  print: "Just print it: only slicer & printer settings are suggested — your CAD model is unchanged.",
+  design: "The design: only geometry improvements you can take back into CAD (e.g. teardrop holes).",
+  both: "Both: shows all design geometry edits, slicer settings, and printer adjustments.",
+};
+
+function updateGoalNote() {
+  const g = document.querySelector("input[name=goal]:checked")?.value;
+  if ($("goal-note")) $("goal-note").textContent = GOAL_NOTES[g] || "";
+}
+
+function updateModeNote() {
+  const m = mode();
+  if ($("mode-note")) $("mode-note").textContent = MODE_NOTES[m] || "";
+  $("design-block").hidden = m === "print";
+}
+
+document.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () => {
+  updateModeNote();
+  if (state.triangles) runCheck();
+}));
+document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () => {
+  updateGoalNote();
+  if (state.triangles) findOrientations();
+}));
+updateModeNote();
+updateGoalNote();
 
 // ---------- input ----------
 $("file").onchange = async (e) => {
@@ -750,15 +827,22 @@ document.querySelectorAll("[data-sample]").forEach((btn) => {
 const baseName = () => state.name.replace(/\.(stl|step|stp)$/i, "");
 
 function download(bytes, filename, type) {
+  if (!bytes || (bytes.length === 0 && bytes.byteLength === 0)) {
+    setStatus(`Export failed: no data generated for ${filename}`, true);
+    return;
+  }
   const a = el("a", { href: URL.createObjectURL(new Blob([bytes], { type })), download: filename });
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 $("dl-3mf").onclick = async () => {
-  const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
-  const bytes = await call("export", { up: activeOption().up, profile: profile(), settings });
-  download(bytes, `${baseName()}.3mf`, "model/3mf");
+  await busy("Exporting 3MF for OrcaSlicer / Bambu Studio…", async () => {
+    const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings });
+    download(bytes, `${baseName()}.3mf`, "model/3mf");
+    setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
+  });
 };
 
 $("dl-stl").onclick = () => download(stlBytes(state.placed), `${baseName()}_oriented.stl`, "model/stl");
