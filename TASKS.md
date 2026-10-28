@@ -69,7 +69,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Infrastructure & UX
 
-- [ ] **T-070 P1** GitHub Actions CI: pytest + e2e smoke test (Windows runner with Edge, or Linux + Chromium). · owner: —
+- [~] **T-070 P1** GitHub Actions CI: pytest + e2e smoke test (Windows runner with Edge, or Linux + Chromium). · owner: Claude (`task/T-070-ci`) — `.github/workflows/ci.yml`: pytest, Pyodide check, Linux Chromium e2e. Not run on GitHub yet: verify on the first push/PR (WebGL in headless Linux Chromium is the main risk).
 - [ ] **T-071 P2** Hosting: GitHub Pages (needs a public repo or paid plan) or Cloudflare Pages. · owner: —
 - [ ] **T-072 P3** Self-host Pyodide/three/manifold/occt assets (offline use, no CDN dependency). · owner: —
 - [x] **T-080 P1** Progress indicator + cancel for long operations. · owner: Claude (`task/T-080-progress`) — `progress.py` stages (layers, orientation search, nozzle comparison, FEA iterations); Cancel kills the worker, a new one boots and reloads the part.

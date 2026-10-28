@@ -1,7 +1,7 @@
 """Browser smoke test of the web app (headless Edge/Chrome via Playwright).
 
     pip install playwright
-    python tools/e2e_smoke.py [extra parts .stl/.step ...] [--headed] [--browser chrome] [--gemini-review]
+    python tools/e2e_smoke.py [extra parts .stl/.step ...] [--headed] [--browser chrome|chromium] [--gemini-review]
 
 Starts its own static server, drives the UI like a user, and prints one line per
 step plus every console error. Screenshots go to ./e2e-output/. Exit code 1 on failure.
@@ -138,7 +138,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("parts", nargs="*", type=Path)
     ap.add_argument("--headed", action="store_true")
-    ap.add_argument("--browser", default="msedge", choices=["msedge", "chrome"])
+    ap.add_argument("--browser", default="msedge", choices=["msedge", "chrome", "chromium"],
+                    help="chromium = Playwright's own build (CI: playwright install chromium)")
     ap.add_argument("--gemini-review", action="store_true", help="have the Gemini CLI review the screenshots")
     ap.add_argument("--gemini-bin", default=str(Path.home() / ".gemini" / "bin" / "agy.exe"))
     args = ap.parse_args()
@@ -146,7 +147,8 @@ def main():
     port = serve()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel=args.browser, headless=not args.headed)
+        channel = None if args.browser == "chromium" else args.browser
+        browser = p.chromium.launch(channel=channel, headless=not args.headed)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")

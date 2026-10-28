@@ -1,7 +1,7 @@
 // Runs the engine in Pyodide under Node: loads samples, ranks orientations and checks each one.
 // Catches crashes that only happen in Pyodide (older GEOS; a GEOS error there aborts the engine).
 //
-//   npm install pyodide@0.27.2        (once, anywhere on NODE_PATH or in tools/)
+//   npm install --no-save --prefix tools pyodide@0.27.2     (once)
 //   node tools/pyodide_check.mjs [sample,sample,...]
 import { loadPyodide } from "pyodide";
 import fs from "node:fs";

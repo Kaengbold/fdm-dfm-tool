@@ -50,7 +50,7 @@ may work here in parallel; these rules keep their work from colliding.
 cd core && python -m pytest -q                 # engine tests (~20 s)
 python tools/e2e_smoke.py                      # browser test in headless Edge (pip install playwright)
 python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini screenshot review
-node tools/pyodide_check.mjs                   # engine in Pyodide under Node (npm install pyodide@0.27.2)
+node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)
 python tools/make_samples.py                   # regenerate web/samples (needs trimesh, manifold3d)
 python -m http.server 8000                     # then open http://localhost:8000/web/
 ```
