@@ -170,16 +170,16 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | **4 — AI & agents** | Optional superpowers | Copy-context, BYOK, local mode + MCP + Orca CLI |
 | **5 — Ecosystem** | Grow | Fusion add-in, community rules/presets, calibration prints |
 
-### Progress (2026-10-28)
+### Progress (2026-10-29)
 
 | Phase | Status | Notes |
 |---|---|---|
 | 0 — Spikes | ✅ done | Pyodide engine, orientation, overhang map, STEP import (occt-import-js, exact CAD faces) |
-| 1 — "Just print it" | ✅ done | Presets, pseudo-slicer checks (18 rules incl. build volume / turn-to-fit), KB, settings, 3MF/STL export, report |
-| 2 — Strength | ✅ done | Face regions, voxel FEA (two-level multigrid CG), anisotropic material, strength-aware orientation, "make it stronger" options |
-| 3 — Design fixes | 🟡 partial | Hole/boss recognition, teardrop + corner chamfer edits with ghost preview and manifold-3d booleans. Missing: feature confirm UI, more edits (chamfer under overhangs, thicken walls), STEP output |
-| 4 — AI & agents | ✅ done | MCP server (11 tools, local mode), copy-report, in-browser "Ask AI" with own Anthropic key and 10 UI-operating tools. Not yet: other providers (OpenAI) |
-| 5 — Ecosystem | ⏳ | Fusion add-in, community presets/rules, calibration prints, GitHub Pages hosting |
+| 1 — "Just print it" | ✅ done | Presets (16 printers, 8 materials), pseudo-slicer checks (~27 rules), STL/3MF/STEP input with multi-body pick and unit hints, settings, 3MF/STL export, report, progress + cancel |
+| 2 — Strength | ✅ done | Face regions, voxel FEA, anisotropic material, strength-aware orientation, load cases, loads on faces or spots |
+| 3 — Design fixes | ✅ done | Feature confirm ("is this a hole?"), teardrops, corner chamfers, 45° ledge fills, sacrificial layers, thicker walls; ghost preview (cut/add), adjustable sizes, STL and STEP output (OpenCascade write-back) |
+| 4 — AI & agents | 🟡 mostly | MCP server (local mode), copy-report, Ask AI with Anthropic / Gemini / OpenAI keys. Missing: OrcaSlicer CLI in local mode, paste-back JSON answers, real-key tests (T-063) |
+| 5 — Ecosystem | ⏳ | Fusion add-in, community presets/rules, calibration prints, hosting |
 
 Research notes: `research/fdm_knowledge.md` (Gemini, unverified) — source for future rules.
 

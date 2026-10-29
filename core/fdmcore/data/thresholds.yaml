@@ -24,6 +24,8 @@ bridges:
   sag_mm: [0.2, 0.4]
   large_sag_from_mm: 8.0          # flat roofs wider than this sag 0.4–1.0 mm [mistake_18_large_horizontal_circular_holes]
   tunnel_ratio: 4.0               # supported sideways hole longer than this × its diameter: support can't be pulled out
+  pocket_depth_mm: 10.0           # support in a side pocket deeper than this ... (estimate, like tunnel_ratio)
+  pocket_ratio: 2.0               # ... and deeper than this × its opening is hard to reach and pull out
 
 first_layer:
   zone_mm: 0.6                    # bottom layers affected by squish / elephant foot

@@ -297,3 +297,19 @@ def test_support_trapped_in_blind_or_long_sideways_hole(length, through, trapped
     api.load(to_binary_stl(Mesh(mesh.vert_properties[:, :3][mesh.tri_verts].astype(float))), "block")
     found = {f["rule"]: f for f in api.check([0, 0, 1], {"material": "petg"}, "print")["findings"]}
     assert ("trapped_support" in found) == trapped, found.get("trapped_support", {}).get("detail")
+
+
+@pytest.mark.parametrize("depth, width, trapped", [(40, 20, True), (15, 20, False)])
+def test_support_trapped_in_deep_side_pocket(depth, width, trapped):
+    """A 20 mm wide slot into the side of a block needs support in PETG (bridges ≤ 15 mm); 40 mm deep
+    it can't be reached to pull out, 15 mm deep it can."""
+    m3d = pytest.importorskip("manifold3d")
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    M = m3d.Manifold
+    part = M.cube([60, 40, 30]) - M.cube([depth + 1, width, 10]).translate([-1, 20 - width / 2, 8])
+    mesh = part.to_mesh()
+    api.load(to_binary_stl(Mesh(mesh.vert_properties[:, :3][mesh.tri_verts].astype(float))), "pocket")
+    found = {f["rule"]: f for f in api.check([0, 0, 1], {"material": "petg"}, "print")["findings"]}
+    assert ("trapped_support" in found) == trapped
+    assert ("support_marks" in found) != trapped

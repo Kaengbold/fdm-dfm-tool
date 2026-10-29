@@ -348,6 +348,13 @@ def _support_findings(layers, tracker: Tracker, profile: Profile, T: dict) -> li
             out.append(_finding("trapped_support", "warn",
                                 f"Overhang inside a closed cavity at {_zrange(r)} — support printed there can't be removed", r, profile))
             continue
+        pocket = None if r.metrics.get("enclosed") else _side_pocket(r, layers)
+        if pocket and pocket[0] >= B["pocket_depth_mm"] and pocket[0] >= B["pocket_ratio"] * pocket[1]:
+            depth, mouth = pocket
+            out.append(_finding("trapped_support", "warn",
+                                f"Support under the roof at {_zrange(r)} sits in a pocket {depth:.0f} mm deep behind a {mouth:.0f} mm "
+                                "opening — hard to reach and pull out", r, profile, depth_mm=round(depth, 1), opening_mm=round(mouth, 1)))
+            continue
         sev = "info" if profile.multi_material else "warn"
         out.append(_finding("support_marks", sev,
                             f"Supported underside at {_zrange(r)} (~{r.metrics['area']:.0f} mm²) will be rougher than the rest", r, profile))
@@ -383,6 +390,32 @@ def _cavity_is_closed(r: Region, layers: list[Layer]) -> bool:
         if _safe_diff(void, filled).area > 0.05 * void.area:
             return False  # opens to the outside
     return False  # open to the bed
+
+
+def _side_pocket(r: Region, layers: list[Layer]) -> tuple[float, float] | None:
+    """(depth, opening width) when the space under a roof is a pocket with a floor, open only to
+    one side: the part's outline (convex hull) closes it except for the opening."""
+    roof = Polygon(r.last.exterior) if r.last.geom_type == "Polygon" else r.last
+    below = [layer for layer in layers[: r.last_index] if layer.z < r.z0 and not layer.geom.is_empty]
+    if not below:
+        return None
+    g = below[-1].geom
+    hull = g.convex_hull
+    pocket = shapely.intersection(_safe_diff(roof, g), hull)
+    if pocket.is_empty or pocket.area < 0.3 * roof.area:
+        return None
+    mouth = pocket.boundary.intersection(hull.boundary.buffer(0.05, quad_segs=QUAD))
+    if mouth.is_empty or mouth.length < 0.5:
+        return None
+    # It needs a floor: a pocket that reaches the bed can be cleared from below.
+    for layer in reversed(below):
+        if _safe_diff(pocket, layer.geom).area < 0.05 * pocket.area:
+            break
+    else:
+        return None
+    pts = shapely.points(shapely.get_coordinates(pocket))
+    depth = float(shapely.distance(pts, mouth).max())
+    return depth, float(mouth.length)
 
 
 # ---------------------------------------------------------------- feature size
