@@ -6,8 +6,8 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Verification (do these first — they decide what's real)
 
-- [ ] **T-001 P1** Check that OrcaSlicer applies the per-object settings in our 3MF (open an export, compare walls/infill/support/brim). Fix `export3mf.py` if not. · files: `core/fdmcore/export3mf.py` · owner: —
-- [ ] **T-002 P1** Same check for Bambu Studio and PrusaSlicer (Prusa uses `Metadata/Slic3r_PE_model.config`). · owner: —
+- [x] **T-001 P1** Check that OrcaSlicer applies the per-object settings in our 3MF (open an export, compare walls/infill/support/brim). Fix `export3mf.py` if not. · files: `core/fdmcore/export3mf.py` · owner: Claude (`task/T-001-slicer-check`) — `tools/slicer_check.py` slices two exports with the CLI and measures the G-code: OrcaSlicer 2.x applies walls, infill, support and brim.
+- [x] **T-002 P1** Same check for Bambu Studio and PrusaSlicer (Prusa uses `Metadata/Slic3r_PE_model.config`). · owner: Claude (`task/T-001-slicer-check`) — Bambu Studio passes as is; PrusaSlicer passes after adding `Slic3r_PE_model.config` with its key names (`PRUSA_KEYS`).
 - [ ] **T-003 P1** Real-part corpus: collect ~20 typical hobby STLs/STEPs with known good orientations (licence permitting), add to `core/tests/corpus/`, write a regression test for top orientation + key findings. · owner: —
 - [~] **T-004 P1** Browser performance on big parts (200k–1M triangles): measure load/orient/check/strength times, fix the worst. · owner: Claude (`task/T-004-performance`) — 572k-face CAD export in Pyodide: load 12→1.6 s, check ~50→16 s, orient 8 s (`node tools/pyodide_check.mjs part.stl`). Fixes: outlines simplified to 0.01 mm, vectorised ring building, no vertex dedupe in placement, `to_bytes()` for uploads. Left: strength/FEA and design timings on big parts, orient (8 s).
 - [ ] **T-005 P2** Manual UI review on a laptop screen and a phone; file issues as tasks. · owner: —

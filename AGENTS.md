@@ -52,6 +52,7 @@ python tools/e2e_smoke.py                      # browser test in headless Edge (
 python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini screenshot review
 node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)
 node tools/make_step_fixture.mjs               # regenerate the STEP test part (once: npm install --no-save --prefix tools replicad-opencascadejs@1.1.0)
+python tools/slicer_check.py                   # do installed OrcaSlicer / Bambu Studio / PrusaSlicer apply our 3MF settings?
 python tools/make_samples.py                   # regenerate web/samples (needs trimesh, manifold3d)
 python -m http.server 8000                     # then open http://localhost:8000/web/
 ```
