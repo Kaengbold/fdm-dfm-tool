@@ -692,8 +692,8 @@ def _runs(idx: list[int]) -> list[list[int]]:
 # Print-time model, fitted to OrcaSlicer's own estimates for the samples (P1S and K1C system
 # profiles, see tools/time_fit.py). Real moves rarely reach nominal speed.
 TIME_EFFICIENCY = 0.2
-LAYER_OVERHEAD_S = 5.0  # layer change, travel, retractions, slow first moves
-START_MIN = 5.0  # heating, homing, bed levelling, purge line
+LAYER_OVERHEAD_S = 7.0  # layer change, travel, retractions, slow first moves
+START_MIN = 3.0  # heating, homing, bed levelling, purge line
 
 
 def _estimate(layers: list[Layer], profile: Profile) -> dict:
@@ -729,17 +729,19 @@ def _estimate(layers: list[Layer], profile: Profile) -> dict:
 
 
 def _skin_area(layers: list[Layer], zs: np.ndarray, i: int, top: float, bottom: float) -> float:
-    """Area of layer i printed solid: within ``top`` mm below a surface or ``bottom`` mm above one
-    (compared with the analysed layer that far away; none there = outside the part)."""
-    g = layers[i].geom
-    out = Polygon()
+    """Area of layer i printed solid: what it has more than the layer ``top`` mm above or ``bottom``
+    mm below (none there = outside the part: all skin). Area differences, not polygon overlays:
+    near-coincident walls of two layers make Pyodide's older GEOS abort, and a time estimate
+    doesn't need the exact shape."""
+    area = layers[i].geom.area
+    exposed = 0.0
     for z, step in ((zs[i] + top, 1), (zs[i] - bottom, -1)):
         if not 0 <= z <= zs[-1] + 1e-6:
-            return g.area  # the first/last few layers are all skin
+            return area  # the first/last few layers are all skin
         j = int(np.argmin(np.abs(zs - z)))
         j = j if j != i else min(max(i + step, 0), len(layers) - 1)  # sampled layers further apart than the skin
-        out = out.union(_safe_diff(g, layers[j].geom)) if not out.is_empty else _safe_diff(g, layers[j].geom)
-    return out.area
+        exposed = max(exposed, area - layers[j].geom.area)
+    return exposed
 
 
 def _cooling_findings(layers, times, profile: Profile, T: dict) -> list[dict]:

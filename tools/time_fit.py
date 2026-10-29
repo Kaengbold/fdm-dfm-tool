@@ -65,7 +65,7 @@ def main():
         target.setdefault((part, goal), []).append(r["print_time_min"])
     target = {k: float(np.mean(v)) for k, v in target.items()}
     best = None
-    for eff, over, start in itertools.product((0.12, 0.15, 0.18, 0.2, 0.25, 0.3), (3.0, 5.0, 7.0, 9.0), (3.0, 5.0, 7.0)):
+    for eff, over, start in itertools.product((0.12, 0.15, 0.18, 0.2, 0.25, 0.3), (3.0, 5.0, 7.0, 9.0), (1.0, 2.0, 3.0, 5.0)):
         checks.TIME_EFFICIENCY, checks.LAYER_OVERHEAD_S, checks.START_MIN = eff, over, start
         est = ours({k: v for k, v in runs.items() if k.split("|")[1] == PRINTERS[0]})
         err = [np.log(est[k] / target[(k.split("|")[0], k.split("|")[2])]) for k in est]
