@@ -320,15 +320,7 @@ def von_mises(stress: np.ndarray) -> np.ndarray:
 def refine(tris: np.ndarray, max_edge: float, max_tris: int = 120_000) -> np.ndarray:
     """Split triangles into four until their edges are at most ``max_edge``: a display mesh fine
     enough to show the stress field (CAD exports often have huge flat triangles)."""
-    while True:
-        edges = np.linalg.norm(tris - np.roll(tris, 1, axis=1), axis=2).max(axis=1)
-        long = edges > max_edge
-        if not long.any() or len(tris) + 3 * long.sum() > max_tris:
-            return tris
-        a, b, c = tris[long, 0], tris[long, 1], tris[long, 2]
-        ab, bc, ca = (a + b) / 2, (b + c) / 2, (c + a) / 2
-        split = np.stack([np.stack(t, axis=1) for t in ((a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca))], axis=1).reshape(-1, 3, 3)
-        tris = np.concatenate([tris[~long], split])
+    return _refine_with_source(tris, max_edge, max_tris)[0]
 
 
 def surface_values(model: Model, values: np.ndarray, tris: np.ndarray) -> np.ndarray:
@@ -390,6 +382,8 @@ def _summary(case: LoadCase, fi_layer, fi_plane, u, info) -> dict:
     centre = grid.centers(case.model.elems[crit])
     near = bool(len(held)) and float(np.linalg.norm(held - centre, axis=1).min()) <= NEAR_SUPPORT_VOXELS * grid.h
     return {
+        "fi_layers_max": float(worst_layer),  # what the layer bond uses of its strength (for material swaps)
+        "fi_material_max": float(worst_plane),
         "near_support": near,
         "safety_factor": sf,
         "verdict": verdict(sf),
@@ -412,10 +406,29 @@ def face_values(mesh: Mesh, grid: VoxelGrid, model: Model, values: np.ndarray) -
 
 
 def _surface_elements(tris, normals, grid: VoxelGrid, elem_id) -> np.ndarray:
-    pts = np.concatenate([tris.mean(axis=1), tris.reshape(-1, 3), (tris + tris.mean(axis=1, keepdims=True)).reshape(-1, 3) / 2])
-    inward = np.concatenate([normals, np.repeat(normals, 3, axis=0), np.repeat(normals, 3, axis=0)])
+    """Voxels just inside a face: sampled every h/2 over each triangle (CAD faces are often two
+    huge triangles; sampling only their corners held or loaded the part at a few points)."""
+    fine, src = _refine_with_source(tris, grid.h / 2)
+    n = normals[src]
+    pts = np.concatenate([fine.mean(axis=1), fine.reshape(-1, 3)])
+    inward = np.concatenate([n, np.repeat(n, 3, axis=0)])
     ids = _lookup(pts - inward * grid.h * 0.5, grid, elem_id)
     return np.unique(ids[ids >= 0])
+
+
+def _refine_with_source(tris: np.ndarray, max_edge: float, max_tris: int = 2_000_000) -> tuple[np.ndarray, np.ndarray]:
+    """``refine`` that also says which input triangle each small one came from."""
+    src = np.arange(len(tris))
+    while True:
+        edges = np.linalg.norm(tris - np.roll(tris, 1, axis=1), axis=2).max(axis=1)
+        long = edges > max_edge
+        if not long.any() or len(tris) + 3 * long.sum() > max_tris:
+            return tris, src
+        a, b, c = tris[long, 0], tris[long, 1], tris[long, 2]
+        ab, bc, ca = (a + b) / 2, (b + c) / 2, (c + a) / 2
+        split = np.stack([np.stack(t, axis=1) for t in ((a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca))], axis=1).reshape(-1, 3, 3)
+        tris = np.concatenate([tris[~long], split])
+        src = np.concatenate([src[~long], np.repeat(src[long], 4)])
 
 
 def _lookup(pts, grid: VoxelGrid, elem_id) -> np.ndarray:

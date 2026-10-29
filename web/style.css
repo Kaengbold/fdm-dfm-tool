@@ -141,6 +141,14 @@ main canvas { display: block; }
 .loads li { display: flex; justify-content: space-between; align-items: center; border: 1px solid #e0e1e6; border-radius: 6px; padding: 4px 8px; }
 .loads li.fixed { border-left: 4px solid var(--fixed); }
 .loads li.force { border-left: 4px solid var(--force); }
+#strength-options { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#strength-options li.option { display: flex; flex-direction: column; align-items: stretch; gap: 3px; border: 1px solid #e0e1e6; border-radius: 6px; padding: 6px 8px; background: #fff; }
+#strength-options li.option > button { align-self: flex-start; }
+#strength-options li.option .hint { margin: 0; }
+#strength-options .option-head { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+#strength-options .option-head small { flex-basis: 100%; color: var(--muted); text-transform: uppercase; font-size: 10px; }
+#strength-options .option-head strong { flex: 1; font-size: 13px; }
+#strength-options .gain { font-weight: 600; color: var(--ok, #2f9e44); }
 .marks button { padding: 2px 9px; min-width: 28px; min-height: 26px; border-radius: 6px; }
 @keyframes pulse { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
 .pulse { animation: pulse 0.5s ease-out; border-radius: 6px; }
@@ -153,6 +161,9 @@ button.link { background: none; border: none; color: var(--accent); font-size: 1
 .angle-editor { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .angle-editor label { display: flex; gap: 6px; align-items: center; }
 .angle-editor input[type=range] { flex: 1; }
+.angle-editor .angles { display: flex; flex-direction: column; gap: 2px; }
+.angle-editor .angles[hidden] { display: none; }
+.angle-editor input[type=number] { width: 60px; }
 .verdict { border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #fff; }
 .verdict strong { font-size: 15px; display: block; }
 .verdict.fine { background: var(--bed); }

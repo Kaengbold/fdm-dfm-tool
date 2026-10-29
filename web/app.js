@@ -14,6 +14,9 @@ const el = (tag, props = {}, ...children) => {
   return node;
 };
 
+// The AI features (Ask AI, paste back an answer) are being redone; hidden unless the page is opened with ?ai=1.
+const AI_ENABLED = new URLSearchParams(location.search).has("ai");
+
 // ---------- engine (Pyodide worker) ----------
 // Cancelling kills the worker (Python can't be interrupted mid-call); a fresh one boots and
 // gets the current part again before any other call runs.
@@ -273,7 +276,8 @@ async function runCheck() {
     state.check = result;
     renderCheck();
     $("design-block").hidden = mode() === "print";
-    $("ai-block").hidden = false;
+    $("ai-block").hidden = !AI_ENABLED;
+    $("paste-block").hidden = !AI_ENABLED;
     setStatus(state.summary);
     $("results").hidden = false;
   });
@@ -582,22 +586,47 @@ function dirLabel(l) {
   return `at an angle (turn ${a.turn}°, tilt ${a.tilt}°)`;
 }
 
-function angleEditor(l) {
+/** Edit a load in place: weight, direction (preset or any angle), load case. */
+function loadEditor(l) {
   const a = toAngles(loadVector(l));
+  const kg = el("input", { type: "number", min: 0.1, step: 0.5, value: l.kg, "aria-label": "Load in kg" });
+  const dir = el("select", { "aria-label": "Direction" },
+    ...[["push", "pushing on the face"], ["pull", "pulling the face"], ["down", "hanging down (−Z as modelled)"], ["angle", "at an angle…"]]
+      .map(([v, t]) => el("option", { value: v, textContent: t })));
+  dir.value = Array.isArray(l.direction) ? "angle" : l.direction;
+  const kase = el("select", { "aria-label": "Load case" }, ...[1, 2, 3].map((c) => el("option", { value: c, textContent: `case ${c}` })));
+  kase.value = l.case ?? 1;
   const out = el("span", { textContent: `turn ${a.turn}°, tilt ${a.tilt}°` });
   const turn = el("input", { type: "range", min: -180, max: 180, step: 5, value: a.turn, "aria-label": "Turn" });
   const tilt = el("input", { type: "range", min: -90, max: 90, step: 5, value: a.tilt, "aria-label": "Tilt" });
-  const update = () => {
-    l.direction = fromAngles(Number(turn.value), Number(tilt.value));
-    out.textContent = `turn ${turn.value}°, tilt ${tilt.value}°`;
-    viewer.showLoadSymbols(loadSymbols());
-  };
-  turn.oninput = tilt.oninput = update;
-  turn.onchange = tilt.onchange = () => renderLoads();
-  return el("div", { className: "angle-editor" },
+  const angles = el("div", { className: "angles", hidden: dir.value !== "angle" },
     el("label", {}, "Turn ", turn), el("label", {}, "Tilt ", tilt), out,
     el("p", { className: "hint", textContent: "Or drag the arrow on the part: it follows the mouse." }));
+  const changed = () => {
+    viewer.showLoadSymbols(loadSymbols());
+    $("loads").querySelector(`#load-${state.loads.indexOf(l)} > span`).textContent = loadText(l);
+  };
+  kg.oninput = () => {
+    if (Number(kg.value) > 0) l.kg = Number(kg.value);
+    changed();
+  };
+  kase.onchange = () => ((l.case = Number(kase.value)), renderLoads());
+  dir.onchange = () => {
+    angles.hidden = dir.value !== "angle";
+    l.direction = dir.value === "angle" ? fromAngles(Number(turn.value), Number(tilt.value)) : dir.value;
+    changed();
+  };
+  turn.oninput = tilt.oninput = () => {
+    l.direction = fromAngles(Number(turn.value), Number(tilt.value));
+    out.textContent = `turn ${turn.value}°, tilt ${tilt.value}°`;
+    changed();
+  };
+  return el("div", { className: "angle-editor" },
+    el("div", { className: "row" }, kg, " kg ", dir), el("label", {}, "in ", kase), angles,
+    el("p", { className: "hint", textContent: "Changes apply the next time you check strength." }));
 }
+
+const loadText = (l) => (l.kind === "fixed" ? "🔒 Held here" : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
 
 // The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
 const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,
@@ -644,9 +673,9 @@ function renderLoads() {
     ...state.loads.map((l, i) =>
       el(
         "li",
-        { className: l.kind },
-        el("span", { textContent: (l.kind === "fixed" ? "🔒 Held here" : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "") }),
-        l.kind === "force" ? el("button", { textContent: "↻", title: "Change the direction", className: "icon", onclick: () => {
+        { className: l.kind, id: `load-${i}` },
+        el("span", { textContent: loadText(l) }),
+        l.kind === "force" ? el("button", { textContent: "✎", title: "Edit weight, direction or case", className: "icon", onclick: () => {
           state.angleOpen = state.angleOpen === i ? null : i;
           renderLoads();
         } }) : "",
@@ -660,7 +689,7 @@ function renderLoads() {
             recolor();
           },
         }),
-        state.angleOpen === i && l.kind === "force" ? angleEditor(l) : "",
+        state.angleOpen === i && l.kind === "force" ? loadEditor(l) : "",
       ),
     ),
   );
@@ -713,7 +742,8 @@ async function runStrength(fine = false) {
     $("show-temp").checked = false;
     recolor();
     viewer.showFindings([]);
-    viewer.mark(r.critical_point_print);
+    if (r.weak_marker) viewer.markWeak(r.weak_marker.point, r.weak_marker.normal);
+    else viewer.mark(r.critical_point_print);
     renderStrength();
     setStatus(state.summary);
     return r;
@@ -798,7 +828,7 @@ function strengthViewControls(r) {
   cut.oninput = () => ((view.cut = Number(cut.value)), show());
   const m = r.mesh;
   return el("div", { className: "fea-view" },
-    el("label", { className: "toggle" }, heat, "Show results on the part (red dot = weakest spot)"),
+    el("label", { className: "toggle" }, heat, "Show results on the part (red arrow = weakest spot)"),
     el("label", {}, "Colour by ", field),
     el("label", {}, "Show bending (exaggerated) ", bend),
     el("div", { className: "row" }, axis, cut),
@@ -825,7 +855,8 @@ function renderStrength() {
       : "",
     strengthViewControls(r),
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
-    el("button", { textContent: "How can I make it stronger?", onclick: showStrengthOptions }),
+    el("button", { className: "primary", textContent: "How can I make it stronger?", onclick: showStrengthOptions,
+      title: "Shows every option: slicer settings, orientation, design changes and materials, each with what it costs" }),
     el("button", { textContent: "Re-rank orientations including strength", onclick: () => findOrientations(true) }),
     el("ul", { id: "strength-options", className: "options" }),
   );
@@ -834,15 +865,21 @@ function renderStrength() {
 async function showStrengthOptions() {
   return busy("Trying alternatives (a few seconds)…", async () => {
     const opts = await call("strength_options", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() });
+    const KIND = { slicer: "Slicer setting", orientation: "Orientation", design: "Design change", material: "Material" };
+    const ACTION = { slicer: "Apply", orientation: "Use it", design: "Show me", material: "Use it" };
+    const now = state.strength?.safety_factor;
     $("strength-options").replaceChildren(
       ...opts.map((o) =>
-        el(
-          "li",
-          {},
-          `${o.change}: ×${o.safety_factor.toFixed(1)}`,
-          el("button", { textContent: "Apply", onclick: () => applyOption(o) }),
-        ),
-      ),
+        el("li", { className: `option ${o.kind}` },
+          el("div", { className: "option-head" },
+            el("small", { textContent: KIND[o.kind] }),
+            el("strong", { textContent: o.change }),
+            el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
+              : `×${o.safety_factor.toFixed(1)}${now ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
+          el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
+          el("button", { textContent: ACTION[o.kind], onclick: () => applyOption(o) }))),
+      opts.some((o) => o.kind === "material") ? ""
+        : el("li", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` }),
     );
     setStatus(state.summary);
     return opts;
@@ -882,6 +919,12 @@ async function applyOption(o) {
     state.options.unshift(option);
     renderOptions();
     await selectOption(0);
+  } else if (o.material) {
+    $("material").value = o.material;
+    $("material").dispatchEvent(new Event("change"));
+  } else if (o.kind === "design") {
+    $("design-on").click();
+    await suggestDesign();
   }
 }
 

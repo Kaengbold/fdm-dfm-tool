@@ -382,6 +382,7 @@ def main():
             page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Report copied')")
             report = page.evaluate("() => navigator.clipboard.readText()")
             assert "## For the AI assistant: how to answer" in report and "- 1: " in report, report[-600:]
+            page.evaluate("() => { document.getElementById('paste-block').hidden = false; }")  # AI features are off by default (?ai=1)
             page.click("#paste-block > summary")
             reply = 'Lay it on its side.\n```json\n{"orientation": 1, "settings": {"wall_loops": 5}}\n```'
             page.fill("#paste-input", reply)

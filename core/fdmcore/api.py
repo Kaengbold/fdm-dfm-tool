@@ -468,7 +468,7 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     }[r["mode"]]
     near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
             " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
-    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red dot). {why}{near}"
+    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red arrow). {why}{near}"
 
 
 OPT_TARGET = {"strength": 3.0}  # safety the optimiser aims for, by goal (default 2.0)
@@ -649,44 +649,108 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     r["vm_max_mpa"] = float(vm[ok].max(initial=0))
     r["mesh"] = {"voxels": int(len(model.elems)), "voxel_mm": float(model.grid.h), "nodes": int(model.n_nodes),
                  "load_n": float(np.linalg.norm(worst.forces.sum(axis=0)))}
-    r["critical_point_print"] = _to_print_frame(s.mesh, print_rotation(s.mesh, up, p.printer["bed"])[0], r["critical_point"])
+    rot = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    r["critical_point_print"] = _to_print_frame(s.mesh, rot, r["critical_point"])
+    # Where to point the "weakest spot" arrow: the surface nearest to it (the spot itself is often inside).
+    # Not a face on the bed (an arrow from below the bed can't be seen): the nearest face you can see.
+    normals = np.cross(fine[:, 1] - fine[:, 0], fine[:, 2] - fine[:, 0])
+    normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
+    dist = np.linalg.norm(fine.mean(axis=1) - r["critical_point"], axis=1)
+    dist[normals @ rot[2] < -0.7] += 1e6
+    tri = fine[int(np.argmin(dist))]
+    n = np.cross(tri[1] - tri[0], tri[2] - tri[0])
+    r["weak_marker"] = {"point": _to_print_frame(s.mesh, rot, tri.mean(axis=0)), "normal": (rot @ (n / max(np.linalg.norm(n), 1e-12))).tolist()}
     r.update(walls=sh.walls, infill=sh.infill, top=sh.top, bottom=sh.bottom, material=p.material["name"])
-    s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a fillet there
+    s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
 
 
 def strength_options(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
-    """What would make it stronger? Tries more walls, more infill, more top/bottom layers and the strongest orientation."""
+    """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
+    slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
+    at the weak spot (from the last strength check), and other materials. Sorted strongest first."""
     from dataclasses import replace
 
-    from .strength import cases_safety, verdict
+    from .features import concave_edges
+    from .strength import cases_safety, material_volume, verdict
     from .strength import evaluate_cases as evaluate_strength
 
+    s = _require()
     p = Profile.from_dict(profile)
     case = _load_case(loads)
     sh = _shells(p, walls, infill, top, bottom)
+    model = case[0].model
+    to_grams = abs(s.mesh.volume()) / (len(model.elems) * model.grid.h**3) / 1000 * p.material["density_g_cm3"]
+    base = evaluate_strength(case, up, p, sh)
+    grams = material_volume(model, up, sh, p) * to_grams
     out = []
 
-    def add(change, kind, sf, **extra):
-        out.append({"change": change, "kind": kind, "safety_factor": float(sf), "verdict": verdict(sf), **extra})
+    def add(change, kind, sf, why, cost="", **extra):
+        out.append({"change": change, "kind": kind, "safety_factor": None if sf is None else float(sf),
+                    "verdict": None if sf is None else verdict(sf), "why": why, "cost": cost, **extra})
 
-    more_walls = evaluate_strength(case, up, p, replace(sh, walls=sh.walls + 2))["safety_factor"]
-    add(f"{sh.walls + 2} walls instead of {sh.walls}", "slicer", more_walls, settings={"wall_loops": str(sh.walls + 2)})
+    def slicer(change, shells, why, settings):
+        sf = evaluate_strength(case, up, p, shells)["safety_factor"]
+        extra = material_volume(model, up, shells, p) * to_grams - grams
+        add(change, "slicer", sf, why, f"+{extra:.0f} g plastic, a bit longer to print", settings=settings)
+
+    slicer(f"{sh.walls + 2} walls instead of {sh.walls}", replace(sh, walls=sh.walls + 2),
+           "Walls are the solid outside of the print and carry most of the load.", {"wall_loops": str(sh.walls + 2)})
     dense = max(0.4, sh.infill)
     if dense > sh.infill:
-        sf = evaluate_strength(case, up, p, replace(sh, infill=dense))["safety_factor"]
-        add(f"{dense:.0%} infill instead of {sh.infill:.0%}", "slicer", sf, settings={"sparse_infill_density": f"{dense:.0%}"})
-    shells = replace(sh, top=sh.top + 3, bottom=sh.bottom + 3)
-    sf = evaluate_strength(case, up, p, shells)["safety_factor"]
-    add(f"{shells.top} top and {shells.bottom} bottom layers instead of {sh.top} and {sh.bottom}", "slicer", sf,
-        settings={"top_shell_layers": str(shells.top), "bottom_shell_layers": str(shells.bottom)})
+        slicer(f"{dense:.0%} infill instead of {sh.infill:.0%}", replace(sh, infill=dense),
+               "Denser infill backs up the walls inside the part.", {"sparse_infill_density": f"{dense:.0%}"})
+    more = replace(sh, top=sh.top + 3, bottom=sh.bottom + 3)
+    slicer(f"{more.top} top and {more.bottom} bottom layers instead of {sh.top} and {sh.bottom}", more,
+           "Solid top and bottom skins carry bending, like the flanges of a beam.",
+           {"top_shell_layers": str(more.top), "bottom_shell_layers": str(more.bottom)})
+
     axes = np.vstack([np.eye(3), -np.eye(3)])
     sfs = cases_safety(case, axes, p, sh)
     best = int(np.argmax(sfs))
     if abs(float(np.dot(axes[best], np.asarray(up, float) / np.linalg.norm(up)))) < 0.99:
-        add("Print in the strongest orientation", "orientation", sfs[best], up=axes[best].tolist())
+        add("Print in the strongest orientation", "orientation", sfs[best],
+            "Turns the part so the load runs along the layers instead of pulling them apart.",
+            "may need more support or take longer", up=axes[best].tolist())
+
+    # Design: a chamfer at the inside corner next to the weak spot (see features._stress_chamfers).
+    if s.weak_spot is not None:
+        spot = np.asarray(s.weak_spot[0])
+        edges = concave_edges(s.mesh)
+        if edges and min(np.linalg.norm((e["a"] + e["b"]) / 2 - spot) for e in edges) <= 8 * s.weak_spot[1]:
+            add("Add a 45° chamfer at the weak spot (design change)", "design", None,
+                "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. On a test part "
+                "2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
+                "changes the shape a little")
+    if base["mode"] == "material":
+        add("Make the weak spot thicker (design change)", "design", None,
+            "The plastic itself is the limit there: more cross-section is the direct fix.", "changes the shape")
+
+    # Other materials: stresses don't depend on stiffness here, only the strengths change.
+    lay, mat_fi = base["fi_layers_max"], base["fi_material_max"]
+    cur = p.material
+    cur_z = cur["tensile_xy_mpa"] * p.z_strength_factor
+    for mid, m in presets()["materials"].items():
+        if mid == p.material_id or mid.startswith("tpu") or m.get("based_on", "").startswith("tpu"):
+            continue
+        other = Profile.from_dict({**(profile or {}), "material": mid})
+        worst = max(lay * cur_z / (m["tensile_xy_mpa"] * other.z_strength_factor), mat_fi * cur["tensile_xy_mpa"] / m["tensile_xy_mpa"])
+        sf = 1 / worst if worst > 0 else float("inf")
+        if sf <= base["safety_factor"] * 1.15:  # only clearly stronger ones
+            continue
+        needs = []
+        if m["warp_risk"] == "high" and p.enclosure == "none":
+            needs.append("an enclosed printer (warps on an open one)")
+        if m["abrasive"] and not p.printer.get("hardened_nozzle"):
+            needs.append("a hardened nozzle")
+        if m["hygroscopic"] == "high":
+            needs.append("dry filament")
+        add(f"Print it in {m['name']}", "material", sf,
+            f"{m['name']} is stronger{' and its layers bond better' if other.z_strength_factor > p.z_strength_factor else ''}.",
+            "needs " + ", ".join(needs) if needs else "", material=mid)
+    out.sort(key=lambda o: -(o["safety_factor"] or 0))
     return out
 
 

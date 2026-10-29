@@ -189,7 +189,8 @@ rules:
       at the corner. A rounded or 45° fillet spreads the load over more material.
     fixes:
     - domain: geometry
-      text: Add a fillet or 45° chamfer of 1–3 mm (more for big parts) where the two faces meet.
+      text: Add a 45° chamfer of 1–3 mm (more for big parts) where the two faces meet. Prefer a chamfer to a round
+        fillet wherever it would print as an overhang.
     - domain: slicer
       text: More walls put more solid plastic around the corner.
       settings:

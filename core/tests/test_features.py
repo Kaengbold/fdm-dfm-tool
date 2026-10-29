@@ -70,13 +70,13 @@ def test_bottom_chamfer_and_fillet_at_the_weak_spot():
     api.load((Path(__file__).resolve().parents[2] / "web" / "samples" / "mushroom.stl").read_bytes(), "m")
     prof = {"material": "pla"}
     edits = {e["id"]: e for e in api.design([0, 0, -1], prof)["edits"]}
-    assert "foot-chamfer" in edits and "stress-fillet" not in edits  # no strength check yet
+    assert "foot-chamfer" in edits and "stress-chamfer" not in edits  # no strength check yet
     part = api._require().mesh
     # 0.5 mm 45° chamfer along the 160 mm cap outline: 0.125 mm² × 160 mm.
     assert abs(part.volume()) - abs(apply_edits(part, [edits["foot-chamfer"]]).volume()) == pytest.approx(20, rel=0.05)
     api.regions()
     api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}], prof)
-    fillet = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-fillet")
+    fillet = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
     assert fillet["op"] == "add" and len(fillet["pieces"]) == 4  # the four edges where the stem meets the cap
 
 

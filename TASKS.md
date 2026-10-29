@@ -56,6 +56,8 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [x] **T-132 P1** Load symbols are hidden by the part when behind it (lock, arrows). · owner: Claude (`task/T-130-sim-fixes`)
 - [x] **T-133 P2** Set the force direction on the part: drag the arrow / angle controls, any direction, not only push/pull/down. · owner: Claude (`task/T-130-sim-fixes`) — trackball drag of the arrow; turn/tilt sliders (↻ on the load).
 - [x] **T-134 P2** Review the strength simulation against standard FEA practice (mesh check, convergence, deformation view, reaction forces) and fix what is missing. · owner: Claude (`task/T-130-sim-fixes`) — singularities: 2 element rings at supports/loads left out, weak spot next to a clamp called out; "check accuracy" re-runs on a 3× finer grid and says how stable the answer is (samples: 14–25 % lower → shown honestly); grid size, total load and solver state shown; deformation view. Still open: self-weight, contact, non-linear material (out of scope for hobby checks).
+- [x] **T-138 P1** Supports and loads only acted on a few voxels of big CAD faces (sampled at triangle corners/centres): hot spots on the held face, wrong weak spot. · owner: Claude (`task/T-130-sim-fixes`) — faces sampled every h/2; all nodes of the mushroom's top face held (was 48 of 1764).
+- [ ] **T-139 P2** "How is it held?": rigidly clamped/glued vs resting on a surface (only pushes back) vs a screw in a hole; a rigid glued face overstates stress at its edge. · owner: —
 - [ ] **T-033 P3** Partial-voxel fill fractions for better accuracy on thin sections. · files: `voxel.py`, `strength.py` · owner: —
 
 ## Design edits
@@ -90,6 +92,17 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 - [x] **T-137 P2** UI bugs from review: AI key field outside a form (console warning); nozzle comparison closes on orientation change; no feedback when clicking the active goal/mode; the 3D view doesn't look clickable (hover highlight + hint); "Design changes" hidden in print mode without a note; small × buttons; walls/infill controls far from the slicer settings. · owner: Claude (`task/T-130-sim-fixes`) — all fixed; moving the controls for real is part of T-141.
 - [ ] **T-140 P1** (Phase 7) Start wizard: what do you want — good slicer settings / one-off optimisation / step by step / expert. · owner: —
+- [ ] **T-142 P1** (Phase 7) Three modes, refined in rounds: Simple (one button after printer / material / where the load is), Advanced (more simulation, CAD changes), Expert (everything). · owner: —
+- [ ] **T-143 P1** (Phase 7) Always show clearly when something loads or works in the background (what, how long, cancel). · owner: —
+- [ ] **T-150 P2** (Phase 8) Custom infill: density per region from the stress result; strengthening holes that make the slicer add walls inside; 3MF modifier volumes (Orca/Bambu/Prusa) to strengthen or lighten regions. · owner: —
+- [ ] **T-151 P2** (Phase 8) Special slicer settings integration: expose the useful advanced settings with plain explanations (continues T-136). · owner: —
+- [ ] **T-160 P3** (Phase 9) Simplified dynamic (vibration, impact) simulation. · owner: —
+- [ ] **T-161 P3** (Phase 9) Heat in use (part temperature vs softening) and creep under a constant load. · owner: —
+- [ ] **T-162 P2** (Phase 9) Warping and residual stress with the deformation shown on the part; cooling settings optimised from the heat simulation. · owner: —
+- [ ] **T-170 P2** (Phase 10) Calibration prints: tolerances / fits, overhang angle, bridges, support gap (layer strength and warping exist); presets shipped for printers that prove consistent. · owner: —
+- [ ] **T-171 P3** (Phase 10) Material advisor from environment and load case. · owner: —
+- [ ] **T-180 P3** (Phase 11) Redo the AI integration (hidden for now, ``?ai=1``). · owner: —
+- [ ] **T-181 P2** Research more CAD tricks and simulation ideas to suggest (see PLAN research list). · owner: —
 - [ ] **T-141 P1** (Phase 7) UI overhaul: simpler layout, fewer controls at once, clear next step. · owner: —
 
 - [~] **T-070 P1** GitHub Actions CI: pytest + e2e smoke test (Windows runner with Edge, or Linux + Chromium). · owner: Claude (`task/T-070-ci`) — `.github/workflows/ci.yml`: pytest, Pyodide check, Linux Chromium e2e. Not run on GitHub yet: verify on the first push/PR (WebGL in headless Linux Chromium is the main risk).

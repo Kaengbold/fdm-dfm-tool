@@ -190,3 +190,15 @@ def test_fea_view_fields_cover_the_refined_surface():
     assert r["mesh"]["load_n"] == pytest.approx(5 * 9.81, rel=1e-3)
     centers = np.frombuffer(r["elements"]["centers"], np.float32)
     assert len(centers) == 3 * r["mesh"]["voxels"]
+
+
+def test_a_held_face_is_held_everywhere_not_at_a_few_points():
+    """CAD faces are often two big triangles: every voxel under the face must be held / loaded."""
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
+    api.regions()
+    case = api._load_case([{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 20, "direction": "pull"}])[0]
+    nodes = np.argwhere(case.model.node_index >= 0)
+    top = nodes[:, 2] == nodes[:, 2].max()
+    bottom = nodes[:, 2] == nodes[:, 2].min()
+    assert case.fixed[top].all()
+    assert (np.abs(case.forces[bottom]).sum(axis=1) > 0).all()

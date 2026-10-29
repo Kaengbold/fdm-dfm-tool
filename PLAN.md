@@ -171,7 +171,11 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | **5 — Ecosystem** | Grow | Fusion add-in, community rules/presets, calibration prints |
 | **6a — Fixes from user testing** | Answers you can trust | Strength-aware orientation bug (mushroom pulled on its stem), FEA-style stress colours with a legend, symbols hidden behind the part, force direction set on the part, design suggestions for warping corners / elephant foot / stress at fillets, slicer helpers (hole and elephant-foot compensation), small UI bugs |
 | **6 — Simulation** | Trustworthy answers | Simple level (seconds–2 min, browser): walls/top/bottom/infill as you'll print them, settings optimised for your load and goal, heat build-up and warping estimates, plain explanations. Detailed level (local install, up to ~20 min): slice with OrcaSlicer, then strength with each line's direction and heat/warping from the real G-code timing. Later: OrcaSlicer compiled to WebAssembly in the browser |
-| **7 — UI overhaul + wizard** | Usable without reading a manual | A guide that starts by default and asks what you want: (1) just good slicer settings, (2) a one-off optimisation, (3) step by step through everything, (4) expert mode (today's full UI). Then a cleaner layout: fewer controls at once, settings next to where they matter, clear next steps |
+| **7 — UI overhaul + wizard** | Usable without reading a manual | Three levels, each refined in several rounds: **Simple** — one button after a few questions (printer, material you have, where the load is); **Advanced** — more simulations, finer control, CAD changes; **Expert** — open access to every tool and output. A guide starts by default (just slicer settings / one-off optimisation / step by step / expert). Less UI at once, settings next to where they matter, a clear next step, and always visible when something is loading or working in the background |
+| **8 — Optimised printing** | Parts that are strong where it matters and light elsewhere | Custom infill: different density per region, strengthening geometry (small holes that make the slicer add walls inside), slicer modifier volumes where the slicer supports them (OrcaSlicer/Bambu/Prusa 3MF modifiers) to strengthen some regions and lighten others; driven by the stress results |
+| **9 — More simulation (advanced mode)** | Answers beyond "will it break" | Simplified dynamic (vibration / impact), heat (part in use, e.g. a hot car), creep under constant load, warping with visible deformation, internal (residual) stress from printing, cooling optimised from the heat simulation |
+| **10 — Calibration & materials** | Right numbers for your printer | Calibration prints with a form for the result: tolerances / fits, overhang angle, bridges, support gap, layer strength, warping (some exist). Ship presets for printers once they prove consistent between machines. Optional material advisor: from the environment (heat, outdoors, chemicals) and the load case, the best material you can print — not assuming everything maxed out at any price |
+| **11 — AI, redone** | Optional | The current Ask AI / paste-back panel is hidden (``?ai=1``); redesign and re-integrate later |
 
 ### Progress (2026-10-29)
 
@@ -183,6 +187,10 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | 3 — Design fixes | ✅ done | Feature confirm ("is this a hole?"), teardrops, corner chamfers, 45° ledge fills, sacrificial layers, thicker walls; ghost preview (cut/add), adjustable sizes, STL and STEP output (OpenCascade write-back) |
 | 4 — AI & agents | ✅ done | MCP server (local mode) with real slicing via the installed OrcaSlicer, copy-report + paste-back answers (any chat subscription), Ask AI with Anthropic / Gemini / OpenAI keys. Open: real-key tests (T-063), streaming (T-062), CLI subscription bridge (T-061) |
 | 5 — Ecosystem | ⏳ | Done: your own printers/materials with calibration prints, offline use, GitHub Pages workflow, Fusion add-in (report + teardrops; untested inside Fusion). Open: first Pages deploy, real calibration prints, community rules |
+
+Research to do: more CAD tricks and optimisations to suggest (e.g. holes that force walls, rib and gusset patterns,
+bolt-hole bosses, print-in-place clearances, split lines for big parts, orientation-friendly chamfers instead of fillets
+on overhangs), and simulation ideas beyond the list above.
 
 Research notes: `research/fdm_knowledge.md` (Gemini, unverified) — source for future rules.
 

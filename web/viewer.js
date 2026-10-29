@@ -272,7 +272,9 @@ export class Viewer {
       const arrow = solidArrow(d, tail, len, size, color);
       arrow.userData.load = s.load; // pickSymbol: drag it to change the direction
       const tag = iconSprite(s.label, size * 0.75, color.getStyle());
-      tag.position.copy(into ? tail : tail.clone().addScaledVector(d, len)).addScaledVector(d, into ? -size * 0.5 : size * 0.5);
+      // Beyond the arrow's free end, far enough that the (wide) label doesn't overlap the head.
+      const gap = tag.scale.x / 2 + size * 0.5;
+      tag.position.copy(into ? tail : tail.clone().addScaledVector(d, len)).addScaledVector(d, into ? -gap : gap);
       this.symbols.add(arrow, tag);
     }
   }
@@ -300,6 +302,18 @@ export class Viewer {
       for (let o = hit.object; o; o = o.parent) if (o.userData.load != null) return o.userData.load;
     }
     return null;
+  }
+
+  /** Red arrow pointing at the weakest spot (print-frame surface ``point`` and outward ``normal``);
+   * hidden where the part is in front of it, like the load symbols. */
+  markWeak(point, normal) {
+    const r = this.part.geometry.boundingSphere.radius;
+    const size = Math.max(5, 0.11 * r);
+    const n = new THREE.Vector3(...normal).normalize();
+    const len = size * 3;
+    const tail = new THREE.Vector3(...point).addScaledVector(n, len);
+    const arrow = solidArrow(n.clone().negate(), tail, len, size, css("--support"));
+    this.markers.add(arrow);
   }
 
   /** Small sphere marking a point (e.g. where the part would break). */

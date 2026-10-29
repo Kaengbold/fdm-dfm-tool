@@ -107,13 +107,13 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
 CORNER_ROUND_SHARE = 0.3  # low-warp materials: round corners once the footprint is this share of the warp length
 CORNER_ARC_STEPS = 8
 MAX_FOOT_PIECES = 600
-FILLET_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot (in analysis voxels) seeds the fillet
+CHAMFER_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot (in analysis voxels) seeds the chamfer
 MAX_FILLET_PIECES = 400
 
 PARAMS = {
     "chamfer_mm": (3.0, 0.5, 10.0),  # radius of rounded bed corners
     "foot_chamfer_mm": (0.5, 0.2, 1.5),  # elephant-foot chamfer along the bottom edge
-    "fillet_mm": (2.0, 0.5, 8.0),  # fillet at the inside corner where the strength check finds the most stress
+    "stress_chamfer_mm": (2.0, 0.5, 8.0),  # 45° chamfer at the inside corner where the strength check finds the most stress
     "teardrop_angle_deg": (45.0, 30.0, 60.0),  # tip half-angle from vertical; 45° is the classic choice
     "ledge_max_mm": (20.0, 2.0, 40.0),  # widest ledge to fill in at 45° underneath
     "wall_lines": (2.0, 2.0, 4.0),  # thin walls grow to this many printed lines
@@ -140,7 +140,7 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
                  weak_spot=None, voxel_mm: float = 1.0) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
-    ``weak_spot`` (part coordinates, from the last strength check) adds a fillet at the nearest inside corner."""
+    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
 
     up = np.asarray(up, float) / np.linalg.norm(up)
@@ -159,7 +159,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     to_part = _to_part(mesh, r)
     edits += _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"])
     edits += _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"])
-    edits += _stress_fillets(mesh, weak_spot, voxel_mm, prm["fillet_mm"])
+    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"])
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
@@ -298,9 +298,9 @@ def _cross2(u, v) -> float:
     return float(u[0] * v[1] - u[1] * v[0])
 
 
-def _stress_fillets(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:
-    """45° fillets along the inside corner nearest the weak spot from the strength check (e.g. where a
-    stem meets a plate): sharp inside corners concentrate stress, a fillet spreads it out. Takes the
+def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:
+    """45° chamfers along the inside corner nearest the weak spot from the strength check (e.g. where a
+    stem meets a plate): sharp inside corners concentrate stress, a chamfer spreads it out. Takes the
     whole connected corner (all inside edges linked to the ones near the weak spot)."""
     if weak_spot is None:
         return []
@@ -310,7 +310,7 @@ def _stress_fillets(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:
     spot = np.asarray(weak_spot, float)
     mids = np.array([(e["a"] + e["b"]) / 2 for e in edges])
     dist = np.linalg.norm(mids - spot, axis=1)
-    if dist.min() > max(FILLET_REACH_VOXELS * h, size * 2):
+    if dist.min() > max(CHAMFER_REACH_VOXELS * h, size * 2):
         return []  # the weak spot isn't at an inside corner
     pieces = []
     for k in _connected(edges, [int(np.argmin(dist))])[:MAX_FILLET_PIECES]:
@@ -320,10 +320,10 @@ def _stress_fillets(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:
         inset = -(e["n1"] + e["n2"]) * 0.15  # reach a little into the part, so the union joins it
         prof = [mid + inset, mid + e["t1"] * size - e["n1"] * 0.15, mid + e["t2"] * size - e["n2"] * 0.15]
         pieces.append(_prism(prof, half))
-    return [_edit("stress-fillet", "stress_at_inside_corner", f"{size:.1f} mm fillet where the part is weakest",
-                  "The strength check found the most stress at this sharp inside corner. A 45° fillet spreads the load "
-                  "over more material, often the cheapest way to make a part much stronger.",
-                  pieces, op="add", param="fillet_mm")]
+    return [_edit("stress-chamfer", "stress_at_inside_corner", f"{size:.1f} mm 45° chamfer where the part is weakest",
+                  "The strength check found the most stress at this sharp inside corner. A 45° chamfer spreads the load "
+                  "over more material, often the cheapest way to make a part much stronger (a chamfer prints cleanly where a round fillet would be an overhang).",
+                  pieces, op="add", param="stress_chamfer_mm")]
 
 
 def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
