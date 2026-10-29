@@ -104,3 +104,25 @@ def test_point_load_lever_matters():
     assert tip["safety_factor"] < 0.6 * root["safety_factor"]
     with pytest.raises(ValueError, match="No surface"):
         api.strength([1, 0, 0], [fixed, {"point": [0, 300, 0], "kind": "force", "kg": 2}], prof)
+
+
+def test_loose_pieces_dont_break_the_solver():
+    """A piece joined only by a link thinner than a voxel is cut off in the analysis grid. That used
+    to make the solver fail ("exactly singular"); now the loose piece is held still, and loading
+    only that piece is explained."""
+    m3d = pytest.importorskip("manifold3d")
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    M = m3d.Manifold
+    part = M.cube([60, 10, 10]) + M.cube([10, 10, 10]).translate([0, 30, 0]) + M.cube([0.3, 21, 0.3]).translate([5, 9.5, 5])
+    m = part.to_mesh()
+    api.load(to_binary_stl(Mesh(m.vert_properties[:, :3][m.tri_verts].astype(float))), "linked")
+    info = api.regions()["regions"]
+    bar = [i for i in info if i["centroid"][1] < 9 and i["area_mm2"] > 50]
+    end = min(bar, key=lambda i: i["normal"][0])["id"]  # x = 0 face of the bar
+    tip = max(bar, key=lambda i: i["normal"][0])["id"]  # x = 60 face
+    loose = max((i for i in info if i["centroid"][1] > 25 and i["area_mm2"] > 50), key=lambda i: i["normal"][2])["id"]  # cube top
+    r = api.strength([0, 0, 1], [{"region": end, "kind": "fixed"}, {"region": tip, "kind": "force", "kg": 2, "direction": "down"}])
+    assert r["solver_converged"] and r["safety_factor"] > 1
+    with pytest.raises(ValueError, match="isn't connected"):
+        api.strength([0, 0, 1], [{"region": end, "kind": "fixed"}, {"region": loose, "kind": "force", "kg": 2}])

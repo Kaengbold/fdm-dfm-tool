@@ -92,7 +92,29 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
         raise ValueError("Mark at least one face as fixed (where the part is held)")
     if not forces.any():
         raise ValueError("Add at least one load")
+    loose = _loose_nodes(model, fixed)
+    if loose.any():
+        if not np.abs(forces[~loose]).sum():
+            raise ValueError("The load isn't connected to a held face (at the analysis resolution, thin links are lost)")
+        fixed |= loose
+        forces[loose] = 0.0
     return LoadCase(model, forces, fixed, _grow(ignore, model, elem_id))
+
+
+def _loose_nodes(model: Model, fixed: np.ndarray) -> np.ndarray:
+    """Nodes of voxel islands with no held node: pieces that voxelising cut off (or a part made of
+    several bodies). Left free they make the stiffness matrix singular; holding them changes nothing
+    that is connected to the support."""
+    from scipy.ndimage import label
+
+    islands, _ = label(model.grid.solid)  # face-connected voxels
+    elem_island = islands[tuple(model.elems.T)]
+    nodes = _element_nodes(model, np.arange(len(model.elems)))  # (E, 8)
+    held = np.unique(elem_island[fixed[nodes].any(axis=1)])
+    anchored = np.isin(elem_island, held)
+    loose = np.ones(model.n_nodes, dtype=bool)
+    loose[nodes[anchored].ravel()] = False
+    return loose
 
 
 def _load_faces(mesh: Mesh, region: np.ndarray, load: dict, h: float) -> np.ndarray:

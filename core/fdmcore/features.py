@@ -33,10 +33,7 @@ def detect_features(mesh: Mesh, region: np.ndarray, tags: dict | None = None) ->
     normals, areas = mesh.normals_and_areas()
     centroids = mesh.triangles.mean(axis=1)
     out = []
-    for r in np.unique(region):
-        sel = region == r
-        if sel.sum() < 6:
-            continue
+    for r, sel in _groups(region, min_size=6):
         n, a, c = normals[sel], areas[sel], centroids[sel]
         if np.linalg.norm((n * a[:, None]).sum(axis=0)) / a.sum() > 0.99:
             continue  # flat
@@ -44,13 +41,23 @@ def detect_features(mesh: Mesh, region: np.ndarray, tags: dict | None = None) ->
         if feat:
             feat["region"] = int(r)
             # Few faces or a partial circle (could be a rounded edge): worth asking.
-            feat["confidence"] = "high" if feat["full_circle"] and sel.sum() >= 12 and feat["fit_error"] < 0.02 else "low"
+            feat["confidence"] = "high" if feat["full_circle"] and len(sel) >= 12 and feat["fit_error"] < 0.02 else "low"
             tag = tags.get(int(r))
             feat["tag"] = tag
             if tag in ("hole", "boss"):
                 feat["type"] = tag
             out.append(feat)
     return out
+
+
+def _groups(region: np.ndarray, min_size: int = 1):
+    """(region id, triangle indices) for every region with at least ``min_size`` triangles. CAD
+    exports have thousands of regions: a mask per region would scan every triangle each time."""
+    order = np.argsort(region)
+    ids, starts, counts = np.unique(region[order], return_index=True, return_counts=True)
+    for r, s, c in zip(ids, starts, counts):
+        if c >= min_size:
+            yield int(r), order[s:s + c]
 
 
 def accepted(features: list[dict]) -> list[dict]:

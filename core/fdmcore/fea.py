@@ -155,10 +155,17 @@ def prolongation(model: Model) -> sp.csr_matrix:
     return sp.kron(p, sp.eye(3), format="csr")  # same weights for x, y, z dofs
 
 
-def two_level_preconditioner(k: sp.csr_matrix, p: sp.csr_matrix, sweeps: int = 2, omega: float = 0.6):
-    """Jacobi smoothing + exact coarse-grid correction, as a symmetric CG preconditioner."""
+def two_level_preconditioner(k: sp.csr_matrix, p: sp.csr_matrix, sweeps: int = 2, omega: float = 0.5):
+    """Jacobi smoothing + exact coarse-grid correction, as a symmetric CG preconditioner.
+
+    ``omega`` 0.6 sat just past the stable limit for parts mixing stiff wall voxels with soft infill:
+    a 572k-triangle CAD part needed ~800 CG iterations instead of 12 (and the hook 29 instead of 13)."""
     p = p[:, np.asarray(p.getnnz(axis=0) > 0).ravel()]
     kc = (p.T @ k @ p).tocsc()
+    # In thin features several coarse nodes can reach the same one or two fine nodes, which makes
+    # their columns dependent and kc singular. A tiny diagonal shift only touches the preconditioner,
+    # not the solution CG converges to.
+    kc = kc + sp.identity(kc.shape[0], format="csc") * (1e-9 * kc.diagonal().mean())
     coarse = spla.splu(kc)
     dinv = omega / k.diagonal()
 

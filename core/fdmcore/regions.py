@@ -50,22 +50,20 @@ def find_regions(mesh: Mesh, planar_deg: float = 0.5, smooth_deg: float = 20.0, 
 
 
 def region_info(mesh: Mesh, region: np.ndarray) -> list[dict]:
+    """Area, mean normal, centroid and flat/curved per region (bincount sums: CAD exports have
+    thousands of regions, and a mask per region would scan every triangle each time)."""
     normals, areas = mesh.normals_and_areas()
     centroids = mesh.triangles.mean(axis=1)
-    out = []
-    for r in range(region.max() + 1):
-        sel = region == r
-        a = areas[sel]
-        n = (normals[sel] * a[:, None]).sum(axis=0)
-        flatness = float(np.linalg.norm(n) / max(a.sum(), 1e-12))  # 1 = planar
-        out.append({
-            "id": r,
-            "area_mm2": float(a.sum()),
-            "normal": (n / max(np.linalg.norm(n), 1e-12)).tolist(),
-            "centroid": (centroids[sel] * a[:, None]).sum(axis=0).__truediv__(max(a.sum(), 1e-12)).tolist(),
-            "kind": "flat" if flatness > 0.999 else "curved",
-        })
-    return out
+    k = int(region.max()) + 1
+    area = np.bincount(region, areas, minlength=k)
+    n = np.stack([np.bincount(region, normals[:, d] * areas, minlength=k) for d in range(3)], axis=1)
+    c = np.stack([np.bincount(region, centroids[:, d] * areas, minlength=k) for d in range(3)], axis=1)
+    length = np.linalg.norm(n, axis=1)
+    flat = length / np.maximum(area, 1e-12) > 0.999  # 1 = planar
+    normal = n / np.maximum(length, 1e-12)[:, None]
+    centroid = c / np.maximum(area, 1e-12)[:, None]
+    return [{"id": r, "area_mm2": float(area[r]), "normal": normal[r].tolist(), "centroid": centroid[r].tolist(),
+             "kind": "flat" if flat[r] else "curved"} for r in range(k)]
 
 
 def _components(pairs: np.ndarray, n: int):
