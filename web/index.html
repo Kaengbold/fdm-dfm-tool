@@ -83,14 +83,16 @@
         </details>
 
         <h2>Strength <small>optional — will it hold?</small></h2>
-        <div class="strength wip" data-wip="rough estimate, not yet checked against real test prints (T-032). Loads only on whole faces (no edges or points yet).">
+        <div class="strength wip" data-wip="rough estimate, not yet checked against real test prints (T-032).">
           <p class="hint" id="pick-hint">Click a face on the part, then say whether it's <b>held</b> (screwed, glued, clamped) or <b>loaded</b>.</p>
           <div id="pick-panel" hidden>
             <p class="hint">Selected: <span id="pick-info"></span></p>
             <div class="row">
               <button id="mark-clean" title="Orientations that put supports on this face rank lower">Keep this face clean</button>
               <button id="mark-bed" title="Only orientations with this face on the bed are recommended">Put this face on the bed</button>
+              <button id="mark-vertical" title="Upright faces and holes print most accurately (a hole stands with its axis up, so it comes out round)">Keep this upright</button>
             </div>
+            <label class="row"><input id="at-spot" type="checkbox" /> Only around the clicked spot (Ø6 mm): an edge, a corner or part of a big face</label>
             <button id="as-fixed">Held here</button>
             <div class="row">
               <input id="kg" type="number" value="2" min="0.1" step="0.5" aria-label="Load in kg" /> kg

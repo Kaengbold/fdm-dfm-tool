@@ -93,3 +93,14 @@ def test_several_load_cases_weakest_decides():
     assert [c["safety_factor"] for c in both["cases"]] == pytest.approx([light, heavy], rel=1e-3)
     # Same forces in one case add up instead: weaker than either alone.
     assert api.strength([1, 0, 0], [fixed, {**force, "kg": 2}, {**force, "kg": 8}], prof)["safety_factor"] < heavy
+
+
+def test_point_load_lever_matters():
+    """The same 2 kg pressed on a spot at the arm's tip is much harder on the hook than near its root."""
+    fixed, _ = hook_loads()
+    prof = {"material": "pla"}
+    tip = api.strength([1, 0, 0], [fixed, {"point": [0, 30, 22], "radius": 2, "kind": "force", "kg": 2, "direction": "down"}], prof)
+    root = api.strength([1, 0, 0], [fixed, {"point": [0, 5, 10.5], "radius": 2, "kind": "force", "kg": 2, "direction": "down"}], prof)
+    assert tip["safety_factor"] < 0.6 * root["safety_factor"]
+    with pytest.raises(ValueError, match="No surface"):
+        api.strength([1, 0, 0], [fixed, {"point": [0, 300, 0], "kind": "force", "kg": 2}], prof)

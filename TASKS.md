@@ -15,7 +15,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 ## Orientation
 
 - [x] **T-010 P1** Refine the top ~5 orientations with the pseudo-slicer: true first-layer area, supports that land on the part vs. the bed, support volume. · files: `orientation.py`, `api.py` · owner: Claude (`task/T-010-refine`) — `refine.py`; bridges within the material's limit need no support; scars on the part are penalised and named in the reasons. Slicing budget scales with mesh size.
-- [x] **T-011 P2** "Critical faces": let the user mark faces that must be flat on the bed / vertical / not touched by supports (cosmetic); use them in the ranking. · owner: Claude (`task/T-011-critical-faces`) — "Keep clean" and "On the bed" (click a face); `faces` in `orientations`/`check`. Left: "must be vertical".
+- [x] **T-011 P2** "Critical faces": let the user mark faces that must be flat on the bed / vertical / not touched by supports (cosmetic); use them in the ranking. · owner: Claude (`task/T-011-critical-faces`) — "Keep clean" and "On the bed" (click a face); `faces` in `orientations`/`check`; "Keep this upright" (flat faces upright, holes/pins with the axis up). MCP tools take `faces` too.
 - [x] **T-012 P2** Show *why* an option lost (score breakdown) in the UI. · owner: Claude (`task/T-012-score-breakdown`) — `score_terms` per option (support/height/bed/weak/strength) and a plain `why_lower` line.
 
 ## Printability checks & knowledge base
@@ -41,7 +41,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 ## Strength
 
 - [x] **T-030 P2** Several load cases at once (worst case wins). · owner: Claude (`task/T-030-load-cases`) — `case` on forces (UI picker, AI + MCP schemas); one voxel model, one solve per case; all safety factors listed.
-- [~] **T-031 P2** Loads on edges/points and "screw here" helper (hole → fixed). · owner: Claude (`task/T-030-load-cases`) — picked hole walls are named ("Ø3.2 mm hole — held by a screw"). Left: loads on edges/points.
+- [x] **T-031 P2** Loads on edges/points and "screw here" helper (hole → fixed). · owner: Claude (`task/T-030-load-cases`) — picked hole walls are named ("Ø3.2 mm hole — held by a screw"); "only around the clicked spot" puts a load or support on the surface within 3 mm of a point (edges, corners, part of a face); `point`/`radius` in the API, MCP and Ask AI.
 - [ ] **T-032 P2** Calibrate layer-strength factors with test prints (CNC-Kitchen-style hooks), document method and results. · owner: —
 - [ ] **T-033 P3** Partial-voxel fill fractions for better accuracy on thin sections. · files: `voxel.py`, `strength.py` · owner: —
 

@@ -117,7 +117,8 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
 
     With ``loads``, candidates are also ranked by strength: a weak orientation is
     penalised even when it prints more easily. ``faces`` = {"clean": [region ids],
-    "bed": [region ids]}: faces that should stay free of support marks / sit on the bed.
+    "bed": [...], "vertical": [...]}: faces that should stay free of support marks / sit on
+    the bed / stand upright (a flat face upright, or a round hole or pin with its axis up).
     """
     s = _require()
     p = Profile.from_dict(profile)
@@ -129,6 +130,8 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     if marked:
         # Lying on a face the user wants on the bed may not be among the generic best: add it.
         candidates += [evaluate(s.mesh, -_region_normal(s.mesh, m), settings) for m in marked["bed"]]
+        for m in marked["vertical"]:
+            candidates += [evaluate(s.mesh, up, settings) for up in _upright_directions(s.mesh, m, [c.up for c in candidates])]
         for r in [*candidates, as_loaded]:
             _face_penalty(s.mesh, r, marked, settings)
     progress.report(0.2, "Scoring directions")
@@ -208,18 +211,53 @@ def why_lower(terms: dict[str, float], best: dict[str, float], min_gap: float = 
 
 CLEAN_FACE_WEIGHT = 3.0  # full penalty when a "clean" face is all supported (a strong preference)
 BED_FACE_WEIGHT = 10.0  # a face the user wants on the bed isn't on it (an instruction: beats everything else)
+VERTICAL_FACE_WEIGHT = 10.0  # same for a face that should stand upright
+VERTICAL_TOL = 0.05  # |normal · up| still counted as upright (~3°)
+MARK_KINDS = ("clean", "bed", "vertical")
 
 
 def _marked_faces(faces: dict | None) -> dict | None:
     """Triangle masks for the user's marked faces (regions), or None if nothing is marked."""
-    if not faces or not (faces.get("clean") or faces.get("bed")):
+    if not faces or not any(faces.get(k) for k in MARK_KINDS):
         return None
     from .regions import find_regions
 
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
-    return {kind: [s.regions == r for r in faces.get(kind, [])] for kind in ("clean", "bed")}
+    return {kind: [s.regions == r for r in faces.get(kind, [])] for kind in MARK_KINDS}
+
+
+def _normal_spread(mesh: Mesh, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Eigenvalues (ascending, sum 1) and eigenvectors of the area-weighted Σ n nᵀ of a face.
+    A flat face has one direction (its normal); a cylinder's normals avoid only its axis."""
+    normals, areas = mesh.normals_and_areas()
+    n, a = normals[mask], areas[mask]
+    w, v = np.linalg.eigh((n * a[:, None]).T @ n)
+    return w / w.sum(), v
+
+
+def _tilt(mesh: Mesh, mask: np.ndarray, up) -> float:
+    """RMS of normal · up over the face: 0 when it stands upright."""
+    normals, areas = mesh.normals_and_areas()
+    d = normals[mask] @ (np.asarray(up) / np.linalg.norm(up))
+    return float(np.sqrt((areas[mask] * d * d).sum() / areas[mask].sum()))
+
+
+def _upright_directions(mesh: Mesh, mask: np.ndarray, ups) -> list[np.ndarray]:
+    """Build directions that keep the face upright: each candidate projected onto the directions the
+    face's normals don't use (for a round hole, its axis)."""
+    w, v = _normal_spread(mesh, mask)
+    used = v[:, w > 0.05]
+    out = []
+    for up in ups:
+        u = np.asarray(up, float)
+        u = u - used @ (used.T @ u)
+        if np.linalg.norm(u) > 0.1:
+            out.append(u / np.linalg.norm(u))
+    if not out:
+        out = [v[:, 0], -v[:, 0]]
+    return out
 
 
 def _region_normal(mesh: Mesh, mask: np.ndarray) -> np.ndarray:
@@ -243,6 +281,10 @@ def _face_penalty(mesh: Mesh, r, marked: dict, settings: OrientationSettings) ->
         frac = areas[m & (classes == BED)].sum() / areas[m].sum()
         penalty += BED_FACE_WEIGHT * (1 - frac)
         notes.append("The face you picked sits on the bed" if frac > 0.9 else "The face you want on the bed is not on the bed")
+    for m in marked["vertical"]:
+        tilt = _tilt(mesh, m, r.up)
+        penalty += VERTICAL_FACE_WEIGHT * min(1.0, max(0.0, tilt - VERTICAL_TOL) / 0.2)
+        notes.append("The face you picked stands upright" if tilt <= VERTICAL_TOL else "The face you want upright is tilted or lying")
     r.penalize("faces", penalty)
     r.reasons += notes
 

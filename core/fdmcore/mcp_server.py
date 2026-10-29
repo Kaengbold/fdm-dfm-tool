@@ -79,19 +79,31 @@ def scale_part(factor: float) -> dict:
 
 @server.tool()
 def find_orientations(
-    printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", loads: list[dict] | None = None
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    loads: list[dict] | None = None,
+    faces: dict[str, list[int]] | None = None,
 ) -> dict:
-    """Rank print orientations. With loads (see check_strength), strength is included in the ranking."""
-    return _clean(api.orientations(_profile(printer, material, nozzle), loads=loads or None))
+    """Rank print orientations. With loads (see check_strength), strength is included in the ranking.
+    ``faces`` marks faces (ids from list_faces) the user cares about: {"clean": [...] no support marks,
+    "bed": [...] on the bed, "vertical": [...] upright, e.g. a hole that must come out round}."""
+    return _clean(api.orientations(_profile(printer, material, nozzle), loads=loads or None, faces=faces))
 
 
 @server.tool()
 def check_print(
-    up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", mode: str = "both"
+    up: list[float],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    mode: str = "both",
+    faces: dict[str, list[int]] | None = None,
 ) -> dict:
     """Printability findings, rough print time/filament and recommended slicer settings for one orientation.
-    mode: 'print' (can't change the model), 'design' (can't change slicer settings) or 'both'."""
-    return _clean(api.check(up, _profile(printer, material, nozzle), mode))
+    mode: 'print' (can't change the model), 'design' (can't change slicer settings) or 'both'.
+    ``faces`` as in find_orientations: support on a "clean" face is reported as a problem."""
+    return _clean(api.check(up, _profile(printer, material, nozzle), mode, faces))
 
 
 @server.tool()
@@ -113,6 +125,8 @@ def check_strength(
     """Rough strength check. loads: [{"region": id, "kind": "fixed"},
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
+    Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
+    (default 3) — for an edge, a corner or part of a big face.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
     return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill))
 

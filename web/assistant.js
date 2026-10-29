@@ -41,7 +41,7 @@ export const TOOLS = [
   },
   {
     name: "set_loads",
-    description: "Replace the loads. Needs at least one fixed face and one force. Forces with different `case` numbers are separate situations; the weakest case decides.",
+    description: "Replace the loads. Needs at least one fixed face and one force. Forces with different `case` numbers are separate situations; the weakest case decides. A load acts on a whole face (`region`) or on the surface around a `point` (part coordinates: an edge, a corner, part of a big face).",
     input_schema: {
       type: "object",
       properties: {
@@ -50,13 +50,15 @@ export const TOOLS = [
           items: {
             type: "object",
             properties: {
-              region: { type: "integer", description: "Face id from list_faces" },
+              region: { type: "integer", description: "Face id from list_faces (or give point)" },
+              point: { type: "array", items: { type: "number" }, description: "[x, y, z] in part coordinates, instead of region" },
+              radius: { type: "number", description: "mm around point (default 3)" },
               kind: { type: "string", enum: ["fixed", "force"] },
               kg: { type: "number", description: "Load in kg (force only)" },
               direction: { type: "string", enum: ["push", "pull", "down"], description: "push into the face, pull it away, or hang down (-Z as modelled)" },
               case: { type: "integer", minimum: 1, description: "Load case number (force only, default 1)" },
             },
-            required: ["region", "kind"],
+            required: ["kind"],
             additionalProperties: false,
           },
         },

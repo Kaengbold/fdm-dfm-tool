@@ -9,7 +9,7 @@ const css = (v) => new THREE.Color(getComputedStyle(document.documentElement).ge
 const CLASS_COLORS = ["--ok", "--borderline", "--support", "--bed"].map(css);
 const SEVERITY_COLORS = { problem: css("--support"), warn: css("--borderline"), info: css("--accent") };
 
-export const REGION_COLORS = { fixed: css("--fixed"), force: css("--force"), selected: css("--accent"), clean: css("--clean"), bed: css("--bed") };
+export const REGION_COLORS = { fixed: css("--fixed"), force: css("--force"), selected: css("--accent"), clean: css("--clean"), bed: css("--bed"), vertical: css("--vertical") };
 
 export class Viewer {
   constructor(el) {
@@ -117,13 +117,43 @@ export class Viewer {
 
   /** Face index under a click, or -1. */
   pick(event) {
-    if (!this.part) return -1;
+    return this.pickHit(event)?.face ?? -1;
+  }
+
+  /** {face, point} under a click (point in part coordinates), or null. */
+  pickHit(event) {
+    if (!this.part) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
     const hit = ray.intersectObject(this.part)[0];
-    return hit ? hit.faceIndex : -1;
+    return hit ? { face: hit.faceIndex, point: this.toPart(hit.point.toArray()) } : null;
+  }
+
+  /** Shown (print-frame) point -> part coordinates: the inverse of placeTriangles. */
+  toPart(p) {
+    const { rotation: R, shift } = this.placement;
+    const d = p.map((v, i) => v - shift[i]);
+    return [0, 1, 2].map((k) => R[0][k] * d[0] + R[1][k] * d[1] + R[2][k] * d[2]);
+  }
+
+  /** Part-coordinate point -> where it is shown. */
+  toShown(p) {
+    const { rotation: R, shift } = this.placement;
+    return R.map((row, i) => row[0] * p[0] + row[1] * p[1] + row[2] * p[2] + shift[i]);
+  }
+
+  /** Translucent balls for loads on a spot: [{point (part coords), radius, color}]. */
+  showSpots(spots) {
+    this.spots?.clear();
+    if (!this.spots) this.scene.add((this.spots = new THREE.Group()));
+    for (const s of spots) {
+      const material = new THREE.MeshBasicMaterial({ color: s.color, transparent: true, opacity: 0.5, depthWrite: false });
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(s.radius, 24, 16), material);
+      ball.position.set(...this.toShown(s.point));
+      this.spots.add(ball);
+    }
   }
 
   /** Small sphere marking a point (e.g. where the part would break). */

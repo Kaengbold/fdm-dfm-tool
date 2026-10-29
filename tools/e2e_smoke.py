@@ -279,6 +279,31 @@ def main():
             return f"loads: {page.locator('#loads li').all_inner_texts()} | {text.splitlines()[0]}"
         run.step("strength with two load cases", load_cases)
 
+        def spot_load():
+            # Replace the case-2 face load by the same weight on a spot of that face.
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer, s = fdm.state, held = s.loads[0].region;"
+                " const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f++) { if (s.faceRegions[f] === held) continue; const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); const hit = v.pick({clientX: x, clientY: y}); if (el && el.tagName === 'CANVAS' && hit >= 0 && s.faceRegions[hit] !== held) return [x, y]; }"
+                " return [0, 0]; }"
+            )
+            page.evaluate("() => { fdm.state.loads = fdm.state.loads.filter((l) => l.kind === 'fixed'); }")
+            page.mouse.click(x, y)
+            page.wait_for_selector("#pick-panel:not([hidden])")
+            page.check("#at-spot")
+            assert page.evaluate("() => fdm.viewer.spots.children.length") == 1, "no preview ball for the spot"
+            page.fill("#kg", "4")
+            page.click("#as-load")
+            page.evaluate("() => { document.getElementById('at-spot').checked = false; }")  # back to whole faces
+            loads = page.locator("#loads li").all_inner_texts()
+            assert any("(at a spot)" in l for l in loads), loads
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            text = page.locator("#strength-result").inner_text()
+            assert "safety" in text.lower(), text
+            return f"loads: {loads} | {text.splitlines()[0]}"
+        run.step("strength with a load on a spot", spot_load)
+
         def marked_faces():
             run.act(lambda: page.click("[data-sample=mushroom]"))
             before = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")

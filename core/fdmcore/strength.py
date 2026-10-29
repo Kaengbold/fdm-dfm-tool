@@ -1,8 +1,10 @@
 """Strength check for a printed part under user-defined loads.
 
-Loads are given on regions (see regions.py):
+Loads are given on regions (see regions.py), or around a point on the surface (an edge, a
+corner, a spot on a big face — part coordinates, ``radius`` mm, default 3):
   {"region": 3, "kind": "fixed"}
   {"region": 7, "kind": "force", "kg": 5, "direction": "push" | "pull" | "down" | [x, y, z], "case": 2}
+  {"point": [10, 0, 5], "radius": 2, "kind": "force", "kg": 1}
 ``down`` means -Z in the part's own (as-modelled) coordinates, like a hanging weight.
 Forces with different ``case`` numbers are separate situations (e.g. "hanging" and "being
 pulled sideways"); fixed faces hold in every case and the weakest case decides.
@@ -25,6 +27,7 @@ from .profile import Profile
 from .voxel import VoxelGrid, depth, voxelize
 
 G = 9.81
+POINT_RADIUS = 3.0  # mm around a picked point that carries the load
 E_Z_RATIO = 0.85  # layer-direction stiffness vs. in-plane (stiffness drops far less than strength)
 INFILL_EXPONENT = 1.5  # Gibson–Ashby-style scaling for stiffness and strength of sparse infill
 
@@ -61,14 +64,19 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
     elem_id = np.full(grid.solid.shape, -1)
     elem_id[tuple(model.elems.T)] = np.arange(len(model.elems))
     ignore = np.zeros(len(model.elems), dtype=bool)
+    surface = None
 
     for load in loads:
-        sel = region == load["region"]
-        if not sel.any():
-            raise ValueError(f"Unknown region {load['region']}")
-        elems = _surface_elements(mesh.triangles[sel], normals[sel], grid, elem_id)
+        sel = _load_faces(mesh, region, load, grid.h)
+        if "point" in load:  # outer voxels near the spot (a big triangle reaches far past it)
+            if surface is None:
+                surface = depth(grid.solid)[tuple(model.elems.T)] == 1
+            near = np.linalg.norm(grid.centers(model.elems) - load["point"], axis=1) <= _radius(load, grid.h) + 0.5 * grid.h
+            elems = np.flatnonzero(near & surface)
+        else:
+            elems = _surface_elements(mesh.triangles[sel], normals[sel], grid, elem_id)
         if len(elems) == 0:
-            raise ValueError(f"Region {load['region']} is too small for the analysis grid")
+            raise ValueError(f"{_where(load)} is too small for the analysis grid")
         ignore[elems] = True
         nodes = np.unique(_element_nodes(model, elems))
         if load["kind"] == "fixed":
@@ -85,6 +93,49 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
     if not forces.any():
         raise ValueError("Add at least one load")
     return LoadCase(model, forces, fixed, _grow(ignore, model, elem_id))
+
+
+def _load_faces(mesh: Mesh, region: np.ndarray, load: dict, h: float) -> np.ndarray:
+    """Triangles a load acts on: its region, or the surface within ``radius`` of its point
+    (at least ~1.5 voxels, so a small spot still reaches the grid)."""
+    if "point" in load:
+        p = np.asarray(load["point"], float)
+        r = _radius(load, h)
+        sel = _distance_to_triangles(mesh.triangles, p) <= r
+        if not sel.any():
+            raise ValueError(f"No surface within {r:.1f} mm of point {p.round(1).tolist()}")
+        return sel
+    sel = region == load["region"]
+    if not sel.any():
+        raise ValueError(f"Unknown region {load['region']}")
+    return sel
+
+
+def _radius(load: dict, h: float) -> float:
+    return max(float(load.get("radius", POINT_RADIUS)), 1.5 * h)
+
+
+def _distance_to_triangles(tris: np.ndarray, p: np.ndarray) -> np.ndarray:
+    """Distance from point p to each triangle: to its plane where p projects inside, else to its edges."""
+    a, b, c = tris[:, 0], tris[:, 1], tris[:, 2]
+    n = np.cross(b - a, c - a)
+    nn = np.einsum("ij,ij->i", n, n)
+    ok = nn > 1e-18
+    plane = np.where(ok, np.einsum("ij,ij->i", p - a, n) / np.sqrt(np.where(ok, nn, 1)), np.inf)
+    q = p - plane[:, None] * n / np.sqrt(np.where(ok, nn, 1))[:, None]  # projection onto the plane
+    inside = ok.copy()
+    for u, v in ((a, b), (b, c), (c, a)):
+        inside &= np.einsum("ij,ij->i", np.cross(v - u, q - u), n) >= 0
+    edge = np.full(len(tris), np.inf)
+    for u, v in ((a, b), (b, c), (c, a)):
+        d = v - u
+        t = np.clip(np.einsum("ij,ij->i", p - u, d) / np.maximum(np.einsum("ij,ij->i", d, d), 1e-18), 0, 1)
+        edge = np.minimum(edge, np.linalg.norm(u + t[:, None] * d - p, axis=1))
+    return np.where(inside, np.abs(plane), edge)
+
+
+def _where(load: dict) -> str:
+    return f"The spot at {np.round(load['point'], 1).tolist()}" if "point" in load else f"Region {load['region']}"
 
 
 def material_for(profile: Profile) -> Material:

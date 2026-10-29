@@ -150,3 +150,14 @@ def test_marked_faces_steer_orientation_and_check():
         found = api.check([0, 0, 1], {}, "print", faces={"clean": underside})["findings"]
         assert any(f["rule"] == "support_marks" and f["severity"] == "problem" for f in found)
     assert cap_top != stem_end
+
+
+def test_upright_mark_stands_a_hole_up():
+    """Marking the sideways Ø8 hole of the L-bracket "vertical" turns its axis up, so it prints round."""
+    api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")
+    best = api.orientations()["orientations"][0]["up"]
+    hole = next(f for f in api.design(best)["features"] if f["type"] == "hole" and abs(f["axis"][2]) < 0.1)
+    assert abs(np.dot(best, hole["axis"])) < 0.1  # lying: the hole is sideways
+    ranked = api.orientations(faces={"vertical": [hole["region"]]})["orientations"]
+    assert abs(np.dot(ranked[0]["up"], hole["axis"])) > 0.99
+    assert "The face you picked stands upright" in ranked[0]["reasons"]

@@ -434,13 +434,17 @@ function recolor() {
   const option = activeOption();
   if (!option) return;
   if (state.showHeat && state.strength) return viewer.colorByHeat(state.strength.face_heat);
-  const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.map((l) => [l.region, l.kind])]);
+  const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
+  const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions) return null;
     const r = state.faceRegions[f];
-    if (r === state.selectedRegion) return REGION_COLORS.selected;
+    if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
+  const spots = state.loads.filter((l) => l.point).map((l) => ({ point: l.point, radius: l.radius, color: REGION_COLORS[l.kind] }));
+  if (spot) spots.push({ point: state.pickedPoint, radius: SPOT_RADIUS, color: REGION_COLORS.selected });
+  viewer.showSpots(spots);
 }
 
 async function ensureRegions() {
@@ -458,10 +462,11 @@ let downAt = null;
 $("viewer").addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 $("viewer").addEventListener("pointerup", async (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || !state.triangles) return;
-  const face = viewer.pick(e);
-  if (face < 0) return;
+  const hit = viewer.pickHit(e);
+  if (!hit) return;
   await ensureRegions();
-  state.selectedRegion = state.faceRegions[face];
+  state.selectedRegion = state.faceRegions[hit.face];
+  state.pickedPoint = hit.point;
   const info = state.regionInfo[state.selectedRegion];
   $("pick-info").textContent = info.hole_diameter
     ? `Ø${info.hole_diameter.toFixed(1)} mm hole — "Held here" means a screw or pin through it holds the part`
@@ -471,9 +476,17 @@ $("viewer").addEventListener("pointerup", async (e) => {
   recolor();
 });
 
+const SPOT_RADIUS = 3; // mm, for loads "only around the clicked spot"
+const where = (l) => (l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
+
+/** The clicked face, or the spot around the clicked point when "only around the spot" is ticked. */
+function target() {
+  return $("at-spot").checked ? { point: state.pickedPoint, radius: SPOT_RADIUS } : { region: state.selectedRegion };
+}
+
 function addLoad(load) {
-  // One entry per face and case: a face can be loaded differently in each case, and "held" is shared.
-  const same = (l) => l.region === load.region && (l.kind === "fixed" || load.kind === "fixed" || l.case === load.case);
+  // One entry per face (or spot) and case: it can be loaded differently in each case, and "held" is shared.
+  const same = (l) => where(l) === where(load) && (l.kind === "fixed" || load.kind === "fixed" || l.case === load.case);
   state.loads = state.loads.filter((l) => !same(l)).concat(load);
   state.selectedRegion = -1;
   $("pick-panel").hidden = true;
@@ -486,10 +499,10 @@ function addLoad(load) {
 function faceMarks() {
   if (!state.marks?.length) return undefined;
   const of = (kind) => state.marks.filter((m) => m.kind === kind).map((m) => m.region);
-  return { clean: of("clean"), bed: of("bed") };
+  return { clean: of("clean"), bed: of("bed"), vertical: of("vertical") };
 }
 
-const MARK_LABEL = { clean: "Keep clean (no support marks)", bed: "On the bed" };
+const MARK_LABEL = { clean: "Keep clean (no support marks)", bed: "On the bed", vertical: "Upright (accurate shape)" };
 
 function setMark(kind) {
   const region = state.selectedRegion;
@@ -514,10 +527,12 @@ function renderMarks() {
 }
 $("mark-clean").onclick = () => setMark("clean");
 $("mark-bed").onclick = () => setMark("bed");
+$("mark-vertical").onclick = () => setMark("vertical");
 
-$("as-fixed").onclick = () => addLoad({ region: state.selectedRegion, kind: "fixed" });
+$("as-fixed").onclick = () => addLoad({ ...target(), kind: "fixed" });
 $("as-load").onclick = () =>
-  addLoad({ region: state.selectedRegion, kind: "force", kg: Number($("kg").value), direction: $("dir").value, case: Number($("load-case").value) });
+  addLoad({ ...target(), kind: "force", kg: Number($("kg").value), direction: $("dir").value, case: Number($("load-case").value) });
+$("at-spot").onchange = recolor;
 
 const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" };
 const multiCase = () => new Set(state.loads.filter((l) => l.kind === "force").map((l) => l.case)).size > 1;
@@ -529,7 +544,7 @@ function renderLoads() {
       el(
         "li",
         { className: l.kind },
-        l.kind === "fixed" ? "Held here" : `${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${DIR_LABEL[l.direction]}`,
+        (l.kind === "fixed" ? "Held here" : `${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${DIR_LABEL[l.direction]}`) + (l.point ? " (at a spot)" : ""),
         el("button", {
           textContent: "×",
           title: "Remove",
@@ -765,10 +780,11 @@ const aiActions = {
   },
   set_loads: async ({ loads }) => {
     await ensureRegions();
-    for (const l of loads) if (!state.regionInfo[l.region]) throw new Error(`Unknown face ${l.region}`);
-    state.loads = loads.map((l) =>
-      l.kind === "fixed" ? { region: l.region, kind: "fixed" } : { region: l.region, kind: "force", kg: l.kg ?? 1, direction: l.direction ?? "push" },
-    );
+    for (const l of loads) if (!l.point && !state.regionInfo[l.region]) throw new Error(`Unknown face ${l.region}`);
+    state.loads = loads.map((l) => {
+      const at = l.point ? { point: l.point, radius: l.radius ?? SPOT_RADIUS } : { region: l.region };
+      return l.kind === "fixed" ? { ...at, kind: "fixed" } : { ...at, kind: "force", kg: l.kg ?? 1, direction: l.direction ?? "push", case: l.case ?? 1 };
+    });
     renderLoads();
     recolor();
     return { loads: state.loads };
