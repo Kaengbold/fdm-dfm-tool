@@ -697,9 +697,17 @@ const MODE_TEXT = {
   material: "The plastic itself is the limit. More walls or infill, or a thicker design, help most.",
 };
 
-async function runStrength() {
-  return busy("Simulating the load…", async () => {
-    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() });
+async function runStrength(fine = false) {
+  const before = state.strength;
+  return busy(fine ? "Simulating again with a finer grid (up to a minute)…" : "Simulating the load…", async () => {
+    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine });
+    if (fine && before) {
+      const change = r.safety_factor / before.safety_factor - 1;
+      r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
+        (Math.abs(change) <= 0.1 ? "Barely changes: the result is stable." : Math.abs(change) <= 0.25
+          ? "A normal difference for a rough estimate; the finer one is closer to the truth."
+          : "Changes a lot: the weak spot is small or sharp. Trust the finer result and keep a bigger safety margin.");
+    }
     state.strength = r;
     state.showHeat = true;
     $("show-temp").checked = false;
@@ -711,13 +719,20 @@ async function runStrength() {
     return r;
   });
 }
-$("run-strength").onclick = runStrength;
+$("run-strength").onclick = () => runStrength();
 
 // ---------- strength: FEA result view ----------
 const f32 = (b) => new Float32Array(b.slice().buffer);
+const dispLength = (r) => {
+  const d = f32(r.vertex_disp);
+  const out = new Float32Array(d.length / 3);
+  for (let i = 0; i < out.length; i++) out[i] = Math.hypot(d[3 * i], d[3 * i + 1], d[3 * i + 2]);
+  return out;
+};
 const FIELD = {
-  fi: { title: "Strength used (%)", note: "100 % = breaks", values: "vertex_fi", elements: "fi", max: "fi_max_pct", fmt: (v) => `${Math.round(v)} %` },
-  vm: { title: "Stress, von Mises (MPa)", note: "", values: "vertex_vm", elements: "vm", max: "vm_max_mpa", fmt: (v) => v.toFixed(v < 10 ? 1 : 0) },
+  fi: { title: "Strength used (%)", note: "100 % = breaks", values: (r) => f32(r.vertex_fi), elements: "fi", max: (r) => r.fi_max_pct, fmt: (v) => `${Math.round(v)} %` },
+  vm: { title: "Stress, von Mises (MPa)", note: "", values: (r) => f32(r.vertex_vm), elements: "vm", max: (r) => r.vm_max_mpa, fmt: (v) => v.toFixed(v < 10 ? 1 : 0) },
+  disp: { title: "Moves by (mm)", note: "how far each spot bends away", values: dispLength, elements: null, max: (r) => r.max_displacement_mm, fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) },
 };
 const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
 
@@ -730,16 +745,17 @@ function strengthView() {
     return false;
   }
   const f = FIELD[view.field];
-  const max = Math.max(r[f.max], 1e-6);
+  const max = Math.max(f.max(r), 1e-9);
   const key = `${view.field}|${r.critical_point}|${activeOption().up}`;
   if (viewer.fieldKey !== key || !viewer.field) {
-    viewer.showField({ triangles: f32(r.field_triangles), values: f32(r[f.values]), disp: f32(r.vertex_disp), max });
+    viewer.showField({ triangles: f32(r.field_triangles), values: f.values(r), disp: f32(r.vertex_disp), max });
     viewer.fieldKey = key;
   }
   const radius = viewer.part.geometry.boundingSphere.radius;
   viewer.setDeformation(view.bend * (0.08 * radius) / Math.max(r.max_displacement_mm, 1e-9));
   const els = r.elements;
-  viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: f32(els[f.elements]), size_mm: els.size_mm }, max);
+  const cubes = f.elements ? f32(els[f.elements]) : new Float32Array(els.centers.length / 12); // displacement: inside not shown
+  viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: cubes, size_mm: els.size_mm }, max);
   renderLegend(f, max);
   return true;
 }
@@ -769,7 +785,7 @@ function strengthViewControls(r) {
     recolor();
   };
   const field = el("select", {}, el("option", { value: "fi", textContent: "Strength used (% — where it breaks)" }),
-    el("option", { value: "vm", textContent: "Stress (MPa, von Mises)" }));
+    el("option", { value: "vm", textContent: "Stress (MPa, von Mises)" }), el("option", { value: "disp", textContent: "How far it moves (mm)" }));
   field.value = view.field;
   field.onchange = () => ((view.field = field.value), show());
   const bend = el("input", { type: "range", min: 0, max: 1, step: 0.05, value: view.bend });
@@ -787,7 +803,10 @@ function strengthViewControls(r) {
     el("label", {}, "Show bending (exaggerated) ", bend),
     el("div", { className: "row" }, axis, cut),
     el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." }),
-    el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` }));
+    el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` }),
+    r.accuracy ? el("p", { className: "hint", textContent: r.accuracy }) : "",
+    r.fine ? "" : el("button", { textContent: "Check accuracy with a finer grid (slower)", onclick: () => runStrength(true),
+      title: "Runs again with 3× more cubes. If the answer barely changes, you can trust it (the usual check in FEA software)." }));
 }
 
 function renderStrength() {

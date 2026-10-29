@@ -51,17 +51,17 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-125 P2** Detailed strength from G-code: per-voxel direction-dependent material (along lines / across / between layers), finer grid. · owner: —
 - [ ] **T-126 P2** Detailed heat and warping from G-code timing: heat added line by line, cooling, shrinkage → warp map, corner lift, overheating spots. · owner: —
 - [ ] **T-127 P3** OrcaSlicer in the browser (WebAssembly builds exist: OrcaWasm, Muon3D engine) so the detailed level runs without an install. See `research/browser_slicers.md`: try the Muon3D single-thread build first. · owner: —
-- [ ] **T-130 P1** Strength-aware orientation picks the weak direction: mushroom pulled on its stem → suggests printing on the cap (stem upright, layers pulled apart) instead of on its side. · owner: Claude (`task/T-130-sim-fixes`)
-- [ ] **T-131 P1** FEA-style stress view: smooth colours over the part (blue → red) with a legend in MPa / % of strength, like normal FEA software. · owner: Claude (`task/T-130-sim-fixes`)
-- [ ] **T-132 P1** Load symbols are hidden by the part when behind it (lock, arrows). · owner: Claude (`task/T-130-sim-fixes`)
-- [ ] **T-133 P2** Set the force direction on the part: drag the arrow / angle controls, any direction, not only push/pull/down. · owner: Claude (`task/T-130-sim-fixes`)
-- [ ] **T-134 P2** Review the strength simulation against standard FEA practice (mesh check, convergence, deformation view, reaction forces) and fix what is missing. · owner: Claude (`task/T-130-sim-fixes`)
+- [x] **T-130 P1** Strength-aware orientation picks the weak direction: mushroom pulled on its stem → suggests printing on the cap (stem upright, layers pulled apart) instead of on its side. · owner: Claude (`task/T-130-sim-fixes`) — strength only counted below ×2; now a penalty per halving vs the strongest direction (by goal), the strongest is always offered, reasons say "holds 1.8× more". Strength goal: side wins.
+- [x] **T-131 P1** FEA-style stress view: smooth colours over the part (blue → red) with a legend in MPa / % of strength, like normal FEA software. · owner: Claude (`task/T-130-sim-fixes`) — refined display mesh, banded rainbow, legend; % of strength / von Mises / displacement; exaggerated bending; section cut with the analysis cubes.
+- [x] **T-132 P1** Load symbols are hidden by the part when behind it (lock, arrows). · owner: Claude (`task/T-130-sim-fixes`)
+- [x] **T-133 P2** Set the force direction on the part: drag the arrow / angle controls, any direction, not only push/pull/down. · owner: Claude (`task/T-130-sim-fixes`) — trackball drag of the arrow; turn/tilt sliders (↻ on the load).
+- [x] **T-134 P2** Review the strength simulation against standard FEA practice (mesh check, convergence, deformation view, reaction forces) and fix what is missing. · owner: Claude (`task/T-130-sim-fixes`) — singularities: 2 element rings at supports/loads left out, weak spot next to a clamp called out; "check accuracy" re-runs on a 3× finer grid and says how stable the answer is (samples: 14–25 % lower → shown honestly); grid size, total load and solver state shown; deformation view. Still open: self-weight, contact, non-linear material (out of scope for hobby checks).
 - [ ] **T-033 P3** Partial-voxel fill fractions for better accuracy on thin sections. · files: `voxel.py`, `strength.py` · owner: —
 
 ## Design edits
 
-- [ ] **T-135 P1** Missing suggestions (mushroom): round sharp corners of the bed footprint against warping, chamfer the bottom edge against elephant foot, fillet/chamfer where the strength check finds stress at an inside corner (stem base). · owner: Claude (`task/T-130-sim-fixes`)
-- [ ] **T-136 P2** Slicer helpers users don't know about: hole compensation / polyholes for holes, elephant foot compensation, … recommended with plain reasons when the part needs them. · owner: Claude (`task/T-130-sim-fixes`)
+- [x] **T-135 P1** Missing suggestions (mushroom): round sharp corners of the bed footprint against warping, chamfer the bottom edge against elephant foot, fillet/chamfer where the strength check finds stress at an inside corner (stem base). · owner: Claude (`task/T-130-sim-fixes`) — rounded corners (also PLA when the footprint ≥ 30 % of its warp length), 0.5 mm 45° bottom chamfer, 45° fillet along the inside corner nearest the weak spot (mushroom: ×3.1 → ×3.6 with 2 mm, ×4.4 with 4 mm). Fillet pieces leave small gaps at the stem's outside corners.
+- [~] **T-136 P2** Slicer helpers users don't know about: hole compensation / polyholes for holes, elephant foot compensation, … recommended with plain reasons when the part needs them. · owner: Claude (`task/T-130-sim-fixes`) — polyholes with hole compensation, elephant foot compensation by default. Left: verify `hole_to_polyhole` is applied per object by OrcaSlicer (slicer_check), more helpers (ironing, seam placement, precise walls) — candidates for the wizard.
 
 - [x] **T-040 P2** Chamfer under flat overhangs (replace a flat ceiling edge by 45°). · files: `features.py` · owner: Claude (`task/T-040-design-edits`) — `additions.py`: 45° fill under ledges up to `ledge_max_mm` wide (mitred at corners; under a too-long bridge it makes a pointed arch). Edits now `add` or `cut` material.
 - [x] **T-041 P2** Thicken thin walls to 2–3 line widths. · owner: Claude (`task/T-040-design-edits`) — walls under `wall_lines` lines grow on both sides, kept clear of nearby material so gaps don't fuse.
@@ -88,7 +88,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 ## Infrastructure & UX
 
-- [ ] **T-137 P2** UI bugs from review: AI key field outside a form (console warning); nozzle comparison closes on orientation change; no feedback when clicking the active goal/mode; the 3D view doesn't look clickable (hover highlight + hint); "Design changes" hidden in print mode without a note; small × buttons; walls/infill controls far from the slicer settings. · owner: Claude (`task/T-130-sim-fixes`)
+- [x] **T-137 P2** UI bugs from review: AI key field outside a form (console warning); nozzle comparison closes on orientation change; no feedback when clicking the active goal/mode; the 3D view doesn't look clickable (hover highlight + hint); "Design changes" hidden in print mode without a note; small × buttons; walls/infill controls far from the slicer settings. · owner: Claude (`task/T-130-sim-fixes`) — all fixed; moving the controls for real is part of T-141.
 - [ ] **T-140 P1** (Phase 7) Start wizard: what do you want — good slicer settings / one-off optimisation / step by step / expert. · owner: —
 - [ ] **T-141 P1** (Phase 7) UI overhaul: simpler layout, fewer controls at once, clear next step. · owner: —
 

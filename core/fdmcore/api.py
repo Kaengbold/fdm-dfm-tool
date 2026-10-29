@@ -585,17 +585,21 @@ def regions() -> dict:
     return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
 
 
-def _load_case(loads: list[dict]):
-    """Prepared load cases (list, see strength.prepare_cases), cached per load set."""
+STRENGTH_VOXELS = 12_000  # analysis grid: seconds in the browser
+FINE_VOXELS = 40_000  # "check accuracy": a ~1.5× finer grid (3× the cubes)
+
+
+def _load_case(loads: list[dict], voxels: int = STRENGTH_VOXELS):
+    """Prepared load cases (list, see strength.prepare_cases), cached per load set and grid size."""
     from .regions import find_regions
     from .strength import prepare_cases
 
     s = _require()
-    key = json.dumps(loads, sort_keys=True)
+    key = json.dumps([loads, voxels], sort_keys=True)
     if s.load_case is None or s.load_case[0] != key:
         if s.regions is None:
             s.regions = find_regions(s.mesh)
-        s.load_case = (key, prepare_cases(s.mesh, s.regions, loads))
+        s.load_case = (key, prepare_cases(s.mesh, s.regions, loads, voxels))
     return s.load_case[1]
 
 
@@ -610,18 +614,20 @@ def _shells(p: Profile, walls: int | None = None, infill: float | None = None, t
 
 
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
-             top: int | None = None, bottom: int | None = None) -> dict:
+             top: int | None = None, bottom: int | None = None, fine: bool = False) -> dict:
     """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks).
     ``walls`` (lines), ``infill`` (0–1), ``top``/``bottom`` (solid layers) say how it will be printed
     (default: the goal's usual settings). With several load cases (``case`` on forces) the weakest
-    decides; ``cases`` lists them all."""
+    decides; ``cases`` lists them all. ``fine`` uses a finer grid (slower): if the answer barely
+    changes, the coarse one can be trusted (the usual mesh-convergence check in FEA)."""
     from .strength import evaluate_cases, face_values, refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
-    cases = _load_case(loads)
+    cases = _load_case(loads, FINE_VOXELS if fine else STRENGTH_VOXELS)
     sh = _shells(p, walls, infill, top, bottom)
     r = evaluate_cases(cases, up, p, sh)
+    r["fine"] = bool(fine)
     model = cases[0].model
     fi, vm, u = r.pop("fi"), r.pop("vm"), r.pop("u")
     heat = face_values(s.mesh, model.grid, model, fi)

@@ -123,15 +123,17 @@ def check_strength(
     infill: float | None = None,
     top: int | None = None,
     bottom: int | None = None,
+    fine: bool = False,
 ) -> dict:
-    """Rough strength check. walls (lines), infill (0–1), top/bottom (solid layers): how it is
+    """Rough strength check. fine=True: a finer grid (slower); compare with the normal one to see how
+    far to trust the answer. walls (lines), infill (0–1), top/bottom (solid layers): how it is
     printed; omitted = the goal's usual settings. loads: [{"region": id, "kind": "fixed"},
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
     (default 3) — for an edge, a corner or part of a big face.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
-    return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill, top, bottom))
+    return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill, top, bottom, fine))
 
 
 @server.tool()

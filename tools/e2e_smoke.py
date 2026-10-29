@@ -305,6 +305,21 @@ def main():
             return f"loads: {loads} | {text.splitlines()[0]}"
         run.step("strength with a load on a spot", spot_load)
 
+        def fea_view():
+            assert page.locator("#legend").is_visible(), "no legend"
+            colours = page.evaluate("() => fdm.viewer.field.mesh.geometry.getAttribute('color').count")
+            page.locator(".fea-view select").first.select_option("vm")
+            title = page.locator("#legend strong").inner_text()
+            page.locator(".fea-view select").nth(1).select_option("z")
+            cubes = page.evaluate("() => fdm.viewer.section?.count ?? 0")
+            assert cubes > 0, "section shows no cubes"
+            page.locator(".fea-view select").nth(1).select_option("")
+            run.act(lambda: page.get_by_text("Check accuracy with a finer grid").click(), 600_000)
+            note = page.locator(".fea-view").inner_text()
+            assert "Finer grid" in note, note
+            return f"{colours} coloured corners; {title}; section {cubes} cubes; {note.splitlines()[-1][:90]}"
+        run.step("FEA view: legend, section, finer grid", fea_view)
+
         def shells():
             page.locator(".shells summary").click()
             page.fill("#sh-walls", "6")
