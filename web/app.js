@@ -93,6 +93,7 @@ const state = {
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
+  features: [], // detected holes/posts from the last design suggestion
 };
 
 // Debug/test hook: lets automated browser tests and devtools inspect the app.
@@ -665,6 +666,7 @@ async function suggestDesign() {
     const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams() });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
     $("edit-params").hidden = !r.edits.length;
+    state.features = r.features;
     renderFeatures(r.features);
     state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer), selected: true }));
     $("edits").replaceChildren(
@@ -1081,6 +1083,77 @@ $("dl-step").onclick = () =>
 
 $("copy-report").onclick = async () => {
   const md = await call("report", { up: activeOption().up, profile: profile(), mode: mode() });
-  await navigator.clipboard.writeText(md);
-  setStatus("Report copied — paste it anywhere, e.g. into ChatGPT or Claude to ask follow-up questions.");
+  await navigator.clipboard.writeText(md + answerFormat());
+  setStatus("Report copied — paste it into ChatGPT, Claude or Gemini, then paste the reply under \"Paste an AI answer\".");
+};
+
+// ---------- paste-back: an answer from any AI chat ----------
+/** Report appendix telling a chat AI how to answer so the tool can apply it (only the choices that exist now). */
+function answerFormat() {
+  const lines = [
+    "", "## For the AI assistant: how to answer", "",
+    "Answer the user's question in plain language. If you recommend changes, end your reply with one JSON block",
+    "the tool can apply (leave out what you don't want to change):", "",
+    "```json",
+    JSON.stringify({ orientation: 0, settings: { wall_loops: "4" }, design_changes: ["edit-id"], not_features: [0] }),
+    "```", "",
+    "- `orientation`: index from this list:",
+    ...state.options.map((o, i) => `  - ${i}: ${o.label}, up = [${round(o.up, 2).join(", ")}]${i === state.active ? " (current)" : ""}`),
+    "- `settings`: OrcaSlicer setting keys with string values (see the settings table above).",
+  ];
+  if (state.edits.length) lines.push("- `design_changes`: ids of these suggested edits:", ...state.edits.map((e) => `  - ${e.id}: ${e.title}`));
+  const features = state.features.filter(shown);
+  if (features.length) lines.push("- `not_features`: regions of detected features that aren't really holes/posts:", ...features.map((f) => `  - ${f.region}: Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]}`));
+  return lines.join("\n") + "\n";
+}
+
+/** The JSON object in a pasted reply: a ```json block, or the last {...} that parses. */
+function parseAnswer(text) {
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]);
+  const candidates = [...fenced.reverse(), ...[...text.matchAll(/\{[\s\S]*\}/g)].map((m) => m[0])];
+  for (const c of candidates) {
+    try {
+      const v = JSON.parse(c);
+      if (v && typeof v === "object" && !Array.isArray(v)) return v;
+    } catch {
+      // not this one
+    }
+  }
+  throw new Error("No JSON answer found — ask the AI to end its reply with the JSON block from the report.");
+}
+
+async function applyAnswer(answer) {
+  const done = [];
+  const step = async (what, fn) => {
+    try {
+      done.push({ text: `${what}: ${(await fn()) ?? "done"}` });
+    } catch (err) {
+      done.push({ text: `${what}: ${err.message ?? err}`, error: true });
+    }
+  };
+  if (answer.orientation != null) {
+    await step("Orientation", async () => (await aiActions.select_orientation({ index: Number(answer.orientation) }), state.options[state.active].label));
+  }
+  for (const region of answer.not_features ?? []) {
+    await step(`Feature ${region}`, async () => (await aiActions.tag_feature({ region: Number(region), tag: "none" }), "marked as not a feature"));
+  }
+  if (answer.settings && Object.keys(answer.settings).length) {
+    const settings = Object.fromEntries(Object.entries(answer.settings).map(([k, v]) => [k, String(v)]));
+    await step("Slicer settings", async () => (await aiActions.set_slicer_settings({ settings }), Object.entries(settings).map(([k, v]) => `${k} = ${v}`).join(", ")));
+  }
+  if (answer.design_changes?.length) {
+    await step("Design changes", async () => (await aiActions.apply_design_changes({ ids: answer.design_changes.map(String) }), answer.design_changes.join(", ")));
+  }
+  if (!done.length) done.push({ text: "The answer suggests no changes." });
+  return done;
+}
+
+$("paste-apply").onclick = async () => {
+  let rows;
+  try {
+    rows = await applyAnswer(parseAnswer($("paste-input").value));
+  } catch (err) {
+    rows = [{ text: err.message, error: true }];
+  }
+  $("paste-result").replaceChildren(...rows.map((r) => el("li", { className: r.error ? "error" : "", textContent: r.text })));
 };

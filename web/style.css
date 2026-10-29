@@ -231,6 +231,9 @@ main canvas { display: block; }
 .features li.rejected .link { text-decoration: line-through; color: var(--muted); }
 .features button { font-size: 12px; padding: 1px 6px; }
 .features button.link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-align: left; }
+.paste textarea { width: 100%; font: inherit; font-size: 13px; margin: 4px 0; }
+.paste-result { font-size: 13px; padding-left: 18px; margin: 4px 0; }
+.paste-result li.error { color: var(--support); }
 .edit-params { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 6px 0; }
 .edit-params input { width: 4.5em; }
 .marks { list-style: none; padding: 0; margin: 4px 0; font-size: 13px; }

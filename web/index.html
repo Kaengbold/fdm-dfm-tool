@@ -144,10 +144,17 @@
           <button id="dl-stl-model">Download STL (as modelled, incl. design changes)</button>
           <button id="dl-step" hidden>Download STEP (your CAD file with the design changes)</button>
           <button id="copy-report">Copy report (for sharing or an AI chat)</button>
+          <details id="paste-block" class="paste">
+            <summary>Paste an AI answer</summary>
+            <p class="hint">Paste the report into any AI chat (your ChatGPT, Claude or Gemini subscription works), ask your question, then paste its whole reply here. The tool applies the orientation, settings and design changes it suggests.</p>
+            <textarea id="paste-input" rows="4" placeholder="Paste the AI's reply (with its JSON block) here"></textarea>
+            <button id="paste-apply">Apply the answer</button>
+            <ul id="paste-result" class="paste-result"></ul>
+          </details>
         </div>
       </section>
 
-      <details id="ai-block" class="ai wip" data-wip="not tested with real API keys yet (T-063); no OpenAI option yet (T-060)." hidden>
+      <details id="ai-block" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
         <summary>Ask AI <small>with your own API key</small></summary>
         <div class="ai-config">
           <label>Provider

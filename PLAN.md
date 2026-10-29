@@ -178,7 +178,7 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | 1 — "Just print it" | ✅ done | Presets (16 printers, 8 materials), pseudo-slicer checks (~27 rules), STL/3MF/STEP input with multi-body pick and unit hints, settings, 3MF/STL export, report, progress + cancel |
 | 2 — Strength | ✅ done | Face regions, voxel FEA, anisotropic material, strength-aware orientation, load cases, loads on faces or spots |
 | 3 — Design fixes | ✅ done | Feature confirm ("is this a hole?"), teardrops, corner chamfers, 45° ledge fills, sacrificial layers, thicker walls; ghost preview (cut/add), adjustable sizes, STL and STEP output (OpenCascade write-back) |
-| 4 — AI & agents | 🟡 mostly | MCP server (local mode), copy-report, Ask AI with Anthropic / Gemini / OpenAI keys. Missing: OrcaSlicer CLI in local mode, paste-back JSON answers, real-key tests (T-063) |
+| 4 — AI & agents | ✅ done | MCP server (local mode) with real slicing via the installed OrcaSlicer, copy-report + paste-back answers (any chat subscription), Ask AI with Anthropic / Gemini / OpenAI keys. Open: real-key tests (T-063), streaming (T-062), CLI subscription bridge (T-061) |
 | 5 — Ecosystem | ⏳ | Fusion add-in, community presets/rules, calibration prints, hosting |
 
 Research notes: `research/fdm_knowledge.md` (Gemini, unverified) — source for future rules.
