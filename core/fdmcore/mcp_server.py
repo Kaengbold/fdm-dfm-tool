@@ -231,7 +231,8 @@ def slice_with_orcaslicer(
     resources = orca.parent / "resources" / "profiles"
     if not resources.exists():  # macOS app bundle
         resources = orca.parents[1] / "Resources" / "profiles"
-    matched = match_profiles(resources, presets()["printers"][printer]["name"], nozzle, material, float(merged.get("layer_height", p.layer_height)))
+    base_material = presets()["materials"][material].get("based_on", material)  # the user's own presets name one
+    matched = match_profiles(resources, presets()["printers"][printer]["name"], nozzle, base_material, float(merged.get("layer_height", p.layer_height)))
     sliced = slice_3mf(api.export(up, prof, merged), matched, orca)
     if "filament_cm3" in sliced:
         sliced["filament_g"] = round(sliced["filament_cm3"] * p.material["density_g_cm3"], 1)

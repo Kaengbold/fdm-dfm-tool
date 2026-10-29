@@ -34,7 +34,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [x] **T-101 P2** Trapped support in *blind* channels/pockets open on one side (only fully closed cavities are detected now). · owner: Claude (`task/T-101-blind-channels`) — sideways holes too wide to bridge that are blind or longer than 4× their diameter → `trapped_support`; also side pockets/slots of any shape with a floor, ≥ 10 mm and ≥ 2× deeper than their opening (thresholds are estimates).
 - [ ] **T-102 P2** Engraved/raised text legibility on top and side faces (stroke width, depth vs nozzle/layer height). · owner: —
 - [x] **T-103 P2** Support marks on faces the user marks as visible/critical → raise severity (needs T-011). · owner: Claude (`task/T-011-critical-faces`) — support on a clean face is a *problem* finding with its own box.
-- [ ] **T-104 P2** Calibrate warping lengths (`thresholds.yaml`) with real prints per material/enclosure. · owner: —
+- [~] **T-104 P2** Calibrate warping lengths (`thresholds.yaml`) with real prints per material/enclosure. · owner: Claude — tool side done: `calibration_part("warping")` (40–160 mm bars) + form; a measured `warp_length_mm` overrides thresholds.yaml for that material. Left: real prints for the built-ins.
 - [x] **T-105 P2** "Strength" goal: use the voxel simulation automatically when loads are known; heuristics (pins/necks) otherwise. · owner: Claude (`task/T-011-critical-faces`) — the UI sends loads with every re-rank when the goal is Strength.
 - [x] **T-106 P3** Shrinkage per material → expected size error for long parts (shape impact). · owner: Claude (`task/T-026-presets-fasteners`) — `shrinkage_pct` per material, `shrinkage_size_error` finding.
 
@@ -42,7 +42,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 - [x] **T-030 P2** Several load cases at once (worst case wins). · owner: Claude (`task/T-030-load-cases`) — `case` on forces (UI picker, AI + MCP schemas); one voxel model, one solve per case; all safety factors listed.
 - [x] **T-031 P2** Loads on edges/points and "screw here" helper (hole → fixed). · owner: Claude (`task/T-030-load-cases`) — picked hole walls are named ("Ø3.2 mm hole — held by a screw"); "only around the clicked spot" puts a load or support on the surface within 3 mm of a point (edges, corners, part of a face); `point`/`radius` in the API, MCP and Ask AI.
-- [ ] **T-032 P2** Calibrate layer-strength factors with test prints (CNC-Kitchen-style hooks), document method and results. · owner: —
+- [~] **T-032 P2** Calibrate layer-strength factors with test prints (CNC-Kitchen-style hooks), document method and results. · owner: Claude — tool side done: `calibration_part("layer_strength")` bar + form (flat vs standing break weight → factor in your material). Left: real prints to update the built-in factors.
 - [ ] **T-033 P3** Partial-voxel fill fractions for better accuracy on thin sections. · files: `voxel.py`, `strength.py` · owner: —
 
 ## Design edits
@@ -79,6 +79,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-081 P3** Mobile/tablet layout. · owner: —
 - [ ] **T-082 P3** German translation (UI + rules). · owner: —
 - [ ] **T-090 P3** Fusion 360 add-in using the same engine. · owner: —
+- [x] **T-091 P2** Your own printers and materials (PLAN phase 5 "community presets"). · owner: Claude (`task/T-001-slicer-check`) — "My printers & materials": start from a built-in, edit, saved in localStorage, sent via `custom_presets` (validated ranges); OrcaSlicer filament .json import; "Copy as YAML" for a presets.yaml PR.
 
 - [x] **T-111 P2** Findings UI: an impact group "Will fail" can contain a TIP-severity card (e.g. small bed contact that a brim fixes), which reads as a contradiction. Show the severity the group implies, or move fixed-by-setting items to a "needs a setting" note. · owner: Claude — group renamed "Can fail"; the card's severity says how likely.
 

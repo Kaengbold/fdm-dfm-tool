@@ -22,7 +22,7 @@ may work here in parallel; these rules keep their work from colliding.
 | `core/fdmcore/` | Python engine. Runs natively **and in the browser via Pyodide** |
 | `core/fdmcore/data/` | `presets.yaml`, `rules.yaml` (knowledge base) |
 | `core/tests/` | pytest suite |
-| `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `assistant.js` / `gemini.js` / `openai.js` AI panel |
+| `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `mypresets.js` user presets, `assistant.js` / `gemini.js` / `openai.js` AI panel |
 | `tools/` | `make_samples.py`, `make_manifest.py`, `e2e_smoke.py` |
 | `research/` | Background material (unverified unless stated) |
 

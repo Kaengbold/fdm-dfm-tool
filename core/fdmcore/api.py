@@ -57,6 +57,45 @@ def get_presets() -> dict:
     return presets()
 
 
+def custom_presets(printers: dict | None = None, materials: dict | None = None) -> dict:
+    """Set the user's own printers / materials (see profile.set_custom_presets); returns all presets."""
+    from .profile import set_custom_presets
+
+    set_custom_presets(printers, materials)
+    return presets()
+
+
+CALIBRATION = ("layer_strength", "warping")
+
+
+def calibration_part(kind: str) -> dict:
+    """Test print for measuring the user's own material on their printer, as STL bytes.
+
+    layer_strength: a 60 × 10 × 6 mm bar with a Ø6 mm hole near each end. Print one lying flat and one
+      standing on its end, hang each by one hole and add weight at the other until it breaks:
+      upright kg / flat kg is the layer strength factor.
+    warping: bars 40, 80, 120 and 160 mm long (10 × 3 mm, sharp corners), printed without brim:
+      the longest one that stays flat on the bed is the warping length for that printer's enclosure."""
+    from .mesh import to_binary_stl
+
+    if kind == "layer_strength":
+        from shapely.geometry import Point, box as sbox
+
+        from .additions import extrude
+
+        outline = sbox(0, 0, 60, 10).difference(Point(6, 5).buffer(3, 32)).difference(Point(54, 5).buffer(3, 32))
+        return {"stl": to_binary_stl(Mesh(extrude(outline, 0, 6))), "name": "layer_strength_test.stl"}
+    if kind == "warping":
+        tris = []
+        for i, length in enumerate((40, 80, 120, 160)):
+            v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * [length, 10, 3]
+            v += [0, i * 20, 0]
+            f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
+            tris.append(v[np.array(f)])
+        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "warping_test.stl"}
+    raise ValueError(f"kind must be one of {CALIBRATION}")
+
+
 def load(data: bytes, name: str = "part", face_ids: list[int] | None = None) -> dict:
     """Load an STL or 3MF; returns mesh info and the triangles for display.
 
@@ -706,6 +745,8 @@ def report(up, profile: dict | None = None, mode: str = "print") -> str:
 
 METHODS = {
     "presets": get_presets,
+    "custom_presets": custom_presets,
+    "calibration_part": calibration_part,
     "load": load,
     "select_body": select_body,
     "scale": scale,

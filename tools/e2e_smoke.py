@@ -396,6 +396,33 @@ def main():
             return f"{out.stat().st_size // 1024} kB STEP, {text.count('ADVANCED_FACE')} faces; reloaded: {page.locator('#status').inner_text()}"
         run.step("STEP in, design change, STEP out", step_round_trip)
 
+        def my_presets():
+            page.click("#my-presets > summary")
+            page.click("#new-material")
+            page.fill("#preset-fields [name=name]", "My PETG")
+            page.select_option("#preset-fields [name=based_on]", "petg")
+            page.fill("#cal-flat", "10")
+            page.fill("#cal-upright", "4")
+            page.click("#cal-z")
+            page.select_option("#cal-warp", "120")
+            page.click("#cal-warp-use")
+            run.act(lambda: page.click("#preset-form button.primary"))
+            chosen = page.evaluate("() => document.getElementById('material').value")
+            mat = page.evaluate(f"() => fdm.state.presets.materials['{chosen}']")
+            assert chosen.startswith("my_") and mat["name"] == "My PETG" and mat["z_strength_factor"]["none"] == 0.4, mat
+            assert mat["warp_length_mm"]["none"] == 185, mat
+            orca = OUT / "orca_filament.json"
+            orca.write_text('{"name": "Test PETG @BBL X1C", "filament_type": ["PETG"], "filament_density": ["1.27"], "filament_max_volumetric_speed": ["11"]}')
+            page.set_input_files("#import-orca", str(orca))
+            assert page.input_value("#preset-fields [name=density_g_cm3]") == "1.27"
+            run.act(lambda: page.click("#preset-form button.primary"))
+            page.reload()
+            run.booted()
+            names = page.locator("#material option").all_inner_texts()
+            assert "My PETG" in names and "Test PETG" in names, names
+            return f"materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
+        run.step("my presets + calibration + Orca import", my_presets)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

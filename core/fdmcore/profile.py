@@ -16,8 +16,94 @@ def load_data(name: str) -> dict:
     return yaml.safe_load((DATA / f"{name}.yaml").read_text(encoding="utf-8"))
 
 
+_custom: dict = {"printers": {}, "materials": {}}  # the user's own presets (set_custom_presets)
+_merged: dict | None = None
+
+
 def presets() -> dict:
-    return load_data("presets")
+    """Built-in presets plus the user's own (their ids start with "my_")."""
+    global _merged
+    if _merged is None:
+        base = load_data("presets")
+        _merged = {**base, "printers": {**base["printers"], **_custom["printers"]},
+                   "materials": {**base["materials"], **_custom["materials"]}}
+    return _merged
+
+
+# What a user preset may set: key -> (type, min, max). Everything else comes from ``based_on``.
+PRINTER_FIELDS = {
+    "name": (str, None, None),
+    "bed": (list, 20, 2000),
+    "enclosure": (("none", "passive", "heated"), None, None),
+    "hardened_nozzle": (bool, None, None),
+    "speed": (("fast", "medium"), None, None),
+    "multi_material": (("none", "optional", "builtin"), None, None),
+}
+MATERIAL_FIELDS = {
+    "name": (str, None, None),
+    "max_overhang_deg": (float, 20, 75),
+    "max_bridge_mm": (float, 1, 150),
+    "min_layer_time_s": (float, 0, 60),
+    "warp_risk": (("low", "medium", "high"), None, None),
+    "abrasive": (bool, None, None),
+    "hygroscopic": (("low", "medium", "high"), None, None),
+    "max_flow_mm3s": (float, 1, 100),
+    "z_strength_factor": (dict, 0.05, 1.0),
+    "tensile_xy_mpa": (float, 1, 300),
+    "modulus_xy_mpa": (float, 10, 50000),
+    "density_g_cm3": (float, 0.5, 3.0),
+    "shrinkage_pct": (float, 0, 5),
+    "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
+}
+ENCLOSURES = ("none", "passive", "heated")
+
+
+def _custom_entry(kind: str, key: str, spec: dict, fields: dict, base_table: dict) -> dict:
+    base_id = spec.get("based_on")
+    if base_id not in base_table:
+        raise ValueError(f"{key}: based_on must be one of the built-in {kind}s ({', '.join(base_table)})")
+    out = {k: v for k, v in base_table[base_id].items()}
+    for field, value in spec.items():
+        if field == "based_on":
+            continue
+        if field not in fields:
+            raise ValueError(f"{key}: unknown field {field!r}")
+        kind_, lo, hi = fields[field]
+        if isinstance(kind_, tuple):
+            if value not in kind_:
+                raise ValueError(f"{key}.{field} must be one of {', '.join(kind_)}")
+        elif kind_ is bool:
+            value = bool(value)
+        elif kind_ is str:
+            value = str(value)[:60]
+        elif kind_ is list:
+            value = [float(v) for v in value]
+            if len(value) != 3 or not all(lo <= v <= hi for v in value):
+                raise ValueError(f"{key}.{field} must be three sizes in mm ({lo}–{hi})")
+        elif kind_ is dict:
+            value = {e: float(value.get(e, out.get(field, {}).get(e, hi))) for e in ENCLOSURES}
+            if not all(lo <= v <= hi for v in value.values()):
+                raise ValueError(f"{key}.{field} must be between {lo} and {hi}")
+        else:
+            value = float(value)
+            if not lo <= value <= hi:
+                raise ValueError(f"{key}.{field} must be between {lo} and {hi}")
+        out[field] = value
+    out["based_on"] = base_id
+    return out
+
+
+def set_custom_presets(printers: dict | None = None, materials: dict | None = None) -> None:
+    """Replace the user's own presets. Each one names a built-in preset in ``based_on`` and overrides
+    some fields (PRINTER_FIELDS / MATERIAL_FIELDS); ids get a "my_" prefix so they never clash."""
+    global _custom, _merged
+    base = load_data("presets")
+    new = {"printers": {}, "materials": {}}
+    for table, specs, fields in (("printers", printers, PRINTER_FIELDS), ("materials", materials, MATERIAL_FIELDS)):
+        for key, spec in (specs or {}).items():
+            pid = key if key.startswith("my_") else f"my_{key}"
+            new[table][pid] = _custom_entry(table[:-1], pid, spec, fields, base[table])
+    _custom, _merged = new, None
 
 
 GOALS = ("balanced", "strength", "speed", "material")

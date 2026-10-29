@@ -313,3 +313,28 @@ def test_support_trapped_in_deep_side_pocket(depth, width, trapped):
     found = {f["rule"]: f for f in api.check([0, 0, 1], {"material": "petg"}, "print")["findings"]}
     assert ("trapped_support" in found) == trapped
     assert ("support_marks" in found) != trapped
+
+
+def test_custom_presets_and_calibration():
+    """A user's own material, based on ABS but calibrated on their printer: the measured warping
+    length replaces the built-in one, and bad values are refused."""
+    from fdmcore.mesh import load_stl
+
+    try:
+        api.custom_presets(materials={"abs_x": {"based_on": "abs", "name": "My ABS", "warp_length_mm": {"none": 600}}},
+                           printers={"box": {"based_on": "bambu_a1", "name": "My printer", "bed": [300, 300, 300]}})
+        assert api.get_presets()["materials"]["my_abs_x"]["name"] == "My ABS"
+        api.load(to_stl_box([200, 20, 10]), "bar")
+        builtin = {f["rule"] for f in api.check([0, 0, 1], {"material": "abs", "printer": "bambu_a1"}, "print")["findings"]}
+        mine = {f["rule"] for f in api.check([0, 0, 1], {"material": "my_abs_x", "printer": "my_box"}, "print")["findings"]}
+        assert "warping" in builtin and "warping" not in mine
+        with pytest.raises(ValueError, match="between"):
+            api.custom_presets(materials={"bad": {"based_on": "pla", "max_overhang_deg": 89}})
+        with pytest.raises(ValueError, match="based_on"):
+            api.custom_presets(materials={"bad": {"based_on": "unobtainium"}})
+    finally:
+        api.custom_presets()  # back to built-ins only
+    assert "my_abs_x" not in api.get_presets()["materials"]
+    for kind in ("layer_strength", "warping"):
+        part = load_stl(api.calibration_part(kind)["stl"])
+        assert part.volume() > 1000

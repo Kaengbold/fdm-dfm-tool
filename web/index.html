@@ -43,6 +43,41 @@
         <label>Nozzle <select id="nozzle"></select></label>
       </div>
       <label class="toggle" id="mm-row"><input id="multi-material" type="checkbox" /> Multi-material (AMS / MMU) available</label>
+      <details id="my-presets" class="my-presets">
+        <summary>My printers &amp; materials</summary>
+        <p class="hint">Add your own printer or filament, starting from a similar one. Saved in this browser only.</p>
+        <div class="row">
+          <button id="new-material">New material…</button>
+          <button id="new-printer">New printer…</button>
+          <label class="file-button">Import OrcaSlicer filament…<input id="import-orca" type="file" accept=".json" hidden /></label>
+        </div>
+        <form id="preset-form" class="preset-form" hidden>
+          <div id="preset-fields"></div>
+          <div id="calibration" class="calibration" hidden>
+            <h3>Measure it on your printer</h3>
+            <p class="hint"><button type="button" data-calibration="layer_strength">Layer strength test (STL)</button>
+              Print one bar lying flat and one standing on its end. Hang each by one hole, add weight at the other until it breaks.</p>
+            <div class="row">
+              <label>Flat broke at <input id="cal-flat" type="number" step="0.1" min="0" /> kg</label>
+              <label>Standing at <input id="cal-upright" type="number" step="0.1" min="0" /> kg</label>
+              <button type="button" id="cal-z">Use</button>
+            </div>
+            <p class="hint"><button type="button" data-calibration="warping">Warping test (STL)</button>
+              Print the four bars without a brim, in an enclosure if you have one.</p>
+            <div class="row">
+              <label>Longest bar that stayed flat
+                <select id="cal-warp"><option value="">—</option><option value="40">40 mm</option><option value="80">80 mm</option><option value="120">120 mm</option><option value="160">160 mm (all)</option></select></label>
+              <button type="button" id="cal-warp-use">Use</button>
+            </div>
+          </div>
+          <div class="row">
+            <button class="primary">Save</button>
+            <button type="button" id="preset-cancel">Cancel</button>
+          </div>
+        </form>
+        <ul id="my-list" class="my-list"></ul>
+        <button id="copy-yaml" hidden>Copy as YAML (to share in a pull request)</button>
+      </details>
 
       <div class="mode" role="radiogroup" aria-label="Optimise for">
         <span>Optimise for</span>

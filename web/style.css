@@ -231,6 +231,18 @@ main canvas { display: block; }
 .features li.rejected .link { text-decoration: line-through; color: var(--muted); }
 .features button { font-size: 12px; padding: 1px 6px; }
 .features button.link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-align: left; }
+.my-presets { font-size: 13px; margin: 4px 0 8px; }
+.my-presets .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.preset-form { border: 1px solid #e0e3e8; border-radius: 6px; padding: 6px 8px; margin: 6px 0; }
+.preset-form label { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; }
+.preset-form input[type=number], .preset-form input[type=text], .preset-form select { width: 9em; }
+.calibration h3 { font-size: 13px; margin: 8px 0 2px; }
+.calibration .row label { display: inline-flex; }
+.calibration input[type=number] { width: 4.5em; }
+.file-button { border: 1px solid #d0d5dd; border-radius: 6px; padding: 2px 8px; cursor: pointer; background: #fff; }
+.my-list { list-style: none; padding: 0; margin: 4px 0; }
+.my-list li { display: flex; gap: 6px; align-items: center; }
+.my-list li span { flex: 1; }
 .paste textarea { width: 100%; font: inherit; font-size: 13px; margin: 4px 0; }
 .paste-result { font-size: 13px; padding-left: 18px; margin: 4px 0; }
 .paste-result li.error { color: var(--support); }

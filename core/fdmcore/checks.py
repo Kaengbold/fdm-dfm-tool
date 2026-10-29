@@ -599,7 +599,8 @@ def _bed_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
 
     # Warping: long footprints in shrinking materials lift at their corners.
     W = T["warping"]
-    limit = W["risk_length_mm"].get(profile.material_id, {}).get(profile.enclosure)
+    measured = profile.material.get("warp_length_mm")  # from the user's warping calibration print
+    limit = (measured or W["risk_length_mm"].get(profile.material.get("based_on", profile.material_id), {})).get(profile.enclosure)
     if limit:
         for island in parts(first, 1.0):
             length = _rect_sides(island)[1]

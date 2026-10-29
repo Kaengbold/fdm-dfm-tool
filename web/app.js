@@ -4,6 +4,7 @@ import { listOpenAIModels, OpenAIAssistant } from "./openai.js";
 import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
+import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer } from "./viewer.js";
 
 const $ = (id) => document.getElementById(id);
@@ -61,8 +62,11 @@ function cancelEngine() {
   pending.clear();
   startWorker();
   const src = state.source;
-  if (src) {
+  const mine = loadMine();
+  if (src || Object.keys(mine.printers).length || Object.keys(mine.materials).length) {
     restoring = engineReady.then(async () => {
+      await post("custom_presets", mine);
+      if (!src) return;
       await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
       if (src.body) await post("select_body", { index: src.body });
       if (src.scale !== 1) await post("scale", { factor: src.scale });
@@ -936,17 +940,129 @@ $("ai-input").addEventListener("keydown", (e) => {
 // ---------- presets ----------
 async function initPresets() {
   await engineReady;
-  const p = await call("presets");
+  await applyMine(loadMine(), { printer: "bambu_p1s", material: "pla", nozzle: "0.4" });
+  setStatus("Ready — drop an STL, 3MF or STEP file, or try a sample.");
+}
+
+/** Send the user's own presets to the engine and refill the dropdowns, keeping (or setting) the selection. */
+async function applyMine(mine, select = {}) {
+  const p = await call("custom_presets", mine);
   state.presets = p;
   const fill = (sel, entries, value) =>
     $(sel).replaceChildren(...entries.map(([k, label]) => el("option", { value: k, textContent: label, selected: k === value })));
-  fill("printer", Object.entries(p.printers).map(([k, v]) => [k, v.name]), "bambu_p1s");
-  fill("material", Object.entries(p.materials).map(([k, v]) => [k, v.name]), "pla");
-  fill("nozzle", Object.keys(p.nozzles).map((k) => [k, `${k} mm`]), "0.4");
+  const keep = { printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value, ...select };
+  const has = (table, id) => id && id in p[table];
+  fill("printer", Object.entries(p.printers).map(([k, v]) => [k, v.name]), has("printers", keep.printer) ? keep.printer : "bambu_p1s");
+  fill("material", Object.entries(p.materials).map(([k, v]) => [k, v.name]), has("materials", keep.material) ? keep.material : "pla");
+  fill("nozzle", Object.keys(p.nozzles).map((k) => [k, `${k} mm`]), keep.nozzle || "0.4");
   viewer.setBed(p.printers[$("printer").value].bed);
   syncMultiMaterial();
-  setStatus("Ready — drop an STL, 3MF or STEP file, or try a sample.");
+  renderMine(mine);
 }
+
+// ---------- my printers & materials ----------
+let editing = null; // {table: "printers"|"materials", id}
+
+function renderMine(mine) {
+  const rows = [];
+  for (const table of ["printers", "materials"]) {
+    for (const id of Object.keys(mine[table])) {
+      const pid = id.startsWith("my_") ? id : `my_${id}`;
+      rows.push(el("li", {}, el("span", { textContent: `${state.presets[table][pid]?.name ?? id} (${table === "printers" ? "printer" : "material"})` }),
+        el("button", { textContent: "Edit", onclick: () => openPresetForm(table, id) }),
+        el("button", { textContent: "×", title: "Delete", onclick: () => {
+          delete mine[table][id];
+          saveMine(mine);
+          applyMine(mine).then(() => state.triangles && findOrientations());
+        } })));
+    }
+  }
+  $("my-list").replaceChildren(...rows);
+  $("copy-yaml").hidden = !rows.length;
+}
+
+function openPresetForm(table, id = null, values = null) {
+  const builtins = Object.fromEntries(Object.entries(state.presets[table]).filter(([k]) => !k.startsWith("my_")));
+  const current = id ? state.presets[table][id.startsWith("my_") ? id : `my_${id}`] : null;
+  const base = values?.based_on ?? current?.based_on ?? (table === "materials" ? $("material").value : $("printer").value);
+  const start = values ?? toForm(table, current ?? builtins[base] ?? Object.values(builtins)[0]);
+  start.based_on = builtins[base] ? base : Object.keys(builtins)[0];
+  if (!id && !values) start.name = `My ${start.name}`;
+  editing = { table, id: id ?? `${table === "materials" ? "mat" : "printer"}_${Date.now().toString(36)}` };
+  const input = ([key, label, type, step]) => {
+    const v = start[key] ?? "";
+    const field = Array.isArray(type)
+      ? el("select", { name: key }, ...type.map((o) => el("option", { value: o, textContent: o, selected: o === v })))
+      : el("input", { name: key, type, step: step ?? "any", value: type === "checkbox" ? "" : v, checked: type === "checkbox" && Boolean(v) });
+    return el("label", {}, label, field);
+  };
+  const basedOn = el("label", {}, "Based on",
+    el("select", { name: "based_on" }, ...Object.entries(builtins).map(([k, b]) => el("option", { value: k, textContent: b.name, selected: k === start.based_on }))));
+  $("preset-fields").replaceChildren(basedOn, ...(table === "materials" ? MATERIAL_FIELDS : PRINTER_FIELDS).map(input));
+  // A new base fills in its values; the name the user typed stays.
+  basedOn.querySelector("select").onchange = (e) =>
+    openPresetForm(table, id, { ...toForm(table, builtins[e.target.value]), based_on: e.target.value, name: formValues().name });
+  $("calibration").hidden = table !== "materials";
+  $("preset-form").hidden = false;
+  $("my-presets").open = true;
+}
+
+function formValues() {
+  const out = {};
+  for (const f of $("preset-form").querySelectorAll("#preset-fields [name]")) out[f.name] = f.type === "checkbox" ? f.checked : f.value;
+  return out;
+}
+
+$("new-material").onclick = () => openPresetForm("materials");
+$("new-printer").onclick = () => openPresetForm("printers");
+$("preset-cancel").onclick = () => ($("preset-form").hidden = true);
+$("preset-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const mine = loadMine();
+  const { table, id } = editing;
+  const before = structuredClone(mine);
+  mine[table][id] = toSpec(table, formValues());
+  try {
+    await applyMine(mine, { [table === "materials" ? "material" : "printer"]: id.startsWith("my_") ? id : `my_${id}` });
+  } catch (err) {
+    await applyMine(before);
+    return setStatus(`Not saved: ${err.message}`, true);
+  }
+  saveMine(mine);
+  $("preset-form").hidden = true;
+  setStatus(`Saved "${formValues().name}". It's selected now.`);
+  if (state.triangles) findOrientations();
+};
+$("import-orca").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const builtins = Object.fromEntries(Object.entries(state.presets.materials).filter(([k]) => !k.startsWith("my_")));
+    openPresetForm("materials", null, fromOrcaFilament(JSON.parse(await file.text()), builtins));
+    setStatus(`Read ${file.name} — check the values, then Save.`);
+  } catch (err) {
+    setStatus(`Could not read ${file.name}: ${err.message}`, true);
+  }
+};
+$("copy-yaml").onclick = async () => {
+  await navigator.clipboard.writeText(toYaml(state.presets, loadMine()));
+  setStatus("Copied — paste it into a pull request for core/fdmcore/data/presets.yaml (with sources).");
+};
+document.querySelectorAll("[data-calibration]").forEach((b) => (b.onclick = async () => {
+  const part = await call("calibration_part", { kind: b.dataset.calibration });
+  download(part.stl, part.name, "model/stl");
+}));
+$("cal-z").onclick = () => {
+  const flat = Number($("cal-flat").value), upright = Number($("cal-upright").value);
+  if (!(flat > 0 && upright > 0)) return setStatus("Enter both weights first.", true);
+  $("preset-fields").querySelector("[name=z_strength]").value = zFactor(flat, upright).toFixed(2);
+};
+$("cal-warp-use").onclick = () => {
+  const longest = Number($("cal-warp").value);
+  if (!longest) return setStatus("Pick the longest bar that stayed flat.", true);
+  $("preset-fields").querySelector("[name=warp_length]").value = warpLength(longest);
+};
 initPresets().catch((err) => setStatus(`Engine failed to start: ${err.message}`, true));
 
 /** Multi-material checkbox follows the printer: none = off, built-in = on, optional add-on = user's choice. */
