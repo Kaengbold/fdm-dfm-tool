@@ -41,6 +41,7 @@ class Session:
     load_case: tuple | None = None  # (loads json, prepared LoadCase) cache
     bodies: list = field(default_factory=list)  # (name, Mesh) per body in the file
     body: int = 0  # which body is loaded
+    tags: dict = field(default_factory=dict)  # region id -> what the user says the feature is (features.TAGS)
 
 
 _session: Session | None = None
@@ -80,7 +81,7 @@ def select_body(index: int) -> dict:
     s = _require()
     if not 0 <= index < len(s.bodies):
         raise ValueError("No such body")
-    s.mesh, s.body, s.regions, s.load_case = s.bodies[index][1], index, None, None
+    s.mesh, s.body, s.regions, s.load_case, s.tags = s.bodies[index][1], index, None, None, {}
     return _info()
 
 
@@ -363,9 +364,9 @@ def regions() -> dict:
         s.regions = find_regions(s.mesh)
     info = region_info(s.mesh, s.regions)
     # Name round holes, so the UI can say "held by a screw here" when one is picked.
-    from .features import detect_features
+    from .features import accepted, detect_features
 
-    for f in detect_features(s.mesh, s.regions):
+    for f in accepted(detect_features(s.mesh, s.regions, s.tags)):
         if f["type"] == "hole":
             info[f["region"]]["hole_diameter"] = f["diameter"]
     return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
@@ -441,11 +442,57 @@ def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
     return {
-        "features": detect_features(s.mesh, s.regions),
-        "edits": design_edits(s.mesh, s.regions, up, p, params),
+        "features": detect_features(s.mesh, s.regions, s.tags),
+        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
+
+
+def tag_feature(region: int, tag: str | None) -> dict:
+    """Confirm or correct a detected feature: ``tag`` "hole", "boss" or "none" (not a feature);
+    None forgets the answer. Rejected holes get no edits and no hole findings."""
+    from .features import TAGS, detect_features
+    from .regions import find_regions
+
+    s = _require()
+    if tag is not None and tag not in TAGS:
+        raise ValueError(f"tag must be one of {TAGS}")
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    if tag is None:
+        s.tags.pop(int(region), None)
+    else:
+        s.tags[int(region)] = tag
+    return {"features": detect_features(s.mesh, s.regions, s.tags)}
+
+
+HOLE_RULES = {"hole_closes", "small_hole_undersized", "sideways_hole_oval", "bridge_sag", "hole_starts_midair"}
+
+
+def _drop_rejected(findings: list[dict], mesh: Mesh, r: np.ndarray) -> list[dict]:
+    """Remove hole findings at features the user said aren't holes (by distance to the feature's axis)."""
+    s = _require()
+    if not any(t == "none" for t in s.tags.values()) or s.regions is None:
+        return findings
+    from .features import detect_features
+
+    rejected = []
+    for f in detect_features(mesh, s.regions, s.tags):
+        if f["tag"] == "none":
+            rejected.append((np.asarray(_to_print_frame(mesh, r, f["center"])), r @ np.asarray(f["axis"]), f["radius"], f["length"]))
+
+    def at_rejected(finding) -> bool:
+        if finding["rule"] not in HOLE_RULES or not finding.get("bbox"):
+            return False
+        mid = (np.asarray(finding["bbox"][0]) + np.asarray(finding["bbox"][1])) / 2
+        for c, axis, radius, length in rejected:
+            along = (mid - c) @ axis
+            if np.linalg.norm(mid - c - along * axis) <= radius + 1.0 and abs(along) <= length / 2 + radius:
+                return True
+        return False
+
+    return [f for f in findings if not at_rejected(f)]
 
 
 def _to_print_frame(mesh: Mesh, r: np.ndarray, point) -> list[float]:
@@ -464,6 +511,7 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
     rotation, fit = print_rotation(s.mesh, up, p.printer["bed"])
     oriented = orient(s.mesh, rotation)
     result = run_checks(oriented, p)
+    result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
     result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
     if not fit["fits"]:
         result["findings"].insert(0, {"rule": "exceeds_build_volume", "severity": "problem", "bbox": None, "metrics": fit,
@@ -625,6 +673,7 @@ METHODS = {
     "export": export,
     "report": report,
     "regions": regions,
+    "tag_feature": tag_feature,
     "strength": strength,
     "strength_options": strength_options,
     "design": design,

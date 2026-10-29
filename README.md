@@ -17,7 +17,7 @@ browser, no install, your files never leave your computer.
 | **Explanations** | Every finding has a plain-language *why* and fixes, filtered by what you can change: *just print it* / *the design* / *both* |
 | **Slicer settings** | Recommended OrcaSlicer / Bambu Studio settings, exported in a 3MF together with the oriented part |
 | **Strength** | Click a face → "held here" or "2 kg pulling". Voxel FEA with weaker layer bonds (material + enclosure dependent) gives a traffic light, a heat map and what would help (walls, infill, orientation) |
-| **Design fixes** | Detects holes; suggests teardrop holes and corner chamfers, previews them in red, applies them (mesh booleans) and re-checks |
+| **Design fixes** | Detects holes and round posts and asks when unsure ("is this a hole?"); suggests teardrop holes, corner chamfers, 45° fills under ledges, sacrificial layers over holes that start in mid-air and thicker walls; previews them (red = cut, green = added), applies them and re-checks; STEP parts are written back as STEP with only the edited spots changed |
 | **AI** | *Ask AI* panel with your own Anthropic, Google Gemini or OpenAI API key (it can switch orientations, set loads, run checks and apply fixes); MCP server so Claude Code / Codex / Gemini CLI / Claude Desktop can operate the tool with *your own* subscription; or copy the report into any AI chat |
 
 Presets: Bambu Lab A1 / A1 mini / P1S / X1C / H2D, Prusa MK4S / MINI+ / CORE One / XL, Creality K1C / K2 Plus / Ender-3 V3 SE / KE, Elegoo Centauri Carbon, Anycubic Kobra 3 · PLA, PLA+, PETG, ABS, ASA, PC, TPU 95A, PA-CF · 0.2–0.8 mm nozzles.
@@ -98,4 +98,4 @@ print time/filament are rough. Use it to make better decisions, not to sign off 
 ## License
 
 [AGPL-3.0-or-later](LICENSE). Uses three.js (MIT), Pyodide (MPL-2.0), shapely (BSD),
-manifold-3d (Apache-2.0), occt-import-js / OpenCascade (LGPL-2.1), Anthropic TypeScript SDK (MIT).
+manifold-3d (Apache-2.0), occt-import-js and replicad-opencascadejs / OpenCascade (LGPL-2.1), Anthropic TypeScript SDK (MIT).

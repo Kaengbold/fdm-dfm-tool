@@ -230,6 +230,20 @@ def main():
             return f"{edits} -> {again or 'nothing'} | findings: {findings(page)}"
         run.step("design edits that add material", added_material)
 
+        def feature_confirm():
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: page.click("#suggest-design"))
+            row = page.locator("#features li", has_text="Ø8.0 mm hole")
+            assert row.count() == 1, page.locator("#features").inner_text()
+            run.act(lambda: row.get_by_role("button", name="Not a hole").click())
+            edits, found = page.locator("#edits label").all_inner_texts(), findings(page)
+            assert not any("Ø8.0" in e for e in edits), f"teardrop still offered for a rejected hole: {edits}"
+            assert not any("Sideways Hole" in f for f in found), f"rejected hole still reported: {found}"
+            run.act(lambda: page.locator("#features li", has_text="Ø8.0 mm hole").get_by_role("button", name="Undo").click())
+            assert any("Ø8.0" in e for e in page.locator("#edits label").all_inner_texts()), "undo did not bring the teardrop back"
+            return f"{page.locator('#features').inner_text()!r} | findings after reject: {found}"
+        run.step("feature confirm - not a hole", feature_confirm)
+
         def pick_face():
             # Click the centre of the triangle nearest to the camera's view centre that is visible.
             x, y = page.evaluate(
@@ -307,6 +321,37 @@ def main():
             assert "50.8" in page.locator("#status").inner_text(), page.locator("#status").inner_text()
             return f"{first} -> {second}; rescaled: {page.locator('#status').inner_text()}"
         run.step("multi-body file + unit hint", bodies_and_units)
+
+        def step_round_trip():
+            fixture = ROOT / "tools" / "fixtures" / "l_bracket.step"
+            run.act(lambda: page.set_input_files("#file", str(fixture)), 300_000)
+            if "Sideways Hole Prints Oval" not in " ".join(findings(page)):
+                run.act(lambda: page.locator("#options > li").nth(1).click())
+            if not page.locator("input[name=mode][value=both]").is_checked():
+                run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
+            run.act(lambda: page.click("#suggest-design"))
+            boxes = page.locator("#edits label")
+            for i in range(boxes.count()):  # keep only the teardrop
+                if "Teardrop" not in boxes.nth(i).inner_text():
+                    boxes.nth(i).locator("input").uncheck()
+            run.act(lambda: page.click("#apply-edits"))
+            assert page.locator("#dl-step").is_visible(), "no STEP download after editing a STEP part"
+            with page.expect_download(timeout=300_000) as dl:
+                page.click("#dl-step")
+            out = OUT / "l_bracket_dfm.step"
+            dl.value.save_as(out)
+            text = out.read_text(encoding="utf-8", errors="replace")
+            assert text.startswith("ISO-10303-21") and "ADVANCED_FACE" in text, text[:200]
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up.map(Math.round)")
+            run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
+            ups = page.evaluate("() => fdm.state.options.map((o) => o.up.map(Math.round))")
+            assert up in ups, f"edited orientation {up} not offered for the written STEP: {ups}"
+            if ups.index(up) != page.evaluate("() => fdm.state.active"):
+                run.act(lambda: page.locator("#options > li").nth(ups.index(up)).click())
+            seen = findings(page)
+            assert not any("Sideways Hole Prints Oval" in f for f in seen), f"teardrop missing in the written STEP: {seen}"
+            return f"{out.stat().st_size // 1024} kB STEP, {text.count('ADVANCED_FACE')} faces; reloaded: {page.locator('#status').inner_text()}"
+        run.step("STEP in, design change, STEP out", step_round_trip)
 
         for part in args.parts:
             def load_part(part=part):

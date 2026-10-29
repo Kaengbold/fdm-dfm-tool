@@ -3,6 +3,7 @@ import { GeminiAssistant, listGeminiModels } from "./gemini.js";
 import { listOpenAIModels, OpenAIAssistant } from "./openai.js";
 import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
+import { stepWithEdits } from "./stepwrite.js";
 import { REGION_COLORS, Viewer } from "./viewer.js";
 
 const $ = (id) => document.getElementById(id);
@@ -153,7 +154,11 @@ async function openFile(name, bytes) {
   if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes);
   const bodies = await busy("Reading STEP file (first time downloads ~8 MB)…", () => readStep(bytes));
   if (!bodies.length) return setStatus("No solid bodies found in this STEP file.", true);
-  const pick = async (i) => loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds);
+  const pick = async (i) => {
+    // Kept so design edits can be written back into the original CAD solid (stepwrite.js).
+    const step = { name, bytes, volume: bodies[i].volume, edits: [] };
+    await loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds, step);
+  };
   if (bodies.length > 1) {
     showBodyPicker(bodies.map((b) => ({ name: b.name, volume_mm3: b.volume })), 0, pick);
   }
@@ -169,10 +174,13 @@ function showBodyPicker(bodies, active, pick) {
   $("body-pick").hidden = false;
 }
 
-async function loadFile(name, bytes, faceIds = null) {
+/** ``step``: the STEP file this part came from (and the edits applied so far), or null. */
+async function loadFile(name, bytes, faceIds = null, step = null) {
   await busy("Reading part…", async () => {
     await engineReady;
     const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
+    state.step = step;
+    $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: 0, scale: 1 }; // to restore the part after a cancel
     if (info.bodies.length) {
       showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => {
@@ -215,6 +223,8 @@ function showUnitHint(hint) {
   $("unit-scale").onclick = () => busy("Rescaling…", async () => {
     const next = await call("scale", { factor: hint.factor });
     state.source.scale *= hint.factor;
+    state.step = null; // the CAD file keeps its own units: edits would no longer line up
+    $("dl-step").hidden = true;
     await partLoaded(next);
   });
 }
@@ -640,10 +650,7 @@ async function suggestDesign() {
     const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams() });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
     $("edit-params").hidden = !r.edits.length;
-    const holes = r.features.filter((f) => f.type === "hole");
-    $("features-summary").textContent = holes.length
-      ? `Found ${holes.length} hole(s): ${holes.map((h) => `Ø${h.diameter.toFixed(1)} mm`).join(", ")}.`
-      : "No round holes found.";
+    renderFeatures(r.features);
     state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer), selected: true }));
     $("edits").replaceChildren(
       ...(state.edits.length
@@ -664,6 +671,49 @@ async function suggestDesign() {
 }
 $("suggest-design").onclick = suggestDesign;
 
+// ---------- feature confirm ("is this a hole?") ----------
+const shown = (f) => f.type === "hole" || f.full_circle; // partial bosses are rounded edges: not worth a line
+const FEATURE_NAME = { hole: "hole", boss: "round post" };
+
+function renderFeatures(features) {
+  const list = features.filter(shown);
+  const ask = list.filter((f) => f.confidence === "low" && !f.tag).length;
+  $("features-summary").textContent = !list.length
+    ? "No round holes or posts found."
+    : `Found ${list.length} round feature(s).${ask ? ` Please check the ${ask} marked "?" — click a name to see it on the part.` : " Click a name to see it on the part."}`;
+  $("features").replaceChildren(
+    ...list.map((f) => {
+      const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
+      const name = el("button", {
+        className: "link",
+        textContent: `${f.confidence === "low" && !f.tag ? "? " : ""}Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`,
+        onclick: () => showFeature(f),
+      });
+      const answer = f.tag
+        ? [el("span", { className: "hint", textContent: f.tag === "none" ? `ignored — not a ${FEATURE_NAME[f.type]}` : "confirmed" }),
+           el("button", { textContent: "Undo", onclick: () => tagFeature(f.region, null) })]
+        : [el("button", { textContent: "Yes", title: `It is a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, f.type) }),
+           el("button", { textContent: `Not a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, "none") })];
+      return el("li", { className: [f.tag === "none" ? "rejected" : "", f.confidence === "low" && !f.tag ? "ask" : ""].join(" ") }, name, ...answer);
+    }),
+  );
+}
+
+async function showFeature(f) {
+  await ensureRegions();
+  state.selectedRegion = f.region;
+  state.showHeat = false;
+  recolor();
+}
+
+/** Record the user's answer, then redo the edits and the check (rejected holes drop out of both). */
+async function tagFeature(region, tag) {
+  await busy("Updating…", () => call("tag_feature", { region, tag }));
+  state.selectedRegion = -1;
+  await runCheck();
+  return suggestDesign();
+}
+
 /** Edit sizes from the inputs; empty until the first suggestion filled them in (engine defaults). */
 const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
@@ -671,10 +721,12 @@ document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = sug
 
 async function applyEdits() {
   return busy("Applying design changes…", async () => {
-    const soup = await applyDesignEdits(state.triangles, state.edits.filter((e) => e.selected));
+    const chosen = state.edits.filter((e) => e.selected);
+    const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
-    await loadFile(name, stlBytes(soup));
-    setStatus(`${state.summary} — design changes applied. Download the STL to bring them back into your CAD.`);
+    const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
+    await loadFile(name, stlBytes(soup), null, step);
+    setStatus(`${state.summary} — design changes applied. Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
   });
 }
 $("apply-edits").onclick = applyEdits;
@@ -733,9 +785,13 @@ const aiActions = {
   suggest_design_changes: async () => {
     const r = await suggestDesign();
     return {
-      features: r.features.map((f) => ({ type: f.type, diameter_mm: round(f.diameter, 1), axis: round(f.axis), full_circle: f.full_circle })),
+      features: r.features.filter(shown).map((f) => ({ region: f.region, type: f.type, diameter_mm: round(f.diameter, 1), axis: round(f.axis), confidence: f.confidence, tag: f.tag })),
       edits: r.edits.map((e) => ({ id: e.id, op: e.op, title: e.title, description: e.description })),
     };
+  },
+  tag_feature: async ({ region, tag }) => {
+    const r = await tagFeature(region, tag === "forget" ? null : tag);
+    return r.features.filter(shown).map((f) => ({ region: f.region, type: f.type, diameter_mm: round(f.diameter, 1), tag: f.tag }));
   },
   apply_design_changes: async ({ ids }) => {
     if (!state.edits.length) await suggestDesign();
@@ -827,6 +883,7 @@ const TOOL_LABEL = {
   strength_options: "trying stronger options",
   suggest_design_changes: "looking for design changes",
   apply_design_changes: "applying design changes",
+  tag_feature: "noting what a feature is",
   set_slicer_settings: "changing slicer settings",
 };
 
@@ -999,6 +1056,12 @@ $("dl-3mf").onclick = async () => {
 
 $("dl-stl").onclick = () => download(stlBytes(state.placed), `${baseName()}_oriented.stl`, "model/stl");
 $("dl-stl-model").onclick = () => download(stlBytes(state.triangles), `${baseName()}.stl`, "model/stl");
+$("dl-step").onclick = () =>
+  busy("Writing STEP with your design changes (first time downloads ~23 MB)…", async () => {
+    const out = await stepWithEdits(state.step.bytes, state.step.volume, state.step.edits);
+    download(out, `${baseName()}.step`, "model/step");
+    setStatus(state.summary);
+  });
 
 $("copy-report").onclick = async () => {
   const md = await call("report", { up: activeOption().up, profile: profile(), mode: mode() });

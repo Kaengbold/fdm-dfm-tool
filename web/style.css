@@ -224,6 +224,12 @@ main canvas { display: block; }
 .swatch { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 2px; margin: 0 3px 0 6px; vertical-align: -1px; }
 .swatch.cut { background: var(--support); }
 .swatch.add { background: var(--clean); }
+.features { list-style: none; padding: 0; margin: 4px 0 8px; font-size: 13px; }
+.features li { display: flex; align-items: center; gap: 6px; padding: 2px 0; flex-wrap: wrap; }
+.features li.ask .link { font-weight: 600; color: var(--borderline); }
+.features li.rejected .link { text-decoration: line-through; color: var(--muted); }
+.features button { font-size: 12px; padding: 1px 6px; }
+.features button.link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; text-align: left; }
 .edit-params { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 6px 0; }
 .edit-params input { width: 4.5em; }
 .marks { list-style: none; padding: 0; margin: 4px 0; font-size: 13px; }

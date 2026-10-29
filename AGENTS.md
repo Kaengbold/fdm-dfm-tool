@@ -22,7 +22,7 @@ may work here in parallel; these rules keep their work from colliding.
 | `core/fdmcore/` | Python engine. Runs natively **and in the browser via Pyodide** |
 | `core/fdmcore/data/` | `presets.yaml`, `rules.yaml` (knowledge base) |
 | `core/tests/` | pytest suite |
-| `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `assistant.js` / `gemini.js` / `openai.js` AI panel |
+| `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `assistant.js` / `gemini.js` / `openai.js` AI panel |
 | `tools/` | `make_samples.py`, `make_manifest.py`, `e2e_smoke.py` |
 | `research/` | Background material (unverified unless stated) |
 
@@ -51,6 +51,7 @@ cd core && python -m pytest -q                 # engine tests (~20 s)
 python tools/e2e_smoke.py                      # browser test in headless Edge (pip install playwright)
 python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini screenshot review
 node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)
+node tools/make_step_fixture.mjs               # regenerate the STEP test part (once: npm install --no-save --prefix tools replicad-opencascadejs@1.1.0)
 python tools/make_samples.py                   # regenerate web/samples (needs trimesh, manifold3d)
 python -m http.server 8000                     # then open http://localhost:8000/web/
 ```

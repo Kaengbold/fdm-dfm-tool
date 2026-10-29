@@ -122,3 +122,18 @@ def test_thicken_thin_walls():
     rules, edits = _apply("wall")
     assert len(edits) == 2  # the 0.6 mm fin and the 0.3 mm one
     assert not {"too_thin_to_print", "fine_detail_rough", "single_line_wall"} & set(rules)
+
+
+def test_rejected_hole_gets_no_edit_and_no_findings():
+    r = design("l_bracket", [0, 0, 1])
+    sideways = next(f for f in r["features"] if f["type"] == "hole" and abs(f["axis"][2]) < 0.1)
+    assert sideways["confidence"] == "high" and sideways["tag"] is None
+    assert "sideways_hole_oval" in {f["rule"] for f in api.check([0, 0, 1], {}, "both")["findings"]}
+    feats = api.tag_feature(sideways["region"], "none")["features"]
+    assert next(f for f in feats if f["region"] == sideways["region"])["tag"] == "none"
+    assert not any(e["id"].startswith("teardrop") for e in api.design([0, 0, 1])["edits"])
+    assert "sideways_hole_oval" not in {f["rule"] for f in api.check([0, 0, 1], {}, "both")["findings"]}
+    api.tag_feature(sideways["region"], None)  # undo
+    assert any(e["id"].startswith("teardrop") for e in api.design([0, 0, 1])["edits"])
+    with pytest.raises(ValueError):
+        api.tag_feature(sideways["region"], "rib")

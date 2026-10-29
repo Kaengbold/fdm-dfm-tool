@@ -22,7 +22,14 @@ from .slicer import slice_mesh
 TEARDROP_MIN_DIAMETER = 5.0  # smaller horizontal holes bridge fine
 
 
-def detect_features(mesh: Mesh, region: np.ndarray) -> list[dict]:
+TAGS = ("hole", "boss", "none")  # what the user can say a detected feature is ("none": not a feature)
+
+
+def detect_features(mesh: Mesh, region: np.ndarray, tags: dict | None = None) -> list[dict]:
+    """Round holes and bosses, one per curved region. ``tags`` ({region: tag}) are the user's
+    answers: they override the guessed type, and "none" marks a false find (kept in the list,
+    so it can be undone, but ignored by edits and checks). ``confidence`` "low" means: ask."""
+    tags = {int(k): v for k, v in (tags or {}).items()}
     normals, areas = mesh.normals_and_areas()
     centroids = mesh.triangles.mean(axis=1)
     out = []
@@ -36,8 +43,19 @@ def detect_features(mesh: Mesh, region: np.ndarray) -> list[dict]:
         feat = _fit_cylinder(n, a, c, mesh.triangles[sel])
         if feat:
             feat["region"] = int(r)
+            # Few faces or a partial circle (could be a rounded edge): worth asking.
+            feat["confidence"] = "high" if feat["full_circle"] and sel.sum() >= 12 and feat["fit_error"] < 0.02 else "low"
+            tag = tags.get(int(r))
+            feat["tag"] = tag
+            if tag in ("hole", "boss"):
+                feat["type"] = tag
             out.append(feat)
     return out
+
+
+def accepted(features: list[dict]) -> list[dict]:
+    """Features the user hasn't rejected."""
+    return [f for f in features if f.get("tag") != "none"]
 
 
 def _fit_cylinder(n, a, c, tris) -> dict | None:
@@ -73,6 +91,7 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
         "diameter": 2 * radius,
         "length": float(t.max() - t.min()),
         "full_circle": coverage > 0.9,
+        "fit_error": float(resid.max() / radius),
     }
 
 
@@ -102,7 +121,7 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
     }
 
 
-def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None) -> list[dict]:
+def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
 
@@ -110,7 +129,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     prm = edit_params(params)
     angle = prm["teardrop_angle_deg"]
     edits = []
-    for f in detect_features(mesh, region):
+    for f in accepted(detect_features(mesh, region, tags)):
         axis = np.asarray(f["axis"])
         if f["type"] == "hole" and f["full_circle"] and abs(axis @ up) < 0.2 and f["diameter"] >= TEARDROP_MIN_DIAMETER:
             edits.append(_edit(

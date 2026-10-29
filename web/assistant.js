@@ -81,6 +81,16 @@ export const TOOLS = [
     input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "tag_feature",
+    description: "Confirm or correct a detected feature (region from suggest_design_changes): tag \"hole\", \"boss\" or \"none\" if it isn't one (e.g. a rounded edge); \"forget\" removes the answer. Ask the user about features with confidence \"low\". Rejected holes get no edits and no hole findings.",
+    input_schema: {
+      type: "object",
+      properties: { region: { type: "integer" }, tag: { type: "string", enum: ["hole", "boss", "none", "forget"] } },
+      required: ["region", "tag"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "apply_design_changes",
     description: "Apply the given suggested edits to the part (ids from suggest_design_changes) and re-analyse it.",
     input_schema: { type: "object", properties: { ids: { type: "array", items: { type: "string" } } }, required: ["ids"], additionalProperties: false },

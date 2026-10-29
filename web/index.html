@@ -114,9 +114,10 @@
           <div id="strength-result"></div>
         </div>
 
-        <div id="design-block" class="wip" data-wip="only teardrops for sideways holes and corner chamfers so far. Thicker walls, chamfers under overhangs and a feature confirm step are still missing (T-040 to T-044).">
+        <div id="design-block" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Always look at the preview before applying, and check fits after thickening walls.">
           <h2>Design changes <small><span class="swatch cut"></span>cut away · <span class="swatch add"></span>added</small></h2>
           <p class="hint" id="features-summary">Let the tool suggest geometry changes for this orientation.</p>
+          <ul id="features" class="features"></ul>
           <ol id="edits" class="edits"></ol>
           <div id="edit-params" class="edit-params" hidden>
             <label>Corner chamfer <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
@@ -141,6 +142,7 @@
           </div>
           <button id="dl-stl">Download STL (oriented for printing)</button>
           <button id="dl-stl-model">Download STL (as modelled, incl. design changes)</button>
+          <button id="dl-step" hidden>Download STEP (your CAD file with the design changes)</button>
           <button id="copy-report">Copy report (for sharing or an AI chat)</button>
         </div>
       </section>

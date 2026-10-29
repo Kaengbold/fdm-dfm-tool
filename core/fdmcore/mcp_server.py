@@ -144,6 +144,14 @@ def suggest_design_changes(
 
 
 @server.tool()
+def tag_feature(region: int, tag: str | None) -> dict:
+    """Confirm or correct a detected feature (region id from suggest_design_changes): "hole", "boss",
+    or "none" when it isn't one (e.g. a rounded edge taken for a hole). None forgets the answer.
+    Ask the user about features with confidence "low". Rejected holes get no edits and no hole findings."""
+    return _clean(api.tag_feature(region, tag))
+
+
+@server.tool()
 def apply_design_changes(
     up: list[float],
     edit_ids: list[str],

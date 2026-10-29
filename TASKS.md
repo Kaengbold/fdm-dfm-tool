@@ -51,8 +51,8 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [x] **T-041 P2** Thicken thin walls to 2–3 line widths. · owner: Claude (`task/T-040-design-edits`) — walls under `wall_lines` lines grow on both sides, kept clear of nearby material so gaps don't fuse.
 - [x] **T-042 P2** Sacrificial bridge layer for counterbores / holes starting mid-air. · owner: Claude (`task/T-040-design-edits`) — new `hole_starts_midair` finding + one-layer cover edit. Roofs held all round now count as bridges when narrow enough.
 - [x] **T-043 P2** Adjustable edit parameters in the UI (chamfer size, teardrop angle). · owner: Claude (`task/T-010-refine`) — `design(params=…)`, inputs in the design panel, MCP `params`. Chamfers on short edges are capped so two don't meet in a new sharp point.
-- [ ] **T-044 P2** Feature confirm UI ("is this a hole?", tag ribs/bosses), feeding detection. · owner: —
-- [ ] **T-045 P3** Write edits back as STEP (OCCT) instead of STL for CAD users. · owner: —
+- [x] **T-044 P2** Feature confirm UI ("is this a hole?", tag ribs/bosses), feeding detection. · owner: Claude (`task/T-040-design-edits`) — round holes/posts listed with Yes / Not a hole (unsure ones marked ?); `tag_feature` (API, MCP, Ask AI). Rejected holes get no edits and no hole findings. Ribs: not tagged (thin-wall edit covers them).
+- [x] **T-045 P3** Write edits back as STEP (OCCT) instead of STL for CAD users. · owner: Claude (`task/T-040-design-edits`) — `web/stepwrite.js` (replicad-opencascadejs, ~23 MB on first use): original solid ± edit pieces, coplanar faces merged; real CAD faces stay. Browser test round-trips `tools/fixtures/l_bracket.step`.
 
 ## Input / output
 
