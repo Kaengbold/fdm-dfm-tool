@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "5c8d5a30-5195-470b-9836-9e5a055d55e7",
+  "author": "FDM DFM Tool contributors",
+  "description": {
+    "": "Check a body for FDM 3D printing: best orientation, printability problems, slicer settings, and teardrops for sideways holes."
+  },
+  "version": "0.1.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

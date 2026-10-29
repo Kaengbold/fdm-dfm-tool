@@ -23,6 +23,7 @@ may work here in parallel; these rules keep their work from colliding.
 | `core/fdmcore/data/` | `presets.yaml`, `rules.yaml` (knowledge base) |
 | `core/tests/` | pytest suite |
 | `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `mypresets.js` user presets, `assistant.js` / `gemini.js` / `openai.js` AI panel |
+| `fusion/FDMDFM/` | Fusion add-in: `bridge.py` (no `adsk`, tested in `core/tests`), `FDMDFM.py` UI, `install_deps.py` |
 | `tools/` | `make_samples.py`, `make_manifest.py`, `e2e_smoke.py` |
 | `research/` | Background material (unverified unless stated) |
 

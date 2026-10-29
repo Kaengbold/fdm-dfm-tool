@@ -22,6 +22,8 @@ browser, no install, your files never leave your computer.
 
 Add your own printer or filament (or import an OrcaSlicer filament profile) and measure layer strength and warping with two small test prints.
 
+Autodesk Fusion users: an add-in in [`fusion/`](fusion/README.md) runs the same checks on a body and can add teardrops as real CAD features (early, not yet tested inside Fusion).
+
 Presets: Bambu Lab A1 / A1 mini / P1S / X1C / H2D, Prusa MK4S / MINI+ / CORE One / XL, Creality K1C / K2 Plus / Ender-3 V3 SE / KE, Elegoo Centauri Carbon, Anycubic Kobra 3 · PLA, PLA+, PETG, ABS, ASA, PC, TPU 95A, PA-CF · 0.2–0.8 mm nozzles.
 
 ## Try it locally

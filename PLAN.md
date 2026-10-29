@@ -91,7 +91,7 @@ Key decisions:
 - [ ] Local mode: real slicing via OrcaSlicer CLI + Orca profile import
 
 ### Later
-- [ ] Fusion 360 add-in (exact features, apply fixes as real CAD features)
+- [~] Fusion 360 add-in (exact features, apply fixes as real CAD features) — `fusion/`: report + teardrops; not yet run inside Fusion
 - [ ] Hosted remote MCP endpoint (for Claude.ai connectors) if there's demand
 - [ ] Community-contributed rules & printer presets
 - [ ] Calibration from real test prints (tune knockdown factors)
@@ -179,7 +179,7 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | 2 — Strength | ✅ done | Face regions, voxel FEA, anisotropic material, strength-aware orientation, load cases, loads on faces or spots |
 | 3 — Design fixes | ✅ done | Feature confirm ("is this a hole?"), teardrops, corner chamfers, 45° ledge fills, sacrificial layers, thicker walls; ghost preview (cut/add), adjustable sizes, STL and STEP output (OpenCascade write-back) |
 | 4 — AI & agents | ✅ done | MCP server (local mode) with real slicing via the installed OrcaSlicer, copy-report + paste-back answers (any chat subscription), Ask AI with Anthropic / Gemini / OpenAI keys. Open: real-key tests (T-063), streaming (T-062), CLI subscription bridge (T-061) |
-| 5 — Ecosystem | ⏳ | Fusion add-in, community presets/rules, calibration prints, hosting |
+| 5 — Ecosystem | ⏳ | Done: your own printers/materials with calibration prints, offline use, GitHub Pages workflow, Fusion add-in (report + teardrops; untested inside Fusion). Open: first Pages deploy, real calibration prints, community rules |
 
 Research notes: `research/fdm_knowledge.md` (Gemini, unverified) — source for future rules.
 

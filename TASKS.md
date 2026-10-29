@@ -78,7 +78,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [x] **T-080 P1** Progress indicator + cancel for long operations. · owner: Claude (`task/T-080-progress`) — `progress.py` stages (layers, orientation search, nozzle comparison, FEA iterations); Cancel kills the worker, a new one boots and reloads the part.
 - [ ] **T-081 P3** Mobile/tablet layout. · owner: —
 - [ ] **T-082 P3** German translation (UI + rules). · owner: —
-- [ ] **T-090 P3** Fusion 360 add-in using the same engine. · owner: —
+- [~] **T-090 P3** Fusion 360 add-in using the same engine. · owner: Claude (`task/T-001-slicer-check`) — `fusion/FDMDFM`: check a body, report in a palette, optional 45° teardrops as a base-feature cut; `install_deps.py` installs wheels for Fusion's Python 3.14; bridge tested and run under Fusion's Python. Left: run the add-in inside Fusion (UI, STL export, teardrop features), components other than the root.
 - [x] **T-091 P2** Your own printers and materials (PLAN phase 5 "community presets"). · owner: Claude (`task/T-001-slicer-check`) — "My printers & materials": start from a built-in, edit, saved in localStorage, sent via `custom_presets` (validated ranges); OrcaSlicer filament .json import; "Copy as YAML" for a presets.yaml PR.
 
 - [x] **T-111 P2** Findings UI: an impact group "Will fail" can contain a TIP-severity card (e.g. small bed contact that a brim fixes), which reads as a contradiction. Show the severity the group implies, or move fixed-by-setting items to a "needs a setting" note. · owner: Claude — group renamed "Can fail"; the card's severity says how likely.
