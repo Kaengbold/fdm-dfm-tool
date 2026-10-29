@@ -216,6 +216,20 @@ def main():
             return f"applied {edits} -> now suggests {again or 'nothing'}"
         run.step("design edits apply + re-check", design)
 
+        def added_material():
+            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: page.click("#suggest-design"))
+            edits = page.locator("#edits label").all_inner_texts()
+            assert sum("Thicken" in e for e in edits) == 2, f"expected two thin walls to thicken, got {edits}"
+            ops = page.evaluate("() => fdm.state.edits.map((e) => e.op)")
+            assert "add" in ops and len(page.evaluate("() => fdm.viewer.ghosts.children.map((c) => c.material.color.getHexString())")) == len(ops)
+            run.act(lambda: page.click("#apply-edits"))
+            run.act(lambda: page.click("#suggest-design"))
+            again = page.locator("#edits label").all_inner_texts()
+            assert not any("Thicken" in e for e in again), f"walls still thin after thickening: {again}"
+            return f"{edits} -> {again or 'nothing'} | findings: {findings(page)}"
+        run.step("design edits that add material", added_material)
+
         def pick_face():
             # Click the centre of the triangle nearest to the camera's view centre that is visible.
             x, y = page.evaluate(

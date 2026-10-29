@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 from mcp.server.mcpserver import MCPServer
 
 from . import api
@@ -136,8 +135,11 @@ def strength_options(
 def suggest_design_changes(
     up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", params: dict | None = None
 ) -> dict:
-    """Detected holes/bosses and suggested geometry edits (teardrop holes, corner chamfers) for this orientation.
-    ``params`` sets edit sizes, e.g. {"chamfer_mm": 2, "teardrop_angle_deg": 40}; ranges come back in the result."""
+    """Detected holes/bosses and suggested geometry edits for this orientation: teardrop holes and corner
+    chamfers (cut away, ``op: cut``), 45° fills under ledges, sacrificial layers over holes that start in
+    mid-air and thicker walls (added, ``op: add``).
+    ``params`` sets edit sizes, e.g. {"chamfer_mm": 2, "teardrop_angle_deg": 40, "ledge_max_mm": 20,
+    "wall_lines": 3}; ranges come back in the result."""
     return _clean(api.design(up, _profile(printer, material, nozzle), params))
 
 
@@ -152,14 +154,13 @@ def apply_design_changes(
     params: dict | None = None,
 ) -> dict:
     """Apply suggested edits (ids from suggest_design_changes, same params), save the modified STL and load it."""
-    from .booleans import subtract
+    from .booleans import apply_edits
 
     edits = {e["id"]: e for e in api.design(up, _profile(printer, material, nozzle), params)["edits"]}
     unknown = [i for i in edit_ids if i not in edits]
     if unknown:
         raise ValueError(f"Unknown edit ids: {unknown}")
-    cutters = [np.frombuffer(edits[i]["cutter"], "<f4").reshape(-1, 3, 3) for i in edit_ids]
-    mesh = subtract(api._require().mesh, cutters)
+    mesh = apply_edits(api._require().mesh, [edits[i] for i in edit_ids])
     out = Path(output_path).expanduser()
     out.write_bytes(to_binary_stl(mesh))
     return {"saved": str(out), **_clean(api.load(out.read_bytes(), out.name))}

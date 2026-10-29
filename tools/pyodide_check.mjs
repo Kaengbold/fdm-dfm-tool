@@ -1,4 +1,5 @@
-// Runs the engine in Pyodide under Node: loads samples, ranks orientations and checks each one.
+// Runs the engine in Pyodide under Node: loads samples, ranks orientations, checks each one and
+// suggests design edits for the best one.
 // Catches crashes that only happen in Pyodide (older GEOS; a GEOS error there aborts the engine).
 //
 //   npm install --no-save --prefix tools pyodide@0.27.2     (once)
@@ -12,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const arg = process.argv[2] || fs.readdirSync(`${root}/web/samples`).filter((f) => f.endsWith(".stl")).map((f) => f.slice(0, -4)).join(",");
 const files = arg.split(",").map((s) => (/\.(stl|3mf)$/i.test(s) ? s : `${root}/web/samples/${s}.stl`));
 const py = await loadPyodide();
-await py.loadPackage(["numpy", "shapely", "pyyaml"]);
+await py.loadPackage(["numpy", "shapely", "pyyaml", "scipy"]);
 for (const name of JSON.parse(fs.readFileSync(`${root}/core/fdmcore/manifest.json`, "utf8"))) {
   const file = `/home/pyodide/fdmcore/${name}`;
   py.FS.mkdirTree(file.slice(0, file.lastIndexOf("/")));
@@ -39,5 +40,8 @@ for (const file of files) {
   t = performance.now();
   const counts = orientations.map((o) => call("check", { up: o.up, profile: {}, mode: "both" }).findings.length);
   const check = (secs(t) / orientations.length).toFixed(1);
-  console.log(`ok ${name}: ${info.faces} faces, ${orientations.length} orientations, findings ${counts.join("/")} | load ${load} s, orient ${orient} s, check ${check} s each`);
+  t = performance.now();
+  const { edits } = call("design", { up: orientations[0].up, profile: { material: "abs" } });
+  const design = secs(t);
+  console.log(`ok ${name}: ${info.faces} faces, ${orientations.length} orientations, findings ${counts.join("/")}, ${edits.length} edits | load ${load} s, orient ${orient} s, check ${check} s each, design ${design} s`);
 }

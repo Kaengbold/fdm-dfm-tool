@@ -115,12 +115,14 @@
         </div>
 
         <div id="design-block" class="wip" data-wip="only teardrops for sideways holes and corner chamfers so far. Thicker walls, chamfers under overhangs and a feature confirm step are still missing (T-040 to T-044).">
-          <h2>Design changes <small>shown in red on the part</small></h2>
+          <h2>Design changes <small><span class="swatch cut"></span>cut away · <span class="swatch add"></span>added</small></h2>
           <p class="hint" id="features-summary">Let the tool suggest geometry changes for this orientation.</p>
           <ol id="edits" class="edits"></ol>
           <div id="edit-params" class="edit-params" hidden>
             <label>Corner chamfer <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
             <label>Teardrop tip <input id="param-teardrop_angle_deg" data-param="teardrop_angle_deg" type="number" step="5" />° from vertical</label>
+            <label>Fill ledges up to <input id="param-ledge_max_mm" data-param="ledge_max_mm" type="number" step="1" /> mm wide</label>
+            <label>Thin walls to <input id="param-wall_lines" data-param="wall_lines" type="number" step="1" /> lines</label>
           </div>
           <div class="actions">
             <button id="suggest-design">Suggest design changes</button>

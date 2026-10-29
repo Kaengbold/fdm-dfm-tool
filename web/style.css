@@ -221,6 +221,9 @@ main canvas { display: block; }
 .progress { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
 .progress progress { flex: 1; height: 8px; }
 .why-lower { margin: 4px 0 0; font-size: 12px; color: var(--muted); font-style: italic; }
+.swatch { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 2px; margin: 0 3px 0 6px; vertical-align: -1px; }
+.swatch.cut { background: var(--support); }
+.swatch.add { background: var(--clean); }
 .edit-params { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin: 6px 0; }
 .edit-params input { width: 4.5em; }
 .marks { list-style: none; padding: 0; margin: 4px 0; font-size: 13px; }

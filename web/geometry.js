@@ -11,8 +11,10 @@ async function manifold() {
   return wasm;
 }
 
-/** Subtract cutter soups from a part soup (all Float32Array, 9 floats per triangle). */
-export async function subtract(part, cutters) {
+/** Apply design edits to a part soup (Float32Array, 9 floats per triangle). Each edit is
+ * {op: "add"|"cut", mesh: Float32Array, pieces: [triangle count per closed piece]};
+ * additions go first, then cuts, one closed piece at a time. */
+export async function applyEdits(part, edits) {
   const { Manifold, Mesh } = await manifold();
   const toManifold = (soup, what) => {
     const mesh = new Mesh({ numProp: 3, vertProperties: soup, triVerts: Uint32Array.from({ length: soup.length / 3 }, (_, i) => i) });
@@ -22,7 +24,16 @@ export async function subtract(part, cutters) {
     return m;
   };
   let result = toManifold(part, "The part");
-  for (const c of cutters) result = result.subtract(toManifold(c, "A design edit"));
+  for (const op of ["add", "cut"]) {
+    for (const e of edits.filter((x) => x.op === op)) {
+      let start = 0;
+      for (const n of e.pieces) {
+        const piece = toManifold(e.mesh.subarray(start * 9, (start + n) * 9), `The design change "${e.title}"`);
+        result = op === "add" ? result.add(piece) : result.subtract(piece);
+        start += n;
+      }
+    }
+  }
   const out = result.getMesh();
   const soup = new Float32Array(out.triVerts.length * 3);
   out.triVerts.forEach((v, i) => soup.set(out.vertProperties.subarray(v * out.numProp, v * out.numProp + 3), i * 3));

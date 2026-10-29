@@ -28,10 +28,22 @@ def test_teardrop_only_for_horizontal_holes():
     assert [e["title"] for e in upright if e["id"].startswith("teardrop")] == ["Teardrop for the horizontal Ø6.0 mm hole"]
 
 
-def test_cutters_are_closed_and_outward():
-    for e in design("l_bracket", [0, 0, 1], material="abs")["edits"]:
-        tris = np.frombuffer(e["cutter"], "<f4").reshape(-1, 3, 3).astype(float)
-        assert Mesh(tris).volume() > 0, e["id"]
+def pieces(edit):
+    tris = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3, 3).astype(float)
+    return np.split(tris, np.cumsum(edit["pieces"])[:-1])
+
+
+@pytest.mark.parametrize("name, material", [("l_bracket", "abs"), ("mushroom", "pla"), ("test_block", "pla")])
+def test_edit_pieces_are_closed_and_outward(name, material):
+    edits = design(name, [0, 0, 1], material=material)["edits"]
+    assert edits
+    for e in edits:
+        for p in pieces(e):
+            assert Mesh(p).volume() > 0, e["id"]
+            # Closed and consistently wound: every directed edge a->b has a matching b->a.
+            pts = [tuple(v) for v in p.reshape(-1, 3).round(4)]
+            directed = {(pts[3 * f + k], pts[3 * f + (k + 1) % 3]) for f in range(len(p)) for k in range(3)}
+            assert all((b, a) in directed for a, b in directed), e["id"]
 
 
 def test_corner_chamfers_only_for_warping_materials():
@@ -52,7 +64,7 @@ def test_edit_params_change_cutters():
     def apex(angle):
         r = api.design([0, 0, 1], prof, {"teardrop_angle_deg": angle})
         tear = next(e for e in r["edits"] if e["id"].startswith("teardrop"))
-        return np.frombuffer(tear["cutter"], "<f4").reshape(-1, 3)[:, 2].max(), r
+        return np.frombuffer(tear["mesh"], "<f4").reshape(-1, 3)[:, 2].max(), r
 
     pointy, r30 = apex(30)
     classic, _ = apex(45)
@@ -61,3 +73,52 @@ def test_edit_params_change_cutters():
     chamfers = [e["title"] for e in api.design([0, 0, 1], prof, {"chamfer_mm": 1.5})["edits"] if e["id"].startswith("chamfer")]
     assert chamfers and all("1.5 mm" in t for t in chamfers)
     assert api.design([0, 0, 1], prof, {"chamfer_mm": 99})["params"]["chamfer_mm"] == 10  # clamped
+
+
+def _apply(ids_prefix, profile=None, params=None):
+    """Apply the suggested edits whose id starts with ``ids_prefix``, reload, return rules found."""
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    edits = [e for e in api.design([0, 0, 1], profile or {}, params)["edits"] if e["id"].startswith(ids_prefix)]
+    assert edits, ids_prefix
+    api.load(to_binary_stl(apply_edits(api._session.mesh, edits)), "edited")
+    return [f["rule"] for f in api.check([0, 0, 1], profile or {}, "both")["findings"]], edits
+
+
+def counterbore_plate():
+    m3d = pytest.importorskip("manifold3d")
+    from fdmcore.mesh import to_binary_stl
+
+    M = m3d.Manifold
+    part = M.cube([30, 30, 8]) - M.cylinder(20, 1.7, 1.7, 48).translate([15, 15, -5])
+    part = part - M.cylinder(3.5, 3.25, 3.25, 48).translate([15, 15, -0.01])  # M3 head pocket on the bed side
+    m = part.to_mesh()
+    return to_binary_stl(Mesh(m.vert_properties[:, :3][m.tri_verts].astype(float)))
+
+
+def test_ledge_fill_removes_support():
+    pytest.importorskip("manifold3d")
+    design("mushroom", [0, 0, 1])
+    rules, edits = _apply("ledge")
+    assert edits[0]["op"] == "add" and "15 mm ledge" in edits[0]["title"]
+    assert "support_marks" not in rules and "too_thin_to_print" not in rules
+    # A narrower limit leaves the 15 mm ledge alone.
+    design("mushroom", [0, 0, 1])
+    assert not any(e["id"].startswith("ledge") for e in api.design([0, 0, 1], {}, {"ledge_max_mm": 10})["edits"])
+
+
+def test_sacrificial_layer_over_counterbore():
+    api.load(counterbore_plate(), "counterbore")
+    assert "hole_starts_midair" in {f["rule"] for f in api.check([0, 0, 1], {}, "print")["findings"]}
+    rules, edits = _apply("sacrificial")
+    assert "Ø3.4 mm" in edits[0]["title"]
+    assert "hole_starts_midair" not in rules
+
+
+def test_thicken_thin_walls():
+    pytest.importorskip("manifold3d")
+    design("test_block", [0, 0, 1])
+    rules, edits = _apply("wall")
+    assert len(edits) == 2  # the 0.6 mm fin and the 0.3 mm one
+    assert not {"too_thin_to_print", "fine_detail_rough", "single_line_wall"} & set(rules)

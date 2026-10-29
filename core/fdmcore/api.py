@@ -430,7 +430,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
 
 def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     """Detected features (holes, bosses) and suggested geometry edits for this orientation.
-    Each edit has a ``cutter`` (float32 triangles, part coordinates) to subtract from the part.
+    Each edit has a ``mesh`` (float32 triangles, part coordinates) made of closed ``pieces`` (triangle
+    counts) to add to the part (``op: "add"``) or cut away (``op: "cut"``).
     ``params`` adjusts edit sizes (see features.PARAMS); the values used come back in ``params``."""
     from .features import PARAMS, design_edits, detect_features, edit_params
     from .regions import find_regions

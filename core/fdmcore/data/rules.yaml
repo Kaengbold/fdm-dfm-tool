@@ -303,6 +303,30 @@ rules:
     - Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA
     - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
+  hole_starts_midair:
+    title: Hole Starts in Mid-Air
+    why: Where a smaller hole starts above an open space (the screw hole above a counterbore printed head-down, or a
+      hole above a pocket), the first layer is a ring with a hole in it. The slicer has no edge to anchor the strands
+      around the hole, so that layer droops into the space below and the start of the hole comes out ragged.
+    fixes:
+    - domain: geometry
+      text: Add a sacrificial layer — one layer that closes the small hole where it starts. The layer below then bridges
+        cleanly across the opening; poke or drill the thin skin open after printing. (The design panel can add it.)
+    - domain: geometry
+      text: Or turn the part over so the counterbore faces up; then the hole starts on solid plastic.
+    - domain: slicer
+      text: Enable support from the build plate only, so the ring gets support from below inside the open space.
+      settings:
+        enable_support: '1'
+        support_on_build_plate_only: '1'
+    tags:
+    - bridge
+    - counterbore
+    - sacrificial-layer
+    sources:
+    - Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA
+    - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
+    - Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698
   sideways_hole_oval:
     title: Sideways Hole Prints Oval
     why: A round hole that lies on its side prints its lower half like a normal wall, but the top half is built in

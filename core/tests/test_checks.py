@@ -227,12 +227,11 @@ def test_sideways_holes():
 
 def test_teardrop_edit_clears_sideways_hole():
     pytest.importorskip("manifold3d")
-    from fdmcore.booleans import subtract
+    from fdmcore.booleans import apply_edits
     from fdmcore.mesh import to_binary_stl
 
     api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")
-    cutters = [np.frombuffer(e["cutter"], "<f4").reshape(-1, 3, 3) for e in api.design([0, 0, 1])["edits"]]
-    api.load(to_binary_stl(subtract(api._session.mesh, cutters)), "l_bracket_dfm")
+    api.load(to_binary_stl(apply_edits(api._session.mesh, api.design([0, 0, 1])["edits"])), "l_bracket_dfm")
     assert "sideways_hole_oval" not in {f["rule"] for f in api.check([0, 0, 1], {}, "both")["findings"]}
 
 

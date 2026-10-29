@@ -1,5 +1,6 @@
 [
  "__init__.py",
+ "additions.py",
  "api.py",
  "checks.py",
  "data/presets.yaml",

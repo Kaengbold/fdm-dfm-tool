@@ -77,7 +77,7 @@ export const TOOLS = [
   },
   {
     name: "suggest_design_changes",
-    description: "Detected holes and suggested geometry edits (teardrop holes, corner chamfers) for the current orientation.",
+    description: "Detected holes and suggested geometry edits for the current orientation: teardrop holes and corner chamfers (cut away), 45° fills under ledges, sacrificial layers over holes that start in mid-air, thicker walls (added).",
     input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
   {

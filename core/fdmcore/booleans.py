@@ -10,7 +10,8 @@ import numpy as np
 from .mesh import Mesh
 
 
-def subtract(part: Mesh, cutters: list[np.ndarray]) -> Mesh:
+def apply_edits(part: Mesh, edits: list[dict]) -> Mesh:
+    """Apply design edits (from ``api.design``): additions first, then cuts, piece by piece."""
     from manifold3d import Error, Manifold
     from manifold3d import Mesh as MMesh
 
@@ -24,7 +25,15 @@ def subtract(part: Mesh, cutters: list[np.ndarray]) -> Mesh:
         return m
 
     result = to_manifold(part.triangles, "The part")
-    for c in cutters:
-        result = result - to_manifold(c, "A design edit")
+    for op in ("add", "cut"):
+        for e in edits:
+            if e.get("op", "cut") != op:
+                continue
+            tris = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)
+            start = 0
+            for n in e["pieces"]:
+                piece = to_manifold(tris[start:start + n], f"Design edit {e['id']}")
+                result = result + piece if op == "add" else result - piece
+                start += n
     out = result.to_mesh()
     return Mesh(out.vert_properties[out.tri_verts.reshape(-1)].reshape(-1, 3, 3).astype(np.float64))

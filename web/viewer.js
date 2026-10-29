@@ -222,16 +222,19 @@ export class Viewer {
     this.markers.clear();
   }
 
-  /** Translucent preview of geometry that a design edit would remove (part coordinates). */
-  showGhosts(cutters) {
+  /** Translucent preview of design edits (part coordinates): red what is cut away, green what is added. */
+  showGhosts(edits) {
     this.ghosts?.clear();
     if (!this.ghosts) this.scene.add((this.ghosts = new THREE.Group()));
-    const material = new THREE.MeshBasicMaterial({ color: css("--support"), transparent: true, opacity: 0.45, depthWrite: false });
-    for (const tris of cutters) {
-      const { out } = placeTriangles(tris, this.placement.rotation, this.placement.shift);
+    const material = {
+      cut: new THREE.MeshBasicMaterial({ color: css("--support"), transparent: true, opacity: 0.45, depthWrite: false }),
+      add: new THREE.MeshBasicMaterial({ color: css("--clean"), transparent: true, opacity: 0.55, depthWrite: false }),
+    };
+    for (const e of edits) {
+      const { out } = placeTriangles(e.mesh, this.placement.rotation, this.placement.shift);
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(out, 3));
-      this.ghosts.add(new THREE.Mesh(g, material));
+      this.ghosts.add(new THREE.Mesh(g, material[e.op]));
     }
   }
 }

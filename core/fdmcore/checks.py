@@ -46,6 +46,7 @@ RULE_IMPACT = {
     "first_layer_detail": "shape",
     "small_hole_undersized": "shape",
     "bridge_sag": "shape",
+    "hole_starts_midair": "shape",
     "sideways_hole_oval": "shape",
     "long_bridge": "shape",
     "small_layers_cooling": "shape",
@@ -160,6 +161,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
 def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dict):
     lw, nozzle = profile.line_width, float(profile.nozzle)
     tan_lim = np.tan(np.radians(profile.material["max_overhang_deg"]))
+    max_bridge = profile.material["max_bridge_mm"]
     min_piece = max(1.0, 4 * lw * lw)
     F, G, H = T["features"], T["gaps"], T["holes"]
     vanish, rough = F["vanish_below_nozzle"] * nozzle, F["rough_below_nozzle"] * nozzle
@@ -182,7 +184,10 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
             reach = layer.dz * tan_lim + 0.5 * lw
             anchor_zone = prev.buffer(reach + lw, quad_segs=QUAD)  # must reach past the supported zone
             for piece in parts(_safe_diff(g, prev.buffer(reach, quad_segs=QUAD)), min_piece):
-                span, anchors = _bridge_span(piece, anchor_zone)
+                span, anchors = _bridge_span(piece, anchor_zone, max_bridge)
+                holes = _open_holes(piece, g)
+                if holes:
+                    tracker.add("hole_start", piece, layer, hole_d=max(holes))
                 if anchors >= 2:
                     tracker.add("bridge", piece, layer, span=span, area=piece.area)
                 else:
@@ -224,20 +229,40 @@ def _layer_features(g, lw, vanish, rough, single, G, H, P) -> list[tuple]:
     return out
 
 
+def _open_holes(piece: Polygon, layer_geom) -> list[float]:
+    """Diameters of holes in an unsupported piece that stay open in the layer (a hole that starts in
+    mid-air, e.g. above a counterbore). Holes filled in the layer are posts below the roof instead."""
+    out = []
+    for ring in piece.interiors:
+        hole = Polygon(ring)
+        d = 2 * np.sqrt(hole.area / np.pi)
+        if 1.0 <= d <= 25.0 and not layer_geom.contains(hole.representative_point()):
+            out.append(float(d))
+    return out
+
+
 def _is_enclosed(piece: Polygon, layer_geom) -> bool:
     """True when the piece touches no outside edge of its layer (a roof inside a cavity)."""
     outer = shapely.union_all([Polygon(p.exterior) for p in parts(layer_geom)]).boundary
     return piece.boundary.distance(outer) > 0.05
 
 
-def _bridge_span(piece: Polygon, anchor_zone) -> tuple[float, int]:
-    """Number of separate anchors on the layer below, and the largest gap between them."""
+def _bridge_span(piece: Polygon, anchor_zone, max_span: float = np.inf) -> tuple[float, int]:
+    """Number of separate anchors on the layer below, and the largest gap between them.
+
+    A piece held all the way round (roof of a pocket, ring over a counterbore) is one closed anchor;
+    it bridges across its narrow width, so it counts as two anchors that far apart when that width is
+    at most ``max_span`` (wider, the slicer supports it instead)."""
     touch = piece.boundary.intersection(anchor_zone)
     if touch.is_empty:
         return 0.0, 0
     merged = shapely.line_merge(touch) if touch.geom_type == "MultiLineString" else touch
     anchors = [a for a in getattr(merged, "geoms", [merged]) if a.length > 0.05]
     if len(anchors) < 2:
+        if anchors and piece.exterior.intersection(anchor_zone).length >= 0.9 * piece.exterior.length:
+            width = _min_width(Polygon(piece.exterior))
+            if width <= max_span:
+                return width, 2
         return 0.0, len(anchors)
     span = max(min(a.distance(b) for b in anchors if b is not a) for a in anchors)
     return float(span), len(anchors)
@@ -326,6 +351,11 @@ def _support_findings(layers, tracker: Tracker, profile: Profile, T: dict) -> li
         sev = "info" if profile.multi_material else "warn"
         out.append(_finding("support_marks", sev,
                             f"Supported underside at {_zrange(r)} (~{r.metrics['area']:.0f} mm²) will be rougher than the rest", r, profile))
+    for r in tracker.of("hole_start"):
+        d = r.metrics["hole_d"]
+        out.append(_finding("hole_starts_midair", "warn",
+                            f"Ø{d:.1f} mm hole starts in mid-air at {r.z0:.1f} mm (e.g. above a counterbore) — the ring around it "
+                            "has no edge to bridge from, so that layer droops and the hole's start prints messy", r, profile))
     max_bridge = profile.material["max_bridge_mm"]
     for r in tracker.of("bridge"):
         span = r.metrics["span"]
@@ -362,14 +392,16 @@ def _feature_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]
     out = []
     nozzle = float(profile.nozzle)
     F = T["features"]
+    # Thin strips seen on only one or two slices are the tips of slopes meeting a wall (chamfers,
+    # gussets, fillets): they merge into the wall when printed.
     for r in tracker.of("too_thin"):
-        if r.z1 - r.z0 < 2 * profile.layer_height and r.volume < 1.0:
+        if r.z1 - r.z0 < 2 * profile.layer_height:
             continue
         out.append(_finding("too_thin_to_print", "problem",
                             f"About {r.metrics['width']:.2f} mm thin at {_zrange(r)} — too thin for a {profile.nozzle} mm nozzle "
                             f"(needs more than ~{F['vanish_below_nozzle'] * nozzle:.2f} mm), it won't print", r, profile))
     for r in tracker.of("rough"):
-        if r.volume < 1.0:
+        if r.volume < 1.0 or r.z1 - r.z0 < 2 * profile.layer_height:
             continue
         out.append(_finding("fine_detail_rough", "info",
                             f"Detail about {r.metrics['width']:.2f} mm wide at {_zrange(r)} prints rough or incomplete "

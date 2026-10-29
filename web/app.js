@@ -1,7 +1,7 @@
 import { Assistant, MODELS } from "./assistant.js";
 import { GeminiAssistant, listGeminiModels } from "./gemini.js";
 import { listOpenAIModels, OpenAIAssistant } from "./openai.js";
-import { stlBytes, subtract } from "./geometry.js";
+import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { REGION_COLORS, Viewer } from "./viewer.js";
 
@@ -91,7 +91,7 @@ const state = {
   strength: null,
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
-  edits: [], // suggested design edits: {id, title, description, cutter: Float32Array, selected}
+  edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
 };
 
 // Debug/test hook: lets automated browser tests and devtools inspect the app.
@@ -631,7 +631,7 @@ function clearEdits() {
 }
 
 function showSelectedGhosts() {
-  viewer.showGhosts(state.edits.filter((e) => e.selected).map((e) => e.cutter));
+  viewer.showGhosts(state.edits.filter((e) => e.selected));
   $("apply-edits").hidden = !state.edits.some((e) => e.selected);
 }
 
@@ -644,7 +644,7 @@ async function suggestDesign() {
     $("features-summary").textContent = holes.length
       ? `Found ${holes.length} hole(s): ${holes.map((h) => `Ø${h.diameter.toFixed(1)} mm`).join(", ")}.`
       : "No round holes found.";
-    state.edits = r.edits.map((e) => ({ ...e, cutter: new Float32Array(e.cutter.slice().buffer), selected: true }));
+    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer), selected: true }));
     $("edits").replaceChildren(
       ...(state.edits.length
         ? state.edits.map((e) => {
@@ -671,8 +671,7 @@ document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = sug
 
 async function applyEdits() {
   return busy("Applying design changes…", async () => {
-    const cutters = state.edits.filter((e) => e.selected).map((e) => e.cutter);
-    const soup = await subtract(state.triangles, cutters);
+    const soup = await applyDesignEdits(state.triangles, state.edits.filter((e) => e.selected));
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     await loadFile(name, stlBytes(soup));
     setStatus(`${state.summary} — design changes applied. Download the STL to bring them back into your CAD.`);
@@ -735,7 +734,7 @@ const aiActions = {
     const r = await suggestDesign();
     return {
       features: r.features.map((f) => ({ type: f.type, diameter_mm: round(f.diameter, 1), axis: round(f.axis), full_circle: f.full_circle })),
-      edits: r.edits.map((e) => ({ id: e.id, title: e.title, description: e.description })),
+      edits: r.edits.map((e) => ({ id: e.id, op: e.op, title: e.title, description: e.description })),
     };
   },
   apply_design_changes: async ({ ids }) => {
