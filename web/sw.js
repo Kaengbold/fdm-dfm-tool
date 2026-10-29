@@ -32,7 +32,9 @@ async function networkFirst(req) {
   const url = new URL(req.url);
   const key = url.origin + url.pathname;
   try {
-    const res = await fetch(req);
+    // Revalidate with the server: otherwise the browser's HTTP cache can hand back an old module
+    // next to a new one (e.g. a new app.js calling a viewer.js function that isn't there yet).
+    const res = await (req.mode === "navigate" ? fetch(req.url, { cache: "no-cache" }) : fetch(req, { cache: "no-cache" }));
     if (res.ok) cache.put(key, res.clone());
     return res;
   } catch (err) {
