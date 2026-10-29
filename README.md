@@ -13,10 +13,10 @@ browser, no install, your files never leave your computer.
 |---|---|
 | **Input** | STL, 3MF or STEP (exact CAD faces). Files with several parts let you pick one; parts exported in inches or metres get a one-click rescale |
 | **Orientation** | Ranks build directions by supports (sliced: bridges, supports landing on the part), bed contact, height — and strength if you add loads; click faces to keep them clean of support marks or put them on the bed; says why other options rank lower; checks the build volume and turns the part to fit |
-| **Printability** | Pseudo-slices the part: overhangs vs. bridges, thin walls, sharp bed corners, tipping, slender features, small hot layers, material/printer issues |
+| **Printability** | Pseudo-slices the part: overhangs vs. bridges, thin walls, sharp bed corners, tipping, slender features, heat build-up (small pins and tips that are still soft when the next layers go on, with a heat colour view), material/printer issues |
 | **Explanations** | Every finding has a plain-language *why* and fixes, filtered by what you can change: *just print it* / *the design* / *both* |
 | **Slicer settings** | Recommended OrcaSlicer / Bambu Studio settings, exported in a 3MF together with the oriented part |
-| **Strength** | Click a face → "held here" or "2 kg pulling". Voxel FEA with weaker layer bonds (material + enclosure dependent) gives a traffic light, a heat map and what would help (walls, infill, orientation) |
+| **Strength** | Click a face → "held here" or "2 kg pulling". Voxel FEA with weaker layer bonds (material + enclosure dependent) with your walls, top/bottom layers and infill gives a traffic light, a heat map and a plain explanation; "Find the lightest settings that hold" searches walls, layers, infill and orientation for your load |
 | **Design fixes** | Detects holes and round posts and asks when unsure ("is this a hole?"); suggests teardrop holes, corner chamfers, 45° fills under ledges, sacrificial layers over holes that start in mid-air and thicker walls; previews them (red = cut, green = added), applies them and re-checks; STEP parts are written back as STEP with only the edited spots changed |
 | **AI** | *Ask AI* panel with your own Anthropic, Google Gemini or OpenAI API key (it can switch orientations, set loads, run checks and apply fixes); MCP server so Claude Code / Codex / Gemini CLI / Claude Desktop can operate the tool with *your own* subscription; or copy the report into any AI chat and paste its answer back — the tool applies it |
 

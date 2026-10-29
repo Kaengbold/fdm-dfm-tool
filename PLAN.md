@@ -169,6 +169,7 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | **3 — Design fixes** | "I'm designing it" mode | Feature graph confirm UI, ghost edits, modified STL/STEP export |
 | **4 — AI & agents** | Optional superpowers | Copy-context, BYOK, local mode + MCP + Orca CLI |
 | **5 — Ecosystem** | Grow | Fusion add-in, community rules/presets, calibration prints |
+| **6 — Simulation** | Trustworthy answers | Simple level (seconds–2 min, browser): walls/top/bottom/infill as you'll print them, settings optimised for your load and goal, heat build-up and warping estimates, plain explanations. Detailed level (local install, up to ~20 min): slice with OrcaSlicer, then strength with each line's direction and heat/warping from the real G-code timing. Later: OrcaSlicer compiled to WebAssembly in the browser |
 
 ### Progress (2026-10-29)
 

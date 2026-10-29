@@ -126,3 +126,50 @@ def test_loose_pieces_dont_break_the_solver():
     assert r["solver_converged"] and r["safety_factor"] > 1
     with pytest.raises(ValueError, match="isn't connected"):
         api.strength([0, 0, 1], [{"region": end, "kind": "fixed"}, {"region": loose, "kind": "force", "kg": 2}])
+
+
+def _plank():
+    """A 100 × 20 × 6 mm plank: held at one end, 1 kg hanging from the other."""
+    from shapely.geometry import box
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 100, 20), 0, 6))), "plank")
+    info = api.regions()["regions"]
+    end = min(info, key=lambda i: i["normal"][0])["id"]
+    other = max(info, key=lambda i: i["normal"][0])["id"]
+    return [{"region": end, "kind": "fixed"}, {"region": other, "kind": "force", "kg": 1, "direction": "down"}]
+
+
+def test_top_and_bottom_layers_carry_bending_when_printed_flat():
+    loads = _plank()
+    prof = {"material": "pla", "printer": "bambu_p1s"}
+    base = dict(walls=2, infill=0.1, top=3, bottom=3)
+
+    def run(up, **kw):
+        return api.strength(up, loads, prof, **{**base, **kw})
+
+    # Printed flat, the top and bottom skins are the outer fibres of the bent plank: thicker skins
+    # stiffen it more than thicker walls along its sides (walls also wrap the clamped end, so
+    # compare how far it bends, not the stress right at the clamp).
+    flat = lambda **kw: run([0, 0, 1], **kw)["max_displacement_mm"]
+    assert flat(top=8, bottom=8) < flat(walls=7) < flat()
+    assert run([0, 0, 1], top=8, bottom=8)["safety_factor"] > 1.3 * run([0, 0, 1])["safety_factor"]
+    # Standing on its long edge, the same skins sit on the narrow sides: walls take over.
+    edge = lambda **kw: run([0, 1, 0], **kw)["max_displacement_mm"]
+    assert edge(walls=7) < edge(top=8, bottom=8)
+
+
+def test_optimiser_finds_the_lightest_settings_that_hold():
+    loads = _plank()
+    prof = {"material": "pla", "printer": "bambu_p1s"}
+    o = api.optimise_strength([0, 0, 1], loads, prof)
+    assert o["met"] and o["safety_factor"] >= 2.0 and o["target"] == 2.0
+    assert o["settings"]["wall_loops"] == str(o["walls"])
+    assert "reach" in o["explanation"]
+    check = api.strength(o["up"], loads, prof, o["walls"], o["infill"], o["top"], o["bottom"])
+    assert check["safety_factor"] == pytest.approx(o["safety_factor"], rel=1e-6)
+    heavy = [dict(l, kg=500) if l["kind"] == "force" else l for l in loads]
+    o = api.optimise_strength([0, 0, 1], heavy, prof)
+    assert not o["met"] and "can't make it strong enough" in o["explanation"]

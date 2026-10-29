@@ -32,8 +32,8 @@ server = MCPServer(
 )
 
 
-def _profile(printer: str, material: str, nozzle: str) -> dict:
-    return {"printer": printer, "material": material, "nozzle": nozzle}
+def _profile(printer: str, material: str, nozzle: str, goal: str = "balanced") -> dict:
+    return {"printer": printer, "material": material, "nozzle": nozzle, "goal": goal}
 
 
 def _clean(value):
@@ -119,16 +119,19 @@ def check_strength(
     printer: str = "bambu_p1s",
     material: str = "pla",
     nozzle: str = "0.4",
-    walls: int = 2,
-    infill: float = 0.15,
+    walls: int | None = None,
+    infill: float | None = None,
+    top: int | None = None,
+    bottom: int | None = None,
 ) -> dict:
-    """Rough strength check. loads: [{"region": id, "kind": "fixed"},
+    """Rough strength check. walls (lines), infill (0–1), top/bottom (solid layers): how it is
+    printed; omitted = the goal's usual settings. loads: [{"region": id, "kind": "fixed"},
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
     (default 3) — for an edge, a corner or part of a big face.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
-    return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill))
+    return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill, top, bottom))
 
 
 @server.tool()
@@ -138,11 +141,29 @@ def strength_options(
     printer: str = "bambu_p1s",
     material: str = "pla",
     nozzle: str = "0.4",
-    walls: int = 2,
-    infill: float = 0.15,
+    walls: int | None = None,
+    infill: float | None = None,
+    top: int | None = None,
+    bottom: int | None = None,
 ) -> list[dict]:
-    """Safety factor with more walls, more infill and the strongest orientation."""
-    return api.strength_options(up, loads, _profile(printer, material, nozzle), walls, infill)
+    """Safety factor with more walls, more infill, more top/bottom layers and the strongest orientation."""
+    return api.strength_options(up, loads, _profile(printer, material, nozzle), walls, infill, top, bottom)
+
+
+@server.tool()
+def optimise_strength(
+    up: list[float],
+    loads: list[dict],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    goal: str = "balanced",
+    target: float | None = None,
+) -> dict:
+    """Lightest walls / top-bottom layers / infill that reach ``target`` safety (default ×2, ×3 for
+    goal "strength"), for this orientation and the strongest one. Returns slicer ``settings``,
+    grams, ``explanation`` and the steps tried. Takes up to a minute."""
+    return api.optimise_strength(up, loads, _profile(printer, material, nozzle, goal), target)
 
 
 @server.tool()

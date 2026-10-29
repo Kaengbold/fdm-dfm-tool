@@ -338,3 +338,22 @@ def test_custom_presets_and_calibration():
     for kind in ("layer_strength", "warping"):
         part = load_stl(api.calibration_part(kind)["stl"])
         assert part.volume() > 1000
+
+
+def test_heat_build_up_flags_a_thin_pin_not_a_block():
+    from shapely.geometry import Point, box
+
+    from fdmcore.additions import extrude
+    from fdmcore.checks import run_checks
+    from fdmcore.mesh import Mesh
+    from fdmcore.profile import Profile
+
+    prof = Profile.from_dict({"material": "pla", "printer": "bambu_p1s"})
+    pin = Mesh(np.concatenate([extrude(box(0, 0, 20, 20), 0, 2), extrude(Point(10, 10).buffer(1.5, 32), 2, 22)]))
+    block = Mesh(extrude(box(0, 0, 40, 40), 0, 20))
+    hot = [f for f in run_checks(pin, prof)["findings"] if f["rule"] == "small_layers_cooling"]
+    assert len(hot) == 1 and hot[0]["severity"] == "warn" and hot[0]["bbox"][0][2] >= 2.0
+    r = run_checks(block, prof)
+    assert not [f for f in r["findings"] if f["rule"] == "small_layers_cooling"]
+    heat = r["stats"]["layer_heat"]
+    assert len(heat["z"]) == len(heat["temp_c"]) and max(heat["temp_c"]) < prof.material["nozzle_temp_c"]

@@ -408,7 +408,12 @@ function renderCheck() {
   );
   viewer.showFindings(findings);
   renderSettings();
+  recolor();
 }
+$("show-temp").onchange = () => {
+  if ($("show-temp").checked) state.showHeat = false;
+  recolor();
+};
 
 /** Recommended settings with the user's applied strength suggestions on top. */
 function effectiveSettings() {
@@ -428,6 +433,7 @@ function renderSettings() {
       el("tr", { title: s.reason }, el("td", { textContent: s.label + (s.changed ? " ★" : "") }), el("td", { textContent: s.value })),
     ),
   );
+  renderShells();
 }
 
 function fmtTime(min) {
@@ -439,6 +445,7 @@ function recolor() {
   const option = activeOption();
   if (!option) return;
   if (state.showHeat && state.strength) return viewer.colorByHeat(state.strength.face_heat);
+  if ($("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
   const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
   viewer.colorByClass(option.face_classes, (f) => {
@@ -563,12 +570,31 @@ function renderLoads() {
     ),
   );
   $("run-strength").disabled = !readyForStrength();
+  $("run-optimise").disabled = !readyForStrength();
   $("pick-hint").hidden = state.loads.length > 1;
 }
 
-function currentWallsInfill() {
+/** How the part will be printed (walls, solid top/bottom layers, infill 0–1), from the settings shown. */
+function currentShells() {
   const s = Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value]));
-  return { walls: Number(s.wall_loops ?? 2), infill: parseFloat(s.sparse_infill_density ?? "15") / 100 };
+  const num = (v, d) => (v == null || v === "" || Number.isNaN(parseFloat(v)) ? d : parseFloat(v));
+  return { walls: num(s.wall_loops, 2), top: num(s.top_shell_layers, 4), bottom: num(s.bottom_shell_layers, 3), infill: num(s.sparse_infill_density, 15) / 100 };
+}
+
+const SHELL_KEYS = { walls: "wall_loops", top: "top_shell_layers", bottom: "bottom_shell_layers", infill: "sparse_infill_density" };
+
+function renderShells() {
+  const sh = currentShells();
+  for (const k of Object.keys(SHELL_KEYS)) $(`sh-${k}`).value = k === "infill" ? Math.round(sh.infill * 100) : sh[k];
+  $("shells-summary").textContent = `${sh.walls} walls, ${sh.top} top / ${sh.bottom} bottom layers, ${Math.round(sh.infill * 100)}% infill`;
+}
+for (const k of Object.keys(SHELL_KEYS)) {
+  $(`sh-${k}`).onchange = (e) => {
+    const v = Math.max(0, Number(e.target.value));
+    state.overrides[SHELL_KEYS[k]] = k === "infill" ? `${Math.min(100, v)}%` : String(Math.round(v));
+    renderSettings();
+    if (state.strength) runStrength();
+  };
 }
 
 const MODE_TEXT = {
@@ -578,10 +604,10 @@ const MODE_TEXT = {
 
 async function runStrength() {
   return busy("Simulating the load…", async () => {
-    const { walls, infill } = currentWallsInfill();
-    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), walls, infill });
+    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() });
     state.strength = r;
     state.showHeat = true;
+    $("show-temp").checked = false;
     recolor();
     viewer.showFindings([]);
     viewer.mark(r.critical_point_print);
@@ -598,6 +624,7 @@ function renderStrength() {
   const heat = el("input", { type: "checkbox", checked: state.showHeat });
   heat.onchange = () => {
     state.showHeat = heat.checked;
+    if (heat.checked) $("show-temp").checked = false;
     recolor();
   };
   $("strength-result").replaceChildren(
@@ -605,8 +632,8 @@ function renderStrength() {
       "div",
       { className: `verdict ${r.verdict.replaceAll(" ", "-")}` },
       el("strong", { textContent: `${r.verdict[0].toUpperCase() + r.verdict.slice(1)} — safety ×${sf.toFixed(1)}` }),
-      el("p", { textContent: MODE_TEXT[r.mode] }),
-      el("p", { textContent: `${r.material}, ${r.walls} walls, ${Math.round(r.infill * 100)}% infill · bends about ${r.max_displacement_mm.toFixed(1)} mm` }),
+      el("p", { textContent: r.explanation ?? MODE_TEXT[r.mode] }),
+      el("p", { className: "hint", textContent: `${r.material}, ${r.walls} walls, ${r.top} top / ${r.bottom} bottom layers, ${Math.round(r.infill * 100)}% infill · bends about ${r.max_displacement_mm.toFixed(1)} mm` }),
     ),
     r.cases.length > 1
       ? el("p", { className: "hint", textContent: `Weakest is case ${r.case} (shown). ` + r.cases.map((c) => `Case ${c.case}: ×${c.safety_factor.toFixed(1)}`).join(" · ") })
@@ -621,8 +648,7 @@ function renderStrength() {
 
 async function showStrengthOptions() {
   return busy("Trying alternatives (a few seconds)…", async () => {
-    const { walls, infill } = currentWallsInfill();
-    const opts = await call("strength_options", { up: activeOption().up, loads: state.loads, profile: profile(), walls, infill });
+    const opts = await call("strength_options", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() });
     $("strength-options").replaceChildren(
       ...opts.map((o) =>
         el(
@@ -637,6 +663,28 @@ async function showStrengthOptions() {
     return opts;
   });
 }
+
+async function runOptimise() {
+  return busy("Trying settings to find the lightest print that holds (up to a minute or two)…", async () => {
+    const o = await call("optimise_strength", { up: activeOption().up, loads: state.loads, profile: profile() });
+    const use = el("button", { className: "primary", textContent: "Use these settings", onclick: async () => {
+      Object.assign(state.overrides, o.settings);
+      renderSettings();
+      if (o.orientation === "strongest") await applyOption({ up: o.up });
+      else runStrength();
+    } });
+    $("optimise-result").replaceChildren(
+      el("div", { className: `verdict ${o.met ? "fine" : "likely-to-break"}` },
+        el("strong", { textContent: o.met ? `Lightest print that holds ×${o.target}` : "Settings alone aren't enough" }),
+        el("p", { textContent: o.explanation }),
+        o.steps.length ? el("p", { className: "hint", textContent: `Added step by step, cheapest first: ${o.steps.map((s) => s.change).join(" → ")}` }) : "",
+        use),
+    );
+    setStatus(state.summary);
+    return o;
+  });
+}
+$("run-optimise").onclick = runOptimise;
 
 async function applyOption(o) {
   if (o.settings) {
@@ -798,7 +846,13 @@ const aiActions = {
   check_strength: async () => {
     if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
     const r = await runStrength();
-    return { safety_factor: round(r.safety_factor), verdict: r.verdict, mode: r.mode, bends_mm: round(r.max_displacement_mm, 1), walls: r.walls, infill: r.infill };
+    return { safety_factor: round(r.safety_factor), verdict: r.verdict, mode: r.mode, explanation: r.explanation, bends_mm: round(r.max_displacement_mm, 1),
+      walls: r.walls, top: r.top, bottom: r.bottom, infill: r.infill };
+  },
+  optimise_strength: async () => {
+    if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
+    const o = await runOptimise();
+    return { met: o.met, target: o.target, safety_factor: round(o.safety_factor), grams: o.grams, orientation: o.orientation, settings: o.settings, explanation: o.explanation };
   },
   strength_options: async () => {
     if (!state.strength) throw new Error("Run check_strength first");
@@ -903,6 +957,7 @@ const TOOL_LABEL = {
   set_loads: "setting loads",
   check_strength: "running the strength check",
   strength_options: "trying stronger options",
+  optimise_strength: "finding the lightest settings that hold",
   suggest_design_changes: "looking for design changes",
   apply_design_changes: "applying design changes",
   tag_feature: "noting what a feature is",

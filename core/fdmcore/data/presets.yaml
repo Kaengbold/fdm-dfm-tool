@@ -113,6 +113,8 @@ printers:
     multi_material: optional # extra toolheads
 
 materials:
+  # nozzle/bed/fan/softening temperatures: OrcaSlicer 2.x "Generic <material> @System" filament profiles
+  # (PLA+ uses PLA's).
   # max_overhang_deg / max_bridge_mm: lower end of the ranges in research/sourced_A1_geometry_rules.yaml
   # [overhang_angle_by_material, bridging_length_by_material]
   pla:
@@ -130,6 +132,10 @@ materials:
     modulus_xy_mpa: 3200
     density_g_cm3: 1.24
     shrinkage_pct: 0.3       # typical linear shrinkage after cooling
+    nozzle_temp_c: 220
+    bed_temp_c: 55
+    fan_pct: 100          # part cooling on small layers
+    softening_c: 45       # Orca's temperature_vitrification
   petg:
     name: PETG
     max_overhang_deg: 45
@@ -144,6 +150,10 @@ materials:
     modulus_xy_mpa: 2000
     density_g_cm3: 1.27
     shrinkage_pct: 0.4       # typical linear shrinkage after cooling
+    nozzle_temp_c: 255
+    bed_temp_c: 80
+    fan_pct: 100          # part cooling on small layers
+    softening_c: 70       # Orca's temperature_vitrification
   abs:
     name: ABS
     max_overhang_deg: 40
@@ -158,6 +168,10 @@ materials:
     modulus_xy_mpa: 2100
     density_g_cm3: 1.04
     shrinkage_pct: 0.8       # typical linear shrinkage after cooling
+    nozzle_temp_c: 260
+    bed_temp_c: 100
+    fan_pct: 80          # part cooling on small layers
+    softening_c: 110       # Orca's temperature_vitrification
   pa_cf:
     name: PA-CF (carbon fibre nylon)
     max_overhang_deg: 45
@@ -172,6 +186,10 @@ materials:
     modulus_xy_mpa: 4500
     density_g_cm3: 1.1
     shrinkage_pct: 0.3       # typical linear shrinkage after cooling
+    nozzle_temp_c: 280
+    bed_temp_c: 100
+    fan_pct: 60          # part cooling on small layers
+    softening_c: 108       # Orca's temperature_vitrification
 
   # Added in T-026 (typical TDS values: Polymaker, eSUN, Prusament; rough, for estimates only).
   pla_plus:
@@ -188,6 +206,10 @@ materials:
     modulus_xy_mpa: 2600
     density_g_cm3: 1.24
     shrinkage_pct: 0.3
+    nozzle_temp_c: 220
+    bed_temp_c: 55
+    fan_pct: 100          # part cooling on small layers
+    softening_c: 45       # Orca's temperature_vitrification
   asa:
     name: ASA
     max_overhang_deg: 45
@@ -202,6 +224,10 @@ materials:
     modulus_xy_mpa: 2000
     density_g_cm3: 1.07
     shrinkage_pct: 0.6
+    nozzle_temp_c: 260
+    bed_temp_c: 100
+    fan_pct: 80          # part cooling on small layers
+    softening_c: 110       # Orca's temperature_vitrification
   pc:
     name: PC (polycarbonate)
     max_overhang_deg: 40
@@ -216,6 +242,10 @@ materials:
     modulus_xy_mpa: 2300
     density_g_cm3: 1.2
     shrinkage_pct: 0.8
+    nozzle_temp_c: 280
+    bed_temp_c: 110
+    fan_pct: 60          # part cooling on small layers
+    softening_c: 120       # Orca's temperature_vitrification
   tpu_95a:
     name: TPU 95A (flexible)
     max_overhang_deg: 40
@@ -230,6 +260,10 @@ materials:
     modulus_xy_mpa: 60       # verify: varies a lot by brand; the strength check is not meant for TPU
     density_g_cm3: 1.21
     shrinkage_pct: 0.5
+    nozzle_temp_c: 240
+    bed_temp_c: 35
+    fan_pct: 100          # part cooling on small layers
+    softening_c: 30       # Orca's temperature_vitrification
 
 nozzles:
   "0.2": {line_width: 0.22, layer_height: 0.1}

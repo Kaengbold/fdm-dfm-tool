@@ -10,7 +10,10 @@ Forces with different ``case`` numbers are separate situations (e.g. "hanging" a
 pulled sideways"); fixed faces hold in every case and the weakest case decides.
 
 The model: voxels with an anisotropic material whose weak axis is the build
-direction; surface voxels carry the walls, inner voxels the (much softer) infill.
+direction. Within a layer it is the same in every direction (line directions are left to
+the detailed, G-code based level). How the slicer fills the part (``Shells``) is modelled by
+depth: walls on the sides (walls × line width), solid top and bottom layers on surfaces facing
+up and down (layers × layer height), and the much softer infill inside.
 Results are indications — "fine / borderline / likely to break" and why.
 """
 
@@ -30,6 +33,16 @@ G = 9.81
 POINT_RADIUS = 3.0  # mm around a picked point that carries the load
 E_Z_RATIO = 0.85  # layer-direction stiffness vs. in-plane (stiffness drops far less than strength)
 INFILL_EXPONENT = 1.5  # Gibson–Ashby-style scaling for stiffness and strength of sparse infill
+
+
+@dataclass(frozen=True)
+class Shells:
+    """How the slicer fills the part: wall lines, solid top/bottom layers, infill fraction."""
+
+    walls: int = 2
+    infill: float = 0.15
+    top: int = 4
+    bottom: int = 3
 
 
 @dataclass
@@ -170,32 +183,73 @@ def material_for(profile: Profile) -> Material:
     )
 
 
-def element_scale(model: Model, walls: int, line_width: float, infill: float) -> np.ndarray:
-    """Effective stiffness/strength fraction per element: walls on the surface, infill inside."""
-    d = depth(model.grid.solid)[tuple(model.elems.T)]
-    shell = walls * line_width
+def solid_fraction(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
+    """Fraction of each element that is solid shell (walls, top or bottom layers) for build
+    direction ``up``; ``up=None`` treats every surface as a wall (direction-free, for one shared solve)."""
     h = model.grid.h
-    fill = infill**INFILL_EXPONENT
-    # Fraction of each voxel layer (by depth) that is wall material.
-    wall_frac = np.clip((shell - (d - 1) * h) / h, 0.0, 1.0)
-    return wall_frac + (1 - wall_frac) * fill
+    pts = model.grid.centers(model.elems)
+    wall = shells.walls * profile.line_width
+
+    def frac(dirs, shell):
+        if shell <= 0:
+            return np.zeros(len(pts))
+        d = _depth_along(model.grid, pts, dirs, shell + h)
+        return np.clip((shell - (d - h / 2)) / h, 0.0, 1.0)  # voxel spans depths d ± h/2
+
+    if up is None:
+        return frac(np.vstack([np.eye(3), -np.eye(3)]), wall)
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    a = np.cross(up, [1.0, 0, 0] if abs(up[0]) < 0.9 else [0, 1.0, 0])
+    a /= np.linalg.norm(a)
+    b = np.cross(up, a)
+    sideways = np.array([np.cos(t) * a + np.sin(t) * b for t in np.arange(8) * np.pi / 4])
+    lh = profile.layer_height
+    return np.maximum.reduce([frac(sideways, wall), frac(up[None], shells.top * lh), frac(-up[None], shells.bottom * lh)])
 
 
-def evaluate(case: LoadCase, up, profile: Profile, walls: int = 2, infill: float = 0.15) -> dict:
+def element_scale(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
+    """Effective stiffness/strength fraction per element: solid shells, sparse infill inside."""
+    solid = solid_fraction(model, up, shells, profile)
+    return solid + (1 - solid) * shells.infill**INFILL_EXPONENT
+
+
+def material_volume(model: Model, up, shells: Shells, profile: Profile) -> float:
+    """Plastic in the part (mm³) with these shells: what more walls or infill cost."""
+    solid = solid_fraction(model, up, shells, profile)
+    return float((solid + (1 - solid) * shells.infill).sum() * model.grid.h**3)
+
+
+def _depth_along(grid: VoxelGrid, pts: np.ndarray, dirs: np.ndarray, cap: float) -> np.ndarray:
+    """Distance (mm) from each point to the outside, the shortest along ``dirs``, up to ``cap``.
+    Steps of h/3 so an axis-aligned surface voxel comes out at exactly h/2."""
+    step = grid.h / 3
+    shape = np.array(grid.solid.shape)
+    out = np.full(len(pts), cap)
+    for k in range(1, int(np.ceil(cap / step)) + 1):
+        for d in dirs:
+            idx = grid.index_of(pts + d * k * step)
+            ok = np.all((idx >= 0) & (idx < shape), axis=1)
+            empty = ~ok
+            empty[ok] = ~grid.solid[tuple(idx[ok].T)]
+            out = np.where(empty, np.minimum(out, (k - 0.5) * step), out)
+    return out
+
+
+def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells()) -> dict:
     """Solve with the anisotropic material for build direction ``up``."""
     mat = material_for(profile)
     r = rotation_to_z(up)
     c = rotate_stiffness(mat.stiffness_print_frame(), r)
-    scale = element_scale(case.model, walls, profile.line_width, infill)
+    scale = element_scale(case.model, up, shells, profile)
     u, info = solve(case.model, c, scale, case.forces, case.fixed)
     stress = element_stress(case.model, c, scale, u)
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
     return _summary(case, fi_layer, fi_plane, u, info)
 
 
-def evaluate_cases(cases: list[LoadCase], up, profile: Profile, walls: int = 2, infill: float = 0.15) -> dict:
+def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells()) -> dict:
     """``evaluate`` for every case; the weakest one is returned, with all safety factors in ``cases``."""
-    results = [evaluate(c, up, profile, walls, infill) for c in cases]
+    results = [evaluate(c, up, profile, shells) for c in cases]
     k = int(np.argmin([r["safety_factor"] for r in results]))
     worst = results[k]
     worst["case"] = cases[k].number
@@ -203,12 +257,12 @@ def evaluate_cases(cases: list[LoadCase], up, profile: Profile, walls: int = 2, 
     return worst
 
 
-def cases_safety(cases: list[LoadCase], ups: np.ndarray, profile: Profile, walls: int = 2, infill: float = 0.15) -> np.ndarray:
+def cases_safety(cases: list[LoadCase], ups: np.ndarray, profile: Profile, shells: Shells = Shells()) -> np.ndarray:
     """Worst-case ``orientation_safety`` over all cases."""
-    return np.min([orientation_safety(c, ups, profile, walls, infill) for c in cases], axis=0)
+    return np.min([orientation_safety(c, ups, profile, shells) for c in cases], axis=0)
 
 
-def orientation_safety(case: LoadCase, ups: np.ndarray, profile: Profile, walls: int = 2, infill: float = 0.15) -> np.ndarray:
+def orientation_safety(case: LoadCase, ups: np.ndarray, profile: Profile, shells: Shells = Shells()) -> np.ndarray:
     """Safety factor for many build directions from ONE isotropic solve.
 
     Rotating the stress field is much cheaper than re-solving; anisotropy shifts the
@@ -217,11 +271,12 @@ def orientation_safety(case: LoadCase, ups: np.ndarray, profile: Profile, walls:
     mat = material_for(profile)
     iso = Material(mat.e_xy, mat.e_xy, mat.nu_xy, mat.nu_xy)
     c = iso.stiffness_print_frame()
-    scale = element_scale(case.model, walls, profile.line_width, infill)
+    scale = element_scale(case.model, None, shells, profile)
     u, _ = solve(case.model, c, scale, case.forces, case.fixed)
     stress = element_stress(case.model, c, scale, u)
     out = []
     for up in ups:
+        # Shells as walls all round: where the top/bottom layers sit changes the load paths only a little.
         fl, fp = failure_indices(stress, np.asarray(up, float), mat, scale)
         worst = max(fl[~case.ignore].max(initial=0), fp[~case.ignore].max(initial=0))
         out.append(1 / worst if worst > 0 else np.inf)

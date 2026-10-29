@@ -304,6 +304,33 @@ def main():
             return f"loads: {loads} | {text.splitlines()[0]}"
         run.step("strength with a load on a spot", spot_load)
 
+        def shells():
+            page.locator(".shells summary").click()
+            page.fill("#sh-walls", "6")
+            run.act(lambda: page.dispatch_event("#sh-walls", "change"), 300_000)
+            page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('6 walls')", timeout=300_000)
+            text = page.locator("#strength-result").inner_text()
+            settings = page.locator("#settings").inner_text()
+            assert "Walls ★" in settings, settings
+            return text.splitlines()[1][:120]
+        run.step("walls set by hand go into strength and the 3MF", shells)
+
+        def optimise():
+            run.act(lambda: page.click("#run-optimise"), 900_000)
+            text = page.locator("#optimise-result").inner_text()
+            assert "g of plastic" in text or "aren't enough" in text, text
+            run.act(lambda: page.locator("#optimise-result button").click(), 300_000)
+            return text.splitlines()[1][:160]
+        run.step("find the lightest settings that hold", optimise)
+
+        def heat_map():
+            n = page.evaluate("() => [fdm.state.check.face_temp.length, fdm.viewer.part.geometry.getAttribute('position').count / 3]")
+            assert n[0] == n[1], n
+            page.check("#show-temp")
+            page.uncheck("#show-temp")
+            return f"{n[0]} faces coloured by heat"
+        run.step("heat while printing colours", heat_map)
+
         def marked_faces():
             run.act(lambda: page.click("[data-sample=mushroom]"))
             before = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")

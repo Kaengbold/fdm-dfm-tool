@@ -64,7 +64,13 @@ stability:
   min_bed_contact_mm2: 150        # [problem_bed_adhesion_moisture_heat_creep_ringing]
 
 cooling:
-  small_layer_area_mm2: 100       # [problem_overhang_curl_and_small_layer_overheating]
+  # Heat build-up (heat.py): the temperature 1 mm below the top, compared with the material's softening
+  # point. The model runs warm (a big PLA block on a 55 °C bed comes out ~53 °C), so only a clear
+  # margin counts. Rough, set so that a Ø3 mm pin is flagged and a 10 mm tower isn't (T-126 calibrates).
+  soft_margin_c: 32               # "may get soft" (info)
+  hot_margin_c: 45                # "will droop / blob" (warn)
+  above_bed_mm: 2.0               # the bed keeps the first layers warm anyway
+  min_run_mm: 1.0
 
 fasteners:
   # Metric screws. Clearance: ISO 273 close / medium series. Nuts: ISO 4032 (across flats, max height).

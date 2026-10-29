@@ -127,6 +127,11 @@ main canvas { display: block; }
 .strength { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .strength .row { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-top: 6px; }
 .strength input[type=number] { width: 60px; font: inherit; font-size: 13px; padding: 3px; border: 1px solid #d0d5dd; border-radius: 6px; }
+.shells { font-size: 13px; }
+.shells summary { cursor: pointer; }
+.shells .row { flex-wrap: wrap; }
+.shells label { display: inline-flex; gap: 4px; align-items: center; }
+#shells-summary { color: #555; }
 .loads { list-style: none; padding: 0; margin: 0; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .loads li { display: flex; justify-content: space-between; align-items: center; border: 1px solid #e0e1e6; border-radius: 6px; padding: 4px 8px; }
 .loads li.fixed { border-left: 4px solid var(--fixed); }

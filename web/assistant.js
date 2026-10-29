@@ -78,6 +78,11 @@ export const TOOLS = [
     input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "optimise_strength",
+    description: "Find the lightest walls / top-bottom layers / infill (and orientation) that hold the loads with the goal's safety margin (×2, ×3 for the strength goal). Shows a 'Use these settings' button; takes up to a minute or two.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "suggest_design_changes",
     description: "Detected holes and suggested geometry edits for the current orientation: teardrop holes and corner chamfers (cut away), 45° fills under ledges, sacrificial layers over holes that start in mid-air, thicker walls (added).",
     input_schema: { type: "object", properties: {}, additionalProperties: false },

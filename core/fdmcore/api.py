@@ -181,7 +181,7 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
         case = _load_case(loads)
         ups = np.array([r.up for r in candidates] + [as_loaded.up])
         with stage(0.2, 0.95):
-            sfs = cases_safety(case, ups, p)
+            sfs = cases_safety(case, ups, p, _shells(p))
         for r, sf in zip([*candidates, as_loaded], sfs):
             safety[id(r)] = float(sf)
             r.reasons.append(_strength_reason(sf, verdict(sf)))
@@ -436,6 +436,120 @@ def _strength_reason(sf: float, verdict: str) -> str:
     return f"{verdict.capitalize()} under your load (safety ×{sf:.1f})"
 
 
+def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
+    """The result in plain words: will it hold, where it gives way, and why there."""
+    sf, z = r["safety_factor"], r["critical_point_print"][2]
+    if not np.isfinite(sf):
+        return "The load hardly stresses the part. It will hold."
+    head = {
+        "fine": f"It should hold: it takes about {sf:.1f}× the load you set before it breaks.",
+        "borderline": f"It might break: it takes only {sf:.1f}× the load you set, and real prints vary by about that much.",
+        "likely to break": f"It will most likely break: it holds only about {sf:.0%} of the load you set.",
+    }[r["verdict"]]
+    why = {
+        "layers": "There the layers get pulled or slid apart. The bond between layers is the weakest part of any print, so turning the part helps most.",
+        "material": "There the plastic itself is overloaded, not the bond between layers. More walls, more infill or a thicker design help most.",
+    }[r["mode"]]
+    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red dot). {why}"
+
+
+OPT_TARGET = {"strength": 3.0}  # safety the optimiser aims for, by goal (default 2.0)
+OPT_WALLS = range(2, 11)
+OPT_LAYERS = range(3, 13)
+OPT_INFILL = (0.10, 0.15, 0.20, 0.25, 0.35, 0.50, 0.75, 1.0)
+OPT_MAX_STEPS = 16
+
+
+def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None) -> dict:
+    """The least plastic that reaches ``target`` safety (default ×2, ×3 for the strength goal):
+    start from a light print and add, one step at a time, whatever buys the most safety per gram
+    — walls, top/bottom layers or infill. Tried for this orientation and the strongest one."""
+    from .strength import cases_safety
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    cases = _load_case(loads)
+    target = float(target or OPT_TARGET.get(p.goal, 2.0))
+    up = (np.asarray(up, float) / np.linalg.norm(up)).tolist()
+    axes = np.vstack([np.eye(3), -np.eye(3)])
+    strongest = axes[int(np.argmax(cases_safety(cases, axes, p, _shells(p))))]
+    ups = [up] + ([strongest.tolist()] if abs(float(np.dot(strongest, up))) < 0.99 else [])
+    plans = []
+    for i, u in enumerate(ups):
+        with stage(i / len(ups), (i + 1) / len(ups)):
+            plans.append(_climb(cases, u, p, target, s.mesh))
+    for plan, u in zip(plans, ups):
+        plan["up"] = u
+        plan["orientation"] = "this one" if u is up else "strongest"
+    # Reaching the target wins; then the lighter print; if neither does, the safer one.
+    best = min(plans, key=lambda q: (not q["met"], q["grams"] if q["met"] else -q["safety_factor"]))
+    best["alternatives"] = [q for q in plans if q is not best]
+    best["target"] = target
+    best["explanation"] = _optimise_story(best, target, len(plans) > 1)
+    return best
+
+
+def _climb(cases, up, p: Profile, target: float, mesh: Mesh) -> dict:
+    from dataclasses import replace
+
+    from .strength import Shells, evaluate_cases, material_volume
+
+    model = cases[0].model
+    to_grams = abs(mesh.volume()) / (len(model.elems) * model.grid.h**3) / 1000 * p.material["density_g_cm3"]
+    memo: dict = {}
+
+    def sf(sh):
+        if sh not in memo:
+            memo[sh] = evaluate_cases(cases, up, p, sh)["safety_factor"]
+        return memo[sh]
+
+    def grams(sh):
+        return material_volume(model, up, sh, p) * to_grams
+
+    sh = Shells(walls=OPT_WALLS[0], infill=OPT_INFILL[0], top=OPT_LAYERS[0], bottom=OPT_LAYERS[0])
+    solid = Shells(walls=OPT_WALLS[-1], infill=OPT_INFILL[-1], top=OPT_LAYERS[-1], bottom=OPT_LAYERS[-1])
+    if sf(solid) < target:  # not even a solid print is enough: no need to search
+        sh = solid
+    steps = []
+    for n in range(OPT_MAX_STEPS):
+        progress.report(n / OPT_MAX_STEPS, "Trying settings")
+        if sf(sh) >= target:
+            break
+        moves = []
+        if sh.walls + 1 in OPT_WALLS:
+            moves.append((replace(sh, walls=sh.walls + 1), f"{sh.walls + 1} walls"))
+        if sh.top + 1 in OPT_LAYERS:
+            moves.append((replace(sh, top=sh.top + 1, bottom=sh.bottom + 1), f"{sh.top + 1} top and bottom layers"))
+        k = OPT_INFILL.index(sh.infill)
+        if k + 1 < len(OPT_INFILL):
+            moves.append((replace(sh, infill=OPT_INFILL[k + 1]), f"{OPT_INFILL[k + 1]:.0%} infill"))
+        gain = [(np.log(sf(m) / sf(sh)) / max(grams(m) - grams(sh), 0.05), m, label) for m, label in moves if np.isfinite(sf(m))]
+        gain = [g for g in gain if g[0] > 1e-4]
+        if not gain:
+            break
+        _, sh, label = max(gain, key=lambda g: g[0])
+        steps.append({"change": label, "safety_factor": float(sf(sh))})
+    settings = {"wall_loops": str(sh.walls), "top_shell_layers": str(sh.top), "bottom_shell_layers": str(sh.bottom),
+                "sparse_infill_density": f"{sh.infill:.0%}"}
+    if p.goal == "material":  # lightning infill only holds up the top surface, not a load
+        settings["sparse_infill_pattern"] = "gyroid"
+    return {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1),
+            "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": sh.infill, "settings": settings, "steps": steps}
+
+
+def _optimise_story(best: dict, target: float, compared: bool) -> str:
+    where = " Printed in the strongest orientation." if best["orientation"] == "strongest" else ""
+    setting = f"{best['walls']} walls, {best['top']} top / {best['bottom']} bottom layers and {best['infill']:.0%} infill"
+    if best["met"]:
+        out = f"{setting} reach ×{best['safety_factor']:.1f} (you need ×{target:.0f}) with about {best['grams']:.0f} g of plastic.{where}"
+        alt = best["alternatives"]
+        if compared and alt and alt[0]["met"]:
+            out += f" The other orientation needs {alt[0]['grams']:.0f} g for the same."
+        return out
+    return (f"Even {setting} only reach ×{best['safety_factor']:.1f} (you need ×{target:.0f}).{where} "
+            "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, or use a stronger material.")
+
+
 def regions() -> dict:
     """Clickable faces: region id per triangle (uint32 bytes) and region summaries."""
     from .regions import find_regions, region_info
@@ -467,43 +581,66 @@ def _load_case(loads: list[dict]):
     return s.load_case[1]
 
 
-def strength(up, loads: list[dict], profile: dict | None = None, walls: int = 2, infill: float = 0.15) -> dict:
+def _shells(p: Profile, walls: int | None = None, infill: float | None = None, top: int | None = None, bottom: int | None = None):
+    """How the part will be printed; anything not given comes from the goal's usual settings."""
+    from .recommend import goal_plan
+    from .strength import Shells
+
+    plan = goal_plan(p)
+    return Shells(walls=int(plan["walls"] if walls is None else walls), infill=float(plan["infill"] / 100 if infill is None else infill),
+                  top=int(plan["top"] if top is None else top), bottom=int(plan["bottom"] if bottom is None else bottom))
+
+
+def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
+             top: int | None = None, bottom: int | None = None) -> dict:
     """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks).
-    With several load cases (``case`` on forces) the weakest decides; ``cases`` lists them all."""
+    ``walls`` (lines), ``infill`` (0–1), ``top``/``bottom`` (solid layers) say how it will be printed
+    (default: the goal's usual settings). With several load cases (``case`` on forces) the weakest
+    decides; ``cases`` lists them all."""
     from .strength import evaluate_cases, face_values
 
     s = _require()
     p = Profile.from_dict(profile)
     cases = _load_case(loads)
-    r = evaluate_cases(cases, up, p, walls, infill)
+    sh = _shells(p, walls, infill, top, bottom)
+    r = evaluate_cases(cases, up, p, sh)
     model = cases[0].model
     heat = face_values(s.mesh, model.grid, model, r.pop("fi"))
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
     r["critical_point_print"] = _to_print_frame(s.mesh, print_rotation(s.mesh, up, p.printer["bed"])[0], r["critical_point"])
-    r.update(walls=walls, infill=infill, material=p.material["name"])
+    r.update(walls=sh.walls, infill=sh.infill, top=sh.top, bottom=sh.bottom, material=p.material["name"])
+    r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
 
 
-def strength_options(up, loads: list[dict], profile: dict | None = None, walls: int = 2, infill: float = 0.15) -> list[dict]:
-    """What would make it stronger? Tries more walls, more infill and the strongest orientation."""
+def strength_options(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
+                     top: int | None = None, bottom: int | None = None) -> list[dict]:
+    """What would make it stronger? Tries more walls, more infill, more top/bottom layers and the strongest orientation."""
+    from dataclasses import replace
+
     from .strength import cases_safety, verdict
     from .strength import evaluate_cases as evaluate_strength
 
     p = Profile.from_dict(profile)
     case = _load_case(loads)
+    sh = _shells(p, walls, infill, top, bottom)
     out = []
 
     def add(change, kind, sf, **extra):
         out.append({"change": change, "kind": kind, "safety_factor": float(sf), "verdict": verdict(sf), **extra})
 
-    more_walls = evaluate_strength(case, up, p, walls + 2, infill)["safety_factor"]
-    add(f"{walls + 2} walls instead of {walls}", "slicer", more_walls, settings={"wall_loops": str(walls + 2)})
-    dense = max(0.4, infill)
-    if dense > infill:
-        sf = evaluate_strength(case, up, p, walls, dense)["safety_factor"]
-        add(f"{dense:.0%} infill instead of {infill:.0%}", "slicer", sf, settings={"sparse_infill_density": f"{dense:.0%}"})
+    more_walls = evaluate_strength(case, up, p, replace(sh, walls=sh.walls + 2))["safety_factor"]
+    add(f"{sh.walls + 2} walls instead of {sh.walls}", "slicer", more_walls, settings={"wall_loops": str(sh.walls + 2)})
+    dense = max(0.4, sh.infill)
+    if dense > sh.infill:
+        sf = evaluate_strength(case, up, p, replace(sh, infill=dense))["safety_factor"]
+        add(f"{dense:.0%} infill instead of {sh.infill:.0%}", "slicer", sf, settings={"sparse_infill_density": f"{dense:.0%}"})
+    shells = replace(sh, top=sh.top + 3, bottom=sh.bottom + 3)
+    sf = evaluate_strength(case, up, p, shells)["safety_factor"]
+    add(f"{shells.top} top and {shells.bottom} bottom layers instead of {sh.top} and {sh.bottom}", "slicer", sf,
+        settings={"top_shell_layers": str(shells.top), "bottom_shell_layers": str(shells.bottom)})
     axes = np.vstack([np.eye(3), -np.eye(3)])
-    sfs = cases_safety(case, axes, p, walls, infill)
+    sfs = cases_safety(case, axes, p, sh)
     best = int(np.argmax(sfs))
     if abs(float(np.dot(axes[best], np.asarray(up, float) / np.linalg.norm(up)))) < 0.99:
         add("Print in the strongest orientation", "orientation", sfs[best], up=axes[best].tolist())
@@ -610,7 +747,19 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         "stats": result["stats"],
         "settings": recommend_settings(p, result["findings"], result["stats"]) if mode != "design" else [],
         "z_strength_factor": result["z_strength_factor"],
+        "face_temp": _face_temp(oriented, result["stats"]["layer_heat"]),
     }
+
+
+HEAT_COLOUR_C = (10.0, 55.0)  # °C above softening: no colour … full red
+
+
+def _face_temp(oriented: Mesh, heat: dict) -> bytes:
+    """Heat build-up per triangle (uint8, 255 = far above softening while printing), for the viewer."""
+    z = oriented.triangles[..., 2].mean(axis=1)
+    over = np.interp(z, heat["z"], heat["temp_c"]) - heat["softening_c"]
+    lo, hi = HEAT_COLOUR_C
+    return (np.clip((over - lo) / (hi - lo), 0, 1) * 255).astype(np.uint8).tobytes()
 
 
 def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotation: np.ndarray) -> list[dict]:
@@ -756,6 +905,7 @@ METHODS = {
     "export": export,
     "report": report,
     "regions": regions,
+    "optimise_strength": optimise_strength,
     "tag_feature": tag_feature,
     "strength": strength,
     "strength_options": strength_options,

@@ -23,6 +23,7 @@ import numpy as np
 import shapely
 from shapely.geometry import Polygon
 
+from .heat import layer_heat
 from .holes import horizontal_holes
 from .mesh import Mesh
 from .profile import Profile, load_data
@@ -138,7 +139,8 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
     findings += _bed_findings(layers, profile, T)
     findings += _weak_findings(layers, tracker, profile, T)
     stats = _estimate(layers, profile)
-    findings += _cooling_findings(layers, stats["layer_times"], profile, T)
+    heat = _layer_heat(layers, profile)
+    findings += _cooling_findings(layers, heat, profile, T)
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
 
@@ -147,6 +149,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
     findings.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
     del stats["layer_times"]
     stats.update(
+        layer_heat={"z": [l.z for l in layers], "temp_c": heat.round(1).tolist(), "softening_c": profile.material["softening_c"]},
         layers_analysed=len(layers),
         height_mm=float(mesh.triangles[..., 2].max()),
         support_area_mm2=float(sum(r.metrics.get("area", 0) for r in tracker.of("overhang"))),
@@ -745,30 +748,42 @@ def _skin_area(layers: list[Layer], zs: np.ndarray, i: int, top: float, bottom: 
     return exposed
 
 
-def _cooling_findings(layers, times, profile: Profile, T: dict) -> list[dict]:
-    """Short layers in a part whose other layers are much bigger: a local hot spot that deforms.
-    (A part that is small everywhere is handled by the slicer's minimum layer time.)"""
-    limit = profile.material["min_layer_time_s"]
-    max_area = max(l.geom.area for l in layers)
-    small = T["cooling"]["small_layer_area_mm2"]
+def _layer_heat(layers: list[Layer], profile: Profile) -> np.ndarray:
+    """Temperature just below the top of each layer while printing (see heat.py)."""
+    zs = np.array([l.z for l in layers])
+    areas = np.array([l.geom.area for l in layers])
+    perimeters = np.array([l.geom.length for l in layers])
+    return layer_heat(zs, areas, perimeters, profile)
+
+
+def _cooling_findings(layers, heat: np.ndarray, profile: Profile, T: dict) -> list[dict]:
+    """Layers still soft when more is printed on top (heat build-up): small tips and pins droop or blob."""
+    soft = profile.material["softening_c"]
+    C = T["cooling"]
     out, run = [], []
-    for layer, t in zip(layers, times):
-        if 0 < t < limit and layer.index > 0 and layer.geom.area < min(0.25 * max_area, small):
-            run.append(layer)
+    for layer, temp in zip(layers, heat):
+        if layer.z > C["above_bed_mm"] and temp >= soft + C["soft_margin_c"]:
+            run.append((layer, temp))
             continue
-        out += _cooling_run(run, profile)
+        out += _cooling_run(run, profile, C)
         run = []
-    return out + _cooling_run(run, profile)
+    return out + _cooling_run(run, profile, C)
 
 
-def _cooling_run(run, profile) -> list[dict]:
-    if not run or run[-1].z - run[0].z < 2.0:
+def _cooling_run(run, profile: Profile, C: dict) -> list[dict]:
+    if not run or run[-1][0].z - run[0][0].z < C["min_run_mm"]:
         return []
-    b = np.array([l.geom.bounds for l in run])
-    bbox = [[b[:, 0].min(), b[:, 1].min(), run[0].z], [b[:, 2].max(), b[:, 3].max(), run[-1].z]]
-    return [_finding("small_layers_cooling", "info",
-                     f"Small layers at {run[0].z:.1f}–{run[-1].z:.1f} mm get little time to cool — tips can droop or blob",
-                     bbox=bbox)]
+    layers = [l for l, _ in run]
+    hottest = max(t for _, t in run)
+    soft = profile.material["softening_c"]
+    b = np.array([l.geom.bounds for l in layers])
+    bbox = [[b[:, 0].min(), b[:, 1].min(), layers[0].z], [b[:, 2].max(), b[:, 3].max(), layers[-1].z]]
+    sev = "warn" if hottest >= soft + C["hot_margin_c"] else "info"
+    return [_finding("small_layers_cooling", sev,
+                     f"At {layers[0].z:.0f}–{layers[-1].z:.0f} mm the plastic is still about {hottest:.0f} °C when the next layers go on "
+                     f"({profile.material['name']} softens from about {soft:.0f} °C) — thin parts here can droop, blob or bend",
+                     bbox=bbox, temp_c=hottest, softening_c=soft)]
+
 
 
 def _profile_findings(layers, profile: Profile) -> list[dict]:

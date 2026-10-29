@@ -112,6 +112,7 @@
 
         <h2>Findings <small id="stats"></small></h2>
         <ol id="findings" class="impact-groups"></ol>
+        <label class="toggle" title="Rough estimate of heat build-up: small pins and tips get the next layer before they have cooled"><input id="show-temp" type="checkbox" /> Show heat while printing (red = still soft when the next layers go on)</label>
         <details id="nozzle-block" class="nozzles">
           <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
           <table id="nozzle-table"></table>
@@ -145,9 +146,21 @@
           </div>
           <ul id="marks" class="marks"></ul>
           <ul id="loads" class="loads"></ul>
+          <details class="shells">
+            <summary>How it's printed: <span id="shells-summary"></span></summary>
+            <p class="hint">The outside of a print is solid: <b>walls</b> around the sides, solid <b>layers</b> on top and bottom. Inside is a light <b>infill</b> grid. Most strength comes from the solid outside. These go into the 3MF too.</p>
+            <div class="row">
+              <label>Walls <input id="sh-walls" type="number" min="1" max="20" step="1" /></label>
+              <label>Top layers <input id="sh-top" type="number" min="0" max="30" step="1" /></label>
+              <label>Bottom layers <input id="sh-bottom" type="number" min="0" max="30" step="1" /></label>
+              <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
+            </div>
+          </details>
           <div class="actions">
             <button id="run-strength" class="primary" disabled>Check strength</button>
+            <button id="run-optimise" disabled title="Tries walls, top/bottom layers and infill, and finds the lightest print that holds your load with a safety margin">Find the lightest settings that hold</button>
           </div>
+          <div id="optimise-result"></div>
           <div id="strength-result"></div>
         </div>
 
