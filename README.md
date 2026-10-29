@@ -33,7 +33,11 @@ python -m http.server 8000
 ```
 
 Then open <http://localhost:8000/web/>. The first visit downloads the Python runtime
-(Pyodide, ~15 MB); strength and design tools fetch scipy (~10 MB) when first used.
+(Pyodide, ~15 MB); strength and design tools fetch scipy (~10 MB) when first used. After that the
+app also works offline (a service worker keeps what it downloaded).
+
+To publish it, enable GitHub Pages with source "GitHub Actions": `.github/workflows/pages.yml`
+deploys `web/` and the engine on every push to `main`.
 
 ## Use it from an AI agent (local mode)
 

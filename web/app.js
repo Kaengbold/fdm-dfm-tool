@@ -1273,3 +1273,6 @@ $("paste-apply").onclick = async () => {
   }
   $("paste-result").replaceChildren(...rows.map((r) => el("li", { className: r.error ? "error" : "", textContent: r.text })));
 };
+
+// Offline after the first visit (see sw.js). Not on file:// pages, where service workers don't run.
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js");

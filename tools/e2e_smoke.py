@@ -423,6 +423,20 @@ def main():
             return f"materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
         run.step("my presets + calibration + Orca import", my_presets)
 
+        def offline():
+            # The reload above ran under the service worker, so the engine and libraries are cached now.
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.context.set_offline(True)
+            try:
+                page.reload()
+                run.booted()
+                status = run.act(lambda: page.click("[data-sample=mushroom]"))
+                assert page.locator("#options > li").count() >= 2, "no orientations offline"
+            finally:
+                page.context.set_offline(False)
+            return f"offline: {status}"
+        run.step("works offline after a visit", offline)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

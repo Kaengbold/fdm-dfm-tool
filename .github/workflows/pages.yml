@@ -1,0 +1,39 @@
+name: Deploy to GitHub Pages
+
+# Publishes the static app: web/ plus the engine files it loads from core/fdmcore/.
+# Needs Settings -> Pages -> Source: "GitHub Actions" (and a public repo or a paid plan).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/core
+          cp -r web _site/web
+          rsync -a --exclude '__pycache__' core/fdmcore/ _site/core/fdmcore/
+          cp LICENSE _site/
+          printf '<!doctype html><meta http-equiv="refresh" content="0; url=web/"><a href="web/">FDM DFM Tool</a>\n' > _site/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
