@@ -135,6 +135,7 @@ def gemini_review(binary: str):
 
 
 def main():
+    sys.stdout.reconfigure(errors="replace")  # results quote UI text (🔒, ×); Windows consoles may not have them
     ap = argparse.ArgumentParser()
     ap.add_argument("parts", nargs="*", type=Path)
     ap.add_argument("--headed", action="store_true")

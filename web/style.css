@@ -127,6 +127,11 @@ main canvas { display: block; }
 .strength { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
 .strength .row { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-top: 6px; }
 .strength input[type=number] { width: 60px; font: inherit; font-size: 13px; padding: 3px; border: 1px solid #d0d5dd; border-radius: 6px; }
+.strength .row { flex-wrap: wrap; }
+.strength label.row { flex-wrap: nowrap; align-items: flex-start; }
+.strength select { max-width: 100%; }
+.pick-step { border: 1px solid #e0e1e6; border-radius: 6px; padding: 6px 8px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; background: #fff; }
+.pick-step > button { align-self: flex-start; }
 .shells { font-size: 13px; }
 .shells summary { cursor: pointer; }
 .shells .row { flex-wrap: wrap; }
@@ -143,6 +148,7 @@ main canvas { display: block; }
 .verdict.borderline { background: #c98a00; }
 .verdict.likely-to-break { background: var(--support); }
 .verdict p { margin: 4px 0 0; }
+.verdict .hint { color: rgba(255, 255, 255, 0.85); }
 .options { list-style: none; padding: 0; margin: 6px 0 0; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .options li { display: flex; justify-content: space-between; gap: 6px; align-items: center; }
 .toggle { font-size: 12px; display: flex; gap: 6px; align-items: center; margin-top: 6px; }

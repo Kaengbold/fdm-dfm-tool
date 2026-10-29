@@ -156,6 +156,37 @@ export class Viewer {
     }
   }
 
+  /** Symbols for the strength setup: a lock on held faces, an arrow with its weight on loads.
+   * [{kind: "fixed"|"force", point, normal, dir (force direction), label}] — part coordinates. */
+  showLoadSymbols(symbols) {
+    this.symbols?.clear();
+    if (!this.symbols) this.scene.add((this.symbols = new THREE.Group()));
+    if (!this.part) return;
+    const r = this.part.geometry.boundingSphere.radius;
+    const size = Math.max(6, 0.12 * r);
+    const turn = (v) => this.toShown(v).map((x, i) => x - this.placement.shift[i]); // directions: rotate only
+    for (const s of symbols) {
+      const at = new THREE.Vector3(...this.toShown(s.point));
+      const n = new THREE.Vector3(...turn(s.normal)).normalize();
+      if (s.kind === "fixed") {
+        const lock = iconSprite("🔒", size);
+        lock.position.copy(at).addScaledVector(n, size * 0.7);
+        this.symbols.add(lock);
+        continue;
+      }
+      const d = new THREE.Vector3(...turn(s.dir)).normalize();
+      const len = Math.max(12, 0.4 * r);
+      // Pushing ends at the face; pulling and hanging start at it.
+      const into = d.dot(n) < 0;
+      const tail = into ? at.clone().addScaledVector(d, -len) : at.clone();
+      const color = css("--force");
+      const arrow = solidArrow(d, tail, len, size, color);
+      const tag = iconSprite(s.label, size * 0.75, color.getStyle());
+      tag.position.copy(into ? tail : tail.clone().addScaledVector(d, len)).addScaledVector(d, into ? -size * 0.5 : size * 0.5);
+      this.symbols.add(arrow, tag);
+    }
+  }
+
   /** Small sphere marking a point (e.g. where the part would break). */
   mark(point, color = "--support") {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(1.5), new THREE.MeshBasicMaterial({ color: css(color), depthTest: false }));
@@ -271,6 +302,49 @@ export class Viewer {
 
 /** Rotate the triangle soup and sit it centred on the bed origin at z = 0 (matches fdmcore.checks.orient).
  * Pass ``fixedShift`` to place other geometry (ghosts) exactly like the part. */
+/** A thick arrow (shaft + head) from ``tail`` along unit ``dir``, drawn on top of the part. */
+function solidArrow(dir, tail, len, size, color) {
+  const material = new THREE.MeshBasicMaterial({ color, depthTest: false });
+  const head = size * 0.7;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.1, size * 0.1, len - head, 12), material);
+  shaft.position.y = (len - head) / 2;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(size * 0.28, head, 16), material);
+  tip.position.y = len - head / 2;
+  const arrow = new THREE.Group();
+  arrow.add(shaft, tip);
+  arrow.position.copy(tail);
+  arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  arrow.traverse((o) => (o.renderOrder = 11));
+  return arrow;
+}
+
+/** A label that always faces the camera and stays visible through the part: an emoji or short text
+ * on a white rounded badge, ``size`` mm tall. */
+function iconSprite(text, size, color = "#1f2328") {
+  const h = 96;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  ctx.font = `bold ${h * 0.62}px system-ui, "Segoe UI Emoji", sans-serif`;
+  const w = Math.max(h, Math.ceil(ctx.measureText(text).width) + h * 0.5);
+  canvas.width = w;
+  canvas.height = h;
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.beginPath();
+  ctx.roundRect(2, 2, w - 4, h - 4, h * 0.3);
+  ctx.fill();
+  ctx.font = `bold ${h * 0.62}px system-ui, "Segoe UI Emoji", sans-serif`;
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, w / 2, h / 2 + h * 0.04);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
+  sprite.scale.set((size * w) / h, size, 1);
+  sprite.renderOrder = 12;
+  return sprite;
+}
+
 function placeTriangles(triangles, [r0, r1, r2], fixedShift = null) {
   const out = new Float32Array(triangles.length);
   const min = [Infinity, Infinity, Infinity];

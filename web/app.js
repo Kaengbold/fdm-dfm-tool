@@ -444,6 +444,7 @@ function fmtTime(min) {
 function recolor() {
   const option = activeOption();
   if (!option) return;
+  viewer.showLoadSymbols(loadSymbols());
   if (state.showHeat && state.strength) return viewer.colorByHeat(state.strength.face_heat);
   if ($("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
@@ -457,6 +458,19 @@ function recolor() {
   const spots = state.loads.filter((l) => l.point).map((l) => ({ point: l.point, radius: l.radius, color: REGION_COLORS[l.kind] }));
   if (spot) spots.push({ point: state.pickedPoint, radius: SPOT_RADIUS, color: REGION_COLORS.selected });
   viewer.showSpots(spots);
+}
+
+/** Lock on held faces, arrow + weight on loads, for the 3D view. */
+function loadSymbols() {
+  if (!state.regionInfo.length) return [];
+  return state.loads.map((l) => {
+    const info = state.regionInfo[l.region];
+    const normal = l.normal ?? info?.normal ?? [0, 0, 1];
+    const point = l.point ?? info?.centroid;
+    if (l.kind === "fixed") return { kind: "fixed", point, normal };
+    const dir = { push: normal.map((v) => -v), pull: normal, down: [0, 0, -1] }[l.direction] ?? normal;
+    return { kind: "force", point, normal, dir, label: `${l.kg} kg${multiCase() ? ` · case ${l.case}` : ""}` };
+  }).filter((s) => s.point);
 }
 
 async function ensureRegions() {
@@ -493,7 +507,9 @@ const where = (l) => (l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",
 
 /** The clicked face, or the spot around the clicked point when "only around the spot" is ticked. */
 function target() {
-  return $("at-spot").checked ? { point: state.pickedPoint, radius: SPOT_RADIUS } : { region: state.selectedRegion };
+  return $("at-spot").checked
+    ? { point: state.pickedPoint, radius: SPOT_RADIUS, normal: state.regionInfo[state.selectedRegion]?.normal }
+    : { region: state.selectedRegion };
 }
 
 function addLoad(load) {
@@ -556,7 +572,7 @@ function renderLoads() {
       el(
         "li",
         { className: l.kind },
-        (l.kind === "fixed" ? "Held here" : `${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${DIR_LABEL[l.direction]}`) + (l.point ? " (at a spot)" : ""),
+        (l.kind === "fixed" ? "🔒 Held here" : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${DIR_LABEL[l.direction]}`) + (l.point ? " (at a spot)" : ""),
         el("button", {
           textContent: "×",
           title: "Remove",
