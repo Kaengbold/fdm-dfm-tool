@@ -161,3 +161,19 @@ def test_upright_mark_stands_a_hole_up():
     ranked = api.orientations(faces={"vertical": [hole["region"]]})["orientations"]
     assert abs(np.dot(ranked[0]["up"], hole["axis"])) > 0.99
     assert "The face you picked stands upright" in ranked[0]["reasons"]
+
+
+def test_pulled_mushroom_prints_on_its_side_for_strength():
+    """Pulling the stem along its axis: upright, the layers are pulled apart. With the strength goal the
+    side wins even when both would hold; with balanced, the other option says how much stronger it is."""
+    from fdmcore import api
+
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
+    api.regions()
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 5, "direction": "pull"}]
+    best = api.orientations({"material": "pla", "goal": "strength"}, loads=loads)["orientations"][0]
+    assert abs(best["up"][2]) < 0.1, best["up"]
+    opts = api.orientations({"material": "pla"}, loads=loads)["orientations"]
+    weaker = [o for o in opts if abs(o["up"][2]) > 0.9]
+    assert weaker and any("holds" in r and "more" in r for r in weaker[0]["reasons"])
+    assert any(abs(o["up"][2]) < 0.1 for o in opts)  # the strongest direction is always offered

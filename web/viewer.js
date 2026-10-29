@@ -156,6 +156,95 @@ export class Viewer {
     }
   }
 
+  /** FEA result view: the refined surface coloured by ``values`` (per corner) from 0 to ``max``,
+   * in banded rainbow colours like FEA software. ``disp`` (3 per corner, mm, part coords) lets
+   * ``setDeformation`` show the bent shape. Hides the normal part until ``hideField``. */
+  showField({ triangles, values, disp, max }) {
+    this.hideField();
+    const { out } = placeTriangles(triangles, this.placement.rotation, this.placement.shift);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(out, 3));
+    const colors = new Float32Array(out.length);
+    const c = new THREE.Color();
+    for (let i = 0; i < values.length; i++) {
+      fieldColor(values[i] / max, c);
+      colors.set([c.r, c.g, c.b], i * 3);
+    }
+    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+    this.renderer.localClippingEnabled = true;
+    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide, clippingPlanes: [] });
+    this.field = { mesh: new THREE.Mesh(geometry, material), base: out.slice(), disp: disp && this.turnAll(disp) };
+    this.scene.add(this.field.mesh);
+    this.part.visible = false;
+  }
+
+  hideField() {
+    if (!this.field) return;
+    this.scene.remove(this.field.mesh);
+    this.field.mesh.geometry.dispose();
+    this.section?.removeFromParent();
+    this.section = null;
+    this.field = null;
+    if (this.part) this.part.visible = true;
+  }
+
+  /** Bend the shown result by ``scale`` × the computed displacement (FEA software exaggerates it). */
+  setDeformation(scale) {
+    if (!this.field?.disp) return;
+    const pos = this.field.mesh.geometry.getAttribute("position");
+    const { base, disp } = this.field;
+    for (let i = 0; i < base.length; i++) pos.array[i] = base[i] + scale * disp[i];
+    pos.needsUpdate = true;
+    this.field.mesh.geometry.computeVertexNormals();
+  }
+
+  /** Cut through the result: hide everything beyond a plane across ``axis`` ("x"/"y"/"z" on the bed)
+   * at ``t`` (0–1 of the part's extent) and show the analysis cubes on the cut, coloured by value.
+   * ``t`` null removes the cut. ``elements``: {centers (part coords), values, size_mm}. */
+  setSection(axis, t, elements, max) {
+    this.section?.removeFromParent();
+    this.section = null;
+    if (!this.field) return;
+    const material = this.field.mesh.material;
+    if (t == null) {
+      material.clippingPlanes = [];
+      material.needsUpdate = true;
+      return;
+    }
+    const k = { x: 0, y: 1, z: 2 }[axis];
+    const box = new THREE.Box3().setFromBufferAttribute(this.field.mesh.geometry.getAttribute("position"));
+    const at = box.min.getComponent(k) + t * (box.max.getComponent(k) - box.min.getComponent(k));
+    const normal = new THREE.Vector3().setComponent(k, -1);
+    material.clippingPlanes = [new THREE.Plane(normal, at)];
+    material.needsUpdate = true;
+    const h = elements.size_mm;
+    const shown = [];
+    for (let i = 0; i < elements.values.length; i++) {
+      const p = this.toShown([elements.centers[3 * i], elements.centers[3 * i + 1], elements.centers[3 * i + 2]]);
+      if (Math.abs(p[k] - at) <= h / 2) shown.push([p, elements.values[i]]);
+    }
+    const cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(h, h, h), new THREE.MeshBasicMaterial(), shown.length);
+    const m = new THREE.Matrix4();
+    const c = new THREE.Color();
+    shown.forEach(([p, v], i) => {
+      cubes.setMatrixAt(i, m.makeTranslation(p[0], p[1], p[2]));
+      cubes.setColorAt(i, fieldColor(v / max, c));
+    });
+    this.section = cubes;
+    this.scene.add(cubes);
+  }
+
+  /** Part-coordinate vectors (flat array, 3 per vector) turned into the shown orientation. */
+  turnAll(v) {
+    const R = this.placement.rotation;
+    const out = new Float32Array(v.length);
+    for (let i = 0; i < v.length; i += 3) {
+      for (let r = 0; r < 3; r++) out[i + r] = R[r][0] * v[i] + R[r][1] * v[i + 1] + R[r][2] * v[i + 2];
+    }
+    return out;
+  }
+
   /** Symbols for the strength setup: a lock on held faces, an arrow with its weight on loads.
    * [{kind: "fixed"|"force", point, normal, dir (force direction), label}] — part coordinates. */
   showLoadSymbols(symbols) {
@@ -181,10 +270,36 @@ export class Viewer {
       const tail = into ? at.clone().addScaledVector(d, -len) : at.clone();
       const color = css("--force");
       const arrow = solidArrow(d, tail, len, size, color);
+      arrow.userData.load = s.load; // pickSymbol: drag it to change the direction
       const tag = iconSprite(s.label, size * 0.75, color.getStyle());
       tag.position.copy(into ? tail : tail.clone().addScaledVector(d, len)).addScaledVector(d, into ? -size * 0.5 : size * 0.5);
       this.symbols.add(arrow, tag);
     }
+  }
+
+  /** Turn a direction (part coordinates) by a mouse drag of (dx, dy) px, like a trackball: the
+   * arrow follows the mouse whichever way the camera looks. */
+  dragDirection(dir, dx, dy) {
+    const R = this.placement.rotation;
+    const shown = new THREE.Vector3(...R.map((row) => row[0] * dir[0] + row[1] * dir[1] + row[2] * dir[2]));
+    const m = this.camera.matrixWorld.elements;
+    const right = new THREE.Vector3(m[0], m[1], m[2]).normalize();
+    const up = new THREE.Vector3(m[4], m[5], m[6]).normalize();
+    shown.applyAxisAngle(up, dx * 0.01).applyAxisAngle(right, dy * 0.01).normalize();
+    return [0, 1, 2].map((k) => Math.round((R[0][k] * shown.x + R[1][k] * shown.y + R[2][k] * shown.z) * 1e4) / 1e4);
+  }
+
+  /** Index of the load whose arrow is under the pointer, or null. */
+  pickSymbol(event) {
+    if (!this.symbols?.children.length) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    for (const hit of ray.intersectObjects(this.symbols.children, true)) {
+      for (let o = hit.object; o; o = o.parent) if (o.userData.load != null) return o.userData.load;
+    }
+    return null;
   }
 
   /** Small sphere marking a point (e.g. where the part would break). */
@@ -302,9 +417,17 @@ export class Viewer {
 
 /** Rotate the triangle soup and sit it centred on the bed origin at z = 0 (matches fdmcore.checks.orient).
  * Pass ``fixedShift`` to place other geometry (ghosts) exactly like the part. */
-/** A thick arrow (shaft + head) from ``tail`` along unit ``dir``, drawn on top of the part. */
+export const FIELD_BANDS = 10;
+
+/** Classic FEA rainbow in bands: blue (0) → cyan → green → yellow → red (1 and above). */
+export function fieldColor(t, c = new THREE.Color()) {
+  const band = Math.min(FIELD_BANDS - 1, Math.max(0, Math.floor(t * FIELD_BANDS)));
+  return c.setHSL((0.66 * (FIELD_BANDS - 1 - band)) / (FIELD_BANDS - 1), 0.85, 0.5);
+}
+
+/** A thick arrow (shaft + head) from ``tail`` along unit ``dir``. */
 function solidArrow(dir, tail, len, size, color) {
-  const material = new THREE.MeshBasicMaterial({ color, depthTest: false });
+  const material = new THREE.MeshBasicMaterial({ color });
   const head = size * 0.7;
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(size * 0.1, size * 0.1, len - head, 12), material);
   shaft.position.y = (len - head) / 2;
@@ -314,12 +437,11 @@ function solidArrow(dir, tail, len, size, color) {
   arrow.add(shaft, tip);
   arrow.position.copy(tail);
   arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-  arrow.traverse((o) => (o.renderOrder = 11));
   return arrow;
 }
 
-/** A label that always faces the camera and stays visible through the part: an emoji or short text
- * on a white rounded badge, ``size`` mm tall. */
+/** A label that always faces the camera (hidden where the part is in front of it): an emoji or
+ * short text on a white rounded badge, ``size`` mm tall. */
 function iconSprite(text, size, color = "#1f2328") {
   const h = 96;
   const canvas = document.createElement("canvas");
@@ -339,9 +461,8 @@ function iconSprite(text, size, color = "#1f2328") {
   ctx.fillText(text, w / 2, h / 2 + h * 0.04);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture }));
   sprite.scale.set((size * w) / h, size, 1);
-  sprite.renderOrder = 12;
   return sprite;
 }
 

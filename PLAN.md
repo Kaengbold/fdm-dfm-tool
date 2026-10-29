@@ -169,7 +169,9 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | **3 — Design fixes** | "I'm designing it" mode | Feature graph confirm UI, ghost edits, modified STL/STEP export |
 | **4 — AI & agents** | Optional superpowers | Copy-context, BYOK, local mode + MCP + Orca CLI |
 | **5 — Ecosystem** | Grow | Fusion add-in, community rules/presets, calibration prints |
+| **6a — Fixes from user testing** | Answers you can trust | Strength-aware orientation bug (mushroom pulled on its stem), FEA-style stress colours with a legend, symbols hidden behind the part, force direction set on the part, design suggestions for warping corners / elephant foot / stress at fillets, slicer helpers (hole and elephant-foot compensation), small UI bugs |
 | **6 — Simulation** | Trustworthy answers | Simple level (seconds–2 min, browser): walls/top/bottom/infill as you'll print them, settings optimised for your load and goal, heat build-up and warping estimates, plain explanations. Detailed level (local install, up to ~20 min): slice with OrcaSlicer, then strength with each line's direction and heat/warping from the real G-code timing. Later: OrcaSlicer compiled to WebAssembly in the browser |
+| **7 — UI overhaul + wizard** | Usable without reading a manual | A guide that starts by default and asks what you want: (1) just good slicer settings, (2) a one-off optimisation, (3) step by step through everything, (4) expert mode (today's full UI). Then a cleaner layout: fewer controls at once, settings next to where they matter, clear next steps |
 
 ### Progress (2026-10-29)
 

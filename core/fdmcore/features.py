@@ -17,6 +17,7 @@ import numpy as np
 from .checks import orient
 from .mesh import Mesh
 from .orientation import rotation_to_z
+from .profile import load_data
 from .slicer import slice_mesh
 
 TEARDROP_MIN_DIAMETER = 5.0  # smaller horizontal holes bridge fine
@@ -103,8 +104,16 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
 
 
 # Adjustable edit sizes: default, min, max (the UI shows these as inputs).
+CORNER_ROUND_SHARE = 0.3  # low-warp materials: round corners once the footprint is this share of the warp length
+CORNER_ARC_STEPS = 8
+MAX_FOOT_PIECES = 600
+FILLET_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot (in analysis voxels) seeds the fillet
+MAX_FILLET_PIECES = 400
+
 PARAMS = {
-    "chamfer_mm": (3.0, 0.5, 10.0),
+    "chamfer_mm": (3.0, 0.5, 10.0),  # radius of rounded bed corners
+    "foot_chamfer_mm": (0.5, 0.2, 1.5),  # elephant-foot chamfer along the bottom edge
+    "fillet_mm": (2.0, 0.5, 8.0),  # fillet at the inside corner where the strength check finds the most stress
     "teardrop_angle_deg": (45.0, 30.0, 60.0),  # tip half-angle from vertical; 45° is the classic choice
     "ledge_max_mm": (20.0, 2.0, 40.0),  # widest ledge to fill in at 45° underneath
     "wall_lines": (2.0, 2.0, 4.0),  # thin walls grow to this many printed lines
@@ -128,8 +137,10 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
     }
 
 
-def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None) -> list[dict]:
-    """Suggested geometry changes for this build direction, as closed meshes in part coordinates."""
+def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
+                 weak_spot=None, voxel_mm: float = 1.0) -> list[dict]:
+    """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
+    ``weak_spot`` (part coordinates, from the last strength check) adds a fillet at the nearest inside corner."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
 
     up = np.asarray(up, float) / np.linalg.norm(up)
@@ -147,6 +158,8 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
     edits += _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"])
+    edits += _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"])
+    edits += _stress_fillets(mesh, weak_spot, voxel_mm, prm["fillet_mm"])
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
@@ -190,29 +203,179 @@ def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.nda
 
 
 def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0) -> list[dict]:
-    """Vertical chamfers on sharp footprint corners (where warping starts)."""
-    from .checks import _sharp_corners
+    """Round sharp footprint corners (where warping starts): a vertical fillet of radius ``size``,
+    cut as a fan of thin wedges between the corner and the arc. Offered for warp-prone materials,
+    and for others once the footprint is a fair part of the length at which they start to lift."""
+    from .checks import _rect_sides, _sharp_corners
 
     layers = slice_mesh(oriented, profile.layer_height, max_layers=60)
-    corners = _sharp_corners(layers[0].geom)
-    if not corners or profile.material["warp_risk"] == "low":
+    first = layers[0].geom
+    if first.is_empty:
         return []
+    corners = _sharp_corners(first)
+    if not corners:
+        return []
+    if profile.material["warp_risk"] == "low":
+        risk = load_data("thresholds")["warping"]["risk_length_mm"]
+        limit = risk.get(profile.material.get("based_on", profile.material_id), {}).get(profile.enclosure)
+        if not limit or _rect_sides(first.minimum_rotated_rectangle)[1] < CORNER_ROUND_SHARE * limit:
+            return []
     out = []
     for i, (x, y) in enumerate(corners):
         top = _corner_height(layers, np.array([x, y]))
-        e1, e2, edge = _corner_edges(layers[0].geom, np.array([x, y]))
+        e1, e2, edge = _corner_edges(first, np.array([x, y]))
         if e1 is None:
             continue
-        # Two chamfers on a short edge must not meet, or they leave a new sharp point between them.
-        cut = min(size, 0.4 * edge)
         p = np.array([x, y])
-        tri = [p - (e1 + e2) * 0.5, p + e1 * cut, p + e2 * cut]  # extends past the corner tip
-        print_tris = _prism([np.array([*q, top / 2]) for q in tri], np.array([0, 0, top / 2 + 0.5]))
+        half_angle = np.arccos(np.clip(e1 @ e2, -1, 1)) / 2
+        # Two roundings on a short edge must not meet, or they leave a new point between them.
+        r = min(size, 0.4 * edge * np.tan(half_angle))
+        reach = r / np.tan(half_angle)  # corner to where the arc meets each edge
+        bis = (e1 + e2) / np.linalg.norm(e1 + e2)
+        centre = p + bis * r / np.sin(half_angle)
+        s1, s2 = p + e1 * reach - centre, p + e2 * reach - centre
+        a1, a2 = np.arctan2(s1[1], s1[0]), np.arctan2(s2[1], s2[0])
+        sweep = (a2 - a1 + np.pi) % (2 * np.pi) - np.pi
+        arc = [centre + r * np.array([np.cos(a), np.sin(a)]) for a in a1 + sweep * np.linspace(0, 1, CORNER_ARC_STEPS + 1)]
+        tip = p - bis * 0.5  # a little past the corner, so the cut leaves no skin
+        mid = np.array([0, 0, top / 2 - 0.25])
+        half = np.array([0, 0, top / 2 + 0.25])
+        pieces = [_prism([np.array([*q, 0]) + mid for q in (tip, arc[k], arc[k + 1])], half) for k in range(CORNER_ARC_STEPS)]
         out.append(_edit(
-            f"chamfer-{i}", "sharp_bed_corners", f"Chamfer sharp corner {i + 1} ({cut:.1f} mm)",
-            "A cut-off corner shrinks less and is much less likely to lift off the bed.",
-            [to_part(print_tris)], param="chamfer_mm"))
+            f"chamfer-{i}", "sharp_bed_corners", f"Round sharp corner {i + 1} (r {r:.1f} mm)",
+            "A rounded corner shrinks more evenly and is much less likely to lift off the bed (warping starts at sharp corners).",
+            [to_part(t) for t in pieces], param="chamfer_mm"))
     return out
+
+
+def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
+    """A small 45° chamfer along every bottom edge (outline and holes): the first layers are squashed
+    and bulge out (elephant foot); the chamfer takes that material away, so edges stay straight and
+    holes at the bed keep their size. One wedge per outline edge, longer at outside corners only
+    (at inside corners a longer wedge would notch the wall next to it)."""
+    from shapely.geometry.polygon import orient as orient_poly
+
+    from .slicer import parts
+
+    first = slice_mesh(oriented, profile.layer_height, max_layers=2)[0].geom
+    if first.is_empty:
+        return []
+    pieces = []
+    for poly in parts(first):
+        poly = orient_poly(poly.simplify(0.05), 1.0)  # exterior CCW, holes CW: material on the left
+        for ring in [poly.exterior, *poly.interiors]:
+            c = np.asarray(ring.coords)[:-1, :2]
+            n = len(c)
+            for k in range(n):
+                a, b = c[k], c[(k + 1) % n]
+                d = b - a
+                length = np.linalg.norm(d)
+                if length < 1e-3:
+                    continue
+                d = d / length
+                out = np.array([d[1], -d[0]])  # right of the edge = outside
+                convex = [_cross2(c[k] - c[k - 1], d) > 0, _cross2(d, c[(k + 2) % n] - b) > 0]
+                ext = [size + 0.3 if cv else 0.0 for cv in convex]
+                p0, p1 = a - d * ext[0], b + d * ext[1]
+                mid = (p0 + p1) / 2
+                half = np.array([*(p1 - p0) / 2, 0.0])
+                # Cross-section (outward, up): the 45° line from (-size, 0) to (0, size), extended past both ends.
+                prof = [np.array([*(mid - out * (size + 0.3)), -0.3]),
+                        np.array([*(mid + out * 0.3), size + 0.3]),
+                        np.array([*(mid + out * 0.3), -0.3])]
+                pieces.append(_prism(prof, half))
+                if len(pieces) > MAX_FOOT_PIECES:
+                    return []  # a very detailed footprint: leave it to the slicer's elephant foot compensation
+    if not pieces:
+        return []
+    return [_edit("foot-chamfer", "elephant_foot", f"{size:.1f} mm chamfer along the bottom edge",
+                  "The first layers are pressed flat and bulge out (elephant foot). A small 45° chamfer at the bottom edge "
+                  "takes that away, so the edges look straight and holes at the bed keep their size.",
+                  [to_part(t) for t in pieces], param="foot_chamfer_mm")]
+
+
+def _cross2(u, v) -> float:
+    return float(u[0] * v[1] - u[1] * v[0])
+
+
+def _stress_fillets(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:
+    """45° fillets along the inside corner nearest the weak spot from the strength check (e.g. where a
+    stem meets a plate): sharp inside corners concentrate stress, a fillet spreads it out. Takes the
+    whole connected corner (all inside edges linked to the ones near the weak spot)."""
+    if weak_spot is None:
+        return []
+    edges = concave_edges(mesh)
+    if not edges:
+        return []
+    spot = np.asarray(weak_spot, float)
+    mids = np.array([(e["a"] + e["b"]) / 2 for e in edges])
+    dist = np.linalg.norm(mids - spot, axis=1)
+    if dist.min() > max(FILLET_REACH_VOXELS * h, size * 2):
+        return []  # the weak spot isn't at an inside corner
+    pieces = []
+    for k in _connected(edges, [int(np.argmin(dist))])[:MAX_FILLET_PIECES]:
+        e = edges[k]
+        mid = (e["a"] + e["b"]) / 2
+        half = (e["b"] - e["a"]) / 2
+        inset = -(e["n1"] + e["n2"]) * 0.15  # reach a little into the part, so the union joins it
+        prof = [mid + inset, mid + e["t1"] * size - e["n1"] * 0.15, mid + e["t2"] * size - e["n2"] * 0.15]
+        pieces.append(_prism(prof, half))
+    return [_edit("stress-fillet", "stress_at_inside_corner", f"{size:.1f} mm fillet where the part is weakest",
+                  "The strength check found the most stress at this sharp inside corner. A 45° fillet spreads the load "
+                  "over more material, often the cheapest way to make a part much stronger.",
+                  pieces, op="add", param="fillet_mm")]
+
+
+def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
+    """Sharp inside edges: two faces meeting at more than ``min_angle_deg`` with the second face in
+    front of the first one's plane. Each: end points a, b; face normals n1, n2; t1, t2 the directions
+    along each face away from the edge."""
+    tris = mesh.triangles
+    normals, _ = mesh.normals_and_areas()
+    verts, inv = np.unique(np.round(tris.reshape(-1, 3), 4), axis=0, return_inverse=True)
+    ids = inv.reshape(-1, 3)
+    owner: dict = {}
+    pairs = []
+    for f, (i, j, k) in enumerate(ids):
+        for a, b in ((i, j), (j, k), (k, i)):
+            key = (min(a, b), max(a, b))
+            if key in owner:
+                pairs.append((key, owner.pop(key), f))
+            else:
+                owner[key] = f
+    cos = np.cos(np.radians(min_angle_deg))
+    centroids = tris.mean(axis=1)
+    out = []
+    for (a, b), f1, f2 in pairs:
+        n1, n2 = normals[f1], normals[f2]
+        if n1 @ n2 > cos:
+            continue
+        pa, pb = verts[a], verts[b]
+        if (centroids[f2] - pa) @ n1 <= 1e-6:  # second face behind the first: an outside (convex) edge
+            continue
+        e = (pb - pa) / np.linalg.norm(pb - pa)
+        t1, t2 = np.cross(n1, e), np.cross(n2, e)
+        t1 = t1 if (centroids[f1] - pa) @ t1 > 0 else -t1
+        t2 = t2 if (centroids[f2] - pa) @ t2 > 0 else -t2
+        out.append({"a": pa, "b": pb, "va": int(a), "vb": int(b), "n1": n1, "n2": n2, "t1": t1, "t2": t2})
+    return out
+
+
+def _connected(edges: list[dict], seeds) -> list[int]:
+    """Edges linked to ``seeds`` through shared vertices (a whole inside corner, e.g. around a stem)."""
+    by_vertex: dict = {}
+    for k, e in enumerate(edges):
+        by_vertex.setdefault(e["va"], []).append(k)
+        by_vertex.setdefault(e["vb"], []).append(k)
+    seen, todo = set(), [int(k) for k in seeds]
+    while todo:
+        k = todo.pop()
+        if k in seen:
+            continue
+        seen.add(k)
+        for v in (edges[k]["va"], edges[k]["vb"]):
+            todo += by_vertex[v]
+    return sorted(seen)
 
 
 def _corner_height(layers, p, inset=0.3) -> float:

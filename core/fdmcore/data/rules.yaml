@@ -182,6 +182,24 @@ rules:
     - drying
     - stringing
     - nylon
+  stress_at_inside_corner:
+    title: Stress Builds Up in a Sharp Inside Corner
+    why: Where a stem, rib or wall meets the rest of the part at a sharp inside corner, the load has to turn the
+      corner in a tiny area. The stress there is several times higher than in the rest of the part, so cracks start
+      at the corner. A rounded or 45° fillet spreads the load over more material.
+    fixes:
+    - domain: geometry
+      text: Add a fillet or 45° chamfer of 1–3 mm (more for big parts) where the two faces meet.
+    - domain: slicer
+      text: More walls put more solid plastic around the corner.
+      settings:
+        wall_loops: '5'
+    - domain: process
+      text: Turn the part so the layers don't run across the corner, so the load doesn't pull the layers apart there.
+    tags:
+    - strength
+    - fillet
+    - stress-concentration
   elephant_foot:
     title: Elephant Foot Flare on First Layers
     why: The weight of upper layers and heat from the build plate squish the initial bottom layers outward. This

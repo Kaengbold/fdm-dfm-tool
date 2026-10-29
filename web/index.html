@@ -172,16 +172,20 @@
           <div id="strength-result"></div>
         </div>
 
+        <p id="design-off" class="mode-note">Design changes (teardrop holes, rounded corners, fillets…) are off in <b>Just print it</b>.
+          <button type="button" id="design-on">Show design changes</button></p>
         <div id="design-block" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Always look at the preview before applying, and check fits after thickening walls.">
           <h2>Design changes <small><span class="swatch cut"></span>cut away · <span class="swatch add"></span>added</small></h2>
           <p class="hint" id="features-summary">Let the tool suggest geometry changes for this orientation.</p>
           <ul id="features" class="features"></ul>
           <ol id="edits" class="edits"></ol>
           <div id="edit-params" class="edit-params" hidden>
-            <label>Corner chamfer <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
+            <label>Round bed corners <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
             <label>Teardrop tip <input id="param-teardrop_angle_deg" data-param="teardrop_angle_deg" type="number" step="5" />° from vertical</label>
             <label>Fill ledges up to <input id="param-ledge_max_mm" data-param="ledge_max_mm" type="number" step="1" /> mm wide</label>
             <label>Thin walls to <input id="param-wall_lines" data-param="wall_lines" type="number" step="1" /> lines</label>
+            <label>Bottom edge chamfer <input id="param-foot_chamfer_mm" data-param="foot_chamfer_mm" type="number" step="0.1" /> mm</label>
+            <label>Fillet at the weak spot <input id="param-fillet_mm" data-param="fillet_mm" type="number" step="0.5" /> mm</label>
           </div>
           <div class="actions">
             <button id="suggest-design">Suggest design changes</button>
@@ -190,7 +194,7 @@
         </div>
 
         <div id="settings-block">
-          <h2>Slicer settings</h2>
+          <h2>Slicer settings <button type="button" id="edit-shells" class="link">change walls, layers, infill</button></h2>
           <table id="settings"></table>
         </div>
 
@@ -212,7 +216,8 @@
 
       <details id="ai-block" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
         <summary>Ask AI <small>with your own API key</small></summary>
-        <div class="ai-config">
+        <form class="ai-config" onsubmit="return false" autocomplete="off">
+          <input type="text" name="username" autocomplete="username" value="api-key" hidden />
           <label>Provider
             <select id="ai-provider">
               <option value="anthropic">Anthropic (Claude)</option>
@@ -220,10 +225,10 @@
               <option value="openai">OpenAI (GPT)</option>
             </select>
           </label>
-          <label>API key <input id="ai-key" type="password" autocomplete="off" placeholder="sk-ant-..." /></label>
+          <label>API key <input id="ai-key" type="password" autocomplete="new-password" placeholder="sk-ant-..." /></label>
           <label>Model <select id="ai-model"></select></label>
           <label class="toggle"><input id="ai-remember" type="checkbox" /> Remember key on this computer</label>
-        </div>
+        </form>
         <div id="ai-log" class="ai-log"></div>
         <form id="ai-form" class="ai-form">
           <textarea id="ai-input" rows="2" placeholder="e.g. Will this hold 5 kg? How can it print without supports?"></textarea>
@@ -240,7 +245,7 @@
         <li class="legend-wip"><i></i>Yellow frame = not finished yet</li>
       </ul>
     </aside>
-    <main id="viewer"></main>
+    <main id="viewer"><div id="legend" class="fea-legend" hidden></div></main>
     <script type="module" src="app.js"></script>
   </body>
 </html>

@@ -141,7 +141,18 @@ main canvas { display: block; }
 .loads li { display: flex; justify-content: space-between; align-items: center; border: 1px solid #e0e1e6; border-radius: 6px; padding: 4px 8px; }
 .loads li.fixed { border-left: 4px solid var(--fixed); }
 .loads li.force { border-left: 4px solid var(--force); }
-.loads button { padding: 0 6px; }
+.marks button { padding: 2px 9px; min-width: 28px; min-height: 26px; border-radius: 6px; }
+@keyframes pulse { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+.pulse { animation: pulse 0.5s ease-out; border-radius: 6px; }
+button.link { background: none; border: none; color: var(--accent); font-size: 12px; font-weight: normal; padding: 0 4px; cursor: pointer; text-decoration: underline; }
+#viewer canvas.hovering { cursor: pointer; }
+.hover-tip { position: fixed; pointer-events: none; background: rgba(31, 35, 40, 0.85); color: #fff; font-size: 12px; padding: 3px 8px; border-radius: 6px; z-index: 5; }
+.loads button { padding: 2px 9px; min-width: 28px; min-height: 26px; border-radius: 6px; }
+.loads li { flex-wrap: wrap; gap: 4px; }
+.loads li > span { flex: 1; }
+.angle-editor { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.angle-editor label { display: flex; gap: 6px; align-items: center; }
+.angle-editor input[type=range] { flex: 1; }
 .verdict { border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #fff; }
 .verdict strong { font-size: 15px; display: block; }
 .verdict.fine { background: var(--bed); }
@@ -268,3 +279,15 @@ main canvas { display: block; }
 .marks li span { flex: 1; }
 /* Many elements set display: flex/grid, which would override the hidden attribute. */
 [hidden] { display: none !important; }
+
+/* FEA result legend, top left of the 3D view (like FEA software). */
+.fea-legend { position: absolute; top: 12px; right: 12px; background: rgba(255, 255, 255, 0.92); border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15); min-width: 130px; }
+.fea-legend strong { display: block; margin-bottom: 2px; }
+.fea-legend small { display: block; color: var(--muted); margin-bottom: 4px; }
+.fea-legend .band { height: 16px; width: 22px; position: relative; }
+.fea-legend .band span { position: absolute; left: 30px; top: -7px; white-space: nowrap; }
+.fea-legend .band-0 { padding-left: 30px; margin-top: -7px; }
+.fea-view { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.fea-view label { display: flex; gap: 6px; align-items: center; }
+.fea-view input[type=range] { flex: 1; }

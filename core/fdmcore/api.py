@@ -42,6 +42,7 @@ class Session:
     bodies: list = field(default_factory=list)  # (name, Mesh) per body in the file
     body: int = 0  # which body is loaded
     tags: dict = field(default_factory=dict)  # region id -> what the user says the feature is (features.TAGS)
+    weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
 
 
 _session: Session | None = None
@@ -182,11 +183,17 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
         ups = np.array([r.up for r in candidates] + [as_loaded.up])
         with stage(0.2, 0.95):
             sfs = cases_safety(case, ups, p, _shells(p))
+        strongest = float(max(sfs[:-1].max(initial=0.0), 1e-9))
+        relative = STRENGTH_RATIO_WEIGHT.get(p.goal, STRENGTH_RATIO_WEIGHT["balanced"])
         for r, sf in zip([*candidates, as_loaded], sfs):
-            safety[id(r)] = float(sf)
-            r.reasons.append(_strength_reason(sf, verdict(sf)))
-            r.penalize("strength", STRENGTH_WEIGHT * max(0.0, 2.0 - float(sf)))
+            sf = float(sf)
+            safety[id(r)] = sf
+            r.reasons.append(_strength_reason(sf, verdict(sf), strongest))
+            # Below ×2 it may break; above, a much stronger direction is still worth something
+            # (how much depends on the goal), so "strong enough either way" doesn't hide a 2× difference.
+            r.penalize("strength", STRENGTH_WEIGHT * max(0.0, 2.0 - sf) + relative * np.log2(strongest / max(sf, 1e-9)))
         candidates.sort(key=lambda r: r.score)
+        strongest_option = max(candidates, key=lambda r: safety[id(r)])
     elif p.goal == "strength":
         with stage(0.2, 0.95):
             _rank_by_weak_spots(s.mesh, candidates, p, extra=[as_loaded])
@@ -198,7 +205,10 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     flat = [r for r in candidates if r.bed_area > 0]
     if flat:
         best = min(r.score for r in flat)
-        candidates = [r for r in flat if r.score <= best + MAX_SCORE_GAP] or flat[:1]
+        keep = [r for r in flat if r.score <= best + MAX_SCORE_GAP] or flat[:1]
+        if loads and all(r is not strongest_option for r in keep):  # always offer the strongest direction for the user's load
+            keep.append(strongest_option)
+        candidates = keep
 
     # Mirror-image directions of symmetric parts score identically: show one of them.
     unique, seen = [], set()
@@ -427,13 +437,19 @@ def _pack(mesh: Mesh, r, label: str, settings: OrientationSettings, rotation: np
 
 
 STRENGTH_WEIGHT = 1.5  # score penalty per unit of safety factor below 2
+# Penalty per halving of safety compared with the strongest direction, by goal: with "strength"
+# a twice-as-strong direction beats a lot of support; balanced weighs it against support and time.
+STRENGTH_RATIO_WEIGHT = {"strength": 1.5, "balanced": 1.0, "speed": 0.4, "material": 0.4}
 MAX_SCORE_GAP = 3.0  # options scoring this much worse than the best are not shown
 
 
-def _strength_reason(sf: float, verdict: str) -> str:
-    if sf >= 2:
-        return f"Strong enough for your load (safety ×{sf:.1f})"
-    return f"{verdict.capitalize()} under your load (safety ×{sf:.1f})"
+def _strength_reason(sf: float, verdict: str, strongest: float | None = None) -> str:
+    out = f"Strong enough for your load (safety ×{sf:.1f})" if sf >= 2 else f"{verdict.capitalize()} under your load (safety ×{sf:.1f})"
+    if strongest and strongest / max(sf, 1e-9) >= 1.2:
+        out += f" — the strongest direction holds {strongest / sf:.1f}× more"
+    elif strongest:
+        out += " — the strongest direction for your load"
+    return out
 
 
 def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
@@ -450,7 +466,9 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
         "layers": "There the layers get pulled or slid apart. The bond between layers is the weakest part of any print, so turning the part helps most.",
         "material": "There the plastic itself is overloaded, not the bond between layers. More walls, more infill or a thicker design help most.",
     }[r["mode"]]
-    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red dot). {why}"
+    near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
+            " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
+    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red dot). {why}{near}"
 
 
 OPT_TARGET = {"strength": 3.0}  # safety the optimiser aims for, by goal (default 2.0)
@@ -597,7 +615,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     ``walls`` (lines), ``infill`` (0–1), ``top``/``bottom`` (solid layers) say how it will be printed
     (default: the goal's usual settings). With several load cases (``case`` on forces) the weakest
     decides; ``cases`` lists them all."""
-    from .strength import evaluate_cases, face_values
+    from .strength import evaluate_cases, face_values, refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -605,10 +623,29 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     sh = _shells(p, walls, infill, top, bottom)
     r = evaluate_cases(cases, up, p, sh)
     model = cases[0].model
-    heat = face_values(s.mesh, model.grid, model, r.pop("fi"))
+    fi, vm, u = r.pop("fi"), r.pop("vm"), r.pop("u")
+    heat = face_values(s.mesh, model.grid, model, fi)
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
+    # FEA view: a finer copy of the surface with smooth fields at every corner — % of strength used,
+    # von Mises stress, displacement.
+    fine = refine(s.mesh.triangles, model.grid.h)
+    corners = fine.reshape(-1, 3)
+    r["field_triangles"] = fine.astype(np.float32).tobytes()
+    r["vertex_fi"] = (surface_values(model, fi, fine) * 100).astype(np.float32).tobytes()
+    r["vertex_vm"] = surface_values(model, vm, fine).astype(np.float32).tobytes()
+    r["vertex_disp"] = sample_nodes(model, u, corners).astype(np.float32).tobytes()
+    # The analysis cubes themselves, for the section view (peaks are often inside the part).
+    r["elements"] = {"centers": model.grid.centers(model.elems).astype(np.float32).tobytes(), "size_mm": float(model.grid.h),
+                     "fi": (fi * 100).astype(np.float32).tobytes(), "vm": vm.astype(np.float32).tobytes()}
+    worst = cases[[c.number for c in cases].index(r["case"])]
+    ok = ~worst.ignore  # stresses right at the supports and loads are not meaningful (they grow as the grid gets finer)
+    r["fi_max_pct"] = float(fi[ok].max(initial=0) * 100)
+    r["vm_max_mpa"] = float(vm[ok].max(initial=0))
+    r["mesh"] = {"voxels": int(len(model.elems)), "voxel_mm": float(model.grid.h), "nodes": int(model.n_nodes),
+                 "load_n": float(np.linalg.norm(worst.forces.sum(axis=0)))}
     r["critical_point_print"] = _to_print_frame(s.mesh, print_rotation(s.mesh, up, p.printer["bed"])[0], r["critical_point"])
     r.update(walls=sh.walls, infill=sh.infill, top=sh.top, bottom=sh.bottom, material=p.material["name"])
+    s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a fillet there
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
 
@@ -661,7 +698,7 @@ def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     p = Profile.from_dict(profile)
     return {
         "features": detect_features(s.mesh, s.regions, s.tags),
-        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags),
+        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0))),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }

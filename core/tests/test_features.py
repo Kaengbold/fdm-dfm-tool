@@ -46,9 +46,38 @@ def test_edit_pieces_are_closed_and_outward(name, material):
             assert all((b, a) in directed for a, b in directed), e["id"]
 
 
-def test_corner_chamfers_only_for_warping_materials():
-    assert not any(e["rule"] == "sharp_bed_corners" for e in design("l_bracket", [0, 0, 1], material="pla")["edits"])
-    assert sum(e["rule"] == "sharp_bed_corners" for e in design("l_bracket", [0, 0, 1], material="abs")["edits"]) == 4
+def test_rounded_bed_corners_for_warping_or_big_footprints():
+    from shapely.geometry import box
+
+    from fdmcore import api
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    # PLA hardly warps: a small footprint gets no rounding, a 60 mm one does; ABS always.
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 20, 20), 0, 5))), "small")
+    assert not any(e["rule"] == "sharp_bed_corners" for e in api.design([0, 0, 1], {"material": "pla"})["edits"])
+    assert sum(e["rule"] == "sharp_bed_corners" for e in design("l_bracket", [0, 0, 1], material="pla")["edits"]) == 4
+    edits = [e for e in design("l_bracket", [0, 0, 1], material="abs")["edits"] if e["rule"] == "sharp_bed_corners"]
+    assert len(edits) == 4 and all(len(e["pieces"]) == 8 for e in edits)
+
+
+def test_bottom_chamfer_and_fillet_at_the_weak_spot():
+    from pathlib import Path
+
+    from fdmcore import api
+    from fdmcore.booleans import apply_edits
+
+    api.load((Path(__file__).resolve().parents[2] / "web" / "samples" / "mushroom.stl").read_bytes(), "m")
+    prof = {"material": "pla"}
+    edits = {e["id"]: e for e in api.design([0, 0, -1], prof)["edits"]}
+    assert "foot-chamfer" in edits and "stress-fillet" not in edits  # no strength check yet
+    part = api._require().mesh
+    # 0.5 mm 45° chamfer along the 160 mm cap outline: 0.125 mm² × 160 mm.
+    assert abs(part.volume()) - abs(apply_edits(part, [edits["foot-chamfer"]]).volume()) == pytest.approx(20, rel=0.05)
+    api.regions()
+    api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}], prof)
+    fillet = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-fillet")
+    assert fillet["op"] == "add" and len(fillet["pieces"]) == 4  # the four edges where the stem meets the cap
 
 
 def test_edit_params_change_cutters():

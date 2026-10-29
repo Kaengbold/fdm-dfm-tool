@@ -5,7 +5,7 @@ import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
-import { REGION_COLORS, Viewer } from "./viewer.js";
+import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -253,10 +253,10 @@ async function selectOption(i) {
   state.strength = null;
   state.showHeat = false;
   $("strength-result").replaceChildren();
-  $("nozzle-block").open = false; // orientation-specific
   clearEdits();
   recolor();
   await runCheck();
+  if ($("nozzle-block").open) compareNozzles(); // orientation-specific: refresh, don't collapse
 }
 
 let checkToken = 0;
@@ -445,7 +445,7 @@ function recolor() {
   const option = activeOption();
   if (!option) return;
   viewer.showLoadSymbols(loadSymbols());
-  if (state.showHeat && state.strength) return viewer.colorByHeat(state.strength.face_heat);
+  if (strengthView()) return;
   if ($("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
   const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
@@ -463,13 +463,13 @@ function recolor() {
 /** Lock on held faces, arrow + weight on loads, for the 3D view. */
 function loadSymbols() {
   if (!state.regionInfo.length) return [];
-  return state.loads.map((l) => {
+  return state.loads.map((l, i) => {
     const info = state.regionInfo[l.region];
     const normal = l.normal ?? info?.normal ?? [0, 0, 1];
     const point = l.point ?? info?.centroid;
     if (l.kind === "fixed") return { kind: "fixed", point, normal };
-    const dir = { push: normal.map((v) => -v), pull: normal, down: [0, 0, -1] }[l.direction] ?? normal;
-    return { kind: "force", point, normal, dir, label: `${l.kg} kg${multiCase() ? ` · case ${l.case}` : ""}` };
+    const dir = loadVector(l);
+    return { kind: "force", load: i, point, normal, dir, label: `${l.kg} kg${multiCase() ? ` · case ${l.case}` : ""}` };
   }).filter((s) => s.point);
 }
 
@@ -493,6 +493,8 @@ $("viewer").addEventListener("pointerup", async (e) => {
   await ensureRegions();
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
+  state.pickedOnce = true;
+  hoverTip.hidden = true;
   const info = state.regionInfo[state.selectedRegion];
   $("pick-info").textContent = info.hole_diameter
     ? `Ø${info.hole_diameter.toFixed(1)} mm hole — "Held here" means a screw or pin through it holds the part`
@@ -563,6 +565,77 @@ $("as-load").onclick = () =>
 $("at-spot").onchange = recolor;
 
 const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" };
+const DEG = Math.PI / 180;
+
+/** Direction a force acts in (unit vector, part coordinates). */
+function loadVector(l) {
+  if (Array.isArray(l.direction)) return l.direction;
+  const n = l.normal ?? state.regionInfo[l.region]?.normal ?? [0, 0, 1];
+  return { push: n.map((v) => -v), pull: n, down: [0, 0, -1] }[l.direction] ?? n;
+}
+/** turn: around the model's Z axis from +X; tilt: up from horizontal (degrees). */
+const toAngles = ([x, y, z]) => ({ turn: Math.round(Math.atan2(y, x) / DEG), tilt: Math.round(Math.asin(Math.max(-1, Math.min(1, z))) / DEG) });
+const fromAngles = (turn, tilt) => [Math.cos(tilt * DEG) * Math.cos(turn * DEG), Math.cos(tilt * DEG) * Math.sin(turn * DEG), Math.sin(tilt * DEG)].map((v) => Math.round(v * 1e4) / 1e4);
+function dirLabel(l) {
+  if (!Array.isArray(l.direction)) return DIR_LABEL[l.direction];
+  const a = toAngles(l.direction);
+  return `at an angle (turn ${a.turn}°, tilt ${a.tilt}°)`;
+}
+
+function angleEditor(l) {
+  const a = toAngles(loadVector(l));
+  const out = el("span", { textContent: `turn ${a.turn}°, tilt ${a.tilt}°` });
+  const turn = el("input", { type: "range", min: -180, max: 180, step: 5, value: a.turn, "aria-label": "Turn" });
+  const tilt = el("input", { type: "range", min: -90, max: 90, step: 5, value: a.tilt, "aria-label": "Tilt" });
+  const update = () => {
+    l.direction = fromAngles(Number(turn.value), Number(tilt.value));
+    out.textContent = `turn ${turn.value}°, tilt ${tilt.value}°`;
+    viewer.showLoadSymbols(loadSymbols());
+  };
+  turn.oninput = tilt.oninput = update;
+  turn.onchange = tilt.onchange = () => renderLoads();
+  return el("div", { className: "angle-editor" },
+    el("label", {}, "Turn ", turn), el("label", {}, "Tilt ", tilt), out,
+    el("p", { className: "hint", textContent: "Or drag the arrow on the part: it follows the mouse." }));
+}
+
+// The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
+const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,
+  textContent: "Click a surface: put it on the bed, keep it clean, or hold / load it for the strength check" }));
+let hoverQueued = false;
+$("viewer").addEventListener("pointermove", (e) => {
+  if (hoverQueued || drag) return;
+  hoverQueued = true;
+  requestAnimationFrame(() => {
+    hoverQueued = false;
+    const over = Boolean(state.triangles) && viewer.pick(e) >= 0;
+    viewer.renderer.domElement.classList.toggle("hovering", over || viewer.pickSymbol(e) != null);
+    hoverTip.hidden = !over || state.pickedOnce;
+    if (!hoverTip.hidden) Object.assign(hoverTip.style, { left: `${e.clientX + 14}px`, top: `${e.clientY + 14}px` });
+  });
+});
+$("viewer").addEventListener("pointerleave", () => (hoverTip.hidden = true));
+
+// Drag a load arrow in the 3D view to change its direction.
+let drag = null;
+$("viewer").addEventListener("pointerdown", (e) => {
+  const i = viewer.pickSymbol(e);
+  if (i == null || state.loads[i]?.kind !== "force") return;
+  drag = { i, x: e.clientX, y: e.clientY, dir: loadVector(state.loads[i]) };
+  viewer.controls.enabled = false; // before OrbitControls sees this press (capture phase)
+}, { capture: true });
+addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  state.loads[drag.i].direction = viewer.dragDirection(drag.dir, e.clientX - drag.x, e.clientY - drag.y);
+  viewer.showLoadSymbols(loadSymbols());
+});
+addEventListener("pointerup", () => {
+  if (!drag) return;
+  drag = null;
+  downAt = null; // not a click on the part
+  viewer.controls.enabled = true;
+  renderLoads();
+});
 const multiCase = () => new Set(state.loads.filter((l) => l.kind === "force").map((l) => l.case)).size > 1;
 const readyForStrength = () => state.loads.some((l) => l.kind === "fixed") && state.loads.some((l) => l.kind === "force");
 
@@ -572,16 +645,22 @@ function renderLoads() {
       el(
         "li",
         { className: l.kind },
-        (l.kind === "fixed" ? "🔒 Held here" : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${DIR_LABEL[l.direction]}`) + (l.point ? " (at a spot)" : ""),
+        el("span", { textContent: (l.kind === "fixed" ? "🔒 Held here" : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "") }),
+        l.kind === "force" ? el("button", { textContent: "↻", title: "Change the direction", className: "icon", onclick: () => {
+          state.angleOpen = state.angleOpen === i ? null : i;
+          renderLoads();
+        } }) : "",
         el("button", {
           textContent: "×",
           title: "Remove",
           onclick: () => {
             state.loads.splice(i, 1);
+            state.angleOpen = null;
             renderLoads();
             recolor();
           },
         }),
+        state.angleOpen === i && l.kind === "force" ? angleEditor(l) : "",
       ),
     ),
   );
@@ -634,15 +713,86 @@ async function runStrength() {
 }
 $("run-strength").onclick = runStrength;
 
-function renderStrength() {
+// ---------- strength: FEA result view ----------
+const f32 = (b) => new Float32Array(b.slice().buffer);
+const FIELD = {
+  fi: { title: "Strength used (%)", note: "100 % = breaks", values: "vertex_fi", elements: "fi", max: "fi_max_pct", fmt: (v) => `${Math.round(v)} %` },
+  vm: { title: "Stress, von Mises (MPa)", note: "", values: "vertex_vm", elements: "vm", max: "vm_max_mpa", fmt: (v) => v.toFixed(v < 10 ? 1 : 0) },
+};
+const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
+
+/** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
+function strengthView() {
   const r = state.strength;
-  const sf = r.safety_factor;
+  if (!(state.showHeat && r)) {
+    viewer.hideField();
+    $("legend").hidden = true;
+    return false;
+  }
+  const f = FIELD[view.field];
+  const max = Math.max(r[f.max], 1e-6);
+  const key = `${view.field}|${r.critical_point}|${activeOption().up}`;
+  if (viewer.fieldKey !== key || !viewer.field) {
+    viewer.showField({ triangles: f32(r.field_triangles), values: f32(r[f.values]), disp: f32(r.vertex_disp), max });
+    viewer.fieldKey = key;
+  }
+  const radius = viewer.part.geometry.boundingSphere.radius;
+  viewer.setDeformation(view.bend * (0.08 * radius) / Math.max(r.max_displacement_mm, 1e-9));
+  const els = r.elements;
+  viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: f32(els[f.elements]), size_mm: els.size_mm }, max);
+  renderLegend(f, max);
+  return true;
+}
+
+function renderLegend(f, max) {
+  const bands = [];
+  for (let i = FIELD_BANDS - 1; i >= 0; i--) {
+    bands.push(el("div", { className: "band", style: `background:${fieldColor((i + 0.5) / FIELD_BANDS).getStyle()}` },
+      el("span", { textContent: f.fmt((max * (i + 1)) / FIELD_BANDS) })));
+  }
+  $("legend").replaceChildren(el("strong", { textContent: f.title }), f.note ? el("small", { textContent: f.note }) : "", ...bands,
+    el("div", { className: "band-0", textContent: f.fmt(0) }));
+  $("legend").hidden = false;
+}
+
+function strengthViewControls(r) {
   const heat = el("input", { type: "checkbox", checked: state.showHeat });
   heat.onchange = () => {
     state.showHeat = heat.checked;
     if (heat.checked) $("show-temp").checked = false;
     recolor();
   };
+  const show = () => {
+    state.showHeat = true;
+    heat.checked = true;
+    $("show-temp").checked = false;
+    recolor();
+  };
+  const field = el("select", {}, el("option", { value: "fi", textContent: "Strength used (% — where it breaks)" }),
+    el("option", { value: "vm", textContent: "Stress (MPa, von Mises)" }));
+  field.value = view.field;
+  field.onchange = () => ((view.field = field.value), show());
+  const bend = el("input", { type: "range", min: 0, max: 1, step: 0.05, value: view.bend });
+  bend.oninput = () => ((view.bend = Number(bend.value)), show());
+  const axis = el("select", {}, ...[["", "No cut"], ["x", "Cut across X"], ["y", "Cut across Y"], ["z", "Cut at a height"]]
+    .map(([v, t]) => el("option", { value: v, textContent: t })));
+  axis.value = view.axis;
+  const cut = el("input", { type: "range", min: 0, max: 1, step: 0.01, value: view.cut, disabled: !view.axis });
+  axis.onchange = () => ((view.axis = axis.value), (cut.disabled = !view.axis), show());
+  cut.oninput = () => ((view.cut = Number(cut.value)), show());
+  const m = r.mesh;
+  return el("div", { className: "fea-view" },
+    el("label", { className: "toggle" }, heat, "Show results on the part (red dot = weakest spot)"),
+    el("label", {}, "Colour by ", field),
+    el("label", {}, "Show bending (exaggerated) ", bend),
+    el("div", { className: "row" }, axis, cut),
+    el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." }),
+    el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` }));
+}
+
+function renderStrength() {
+  const r = state.strength;
+  const sf = r.safety_factor;
   $("strength-result").replaceChildren(
     el(
       "div",
@@ -654,7 +804,7 @@ function renderStrength() {
     r.cases.length > 1
       ? el("p", { className: "hint", textContent: `Weakest is case ${r.case} (shown). ` + r.cases.map((c) => `Case ${c.case}: ×${c.safety_factor.toFixed(1)}`).join(" · ") })
       : "",
-    el("label", { className: "toggle" }, heat, "Show stress colours (red dot = weakest spot)"),
+    strengthViewControls(r),
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
     el("button", { textContent: "How can I make it stronger?", onclick: showStrengthOptions }),
     el("button", { textContent: "Re-rank orientations including strength", onclick: () => findOrientations(true) }),
@@ -1202,7 +1352,26 @@ function updateModeNote() {
   const m = mode();
   if ($("mode-note")) $("mode-note").textContent = MODE_NOTES[m] || "";
   $("design-block").hidden = m === "print";
+  $("design-off").hidden = m !== "print";
 }
+$("design-on").onclick = () => {
+  const both = document.querySelector("input[name=mode][value=both]");
+  both.checked = true;
+  both.dispatchEvent(new Event("change"));
+  $("design-block").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+$("edit-shells").onclick = () => {
+  const d = document.querySelector(".shells");
+  d.open = true;
+  d.scrollIntoView({ behavior: "smooth", block: "center" });
+};
+// Clicking the option that is already chosen still answers, so it doesn't look frozen.
+document.querySelectorAll("input[name=mode], input[name=goal]").forEach((r) => r.parentElement.addEventListener("click", () => {
+  const label = r.parentElement;
+  label.classList.remove("pulse");
+  void label.offsetWidth; // restart the animation
+  label.classList.add("pulse");
+}));
 
 document.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () => {
   updateModeNote();

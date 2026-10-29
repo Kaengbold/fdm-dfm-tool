@@ -31,6 +31,10 @@ from .voxel import VoxelGrid, depth, voxelize
 
 G = 9.81
 POINT_RADIUS = 3.0  # mm around a picked point that carries the load
+# Element rings around supports and loads left out of the verdict: a rigid clamp or a load on a few
+# voxels gives stress peaks that grow as the grid gets finer (a singularity), as in any FEA.
+SINGULAR_RINGS = 2
+NEAR_SUPPORT_VOXELS = 4  # weakest spot this close to a held face: say the clamp may spread the load
 E_Z_RATIO = 0.85  # layer-direction stiffness vs. in-plane (stiffness drops far less than strength)
 INFILL_EXPONENT = 1.5  # Gibson–Ashby-style scaling for stiffness and strength of sparse infill
 
@@ -111,7 +115,9 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
             raise ValueError("The load isn't connected to a held face (at the analysis resolution, thin links are lost)")
         fixed |= loose
         forces[loose] = 0.0
-    return LoadCase(model, forces, fixed, _grow(ignore, model, elem_id))
+    for _ in range(SINGULAR_RINGS):  # stresses right at supports and loads are an artefact of rigid clamps / point loads
+        ignore = _grow(ignore, model, elem_id)
+    return LoadCase(model, forces, fixed, ignore)
 
 
 def _loose_nodes(model: Model, fixed: np.ndarray) -> np.ndarray:
@@ -244,7 +250,10 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells()) ->
     u, info = solve(case.model, c, scale, case.forces, case.fixed)
     stress = element_stress(case.model, c, scale, u)
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
-    return _summary(case, fi_layer, fi_plane, u, info)
+    out = _summary(case, fi_layer, fi_plane, u, info)
+    out["vm"] = von_mises(stress)
+    out["u"] = u
+    return out
 
 
 def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells()) -> dict:
@@ -302,6 +311,68 @@ def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np
     return fi_layer, fi_plane
 
 
+def von_mises(stress: np.ndarray) -> np.ndarray:
+    """Von Mises stress (MPa) per element, the usual colour of FEA results."""
+    sx, sy, sz, syz, sxz, sxy = stress.T
+    return np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (syz**2 + sxz**2 + sxy**2))
+
+
+def refine(tris: np.ndarray, max_edge: float, max_tris: int = 120_000) -> np.ndarray:
+    """Split triangles into four until their edges are at most ``max_edge``: a display mesh fine
+    enough to show the stress field (CAD exports often have huge flat triangles)."""
+    while True:
+        edges = np.linalg.norm(tris - np.roll(tris, 1, axis=1), axis=2).max(axis=1)
+        long = edges > max_edge
+        if not long.any() or len(tris) + 3 * long.sum() > max_tris:
+            return tris
+        a, b, c = tris[long, 0], tris[long, 1], tris[long, 2]
+        ab, bc, ca = (a + b) / 2, (b + c) / 2, (c + a) / 2
+        split = np.stack([np.stack(t, axis=1) for t in ((a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca))], axis=1).reshape(-1, 3, 3)
+        tris = np.concatenate([tris[~long], split])
+
+
+def surface_values(model: Model, values: np.ndarray, tris: np.ndarray) -> np.ndarray:
+    """Element values at every triangle corner, from the element just inside the surface there
+    (the true element results, so the colours match the reported peak; nodal averaging smooths it away).
+    Corners whose inside point misses the voxels get the node-averaged value."""
+    n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+    corners = tris.reshape(-1, 3)
+    inward = corners - np.repeat(n, 3, axis=0) * model.grid.h * 0.5
+    elem_id = np.full(model.grid.solid.shape, -1)
+    elem_id[tuple(model.elems.T)] = np.arange(len(model.elems))
+    ids = _lookup(inward, model.grid, elem_id)
+    smooth = sample_nodes(model, node_average(model, values), corners)
+    return np.where(ids >= 0, values[np.maximum(ids, 0)], smooth)
+
+
+def node_average(model: Model, values: np.ndarray) -> np.ndarray:
+    """Element values averaged onto the nodes around them (smooth colours, like FEA post-processing)."""
+    nodes = (model.edof[:, 0::3] // 3).ravel()
+    total = np.bincount(nodes, np.repeat(values, 8), minlength=model.n_nodes)
+    return total / np.maximum(np.bincount(nodes, minlength=model.n_nodes), 1)
+
+
+def sample_nodes(model: Model, node_values: np.ndarray, pts: np.ndarray) -> np.ndarray:
+    """Trilinear interpolation of node values (n,) or (n, k) at points; corners without a node are left out."""
+    grid = model.grid
+    shape = np.array(model.node_index.shape)
+    g = (pts - grid.origin) / grid.h
+    i0 = np.clip(np.floor(g).astype(int), 0, shape - 2)
+    f = np.clip(g - i0, 0.0, 1.0)
+    vals = node_values.reshape(len(node_values), -1)
+    acc = np.zeros((len(pts), vals.shape[1]))
+    wsum = np.zeros(len(pts))
+    for corner in np.ndindex(2, 2, 2):
+        d = np.array(corner)
+        idx = model.node_index[tuple((i0 + d).T)]
+        w = np.prod(np.where(d == 1, f, 1 - f), axis=1) * (idx >= 0)
+        acc += w[:, None] * vals[np.maximum(idx, 0)]
+        wsum += w
+    out = acc / np.maximum(wsum, 1e-12)[:, None]
+    return out[:, 0] if node_values.ndim == 1 else out
+
+
 def verdict(sf: float) -> str:
     return "fine" if sf >= 2 else "borderline" if sf >= 1 else "likely to break"
 
@@ -314,7 +385,12 @@ def _summary(case: LoadCase, fi_layer, fi_plane, u, info) -> dict:
     worst = max(worst_layer, worst_plane)
     crit = int(np.argmax(fl if mode == "layers" else fp))
     sf = float(1 / worst) if worst > 0 else float("inf")
+    grid = case.model.grid
+    held = grid.origin + np.argwhere(case.model.node_index >= 0)[case.fixed] * grid.h  # node ids follow this order
+    centre = grid.centers(case.model.elems[crit])
+    near = bool(len(held)) and float(np.linalg.norm(held - centre, axis=1).min()) <= NEAR_SUPPORT_VOXELS * grid.h
     return {
+        "near_support": near,
         "safety_factor": sf,
         "verdict": verdict(sf),
         "mode": mode,  # "layers": layers pull/shear apart; "material": the plastic itself yields

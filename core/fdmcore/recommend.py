@@ -83,10 +83,14 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         put("wall_generator", "arachne", "Wall generator", "Arachne varies line width so thin details still print")
     if "small_hole_undersized" in rules:
         put("xy_hole_compensation", T["holes"]["xy_hole_compensation_mm"], "Hole compensation", "Small holes print undersized; this opens them up")
+        put("hole_to_polyhole", 1, "Polyholes", "Prints round holes as polygons with fewer, longer sides: they come out much closer to size (OrcaSlicer, not PrusaSlicer)")
     if rules & {"small_layers_cooling", "tall_thin_feature"}:
         put("slow_down_for_layer_cooling", 1, "Slow down small layers", "Gives small layers time to cool")
-    if rules & {"elephant_foot", "first_layer_detail"}:
-        put("elefant_foot_compensation", 0.15, "Elephant foot compensation", "Keeps the bottom edges and holes true to size")
+    # The first layer is squashed onto the bed and bulges out; pulling it in a little keeps bottom
+    # edges straight. Most printer profiles ship 0.1-0.2 mm; harmless when the profile already has it.
+    put("elefant_foot_compensation", 0.15, "Elephant foot compensation",
+        "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
+        else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight")
     if rules & {"bridge_sag", "long_bridge", "sideways_hole_oval"}:
         put("bridge_speed", 25, "Bridge speed", "Slower bridges sag less")
     return out

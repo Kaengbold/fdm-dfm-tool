@@ -173,3 +173,20 @@ def test_optimiser_finds_the_lightest_settings_that_hold():
     heavy = [dict(l, kg=500) if l["kind"] == "force" else l for l in loads]
     o = api.optimise_strength([0, 0, 1], heavy, prof)
     assert not o["met"] and "can't make it strong enough" in o["explanation"]
+
+
+def test_fea_view_fields_cover_the_refined_surface():
+    loads = hook_loads()
+    r = api.strength([1, 0, 0], loads, {"material": "pla"})
+    tris = np.frombuffer(r["field_triangles"], np.float32).reshape(-1, 3, 3)
+    fi = np.frombuffer(r["vertex_fi"], np.float32)
+    disp = np.frombuffer(r["vertex_disp"], np.float32).reshape(-1, 3)
+    assert len(fi) == len(disp) == 3 * len(tris) > 46 * 3  # finer than the 46-triangle hook
+    edges = np.linalg.norm(tris - np.roll(tris, 1, axis=1), axis=2).max()
+    assert edges <= r["mesh"]["voxel_mm"] + 1e-3
+    assert 0 <= fi.min() and fi.max() <= r["fi_max_pct"] * 3  # surface colours on the same scale as the verdict
+    assert r["fi_max_pct"] == pytest.approx(100 / r["safety_factor"], rel=1e-6)
+    assert np.abs(disp).max() <= r["max_displacement_mm"] * 1.01
+    assert r["mesh"]["load_n"] == pytest.approx(5 * 9.81, rel=1e-3)
+    centers = np.frombuffer(r["elements"]["centers"], np.float32)
+    assert len(centers) == 3 * r["mesh"]["voxels"]

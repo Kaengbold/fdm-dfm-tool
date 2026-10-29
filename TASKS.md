@@ -51,9 +51,17 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-125 P2** Detailed strength from G-code: per-voxel direction-dependent material (along lines / across / between layers), finer grid. · owner: —
 - [ ] **T-126 P2** Detailed heat and warping from G-code timing: heat added line by line, cooling, shrinkage → warp map, corner lift, overheating spots. · owner: —
 - [ ] **T-127 P3** OrcaSlicer in the browser (WebAssembly builds exist: OrcaWasm, Muon3D engine) so the detailed level runs without an install. See `research/browser_slicers.md`: try the Muon3D single-thread build first. · owner: —
+- [ ] **T-130 P1** Strength-aware orientation picks the weak direction: mushroom pulled on its stem → suggests printing on the cap (stem upright, layers pulled apart) instead of on its side. · owner: Claude (`task/T-130-sim-fixes`)
+- [ ] **T-131 P1** FEA-style stress view: smooth colours over the part (blue → red) with a legend in MPa / % of strength, like normal FEA software. · owner: Claude (`task/T-130-sim-fixes`)
+- [ ] **T-132 P1** Load symbols are hidden by the part when behind it (lock, arrows). · owner: Claude (`task/T-130-sim-fixes`)
+- [ ] **T-133 P2** Set the force direction on the part: drag the arrow / angle controls, any direction, not only push/pull/down. · owner: Claude (`task/T-130-sim-fixes`)
+- [ ] **T-134 P2** Review the strength simulation against standard FEA practice (mesh check, convergence, deformation view, reaction forces) and fix what is missing. · owner: Claude (`task/T-130-sim-fixes`)
 - [ ] **T-033 P3** Partial-voxel fill fractions for better accuracy on thin sections. · files: `voxel.py`, `strength.py` · owner: —
 
 ## Design edits
+
+- [ ] **T-135 P1** Missing suggestions (mushroom): round sharp corners of the bed footprint against warping, chamfer the bottom edge against elephant foot, fillet/chamfer where the strength check finds stress at an inside corner (stem base). · owner: Claude (`task/T-130-sim-fixes`)
+- [ ] **T-136 P2** Slicer helpers users don't know about: hole compensation / polyholes for holes, elephant foot compensation, … recommended with plain reasons when the part needs them. · owner: Claude (`task/T-130-sim-fixes`)
 
 - [x] **T-040 P2** Chamfer under flat overhangs (replace a flat ceiling edge by 45°). · files: `features.py` · owner: Claude (`task/T-040-design-edits`) — `additions.py`: 45° fill under ledges up to `ledge_max_mm` wide (mitred at corners; under a too-long bridge it makes a pointed arch). Edits now `add` or `cut` material.
 - [x] **T-041 P2** Thicken thin walls to 2–3 line widths. · owner: Claude (`task/T-040-design-edits`) — walls under `wall_lines` lines grow on both sides, kept clear of nearby material so gaps don't fuse.
@@ -79,6 +87,10 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-063 P2** Test the Ask-AI panel with real keys (Anthropic + Gemini), fix tool-schema issues. · owner: —
 
 ## Infrastructure & UX
+
+- [ ] **T-137 P2** UI bugs from review: AI key field outside a form (console warning); nozzle comparison closes on orientation change; no feedback when clicking the active goal/mode; the 3D view doesn't look clickable (hover highlight + hint); "Design changes" hidden in print mode without a note; small × buttons; walls/infill controls far from the slicer settings. · owner: Claude (`task/T-130-sim-fixes`)
+- [ ] **T-140 P1** (Phase 7) Start wizard: what do you want — good slicer settings / one-off optimisation / step by step / expert. · owner: —
+- [ ] **T-141 P1** (Phase 7) UI overhaul: simpler layout, fewer controls at once, clear next step. · owner: —
 
 - [~] **T-070 P1** GitHub Actions CI: pytest + e2e smoke test (Windows runner with Edge, or Linux + Chromium). · owner: Claude (`task/T-070-ci`) — `.github/workflows/ci.yml`: pytest, Pyodide check, Linux Chromium e2e. Not run on GitHub yet: verify on the first push/PR (WebGL in headless Linux Chromium is the main risk).
 - [~] **T-071 P2** Hosting: GitHub Pages (needs a public repo or paid plan) or Cloudflare Pages. · owner: Claude — `.github/workflows/pages.yml` assembles web/ + core/fdmcore and deploys. Left: enable Pages (Source: GitHub Actions) and check the first deploy.
