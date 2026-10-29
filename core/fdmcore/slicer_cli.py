@@ -152,6 +152,8 @@ def parse_gcode(text: str) -> dict:
     out: dict = {}
     if m := re.search(r"total estimated time:\s*([^\n;]+)", head) or re.search(r"estimated printing time \(normal mode\)\s*=\s*([^\n]+)", text):
         out["print_time_min"] = round(_minutes(m.group(1)), 1)
+    if m := re.search(r"model printing time:\s*([^\n;]+)", head):
+        out["model_time_min"] = round(_minutes(m.group(1)), 1)  # without the printer's start routine
     if m := re.search(r"total layer number:\s*(\d+)", head):
         out["layers"] = int(m.group(1))
     if m := re.search(r"filament used \[mm\]\s*=\s*([\d.]+)", tail):

@@ -40,7 +40,7 @@ def test_orcaslicer_profiles_and_gcode_stats():
 
     g = "; HEADER_BLOCK_START\n; model printing time: 30m 9s; total estimated time: 1h 5m 53s\n; total layer number: 298\n" \
         "; FEATURE: Support\n; filament used [mm] = 4571.60\n; filament used [cm3] = 11.00\n"
-    assert parse_gcode(g) == {"print_time_min": 65.9, "layers": 298, "filament_mm": 4571.6,
+    assert parse_gcode(g) == {"print_time_min": 65.9, "model_time_min": 30.1, "layers": 298, "filament_mm": 4571.6,
                               "filament_cm3": 11.0, "support": True}
     orca = find_orca()
     if orca is None or not (orca.parent / "resources" / "profiles").exists():
