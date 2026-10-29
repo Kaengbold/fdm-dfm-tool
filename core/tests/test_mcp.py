@@ -32,3 +32,18 @@ def test_agent_workflow(tmp_path):
     path = m.export_3mf(up, str(tmp_path / "part.3mf"), **prof, settings={"wall_loops": "5"})
     assert Path(path).stat().st_size > 0
     assert m.get_report(up, **prof).startswith("# Print check")
+
+
+def test_orcaslicer_profiles_and_gcode_stats():
+    """Profile matching needs an installed OrcaSlicer; G-code parsing doesn't."""
+    from fdmcore.slicer_cli import find_orca, match_profiles, parse_gcode
+
+    g = "; HEADER_BLOCK_START\n; model printing time: 30m 9s; total estimated time: 1h 5m 53s\n; total layer number: 298\n" \
+        "; FEATURE: Support\n; filament used [mm] = 4571.60\n; filament used [cm3] = 11.00\n"
+    assert parse_gcode(g) == {"print_time_min": 65.9, "layers": 298, "filament_mm": 4571.6,
+                              "filament_cm3": 11.0, "support": True}
+    orca = find_orca()
+    if orca is None or not (orca.parent / "resources" / "profiles").exists():
+        pytest.skip("OrcaSlicer not installed")
+    m = match_profiles(orca.parent / "resources" / "profiles", "Bambu Lab P1S", "0.4", "petg", 0.2)
+    assert m["machine"].stem == "Bambu Lab P1S 0.4 nozzle" and "PETG" in m["filament"].stem

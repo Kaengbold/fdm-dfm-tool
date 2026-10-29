@@ -54,6 +54,8 @@ For Gemini CLI, add to `~/.gemini/settings.json`:
 { "mcpServers": { "fdm-dfm": { "command": "python", "args": ["-m", "fdmcore.mcp_server"] } } }
 ```
 
+With OrcaSlicer installed, the agent can also slice for real (`slice_with_orcaslicer`: OrcaSlicer's own print time and filament use).
+
 This is the supported way to use a Claude, ChatGPT or Gemini *subscription* with the tool:
 the official client (Claude Code, Codex, Gemini CLI) runs the model, our MCP server only
 provides the tools. The web app itself never uses subscription logins.

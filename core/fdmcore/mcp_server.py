@@ -9,7 +9,7 @@ web app uses.
 
 Typical agent flow: load_part -> find_orientations -> check_print -> (list_faces ->
 check_strength -> strength_options) -> suggest_design_changes -> apply_design_changes
--> export_3mf.
+-> export_3mf (-> slice_with_orcaslicer to confirm with the real slicer).
 """
 
 from __future__ import annotations
@@ -204,6 +204,43 @@ def export_3mf(
     out = Path(output_path).expanduser()
     out.write_bytes(api.export(up, prof, merged))
     return str(out)
+
+
+@server.tool()
+def slice_with_orcaslicer(
+    up: list[float],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    settings: dict[str, str] | None = None,
+) -> dict:
+    """Slice for real with the installed OrcaSlicer (its own printer/process/filament profiles plus our
+    recommended settings, or ``settings`` overrides). Returns OrcaSlicer's print time, filament use and
+    layer count next to our quick estimate. Slow (tens of seconds) — use it to confirm a final choice."""
+    from .profile import Profile, presets
+    from .slicer_cli import find_orca, match_profiles, slice_3mf
+
+    orca = find_orca()
+    if orca is None:
+        raise RuntimeError("OrcaSlicer not found. Install it, or set ORCA_SLICER to its executable.")
+    prof = _profile(printer, material, nozzle)
+    result = api.check(up, prof)
+    merged = {r["key"]: r["value"] for r in result["settings"]}
+    merged.update(settings or {})
+    p = Profile.from_dict(prof)
+    resources = orca.parent / "resources" / "profiles"
+    if not resources.exists():  # macOS app bundle
+        resources = orca.parents[1] / "Resources" / "profiles"
+    matched = match_profiles(resources, presets()["printers"][printer]["name"], nozzle, material, float(merged.get("layer_height", p.layer_height)))
+    sliced = slice_3mf(api.export(up, prof, merged), matched, orca)
+    if "filament_cm3" in sliced:
+        sliced["filament_g"] = round(sliced["filament_cm3"] * p.material["density_g_cm3"], 1)
+    return {
+        "orcaslicer": sliced,
+        "estimate": {k: round(result["stats"][k], 1) for k in ("print_time_min", "filament_g")},
+        "profiles": {k: v.stem for k, v in matched.items()},
+        "settings": merged,
+    }
 
 
 @server.tool()

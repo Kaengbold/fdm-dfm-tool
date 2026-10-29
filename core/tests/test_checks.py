@@ -134,7 +134,7 @@ def test_presets_complete():
 def test_manifest_lists_all_engine_files():
     listed = set(json.loads((PKG / "manifest.json").read_text()))
     actual = {str(p.relative_to(PKG)).replace("\\", "/") for p in PKG.rglob("*") if p.suffix in (".py", ".yaml")}
-    actual -= {"mcp_server.py", "booleans.py"}  # local mode only
+    actual -= {"mcp_server.py", "booleans.py", "slicer_cli.py"}  # local mode only
     assert listed == actual, "update core/fdmcore/manifest.json (see tools/make_manifest.py)"
 
 
