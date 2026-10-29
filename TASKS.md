@@ -96,6 +96,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [ ] **T-143 P1** (Phase 7) Always show clearly when something loads or works in the background (what, how long, cancel). · owner: —
 - [ ] **T-150 P2** (Phase 8) Custom infill: density per region from the stress result; strengthening holes that make the slicer add walls inside; 3MF modifier volumes (Orca/Bambu/Prusa) to strengthen or lighten regions. · owner: —
 - [ ] **T-151 P2** (Phase 8) Special slicer settings integration: expose the useful advanced settings with plain explanations (continues T-136). · owner: —
+- [ ] **T-152 P2** (Phase 8) Survey OrcaSlicer and PrusaSlicer features most users don't know (e.g. polyholes, precise wall, scarf seams, fuzzy skin, ironing, interlocking beams, brim ears, per-region modifiers, variable layer height, support painting, make overhangs printable, hole-to-polyhole, arc fitting) and integrate the useful ones: recommend them when the part needs them, with a plain reason, in the 3MF. Re-check each new Orca release. · owner: —
 - [ ] **T-160 P3** (Phase 9) Simplified dynamic (vibration, impact) simulation. · owner: —
 - [ ] **T-161 P3** (Phase 9) Heat in use (part temperature vs softening) and creep under a constant load. · owner: —
 - [ ] **T-162 P2** (Phase 9) Warping and residual stress with the deformation shown on the part; cooling settings optimised from the heat simulation. · owner: —
