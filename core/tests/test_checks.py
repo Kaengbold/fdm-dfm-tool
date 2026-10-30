@@ -357,3 +357,28 @@ def test_heat_build_up_flags_a_thin_pin_not_a_block():
     assert not [f for f in r["findings"] if f["rule"] == "small_layers_cooling"]
     heat = r["stats"]["layer_heat"]
     assert len(heat["z"]) == len(heat["temp_c"]) and max(heat["temp_c"]) < prof.material["nozzle_temp_c"]
+
+
+def test_shallow_raised_and_engraved_details():
+    from shapely.geometry import box
+
+    from fdmcore.additions import extrude
+    from fdmcore.checks import run_checks
+    from fdmcore.mesh import Mesh
+    from fdmcore.profile import Profile
+
+    prof = Profile.from_dict({})  # 0.2 mm layers
+    plate = box(0, 0, 40, 20)
+    raised = [box(5, 5, 8, 15), box(10, 5, 13, 15)]  # two "letters" 0.2 mm high
+    deep = box(25, 5, 35, 15)  # pocket 0.6 mm deep: fine
+    body = extrude(plate.difference(deep), 0, 3)
+    floor = extrude(deep, 0, 2.4)
+    letters = [extrude(r, 3, 3.2) for r in raised]
+    # One closed solid isn't needed for the check: it looks at the up-facing faces.
+    mesh = Mesh(np.concatenate([body, floor, *letters]))
+    found = [f for f in run_checks(mesh, prof)["findings"] if f["rule"] == "shallow_relief"]
+    assert len(found) == 1 and found[0]["severity"] == "warn" and found[0]["metrics"]["pieces"] == 2
+    assert "Raised" in found[0]["detail"]
+    shallow = Mesh(np.concatenate([extrude(plate.difference(deep), 0, 3), extrude(deep, 0, 2.7)]))
+    eng = [f for f in run_checks(shallow, prof)["findings"] if f["rule"] == "shallow_relief"]
+    assert len(eng) == 1 and "Engraved" in eng[0]["detail"] and eng[0]["severity"] == "warn"

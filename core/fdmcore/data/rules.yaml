@@ -201,6 +201,30 @@ rules:
     - strength
     - fillet
     - stress-concentration
+  shallow_relief:
+    title: Raised or Engraved Detail Too Shallow
+    why: Text, logos or other details raised from or sunk into a face that points up are only a layer or two high.
+      The slicer cuts the part once per layer, so a step smaller than a layer may disappear or snap to the next
+      layer, and one of under about 0.4 mm (two layers) reads only faintly.
+    fixes:
+    - domain: geometry
+      text: Raise or sink the detail by 0.4–0.6 mm (2–3 layers at 0.2 mm). Use a bold sans-serif font with strokes
+        at least 1.5 nozzle widths wide.
+    - domain: slicer
+      text: Print thinner layers (for example 0.12 mm) so the step covers more layers; variable layer height can do
+        this only near the detail.
+      settings:
+        layer_height: '0.12'
+    - domain: process
+      text: For contrast, change the filament colour at the layer where the detail starts (a colour change / pause
+        at that height).
+    tags:
+    - text
+    - small-features
+    - layer-height
+    sources:
+    - Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac
+    - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   elephant_foot:
     title: Elephant Foot Flare on First Layers
     why: The weight of upper layers and heat from the build plate squish the initial bottom layers outward. This

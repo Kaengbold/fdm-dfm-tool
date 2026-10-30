@@ -54,6 +54,7 @@ RULE_IMPACT = {
     "tall_thin_feature": "shape",
     "support_marks": "surface",
     "fine_detail_rough": "surface",
+    "shallow_relief": "surface",
     "dry_filament": "surface",
     "weak_upright_pin": "weak",
     "thin_neck": "weak",
@@ -144,6 +145,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _cooling_findings(layers, heat, profile, T)
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
+    findings += _relief_findings(mesh, profile, T)
 
     for f in findings:
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
@@ -538,6 +540,48 @@ def _inside(box, outer, tol: float = 1.0) -> bool:
     """Box centre inside ``outer`` (both [[x0,y0,z0],[x1,y1,z1]]), with some slack."""
     c = (np.asarray(box[0]) + np.asarray(box[1])) / 2
     return bool(np.all(c >= np.asarray(outer[0]) - tol) and np.all(c <= np.asarray(outer[1]) + tol))
+
+
+def _relief_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
+    """Text and details raised from / sunk into an up-facing face by only a layer or two: a small flat
+    patch a little above (raised) or below (engraved) a bigger flat face that surrounds it."""
+    R = T["relief"]
+    lh = profile.layer_height
+    limit = max(R["min_mm"], R["min_layers"] * lh)
+    normals, areas = mesh.normals_and_areas()
+    up = (normals[:, 2] > 0.99) & (areas > 1e-9)
+    if not up.any() or up.sum() > 200_000:
+        return []
+    z = np.round(mesh.triangles[up][..., 2].mean(axis=1), 2)
+    tris = mesh.triangles[up][..., :2]
+    levels = {}
+    for level in np.unique(z):
+        polys = shapely.polygons(tris[z == level])
+        merged = shapely.union_all(shapely.make_valid(polys[shapely.area(polys) > 1e-9]), grid_size=1e-4)
+        levels[float(level)] = [p for p in parts(merged, 0.0) if p.area > 0.01]
+    found: dict[tuple, list] = {}
+    zs = np.array(sorted(levels))
+    for z1, pieces in levels.items():
+        near = zs[(np.abs(zs - z1) > 1e-3) & (np.abs(zs - z1) < limit - 1e-6)]  # only levels close in height
+        for z0 in near.tolist():
+            d, bases = z1 - z0, levels[z0]
+            for base in bases:
+                shell = Polygon(base.exterior)
+                for piece in pieces:
+                    if piece.area <= R["max_share"] * shell.area and shell.contains(piece.buffer(-0.01)):
+                        found.setdefault((round(abs(d), 2), d > 0, z0), []).append(piece)
+    out = []
+    for (d, raised, z0), pieces in found.items():
+        layers = d / lh
+        sev = "warn" if layers < R["vanish_layers"] else "info"
+        what = "Raised" if raised else "Engraved"
+        x0, y0, x1, y1 = shapely.union_all(pieces).bounds
+        top = z0 + (d if raised else 0)
+        out.append(_finding("shallow_relief", sev,
+                            f"{what} detail only {d:.2f} mm {'high' if raised else 'deep'} ({layers:.1f} layers of {lh} mm) on the face at "
+                            f"{z0:.1f} mm — {'may not show at all' if sev == 'warn' else 'reads faintly'}; make it {limit:.1f} mm or more",
+                            bbox=[[x0, y0, top - d], [x1, y1, top]], depth_mm=d, layers=round(layers, 1), pieces=len(pieces)))
+    return out
 
 
 def _shrinkage_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:

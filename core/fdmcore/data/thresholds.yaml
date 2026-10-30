@@ -8,6 +8,15 @@ features:
   single_wall_below_nozzle: 2.0   # walls thinner than this get only one perimeter -> weak [min_wall_thickness_and_arachne]
   single_wall_min_height_mm: 5    # only report single-perimeter walls that stand at least this tall
 
+relief:
+  # Raised (embossed) or sunk (engraved) text and details on faces that point up when printed: the
+  # slicer cuts the part once per layer, so a step of one layer or less may vanish, and under 0.4 mm /
+  # 2 layers it reads faintly. Top-face text depth 0.4–0.6 mm (2–3 layers at 0.2 mm) [text_embossing_debossing_limits].
+  min_mm: 0.4             # and at least min_layers layers
+  min_layers: 2
+  vanish_layers: 1.5      # below this many layers it may not print at all
+  max_share: 0.5          # the detail is at most this share of the face around it (else it's a step, not a detail)
+
 gaps:
   fuse_below_mm: 0.2              # slots/clearances narrower than this fuse shut [slant3d_internal_micro_voids_3x_strength, mechanical_clearances_by_fit]
 
