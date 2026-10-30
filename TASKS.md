@@ -26,7 +26,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [~] **T-023 P2** Threads & fasteners: detect small holes meant for screws, suggest heat-set inserts / nut traps / correct pilot diameters. · owner: Claude (`task/T-026-presets-fasteners`) — holes modelled at M2–M6 nominal size get clearance / pilot / insert sizes (`thresholds.yaml` fasteners). Left: nut traps (hex holes), wall thickness around inserts.
 - [x] **T-024 P2** (done as `bridge_sag`) Horizontal hole droop as an *info* finding even when the bridge is short (link to the teardrop edit). · owner: —
 - [ ] **T-025 P3** Seam / cosmetic surface hints, ironing suggestion for flat tops. · owner: —
-- [~] **T-026 P2** More presets: Creality K1/K2/Ender-3 V3, Elegoo, Anycubic; materials TPU, ASA, PC, PLA+. Cite sources. · files: `data/presets.yaml` · owner: Claude (`task/T-026-presets-fasteners`) — added (Gemini draft, hand-checked); entries marked `verify` in presets.yaml still need a spec-page check; warping lengths for new materials are scaled estimates.
+- [~] **T-026 P2** More presets: Creality K1/K2/Ender-3 V3, Elegoo, Anycubic; materials TPU, ASA, PC, PLA+. Cite sources. · files: `data/presets.yaml` · owner: Claude (`task/T-026-presets-fasteners`) — added (Gemini draft, hand-checked); entries marked `verify` in presets.yaml still need a spec-page check; warping lengths for new materials are scaled estimates. 2026-10-30: strength/stiffness checked against brand data sheets (`research/gemini_filament_datasheets.md`): PLA and PETG stiffness lowered to printed-specimen values, sources noted; KE nozzle and Centauri multi-colour settled. Left: K1C CFS, Prusa nozzles, TPU stiffness.
 
 ## Findings model (impact-based) — follow-ups
 
