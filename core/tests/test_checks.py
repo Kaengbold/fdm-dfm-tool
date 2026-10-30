@@ -88,6 +88,20 @@ def test_settings_follow_findings():
     assert upright["enable_support"] == "1" and flipped["enable_support"] == "0"
 
 
+def test_ironing_and_precise_wall():
+    from fdmcore.export3mf import prusa_settings
+    from fdmcore.recommend import recommend_settings
+
+    p = Profile.from_dict({})
+    plain = {s["key"] for s in recommend_settings(p, [], {"top_flat_mm2": 50})}
+    assert not plain & {"ironing_type", "precise_outer_wall"}
+    keys = {s["key"]: s["value"] for s in recommend_settings(p, [{"rule": "gap_fuses"}], {"top_flat_mm2": 900})}
+    assert keys["ironing_type"] == "topmost" and keys["precise_outer_wall"] == "1"
+    assert "ironing_type" not in {s["key"] for s in recommend_settings(Profile.from_dict({"goal": "speed"}), [], {"top_flat_mm2": 900})}
+    assert prusa_settings({"ironing_type": "topmost"}) == {"ironing": "1", "ironing_type": "topmost"}
+    assert run_checks(orient(sample("l_bracket"), np.eye(3)), p)["stats"]["top_flat_mm2"] > 0
+
+
 def test_export_3mf():
     api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
     data = api.export([1, 0, 0])

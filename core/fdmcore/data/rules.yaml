@@ -325,6 +325,11 @@ rules:
         enable_support: '1'
         support_type: tree(auto)
         support_interface_pattern: rectilinear
+    - domain: slicer
+      text: In OrcaSlicer, "Make overhangs printable" turns steep overhangs into 45° slopes while slicing, so many of
+        them need no support at all (the underside changes shape a little).
+      settings:
+        make_overhang_printable: '1'
     - domain: process
       text: Use a deburring tool, scraper, or fine sandpaper to clean up rough contact pockmarks left by support
         removal.
@@ -337,6 +342,7 @@ rules:
     - Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698
     - Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA
     - Slant 3D — Stop Using Slicer Supports | Design for 3D Printing — https://www.youtube.com/watch?v=_R2E8VwyNz0
+    - OrcaSlicer wiki — Overhangs (Make overhangs printable) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_overhangs
   trapped_support:
     title: Support Trapped Where It Can't Be Removed
     why: The CAD model shows a hollow internal pocket, a blind hole or a long narrow tunnel, but any support

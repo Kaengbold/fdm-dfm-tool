@@ -29,6 +29,11 @@ relief:
 gaps:
   fuse_below_mm: 0.2              # slots/clearances narrower than this fuse shut [slant3d_internal_micro_voids_3x_strength, mechanical_clearances_by_fit]
 
+ironing:
+  # A large flat top (lid, badge, nameplate, a face that gets glued) is where ironing shows: the nozzle
+  # passes over the last layer with almost no flow and smooths the ridges. Only the topmost face, since
+  # ironing every top surface adds a lot of time [OrcaSlicer wiki quality_settings_ironing; Prusa KB ironing_177488].
+  min_top_area_mm2: 300           # about 17 x 17 mm; smaller tops gain little for the extra time
 holes:
   vertical_min_mm: 1.5            # smaller vertical holes close up (0.4 nozzle) [vertical_hole_shrinkage_polyholes]
   vertical_min_nozzle: 3.5        # scaled for other nozzles: max(vertical_min_mm * nozzle/0.4, this * nozzle)

@@ -91,6 +91,12 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
     put("elefant_foot_compensation", 0.15, "Elephant foot compensation",
         "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
         else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight")
+    if stats.get("top_flat_mm2", 0) >= T["ironing"]["min_top_area_mm2"] and goal in ("balanced", "strength"):
+        put("ironing_type", "topmost", "Ironing", "The flat top comes out smooth: the nozzle passes over it once more with almost no"
+            " plastic (adds a few minutes)")
+    if rules & {"gap_fuses", "shrinkage_size_error"}:
+        put("precise_outer_wall", 1, "Precise wall", "Keeps the outer wall from bulging outwards, so outside sizes and gaps come"
+            " out closer to the model (OrcaSlicer; other slicers ignore it)")
     if rules & {"bridge_sag", "long_bridge", "sideways_hole_oval"}:
         put("bridge_speed", 25, "Bridge speed", "Slower bridges sag less")
     return out

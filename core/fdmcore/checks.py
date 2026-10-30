@@ -155,7 +155,11 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
     findings.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
     del stats["layer_times"]
+    normals, areas = mesh.normals_and_areas()
+    z = mesh.triangles[..., 2]
+    top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
     stats.update(
+        top_flat_mm2=float(areas[top].sum()),
         layer_heat={"z": [l.z for l in layers], "temp_c": heat.round(1).tolist(), "softening_c": profile.material["softening_c"]},
         layers_analysed=len(layers),
         height_mm=float(mesh.triangles[..., 2].max()),
