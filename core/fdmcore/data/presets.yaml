@@ -42,7 +42,7 @@ printers:
     name: Prusa MK4S
     bed: [250, 210, 220]
     enclosure: none
-    hardened_nozzle: false   # verify: depends on nozzle fitted
+    hardened_nozzle: false   # depends on the nozzle fitted; with a hardened one, set it under My printers
     speed: medium
     multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   prusa_mini:
@@ -56,7 +56,7 @@ printers:
     name: Prusa CORE One
     bed: [250, 220, 270]
     enclosure: heated        # bed-heated, regulated chamber
-    hardened_nozzle: false   # verify: depends on nozzle fitted
+    hardened_nozzle: false   # depends on the nozzle fitted; with a hardened one, set it under My printers
     speed: fast
     multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
 
@@ -68,7 +68,7 @@ printers:
     enclosure: passive
     hardened_nozzle: true    # steel-tipped nozzle stock
     speed: fast
-    multi_material: none     # verify: CFS support for the K1 series
+    multi_material: optional # CFS via Creality's K1 Series CFS Upgrade Kit (store.creality.com/products/k1-series-cfs-upgrade-accessory-kit); not 2025 units
   creality_k2_plus:
     name: Creality K2 Plus
     bed: [350, 350, 350]
@@ -108,7 +108,7 @@ printers:
     name: Prusa XL (single tool)
     bed: [360, 360, 360]
     enclosure: none
-    hardened_nozzle: false   # verify: depends on nozzle fitted
+    hardened_nozzle: false   # depends on the nozzle fitted; with a hardened one, set it under My printers
     speed: fast
     multi_material: optional # extra toolheads
 

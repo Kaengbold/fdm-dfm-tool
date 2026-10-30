@@ -546,7 +546,7 @@ const ON_OFF = new Set(["enable_support", "hole_to_polyhole", "slow_down_for_lay
 const VALUE_WORDS = {
   brim_type: { no_brim: "Off", outer_only: "Outside only", brim_ears: "Brim ears", outer_and_inner: "Outside and inside" },
   support_type: { "tree(auto)": "Tree (automatic)", "normal(auto)": "Normal (automatic)" },
-  ironing_type: { topmost: "Top surface only", top: "All top surfaces", no_ironing: "Off" },
+  ironing_type: { topmost: "Top surface only", top: "All top surfaces", "no ironing": "Off" },
   seam_slope_type: { external: "Outer wall", all: "All walls", none: "Off" },
   support_interface_pattern: { rectilinear_interlaced: "Rectilinear, crossed" },
 };

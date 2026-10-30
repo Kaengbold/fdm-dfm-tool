@@ -27,6 +27,10 @@ rules:
     - sagging
     - cooling
     - gap
+    sources:
+    - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
+    - OrcaSlicer Wiki — Bridging — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_bridging
+    - Teaching Tech — 3D printer calibration: bridging — https://teachingtechyt.github.io/calibration.html#bridging
   too_thin_to_print:
     title: Too thin to print
     why: This detail is narrower than your printer nozzle's extrusion width. The slicer completely ignores it during
@@ -45,6 +49,9 @@ rules:
     - fine-detail
     - nozzle-size
     - arachne
+    sources:
+    - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
+    - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   small_bed_contact:
     title: Small contact with the bed
     why: The model has very little surface area touching the build plate compared to its overall volume. The weak
@@ -65,6 +72,9 @@ rules:
     - bed-contact
     - brim
     - detachment
+    sources:
+    - Prusa Knowledge Base — Skirt and Brim (brim for tall objects with a small base) — https://help.prusa3d.com/article/skirt-and-brim_133969
+    - OrcaSlicer Wiki — Brim — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_brim
   tipping_risk:
     title: Tall part can tip over
     why: The part is tall and top-heavy relative to its narrow footprint on the print bed. As the bed shakes and
@@ -87,6 +97,8 @@ rules:
     - stability
     - orientation
     - brim
+    sources:
+    - Prusa Knowledge Base — Skirt and Brim (brim for tall objects with a small base) — https://help.prusa3d.com/article/skirt-and-brim_133969
   tall_thin_feature:
     title: Tall, thin part wobbles
     why: A long, skinny pin or spire bends and wobbles back and forth as the nozzle pushes molten plastic onto it.
@@ -109,6 +121,8 @@ rules:
     - slender
     - tall-feature
     - stability
+    sources:
+    - Prusa Knowledge Base — Skirt and Brim (brim for tall objects with a small base) — https://help.prusa3d.com/article/skirt-and-brim_133969
   small_layers_cooling:
     title: Small layers don't cool in time
     why: Tiny tips and spires take only a second to print per layer. The nozzle stays right over the hot spot, turning
@@ -130,6 +144,9 @@ rules:
     - small-layers
     - overheating
     - blobs
+    sources:
+    - Prusa Knowledge Base — Max volumetric speed (Layer time cooldown) — https://help.prusa3d.com/article/max-volumetric-speed_127176
+    - OrcaSlicer Wiki — Material cooling — https://github.com/OrcaSlicer/OrcaSlicer/wiki/material_cooling
   enclosure_recommended:
     title: This material warps on an open printer
     why: Temperature-sensitive filaments like ABS or ASA need hot ambient air around the print. Cold room drafts
@@ -152,6 +169,9 @@ rules:
     - drafts
     - abs
     - delamination
+    sources:
+    - CNC Kitchen — Understand WHY 3D prints WARP — https://www.youtube.com/watch?v=HNAtHl6kB7Y
+    - Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide (enclosed chamber, hardened steel nozzle only) — https://wiki.bambulab.com/en/filament/asacf_pahtcf
   hardened_nozzle_required:
     title: Abrasive filament needs a hardened nozzle
     why: Filaments infused with carbon fiber, glass, glow-in-the-dark powder, or metal are abrasive. Standard brass
@@ -166,6 +186,8 @@ rules:
     - abrasive
     - carbon-fiber
     - wear
+    sources:
+    - Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide (enclosed chamber, hardened steel nozzle only) — https://wiki.bambulab.com/en/filament/asacf_pahtcf
   dry_filament:
     title: Filament needs drying first
     why: Filaments like Nylon, PA-CF, TPU, and PETG absorb water directly out of humid air. The water boils inside
@@ -182,6 +204,8 @@ rules:
     - drying
     - stringing
     - nylon
+    sources:
+    - Bambu Lab Wiki — Filament Drying Recommendations — https://wiki.bambulab.com/en/filament-acc/filament/dry-filament
   stress_at_inside_corner:
     title: Sharp inside corner can crack
     why: Where a stem, rib or wall meets the rest of the part at a sharp inside corner, the load has to turn the
@@ -201,6 +225,9 @@ rules:
     - strength
     - fillet
     - stress-concentration
+    sources:
+    - Printed Solid — 3D Printing Design Tips, Part 1: Stress Concentrations — https://www.printedsolid.com/blogs/news/37036739-3d-printing-design-tips-part-1-stress-concentrations
+    - Experimental Determination of Tensile Stress Concentration Factors of 3D-Printed PLA Polymer, Advanced Materials Research 1180 — https://www.scientific.net/AMR.1180.13
   too_hot_in_use:
     title: Gets too hot where it's used
     why: Printed plastic loses stiffness and strength as it warms up and goes soft near its glass transition
@@ -285,6 +312,8 @@ rules:
     - dimensional-accuracy
     - first-layer
     - tolerances
+    sources:
+    - Prusa Knowledge Base — Elephant foot compensation — https://help.prusa3d.com/article/elephant-foot-compensation_114487
   exceeds_build_volume:
     title: Too big for your printer
     why: The part doesn't fit on the bed or under the gantry in this orientation, so the slicer will refuse to print
@@ -300,6 +329,8 @@ rules:
     tags:
     - size
     - build volume
+    sources:
+    - OrcaSlicer Wiki — Cutting tool — https://github.com/OrcaSlicer/OrcaSlicer/wiki/prepare_cutting_tool
   turned_to_fit:
     title: Turned on the bed to fit
     why: The part only fits when it is rotated around the vertical axis, so the tool turned it. The 3MF export already
@@ -587,6 +618,28 @@ rules:
     - CNC Kitchen — Tips & Tricks for Heat-Set Inserts — https://cnckitchen.com/blog/tips-and-tricks-for-heat-set-inserts
     - DigiKey Maker.io — How to use heat-set inserts — https://www.digikey.com/es/maker/tutorials/2025/intro-to-freecad-part-4-how-to-use-heat-set-inserts
     - Sovol — Design strong screw bosses for heat-set inserts — https://www.sovol3d.com/blogs/news/3d-printing-with-heat-set-inserts-design-strong-screw-bosses-that-last
+  screw_wall_thin:
+    title: Thin wall around a screw hole
+    why: A screw driven straight into printed plastic cuts its own thread and pushes the plastic outwards. With
+      less wall around the hole than the screw is thick, the wall splits along the layers or the thread strips
+      out.
+    fixes:
+    - domain: geometry
+      text: Give the hole a round boss with at least the screw's diameter of plastic all round (M3 needs about 3 mm),
+        or move the hole further from the edge.
+    - domain: slicer
+      text: Print more walls so the screw cuts into solid plastic, not infill.
+      settings:
+        wall_loops: '4'
+    - domain: process
+      text: Use a heat-set insert or a nut instead; they spread the load and can be screwed in and out many times.
+    tags:
+    - fastener
+    - screw
+    - hole
+    sources:
+    - Hubs — How to assemble 3D printed parts with threaded fasteners (wall around a thread ≥ the fastener's diameter)
+      — https://www.hubs.com/knowledge-base/how-assemble-3d-printed-parts-threaded-fasteners/
   first_layer_detail:
     title: Fine detail squashed on the bed
     why: The CAD model shows crisp letters, logos, or shallow grooves on the bottom face, but on the finished print

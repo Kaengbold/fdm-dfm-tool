@@ -72,10 +72,15 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
     else:
         put("enable_support", 0, "Supports", "Nothing needs support in this orientation")
 
-    if rules & {"small_bed_contact", "tipping_risk", "warping"}:
+    if rules & {"small_bed_contact", "tipping_risk"}:
         width = T["warping"]["brim_width_mm"] if "warping" in rules or mat["warp_risk"] == "high" else 5
-        put("brim_type", "outer_only", "Brim", "Holds the part down: small contact, tall part or warping")
+        put("brim_type", "outer_only", "Brim", "Holds the part down: small contact or a tall part")
         put("brim_width", width, "Brim width", "Wide enough to stop corners lifting")
+    elif "warping" in rules:
+        # Only the corners lift: ears at the sharp corners hold them with far less brim to cut off
+        # (OrcaSlicer wiki, Brim: Mouse ears). PrusaSlicer has none and gets an outer brim instead.
+        put("brim_type", "brim_ears", "Brim", "Small ears at the corners, where warping starts; less to cut off than a full brim")
+        put("brim_width", T["warping"]["brim_width_mm"], "Brim width", "Wide enough to stop corners lifting")
     else:
         put("brim_type", "no_brim", "Brim", "Enough bed contact without one")
 
