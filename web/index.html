@@ -15,9 +15,15 @@
       }
     </script>
   </head>
-  <body>
+  <body data-level="simple">
     <aside>
       <h1>FDM DFM Tool <small>pre-alpha</small></h1>
+      <div class="level" role="radiogroup" aria-label="How much to show">
+        <label title="The essentials: load a part, get the best orientation, the problems and slicer settings, check a load"><input type="radio" name="level" value="simple" checked /> Simple</label>
+        <label title="Adds design changes, how it's printed (walls, infill), heat, nozzles, your own printers and materials"><input type="radio" name="level" value="advanced" /> Advanced</label>
+        <label title="Everything: the detailed check from your G-code, FEA views, accuracy checks, AI"><input type="radio" name="level" value="expert" /> Expert</label>
+        <button type="button" id="show-guide" class="link" title="What do you want to do? Picks the right level for you">Guide</button>
+      </div>
 
       <label id="drop" class="drop">
         <input id="file" type="file" accept=".stl,.3mf,.step,.stp" hidden />
@@ -42,8 +48,8 @@
         <label>Material <select id="material"></select></label>
         <label>Nozzle <select id="nozzle"></select></label>
       </div>
-      <label class="toggle" id="mm-row"><input id="multi-material" type="checkbox" /> Multi-material (AMS / MMU) available</label>
-      <details id="my-presets" class="my-presets">
+      <label class="toggle" id="mm-row" data-min="advanced"><input id="multi-material" type="checkbox" /> Multi-material (AMS / MMU) available</label>
+      <details id="my-presets" class="my-presets" data-min="advanced">
         <summary>My printers &amp; materials</summary>
         <p class="hint">Add your own printer or filament, starting from a similar one. Saved in this browser only.</p>
         <div class="row">
@@ -92,7 +98,7 @@
         </div>
       </div>
 
-      <div class="mode" role="radiogroup" aria-label="What can you change?">
+      <div class="mode" role="radiogroup" aria-label="What can you change?" data-min="advanced">
         <span>What can you change?</span>
         <div>
           <label><input type="radio" name="mode" value="print" checked /> Just print it</label>
@@ -101,7 +107,7 @@
         </div>
       </div>
 
-      <p id="mode-note" class="mode-note"></p>
+      <p id="mode-note" class="mode-note" data-min="advanced"></p>
 
       <p id="status" class="status">Loading engine… (first visit downloads ~15 MB)</p>
       <div id="progress" class="progress" hidden><progress id="progress-bar" max="1"></progress> <button id="cancel">Cancel</button></div>
@@ -112,8 +118,8 @@
 
         <h2>Findings <small id="stats"></small></h2>
         <ol id="findings" class="impact-groups"></ol>
-        <label class="toggle" title="Rough estimate of heat build-up: small pins and tips get the next layer before they have cooled"><input id="show-temp" type="checkbox" /> Show heat while printing (red = still soft when the next layers go on)</label>
-        <details id="nozzle-block" class="nozzles">
+        <label class="toggle" data-min="advanced" title="Rough estimate of heat build-up: small pins and tips get the next layer before they have cooled"><input id="show-temp" type="checkbox" /> Show heat while printing (red = still soft when the next layers go on)</label>
+        <details id="nozzle-block" class="nozzles" data-min="advanced">
           <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
           <table id="nozzle-table"></table>
         </details>
@@ -128,7 +134,7 @@
               <button id="mark-bed" title="Only orientations with this face on the bed are recommended">Put this face on the bed</button>
               <button id="mark-vertical" title="Upright faces and holes print most accurately (a hole stands with its axis up, so it comes out round)">Keep this upright</button>
             </div>
-            <label class="row"><input id="at-spot" type="checkbox" /> Only around the clicked spot (Ø6 mm): an edge, a corner or part of a big face</label>
+            <label class="row" data-min="advanced"><input id="at-spot" type="checkbox" /> Only around the clicked spot (Ø6 mm): an edge, a corner or part of a big face</label>
             <div class="pick-step">
               <b>1. Is it held here?</b>
               <div class="row">
@@ -151,17 +157,17 @@
                 </select>
               </div>
               <div class="row">
-                <label>in <select id="load-case" aria-label="Load case">
+                <label data-min="advanced">in <select id="load-case" aria-label="Load case">
                   <option value="1">case 1</option><option value="2">case 2</option><option value="3">case 3</option>
                 </select></label>
                 <button id="as-load" class="primary">➜ Load here</button>
               </div>
             </div>
-            <p class="hint">Loads in the same case act together. Use separate cases for different situations (e.g. hanging vs. being knocked sideways) — the weakest one counts.</p>
+            <p class="hint" data-min="advanced">Loads in the same case act together. Use separate cases for different situations (e.g. hanging vs. being knocked sideways) — the weakest one counts.</p>
           </div>
           <ul id="marks" class="marks"></ul>
           <ul id="loads" class="loads"></ul>
-          <details class="shells">
+          <details class="shells" data-min="advanced">
             <summary>How it's printed: <span id="shells-summary"></span></summary>
             <p class="hint">The outside of a print is solid: <b>walls</b> around the sides, solid <b>layers</b> on top and bottom. Inside is a light <b>infill</b> grid. Most strength comes from the solid outside. These go into the 3MF too.</p>
             <div class="row">
@@ -171,7 +177,7 @@
               <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
             </div>
           </details>
-          <details class="shells" id="detailed">
+          <details class="shells" id="detailed" data-min="expert">
             <summary>Detailed check from your sliced print <span id="gcode-summary"></span></summary>
             <p class="hint">The most exact check. Export the 3MF (below) in this orientation, slice it in OrcaSlicer, Bambu Studio or PrusaSlicer, save the G-code and load it here.
               The check then uses the walls, infill and line directions your printer will really print. A printed line is strong along itself and weaker across, like the layers.</p>
@@ -188,9 +194,9 @@
           <div id="strength-result"></div>
         </div>
 
-        <p id="design-off" class="mode-note">Design changes (teardrop holes, rounded corners, fillets…) are off in <b>Just print it</b>.
+        <p id="design-off" class="mode-note" data-min="advanced">Design changes (teardrop holes, rounded corners, fillets…) are off in <b>Just print it</b>.
           <button type="button" id="design-on">Show design changes</button></p>
-        <div id="design-block" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Always look at the preview before applying, and check fits after thickening walls.">
+        <div id="design-block" data-min="advanced" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Always look at the preview before applying, and check fits after thickening walls.">
           <h2>Design changes <small><span class="swatch cut"></span>cut away · <span class="swatch add"></span>added</small></h2>
           <p class="hint" id="features-summary">Let the tool suggest geometry changes for this orientation.</p>
           <ul id="features" class="features"></ul>
@@ -210,7 +216,7 @@
         </div>
 
         <div id="settings-block">
-          <h2>Slicer settings <button type="button" id="edit-shells" class="link">change walls, layers, infill</button></h2>
+          <h2>Slicer settings <button type="button" id="edit-shells" class="link" data-min="advanced">change walls, layers, infill</button></h2>
           <table id="settings"></table>
         </div>
 
@@ -220,7 +226,7 @@
           <button id="dl-stl-model">Download STL (as modelled, incl. design changes)</button>
           <button id="dl-step" hidden>Download STEP (your CAD file with the design changes)</button>
           <button id="copy-report">Copy report (to share it)</button>
-          <details id="paste-block" class="paste" hidden>
+          <details id="paste-block" class="paste" data-min="expert" hidden>
             <summary>Paste an AI answer</summary>
             <p class="hint">Paste the report into any AI chat (your ChatGPT, Claude or Gemini subscription works), ask your question, then paste its whole reply here. The tool applies the orientation, settings and design changes it suggests.</p>
             <textarea id="paste-input" rows="4" placeholder="Paste the AI's reply (with its JSON block) here"></textarea>
@@ -230,7 +236,7 @@
         </div>
       </section>
 
-      <details id="ai-block" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
+      <details id="ai-block" data-min="expert" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
         <summary>Ask AI <small>with your own API key</small></summary>
         <form class="ai-config" onsubmit="return false" autocomplete="off">
           <input type="text" name="username" autocomplete="username" value="api-key" hidden />
@@ -261,7 +267,17 @@
         <li class="legend-wip"><i></i>Yellow frame = not finished yet</li>
       </ul>
     </aside>
-    <main id="viewer"><div id="legend" class="fea-legend" hidden></div></main>
+    <main id="viewer"><div id="legend" class="fea-legend" hidden></div>
+      <div id="working" class="working" role="status" aria-live="polite" hidden><span id="working-text"></span> <span id="working-time"></span> <button type="button" id="working-cancel">Cancel</button></div>
+    </main>
+    <dialog id="guide" class="guide">
+      <h2>What do you want to do?</h2>
+      <p class="hint">You can change this any time at the top (Simple / Advanced / Expert).</p>
+      <button data-guide="settings"><b>Get good slicer settings for my part</b><span>Best orientation, what could go wrong, and settings to print it. Simple.</span></button>
+      <button data-guide="strength"><b>Make a part strong enough — or lighter</b><span>Say where it's held and loaded; the tool finds the orientation and settings that hold. Simple.</span></button>
+      <button data-guide="steps"><b>Go through everything step by step</b><span>Also design changes, walls and infill, heat and nozzle size. Advanced.</span></button>
+      <button data-guide="expert"><b>Expert: show me every tool</b><span>Detailed check from your sliced G-code, FEA views, accuracy checks.</span></button>
+    </dialog>
     <script type="module" src="app.js"></script>
   </body>
 </html>

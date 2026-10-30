@@ -151,9 +151,21 @@ def main():
         channel = None if args.browser == "chromium" else args.browser
         browser = p.chromium.launch(channel=channel, headless=not args.headed)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
+        # Expert level and no start guide, so every step finds its controls (the guide has its own step).
+        page.add_init_script("localStorage.setItem('fdm-guided', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
+
+        def levels_and_guide():
+            page.click("#show-guide")
+            page.click("[data-guide=settings]")
+            simple = page.evaluate("() => [document.body.dataset.level, getComputedStyle(document.getElementById('design-block')).display, getComputedStyle(document.getElementById('my-presets')).display]")
+            assert simple == ["simple", "none", "none"], simple
+            page.check("input[name=level][value=expert]")
+            assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+            return f"guide -> {simple[0]}; back to expert"
+        run.step("levels and start guide", levels_and_guide)
 
         for name in SAMPLES:
             def load(name=name):

@@ -14,6 +14,9 @@ const el = (tag, props = {}, ...children) => {
   return node;
 };
 
+/** Show ``node`` only from this level up (Simple / Advanced / Expert, see style.css). */
+const from = (level, node) => ((node.dataset.min = level), node);
+
 // The AI features (Ask AI, paste back an answer) are being redone; hidden unless the page is opened with ?ai=1.
 const AI_ENABLED = new URLSearchParams(location.search).has("ai");
 
@@ -127,12 +130,31 @@ let busyCount = 0;
 let doneCount = 0;
 
 let progressTimer = 0;
+let workingClock = 0;
+
+/** The "working" badge over the 3D view: what runs, for how long, and Cancel — visible wherever the sidebar is scrolled. */
+function showWorking(text) {
+  $("working-text").textContent = text;
+  if (workingClock) return;
+  const start = performance.now();
+  const tick = () => ($("working-time").textContent = `${Math.round((performance.now() - start) / 1000)} s`);
+  tick();
+  workingClock = setInterval(tick, 1000);
+  $("working").hidden = false;
+}
+
+function hideWorking() {
+  clearInterval(workingClock);
+  workingClock = 0;
+  $("working").hidden = true;
+}
 
 async function busy(text, fn) {
   setStatus(text);
   document.body.dataset.busy = ++busyCount;
   // Only show the bar for work that takes a moment; quick checks would just flicker.
-  if (busyCount === 1) progressTimer = setTimeout(() => ($("progress").hidden = false), 400);
+  if (busyCount === 1) progressTimer = setTimeout(() => (($("progress").hidden = false), showWorking($("status").textContent)), 400);
+  else if (workingClock) showWorking(text);
   try {
     return await fn();
   } catch (err) {
@@ -145,6 +167,7 @@ async function busy(text, fn) {
     if (!busyCount) {
       clearTimeout(progressTimer);
       $("progress").hidden = true;
+      hideWorking();
     }
   }
 }
@@ -869,14 +892,14 @@ function strengthViewControls(r) {
   const m = r.mesh;
   return el("div", { className: "fea-view" },
     el("label", { className: "toggle" }, heat, "Show results on the part (red arrow = weakest spot)"),
-    el("label", {}, "Colour by ", field),
-    el("label", {}, "Show bending (exaggerated) ", bend),
-    el("div", { className: "row" }, axis, cut),
-    el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." }),
-    el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` }),
+    from("advanced", el("label", {}, "Colour by ", field)),
+    from("advanced", el("label", {}, "Show bending (exaggerated) ", bend)),
+    from("advanced", el("div", { className: "row" }, axis, cut)),
+    from("advanced", el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." })),
+    from("expert", el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` })),
     r.accuracy ? el("p", { className: "hint", textContent: r.accuracy }) : "",
-    r.fine ? "" : el("button", { textContent: "Check accuracy with a finer grid (slower)", onclick: () => runStrength(true),
-      title: "Runs again with 3× more cubes. If the answer barely changes, you can trust it (the usual check in FEA software)." }));
+    r.fine ? "" : from("expert", el("button", { textContent: "Check accuracy with a finer grid (slower)", onclick: () => runStrength(true),
+      title: "Runs again with 3× more cubes. If the answer barely changes, you can trust it (the usual check in FEA software)." })));
 }
 
 function renderStrength() {
@@ -1489,6 +1512,45 @@ updateModeNote();
 updateGoalNote();
 
 $("cancel").onclick = cancelEngine;
+$("working-cancel").onclick = cancelEngine;
+
+// ---------- levels and the start guide ----------
+const LEVELS = ["simple", "advanced", "expert"];
+function setLevel(level) {
+  if (!LEVELS.includes(level)) return;
+  document.body.dataset.level = level;
+  document.querySelector(`input[name=level][value=${level}]`).checked = true;
+  localStorage.setItem("fdm-level", level);
+}
+for (const r of document.querySelectorAll("input[name=level]")) r.onchange = () => setLevel(r.value);
+setLevel(new URLSearchParams(location.search).get("level") ?? localStorage.getItem("fdm-level") ?? "simple");
+
+/** Set "What can you change?" like a click would (it re-checks the part). */
+function setMode(value) {
+  const r = document.querySelector(`input[name=mode][value=${value}]`);
+  if (r.checked) return;
+  r.checked = true;
+  r.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+const GUIDE = {
+  settings: { level: "simple", mode: "print", next: "Drop your part (or try a sample): you get the best orientation, what could go wrong, and slicer settings." },
+  strength: { level: "simple", mode: "print", next: "Drop your part, then click the face where it's held and the face where the load is (Strength). The tool finds what holds." },
+  steps: { level: "advanced", mode: "both", next: "Drop your part. Then go down the list: orientation, problems, strength, design changes, slicer settings." },
+  expert: { level: "expert", mode: "both", next: "Everything is shown. Drop a part to start." },
+};
+for (const b of document.querySelectorAll("[data-guide]")) {
+  b.onclick = () => {
+    const g = GUIDE[b.dataset.guide];
+    setLevel(g.level);
+    setMode(g.mode);
+    localStorage.setItem("fdm-guided", "1");
+    $("guide").close();
+    setStatus(g.next);
+  };
+}
+$("show-guide").onclick = () => $("guide").showModal();
+if (!localStorage.getItem("fdm-guided") && !new URLSearchParams(location.search).has("level")) $("guide").showModal();
 
 // ---------- input ----------
 $("file").onchange = async (e) => {
