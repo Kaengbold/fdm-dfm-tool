@@ -10,7 +10,7 @@ Rules for every job (paste them along):
 
 ## G-1 OrcaSlicer settings most users don't know (→ `research/orca_features.md`, T-152)
 
-> Go through the OrcaSlicer wiki (https://github.com/SoftFever/OrcaSlicer/wiki) and the settings
+> Go through the OrcaSlicer wiki (https://github.com/OrcaSlicer/OrcaSlicer/wiki) and the settings
 > in the OrcaSlicer source (`src/libslic3r/PrintConfig.cpp`). List settings that improve print
 > quality, strength or accuracy but are off by default or hidden in "Advanced/Expert" mode.
 > Markdown table: setting key (exact config name) | name in the UI | what it does in one plain

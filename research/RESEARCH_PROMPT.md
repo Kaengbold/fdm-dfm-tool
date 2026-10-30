@@ -19,7 +19,7 @@ Search broadly and actually open the sources. Prefer, in this order:
 1. **Measured tests**: CNC Kitchen (Stefan Hermann) strength tests and blog, Prusa research
    blog posts, university/lab papers on FDM anisotropy and interlayer strength, manufacturer
    technical data sheets (Bambu Lab, Prusament, Polymaker, eSUN) including Z-direction values.
-2. **Official docs**: OrcaSlicer wiki (github.com/SoftFever/OrcaSlicer/wiki and the in-app
+2. **Official docs**: OrcaSlicer wiki (github.com/OrcaSlicer/OrcaSlicer/wiki and the in-app
    setting descriptions), Bambu Lab Wiki, Prusa Knowledge Base, Ultimaker/Cura settings guide.
 3. **Respected practitioners**: Slant 3D (design-for-manufacturing videos and articles),
    Teaching Tech, Maker's Muse (Angus Deveson), Thomas Sanladerer, Made with Layers,

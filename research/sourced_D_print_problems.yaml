@@ -83,7 +83,7 @@
   numbers: "Layer splitting risk rises sharply when part height > 50 mm and ambient chamber temperature is > 50°C below the material's Tg (e.g., ABS Tg ~105°C printed in a 22°C room)."
   exceptions: "PLA and TPU almost never split mid-print from thermal shrinkage unless dramatically under-extruded."
   sources:
-    - "Prusa Knowledge Base — Layer separation and splitting — https://help.prusa3d.com/article/layer-separation-and-splitting_2268 — Thermal stress mechanics and enclosure/fan fixes"
+    - "Prusa Knowledge Base — Layer separation and splitting — https://help.prusa3d.com/article/layer-separation-and-splitting-fdm_1806 — Thermal stress mechanics and enclosure/fan fixes"
     - "Prusa Knowledge Base — Seam position — https://help.prusa3d.com/article/seam-position_151069 — Scarf joints and staggered inner seams"
   confidence: high
 
