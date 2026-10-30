@@ -102,6 +102,20 @@ def test_ironing_and_precise_wall():
     assert run_checks(orient(sample("l_bracket"), np.eye(3)), p)["stats"]["top_flat_mm2"] > 0
 
 
+def test_scarf_seam_for_round_parts():
+    from shapely.geometry import Point, box
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+    from fdmcore.recommend import recommend_settings
+
+    p = Profile.from_dict({})
+    for shape, scarf in ((Point(0, 0).buffer(10, quad_segs=32), True), (box(0, 0, 20, 20), False)):
+        r = run_checks(orient(Mesh(extrude(shape, 0, 10)), np.eye(3)), p)
+        keys = {s["key"] for s in recommend_settings(p, r["findings"], r["stats"])}
+        assert ("seam_slope_type" in keys) == scarf
+
+
 def test_nut_trap_and_insert_wall():
     from shapely.geometry import Point, Polygon
 

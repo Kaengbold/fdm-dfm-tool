@@ -163,6 +163,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
     stats.update(
         top_flat_mm2=float(areas[top].sum()),
+        round_share=_round_share(layers, T["seam"]["round_min"]),
         layer_heat={"z": [l.z for l in layers], "temp_c": heat.round(1).tolist(), "softening_c": profile.material["softening_c"]},
         layers_analysed=len(layers),
         height_mm=float(mesh.triangles[..., 2].max()),
@@ -510,6 +511,15 @@ def _hole_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
                                 f"Ø{d:.1f} mm hole prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling"
                                 + fastener_advice(d, T), r, profile, **_fastener(d, T)))
     return out
+
+
+def _round_share(layers: list[Layer], round_min: float) -> float:
+    """Share of layers whose outlines are all round (no corner to hide the seam in)."""
+    shapes = [list(parts(l.geom, 0.5)) for l in layers if not l.geom.is_empty]
+    if not shapes:
+        return 0.0
+    round_layers = [all(4 * np.pi * p.area / max(p.exterior.length, 1e-9) ** 2 >= round_min for p in ps) for ps in shapes if ps]
+    return float(np.mean(round_layers)) if round_layers else 0.0
 
 
 def _hex_across_flats(hole: Polygon) -> float | None:
