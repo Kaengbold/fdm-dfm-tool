@@ -221,6 +221,27 @@ rules:
     sources:
     - Grasso et al. 2018, Effect of temperature on the mechanical properties of 3D-printed PLA tensile specimens,
       Rapid Prototyping Journal, https://doi.org/10.1108/RPJ-04-2017-0055
+  side_detail_small:
+    title: Text on an Upright Face Too Small or Too Deep
+    why: On a face that stands upright when printed, the layers draw the detail one horizontal line at a time.
+      Letters shorter than about 3 mm don't get enough layers for their horizontal strokes, and engraving deeper
+      than about 0.8 mm leaves a small unsupported roof at the top of each letter that droops.
+    fixes:
+    - domain: geometry
+      text: Make upright text at least 3–3.5 mm tall in a bold sans-serif font; engrave or raise it 0.4–0.6 mm,
+        or give deeper engraving a 45° top edge.
+    - domain: slicer
+      text: Thinner layers (for example 0.12 mm) draw small upright text more cleanly.
+      settings:
+        layer_height: '0.12'
+    - domain: process
+      text: Turn the part so the text faces up, where the nozzle draws it instead of the layers.
+    tags:
+    - text
+    - small-features
+    - layer-height
+    sources:
+    - Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac
   shallow_relief:
     title: Raised or Engraved Detail Too Shallow
     why: Text, logos or other details raised from or sunk into a face that points up are only a layer or two high.

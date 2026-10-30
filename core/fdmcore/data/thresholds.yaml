@@ -20,6 +20,11 @@ relief:
   min_layers: 2
   vanish_layers: 1.5      # below this many layers it may not print at all
   max_share: 0.5          # the detail is at most this share of the face around it (else it's a step, not a detail)
+  # On upright faces the layers draw the detail: letters under ~3 mm tall lose their horizontal strokes, and
+  # engraving deeper than ~0.8 mm droops at the top of each letter (an unsupported roof) [text_embossing_debossing_limits].
+  side_min_height_mm: 3.0
+  side_max_depth_mm: 0.8
+  side_max_offset_mm: 1.5  # only patches this close to the face count as text / details (deeper: bosses, lips, ribs)
 
 gaps:
   fuse_below_mm: 0.2              # slots/clearances narrower than this fuse shut [slant3d_internal_micro_voids_3x_strength, mechanical_clearances_by_fit]

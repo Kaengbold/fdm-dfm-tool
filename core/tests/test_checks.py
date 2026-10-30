@@ -403,3 +403,24 @@ def test_overhang_follows_the_material_angle():
     rules = lambda deg: {f["rule"] for f in run_checks(leaning(deg), prof)["findings"]}
     assert "support_marks" not in rules(50)
     assert "support_marks" in rules(65)
+
+
+def test_small_or_deep_text_on_an_upright_face():
+    from shapely.geometry import box
+
+    from fdmcore.additions import extrude
+    from fdmcore.checks import run_checks
+    from fdmcore.mesh import Mesh
+    from fdmcore.profile import Profile
+
+    prof = Profile.from_dict({})
+    wall = extrude(box(0, 0, 40, 5), 0, 20)  # 40 mm wide, 5 mm thick, 20 mm tall; front face at y = 0
+
+    def letters(z0, z1, depth):
+        """Raised "letters" standing out of the front face (y < 0)."""
+        return [extrude(box(x, -depth, x + 3, 0), z0, z1) for x in (5, 12, 19)]
+
+    found = lambda m: [f for f in run_checks(Mesh(np.concatenate(m)), prof)["findings"] if f["rule"] == "side_detail_small"]
+    small = found([wall, *letters(8, 10, 0.6)])  # 2 mm tall
+    assert len(small) == 1 and "tall" in small[0]["detail"] and small[0]["metrics"]["pieces"] == 3
+    assert not found([wall, *letters(6, 12, 0.6)])  # 6 mm tall: fine

@@ -55,6 +55,7 @@ RULE_IMPACT = {
     "support_marks": "surface",
     "fine_detail_rough": "surface",
     "shallow_relief": "surface",
+    "side_detail_small": "surface",
     "too_hot_in_use": "weak",
     "dry_filament": "surface",
     "weak_upright_pin": "weak",
@@ -147,6 +148,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
     findings += _relief_findings(mesh, profile, T)
+    findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
 
     for f in findings:
@@ -555,6 +557,61 @@ def _inside(box, outer, tol: float = 1.0) -> bool:
     """Box centre inside ``outer`` (both [[x0,y0,z0],[x1,y1,z1]]), with some slack."""
     c = (np.asarray(box[0]) + np.asarray(box[1])) / 2
     return bool(np.all(c >= np.asarray(outer[0]) - tol) and np.all(c <= np.asarray(outer[1]) + tol))
+
+
+def _side_relief_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
+    """Text and details on faces that stand upright when printed: small flat patches a little in front of
+    (raised) or behind (engraved) a bigger face with the same direction. Reported when the letters are
+    shorter than the layers can draw, or engraving is deep enough to droop."""
+    R = T["relief"]
+    normals, areas = mesh.normals_and_areas()
+    side = (np.abs(normals[:, 2]) < 0.02) & (areas > 1e-9)
+    if not side.any() or side.sum() > 200_000:
+        return []
+    n = normals[side]
+    ang = np.round(np.degrees(np.arctan2(n[:, 1], n[:, 0]))).astype(int) % 360
+    tris = mesh.triangles[side]
+    out = []
+    for a in np.unique(ang):
+        sel = ang == a
+        d = np.array([np.cos(np.radians(a)), np.sin(np.radians(a)), 0.0])
+        u = np.array([-d[1], d[0], 0.0])
+        offset = np.round(tris[sel].mean(axis=1) @ d, 2)
+        flat = np.stack([tris[sel] @ u, tris[sel][..., 2]], axis=-1)  # (along the face, height)
+        planes = {}
+        for o in np.unique(offset):
+            polys = shapely.polygons(flat[offset == o])
+            merged = shapely.union_all(shapely.make_valid(polys[shapely.area(polys) > 1e-9]), grid_size=1e-4)
+            planes[float(o)] = [p for p in parts(merged, 0.0) if p.area > 0.01]
+        offs = np.array(sorted(planes))
+        for o1, pieces in planes.items():
+            near = offs[(np.abs(offs - o1) > 1e-3) & (np.abs(offs - o1) <= R["side_max_offset_mm"])]
+            for o0 in near.tolist():
+                depth, raised = abs(o1 - o0), o1 > o0
+                found = []
+                for base in planes[o0]:
+                    shell = Polygon(base.exterior)
+                    found += [p for p in pieces if p.area <= R["max_share"] * shell.area and shell.contains(p.buffer(-0.01))]
+                if not found:
+                    continue
+                heights = [p.bounds[3] - p.bounds[1] for p in found]
+                tall = float(np.median(heights))
+                small = tall < R["side_min_height_mm"]
+                droop = not raised and depth > R["side_max_depth_mm"]
+                if not (small or droop):
+                    continue
+                why = []
+                if small:
+                    why.append(f"only about {tall:.1f} mm tall ({tall / profile.layer_height:.0f} layers) — make it at least {R['side_min_height_mm']:.0f} mm")
+                if droop:
+                    why.append(f"engraved {depth:.1f} mm deep — the top of each letter droops past {R['side_max_depth_mm']} mm")
+                pts = np.concatenate([np.asarray(p.exterior.coords) for p in found])
+                corners = [o1 * d + pts[:, 0].min() * u + [0, 0, pts[:, 1].min()], o1 * d + pts[:, 0].max() * u + [0, 0, pts[:, 1].max()]]
+                lo, hi = np.minimum(*corners), np.maximum(*corners)
+                out.append(_finding("side_detail_small", "info",
+                                    f"{'Raised' if raised else 'Engraved'} detail on an upright face ({len(found)} piece(s)): " + "; ".join(why),
+                                    bbox=[lo.tolist(), hi.tolist()], height_mm=round(tall, 2), depth_mm=round(depth, 2), pieces=len(found)))
+    return out
 
 
 def _use_heat_findings(profile: Profile, T: dict) -> list[dict]:
