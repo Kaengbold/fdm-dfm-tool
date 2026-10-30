@@ -2,7 +2,8 @@
 // WASM build, LGPL-2.1, ~23 MB, loaded on first use), so CAD users get their exact faces back
 // and only the edited spots change. Edits arrive as closed triangle pieces (see geometry.js);
 // each is sewn into a small solid, fused or cut, and coplanar triangles merged into plain faces.
-const OC_URL = "https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js";
+// Resolved against this module, so the self-hosted build can swap in a relative "../vendor/..." path.
+const OC_URL = new URL("https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js", import.meta.url).href;
 let ocPromise = null;
 
 async function opencascade() {
