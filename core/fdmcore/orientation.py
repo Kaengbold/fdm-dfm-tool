@@ -28,6 +28,7 @@ class OrientationSettings:
     sphere_samples: int = 256
     flat_face_candidates: int = 32
     coarse_faces: int = 20_000  # above this, pre-rank candidates on a sample
+    fine_faces: int = 200_000  # finalists are re-scored on a sample this big (the sliced refinement checks them after)
     refine_candidates: int = 10
     # Score weights (dimensionless terms, lower score is better).
     w_support_area: float = 1.0
@@ -38,6 +39,11 @@ class OrientationSettings:
     # supports just to hold the part, poor first layers and a tilted part that's hard to slice.
     w_small_bed: float = 3.0
     good_bed_fraction: float = 0.15  # bed area / L² at which the small-contact penalty reaches zero
+    # Tall on a narrow footprint tips over and wobbles (the tipping check's height / base width limit,
+    # thresholds.yaml stability.tip_aspect). Full penalty at twice that: a lying pin then beats a standing one
+    # even though it needs a little support.
+    w_tipping: float = 1.0
+    tip_aspect: float = 4.0
 
 
 @dataclass
@@ -85,7 +91,11 @@ def find_orientations(
         sample, area_scale = _area_sample(mesh, s.coarse_faces)
         coarse = _score(sample, cands, s, size=_size(mesh), area_scale=area_scale)
         cands = np.array([r.up for r in _best_distinct(coarse, s.refine_candidates)])
-    picked = _best_distinct(_score(mesh, cands, s), top)
+    if mesh.face_count > s.fine_faces:
+        fine, scale = _area_sample(mesh, s.fine_faces)
+        picked = _best_distinct(_score(fine, cands, s, size=_size(mesh), area_scale=scale), top)
+    else:
+        picked = _best_distinct(_score(mesh, cands, s), top)
     for r in picked:
         r.reasons = explain(r, mesh)
     return picked
@@ -118,11 +128,15 @@ def candidate_directions(mesh: Mesh, s: OrientationSettings) -> np.ndarray:
     sphere = np.stack([np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi)], axis=1)
 
     normals, areas = mesh.normals_and_areas()
-    keys = np.round(normals, 2)
-    uniq, inverse = np.unique(keys, axis=0, return_inverse=True)
-    region_area = np.bincount(inverse.ravel(), weights=areas, minlength=len(uniq))
+    # Group faces by normal rounded to 0.01: one integer key per face sorts far faster than
+    # np.unique over rows (1M faces: 1.7 s -> ~0.1 s).
+    q = np.round(normals * 100).astype(np.int64) + 100
+    uniq, inverse = np.unique((q[:, 0] * 201 + q[:, 1]) * 201 + q[:, 2], return_inverse=True)
+    region_area = np.bincount(inverse, weights=areas, minlength=len(uniq))
     best = np.argsort(region_area)[::-1][: s.flat_face_candidates]
-    flat = np.array([-_unit(normals[inverse.ravel() == k].mean(axis=0)) for k in best])
+    sums = np.zeros((len(uniq), 3))
+    np.add.at(sums, inverse, normals)
+    flat = np.array([-_unit(sums[k]) for k in best])
 
     cands = np.vstack([[[0.0, 0.0, 1.0]], flat, sphere])
     return cands / np.linalg.norm(cands, axis=1, keepdims=True)
@@ -181,6 +195,7 @@ def _score(
     L = size or _size(mesh)
     chunk = max(1, min(16, int(2e8 / (mesh.face_count * 64))))  # keep temporaries ≲ 200 MB
     sin_lim = np.sin(np.radians(s.max_overhang_deg))
+    tol = _bed_tol(mesh)
     results = []
     for start in range(0, len(ups), chunk):
         U = ups[start : start + chunk]  # (K, 3)
@@ -188,7 +203,6 @@ def _score(
         z = np.einsum("mcj,kj->mck", mesh.triangles, U)  # (M, 3, K)
         zmin = z.min(axis=(0, 1))  # (K,)
         height = z.max(axis=(0, 1)) - zmin
-        tol = _bed_tol(mesh)
         bed = (nz < -np.cos(np.radians(s.bed_angle_tol_deg))) & (z.max(axis=1) - zmin < tol)
         support = (-nz > sin_lim) & ~bed
         proj = areas[:, None] * np.clip(-nz, 0, None)
@@ -203,6 +217,7 @@ def _score(
             "height": s.w_height * height / L,
             "bed": s.w_small_bed * np.clip(1.0 - bed_frac / s.good_bed_fraction, 0.0, 1.0)
             - s.w_bed_contact * np.minimum(bed_frac, 1.0),
+            "stability": stability_term(height, bed_area, s),
         }
         score = sum(terms.values())
         for k in range(len(U)):
@@ -218,6 +233,15 @@ def _score(
                 )
             )
     return results
+
+
+def stability_term(height, bed_area, s: OrientationSettings):
+    """Penalty for standing tall on a narrow footprint. The base width is taken from the contact area
+    (the width of a circle that size): cheap enough for every candidate, and the refinement passes
+    the sliced first layer's real area."""
+    width = 2.0 * np.sqrt(np.maximum(bed_area, 1e-6) / np.pi)
+    aspect = np.asarray(height) / width
+    return s.w_tipping * np.clip((aspect - s.tip_aspect) / s.tip_aspect, 0.0, 1.0)
 
 
 def _bed_mask(nz, z, mesh, s):

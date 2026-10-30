@@ -48,6 +48,7 @@ RULE_IMPACT = {
     "small_hole_undersized": "shape",
     "nut_trap_tight": "shape",
     "insert_wall_thin": "fails",
+    "screw_wall_thin": "weak",
     "bridge_sag": "shape",
     "hole_starts_midair": "shape",
     "sideways_hole_oval": "shape",
@@ -243,7 +244,9 @@ def _layer_features(g, lw, vanish, rough, single, G, H, P, F) -> list[tuple]:
         if _strip_width(piece) > 0.02:
             out.append(("gap", piece, {"width": _strip_width(piece)}))
     # Round vertical holes (interior rings), for size checks; hexagonal ones are nut traps.
-    insert_d = [f["insert_hole_mm"] for f in F.values() if isinstance(f, dict)]
+    # Holes sized for an insert or for a screw cut into the plastic: how much wall is around them.
+    sized = [(f["insert_hole_mm"], F["insert_match_mm"]) for f in F.values() if isinstance(f, dict)]
+    sized += [(f["pilot_mm"], F["pilot_match_mm"]) for f in F.values() if isinstance(f, dict)]
     for poly in parts(g):
         for i, ring in enumerate(poly.interiors):
             hole = Polygon(ring)
@@ -254,7 +257,7 @@ def _layer_features(g, lw, vanish, rough, single, G, H, P, F) -> list[tuple]:
             d = 2 * np.sqrt(hole.area / np.pi)
             if d <= H["undersize_up_to_mm"] and 4 * np.pi * hole.area / max(hole.length, 1e-9) ** 2 >= H["circularity_min"]:
                 metrics = {"min_d": d}
-                if min(abs(d - x) for x in insert_d) <= F["insert_match_mm"]:
+                if any(abs(d - x) <= tol for x, tol in sized):
                     others = [poly.exterior] + [r for j, r in enumerate(poly.interiors) if j != i]
                     metrics["min_wall"] = min(ring.distance(o) for o in others)
                 out.append(("hole", hole, metrics))
@@ -552,10 +555,19 @@ def _fastener_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict
                             r, profile, fastener=name, across_flats=round(af, 2)))
     for r in tracker.of("hole"):
         wall = r.metrics.get("min_wall")
-        if wall is None or wall >= F["insert_min_wall_mm"] or r.z1 - r.z0 < 3 * profile.layer_height:
+        if wall is None or r.z1 - r.z0 < 3 * profile.layer_height:
             continue
         d = r.metrics["min_d"]
+        pilot = min(screws, key=lambda k: abs(screws[k]["pilot_mm"] - d))
+        if abs(screws[pilot]["pilot_mm"] - d) <= F["pilot_match_mm"] and wall < screws[pilot]["d"]:
+            # Pilot sizes overlap other holes (an M4 pilot is an M3 clearance hole): a tip, worded as "if".
+            out.append(_finding("screw_wall_thin", "info",
+                                f"If the Ø{d:.1f} mm hole at {_zrange(r)} is for an {pilot} screw cut straight into the plastic: "
+                                f"only {wall:.1f} mm of wall around it — aim for about {screws[pilot]['d']:g} mm (as thick as the screw)",
+                                r, profile, fastener=pilot, wall_mm=round(wall, 2)))
         name = min(screws, key=lambda k: abs(screws[k]["insert_hole_mm"] - d))
+        if abs(screws[name]["insert_hole_mm"] - d) > F["insert_match_mm"] or wall >= F["insert_min_wall_mm"]:
+            continue
         out.append(_finding("insert_wall_thin", "warn",
                             f"If the Ø{d:.1f} mm hole at {_zrange(r)} is for an {name} heat-set insert: only {wall:.1f} mm of wall "
                             f"around it — the melted plastic pushes out and can split it (aim for {F['insert_min_wall_mm']}–2 mm)",
