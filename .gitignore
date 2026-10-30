@@ -8,3 +8,4 @@ dist/
 node_modules/
 .DS_Store
 e2e-output/
+.impeccable/review/

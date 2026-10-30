@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>FDM DFM Tool</title>
+    <title>FDM Check</title>
     <link rel="icon" href="data:," />
+    <link rel="preload" href="fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="style.css" />
     <script type="importmap">
       {
@@ -16,318 +17,399 @@
     </script>
   </head>
   <body data-level="simple">
-    <aside>
-      <h1>FDM DFM Tool <small>pre-alpha</small></h1>
-      <div class="level" role="radiogroup" aria-label="How much to show">
-        <label title="The essentials: load a part, get the best orientation, the problems and slicer settings, check a load"><input type="radio" name="level" value="simple" checked /> Simple</label>
-        <label title="Adds design changes, how it's printed (walls, infill), heat, nozzles, your own printers and materials"><input type="radio" name="level" value="advanced" /> Advanced</label>
-        <label title="Everything: the detailed check from your G-code, FEA views, accuracy checks, AI"><input type="radio" name="level" value="expert" /> Expert</label>
-        <button type="button" id="show-guide" class="link" title="What do you want to do? Picks the right level for you">Guide</button>
+    <header class="top">
+      <div class="brand">
+        <svg viewBox="0 0 26 26" aria-hidden="true"><rect x="3" y="18" width="20" height="4" rx="1" opacity=".35" /><rect x="6" y="13" width="14" height="4" rx="1" opacity=".6" /><rect x="9" y="8" width="8" height="4" rx="1" /><path d="M13 1.5v4.5" stroke="currentColor" stroke-width="2" /></svg>
+        <span>FDM Check</span> <small>pre-alpha</small>
       </div>
-
-      <label id="drop" class="drop">
-        <input id="file" type="file" accept=".stl,.3mf,.step,.stp" hidden />
-        <strong>Drop an STL, 3MF or STEP file here</strong>
-        <span>or click to choose a file</span>
-      </label>
-      <label id="body-pick" class="setting" hidden>This file has several bodies — analyse <select id="body"></select></label>
-      <div id="unit-hint" class="unit-hint" hidden><span id="unit-text"></span> <button id="unit-scale"></button></div>
-      <div class="samples">
-        Samples:
-        <button data-sample="mushroom">Mushroom</button>
-        <button data-sample="l_bracket">L-bracket</button>
-        <button data-sample="hook">Hook</button>
-        <button data-sample="test_block">Test block</button>
-        <button data-sample="detail_plate">Small details</button>
-        <button data-sample="enclosure">Enclosure</button>
-        <button data-sample="dumbbell">Neck</button>
+      <div class="levels" role="radiogroup" aria-label="How much to show">
+        <label title="Printer and material, then one result"><input type="radio" name="level" value="simple" checked /> Simple</label>
+        <label title="All choices, step by step, without the detailed simulations"><input type="radio" name="level" value="basic" /> Basic</label>
+        <label title="Everything, step by step: detailed strength, shaking and knocks, design changes"><input type="radio" name="level" value="advanced" /> Advanced</label>
+        <label title="Every tool on one long page"><input type="radio" name="level" value="expert" /> Expert</label>
       </div>
+      <button type="button" id="show-guide" class="ghost small">Guide</button>
+    </header>
 
-      <div class="presets">
-        <label>Printer <select id="printer"></select></label>
-        <label>Material <select id="material"></select></label>
-        <label>Nozzle <select id="nozzle"></select></label>
-      </div>
-      <details id="advice" class="advice">
-        <summary>Which material suits it?</summary>
-        <div class="row">
-          <label class="toggle"><input id="adv-outdoors" type="checkbox" /> Used outdoors in the sun</label>
-          <label class="toggle"><input id="adv-flexible" type="checkbox" /> Must be flexible</label>
-          <button id="run-advice">Compare materials</button>
-        </div>
-        <p class="hint">Uses where it's used (heat), what your printer can print and — once you've set loads — how strong each one is.</p>
-        <ul id="advice-list" class="options"></ul>
-      </details>
-      <label class="toggle" id="mm-row" data-min="advanced"><input id="multi-material" type="checkbox" /> Multi-material (AMS / MMU) available</label>
-      <details id="my-presets" class="my-presets" data-min="advanced">
-        <summary>My printers &amp; materials</summary>
-        <p class="hint">Add your own printer or filament, starting from a similar one. Saved in this browser only.</p>
-        <div class="row">
-          <button id="new-material">New material…</button>
-          <button id="new-printer">New printer…</button>
-          <label class="file-button">Import OrcaSlicer filament…<input id="import-orca" type="file" accept=".json" hidden /></label>
-        </div>
-        <form id="preset-form" class="preset-form" hidden>
-          <div id="preset-fields"></div>
-          <div id="calibration" class="calibration" hidden>
-            <h3>Measure it on your printer</h3>
-            <p class="hint"><button type="button" data-calibration="layer_strength">Layer strength test (STL)</button>
-              Print one bar lying flat and one standing on its end. Hang each by one hole, add weight at the other until it breaks.</p>
-            <div class="row">
-              <label>Flat broke at <input id="cal-flat" type="number" step="0.1" min="0" /> kg</label>
-              <label>Standing at <input id="cal-upright" type="number" step="0.1" min="0" /> kg</label>
-              <button type="button" id="cal-z">Use</button>
-            </div>
-            <p class="hint"><button type="button" data-calibration="warping">Warping test (STL)</button>
-              Print the four bars without a brim, in an enclosure if you have one.</p>
-            <div class="row">
-              <label>Longest bar that stayed flat
-                <select id="cal-warp"><option value="">—</option><option value="40">40 mm</option><option value="80">80 mm</option><option value="120">120 mm</option><option value="160">160 mm (all)</option></select></label>
-              <button type="button" id="cal-warp-use">Use</button>
-            </div>
-            <p class="hint"><button type="button" data-calibration="fit">Fit test (STL)</button>
-              A 6 mm peg and holes 6.0 … 6.5 mm (the notched end is 6.0). Try the peg in each hole.</p>
-            <div class="row">
-              <label>Pushes in snugly at <select id="cal-fit-snug"><option value="">—</option></select></label>
-              <label>Slides and turns at <select id="cal-fit-slide"><option value="">—</option></select></label>
-              <button type="button" id="cal-fit-use">Use</button>
-            </div>
-            <p class="hint"><button type="button" data-calibration="overhang">Overhang test (STL)</button>
-              Seven blocks leaning 40° … 70° (the short end is 40°), printed without support.</p>
-            <div class="row">
-              <label>Steepest one that's still clean <select id="cal-overhang"><option value="">—</option></select></label>
-              <button type="button" id="cal-overhang-use">Use</button>
-            </div>
-            <p class="hint"><button type="button" data-calibration="bridge">Bridge test (STL)</button>
-              Bridges 10 … 50 mm long between pillars, printed without support.</p>
-            <div class="row">
-              <label>Longest one that doesn't sag <select id="cal-bridge"><option value="">—</option></select></label>
-              <button type="button" id="cal-bridge-use">Use</button>
-            </div>
-            <p class="hint">More free test prints from the community:
-              <a href="https://www.printables.com/model/32321-tolerance-test-prusa-performance-level" target="_blank" rel="noopener">tolerance test</a> (fits down to 0.1 mm),
-              <a href="https://www.printables.com/model/578061-stringing-bridging-test" target="_blank" rel="noopener">stringing &amp; bridging test</a>,
-              <a href="https://teachingtechyt.github.io/calibration.html" target="_blank" rel="noopener">Teaching Tech calibration guide</a> (first layer, temperature, retraction).</p>
-          </div>
-          <div class="row">
-            <button class="primary">Save</button>
-            <button type="button" id="preset-cancel">Cancel</button>
-          </div>
-        </form>
-        <ul id="my-list" class="my-list"></ul>
-        <button id="copy-yaml" hidden>Copy as YAML (to share in a pull request)</button>
-      </details>
+    <nav id="steps" class="steps" aria-label="Steps"></nav>
 
-      <div class="mode" role="radiogroup" aria-label="Optimise for">
-        <span>Optimise for</span>
-        <div>
-          <label><input type="radio" name="goal" value="balanced" checked /> Balanced</label>
-          <label><input type="radio" name="goal" value="strength" /> Strength</label>
-          <label><input type="radio" name="goal" value="speed" /> Speed</label>
-          <label><input type="radio" name="goal" value="material" /> Material</label>
-        </div>
-        <div>
-          <p id="goal-note" class="goal-note"></p>
-        </div>
-      </div>
-
-      <div class="use">
-        <label>Where is it used?
-          <select id="use-temp" title="Plastic gets weaker as it warms up, and soft near its limit (PLA around 60 °C)">
-            <option value="">Indoors (room temperature)</option>
-            <option value="40">Warm spot: sunny window, near electronics (40 °C)</option>
-            <option value="55">Outdoors in the sun (55 °C)</option>
-            <option value="70">In a car in summer (70 °C)</option>
-            <option value="90">Near a motor or heater (90 °C)</option>
-          </select></label>
-        <label class="toggle" title="Plastic slowly stretches under a load that never goes away (creep): it needs a bigger margin"><input id="constant-load" type="checkbox" /> The load stays on (hangs there permanently)</label>
-      </div>
-
-      <div class="mode" role="radiogroup" aria-label="What can you change?" data-min="advanced">
-        <span>What can you change?</span>
-        <div>
-          <label><input type="radio" name="mode" value="print" checked /> Just print it</label>
-          <label><input type="radio" name="mode" value="design" /> The design</label>
-          <label><input type="radio" name="mode" value="both" /> Both</label>
-        </div>
-      </div>
-
-      <p id="mode-note" class="mode-note" data-min="advanced"></p>
-
-      <p id="status" class="status">Loading engine… (first visit downloads ~15 MB)</p>
-      <div id="progress" class="progress" hidden><progress id="progress-bar" max="1"></progress> <button id="cancel">Cancel</button></div>
-
-      <section id="results" hidden>
-        <h2>Orientation</h2>
-        <ol id="options" class="cards"></ol>
-
-        <h2>Findings <small id="stats"></small></h2>
-        <ol id="findings" class="impact-groups"></ol>
-        <label class="toggle" data-min="advanced" title="Rough estimate of heat build-up: small pins and tips get the next layer before they have cooled"><input id="show-temp" type="checkbox" /> Show heat while printing (red = still soft when the next layers go on)</label>
-        <div class="actions" data-min="advanced">
-          <button id="run-warp" title="Simulates the print layer by layer: upper layers shrink onto the warm bottom and pull the corners off the bed">Simulate warping</button>
-        </div>
-        <div id="warp-result" data-min="advanced"></div>
-        <details id="nozzle-block" class="nozzles" data-min="advanced">
-          <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
-          <table id="nozzle-table"></table>
-        </details>
-
-        <h2>Strength <small>optional — will it hold?</small></h2>
-        <div class="strength wip" data-wip="rough estimate, not yet checked against real test prints (T-032).">
-          <p class="hint" id="pick-hint">Click a face on the part, then say whether it's <b>held</b> 🔒 (screwed, glued, clamped) or <b>loaded</b> ➜ (a weight hangs on it, something pushes or pulls). You need at least one of each.</p>
-          <div id="pick-panel" hidden>
-            <p class="hint">Selected: <span id="pick-info"></span></p>
-            <div class="row">
-              <button id="mark-clean" title="Orientations that put supports on this face rank lower">Keep this face clean</button>
-              <button id="mark-bed" title="Only orientations with this face on the bed are recommended">Put this face on the bed</button>
-              <button id="mark-vertical" title="Upright faces and holes print most accurately (a hole stands with its axis up, so it comes out round)">Keep this upright</button>
-            </div>
-            <label class="row" data-min="advanced"><input id="at-spot" type="checkbox" /> Only around the clicked spot (Ø6 mm): an edge, a corner or part of a big face</label>
-            <div class="pick-step">
-              <b>1. Is it held here?</b>
-              <div class="row">
-                <select id="hold" aria-label="How it is held">
-                  <option value="clamped">clamped or glued (can't move at all)</option>
-                  <option value="resting">resting on something (only pushes back, can lift off)</option>
-                  <option value="screw">a screw or bolt through this hole</option>
-                </select>
-                <button id="as-fixed">🔒 Held here</button>
-              </div>
-            </div>
-            <div class="pick-step">
-              <b>2. Or does a load act on it?</b>
-              <div class="row">
-                <input id="kg" type="number" value="2" min="0.1" step="0.5" aria-label="Load in kg" /> kg
-                <select id="dir" aria-label="Load direction">
-                  <option value="push">pushing on the face</option>
-                  <option value="pull">pulling the face</option>
-                  <option value="down">hanging down (−Z as modelled)</option>
-                </select>
-              </div>
-              <div class="row">
-                <label data-min="advanced">in <select id="load-case" aria-label="Load case">
-                  <option value="1">case 1</option><option value="2">case 2</option><option value="3">case 3</option>
-                </select></label>
-                <button id="as-load" class="primary">➜ Load here</button>
-              </div>
-            </div>
-            <p class="hint" data-min="advanced">Loads in the same case act together. Use separate cases for different situations (e.g. hanging vs. being knocked sideways) — the weakest one counts.</p>
-          </div>
-          <ul id="marks" class="marks"></ul>
-          <ul id="loads" class="loads"></ul>
-          <details class="shells" data-min="advanced">
-            <summary>How it's printed: <span id="shells-summary"></span></summary>
-            <p class="hint">The outside of a print is solid: <b>walls</b> around the sides, solid <b>layers</b> on top and bottom. Inside is a light <b>infill</b> grid. Most strength comes from the solid outside. These go into the 3MF too.</p>
-            <div class="row">
-              <label>Walls <input id="sh-walls" type="number" min="1" max="20" step="1" /></label>
-              <label>Top layers <input id="sh-top" type="number" min="0" max="30" step="1" /></label>
-              <label>Bottom layers <input id="sh-bottom" type="number" min="0" max="30" step="1" /></label>
-              <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
-            </div>
-          </details>
-          <details class="shells" id="detailed" data-min="expert">
-            <summary>Detailed check from your sliced print <span id="gcode-summary"></span></summary>
-            <p class="hint">The most exact check. Export the 3MF (below) in this orientation, slice it in OrcaSlicer, Bambu Studio or PrusaSlicer, save the G-code and load it here.
-              The check then uses the walls, infill and line directions your printer will really print. A printed line is strong along itself and weaker across, like the layers.</p>
-            <div class="row">
-              <label>G-code <input id="gcode-file" type="file" accept=".gcode,.gco,.g,.3mf" /></label>
-              <label><input id="use-gcode" type="checkbox" disabled /> Use it for the strength check</label>
-            </div>
-          </details>
-          <div class="actions">
-            <button id="run-strength" class="primary" disabled>Check strength</button>
-            <button id="run-optimise" disabled title="Tries walls, top/bottom layers and infill, and finds the lightest print that holds your load with a safety margin">Find the lightest settings that hold</button>
-          </div>
-          <div id="optimise-result"></div>
-          <div id="strength-result"></div>
-        </div>
-
-        <p id="design-off" class="mode-note" data-min="advanced">Design changes (teardrop holes, rounded corners, fillets…) are off in <b>Just print it</b>.
-          <button type="button" id="design-on">Show design changes</button></p>
-        <div id="design-block" data-min="advanced" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Always look at the preview before applying, and check fits after thickening walls.">
-          <h2>Design changes <small><span class="swatch cut"></span>cut away · <span class="swatch add"></span>added</small></h2>
-          <p class="hint" id="features-summary">Let the tool suggest geometry changes for this orientation.</p>
-          <ul id="features" class="features"></ul>
-          <ol id="edits" class="edits"></ol>
-          <div id="edit-params" class="edit-params" hidden>
-            <label>Round bed corners <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
-            <label>Teardrop tip <input id="param-teardrop_angle_deg" data-param="teardrop_angle_deg" type="number" step="5" />° from vertical</label>
-            <label>Fill ledges up to <input id="param-ledge_max_mm" data-param="ledge_max_mm" type="number" step="1" /> mm wide</label>
-            <label>Thin walls to <input id="param-wall_lines" data-param="wall_lines" type="number" step="1" /> lines</label>
-            <label>Bottom edge chamfer <input id="param-foot_chamfer_mm" data-param="foot_chamfer_mm" type="number" step="0.1" /> mm</label>
-            <label>Chamfer at the weak spot <input id="param-stress_chamfer_mm" data-param="stress_chamfer_mm" type="number" step="0.5" /> mm</label>
-          </div>
-          <div class="actions">
-            <button id="suggest-design">Suggest design changes</button>
-            <button id="apply-edits" class="primary" hidden>Apply selected changes</button>
-          </div>
-        </div>
-
-        <div id="settings-block">
-          <h2>Slicer settings <button type="button" id="edit-shells" class="link" data-min="advanced">change walls, layers, infill</button></h2>
-          <table id="settings"></table>
-        </div>
-
-        <div class="actions">
-          <label id="zones-for" hidden>Your strengthening zones need a file for one slicer:
-            <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio</option><option value="prusa">PrusaSlicer</option></select></label>
-          <button id="dl-3mf" class="primary" title="Walls, infill, supports and brim are set on the part; the slicer's printer and filament profiles stay yours">Download 3MF for OrcaSlicer / Bambu Studio / PrusaSlicer</button>
-          <button id="dl-stl">Download STL (oriented for printing)</button>
-          <button id="dl-stl-model">Download STL (as modelled, incl. design changes)</button>
-          <button id="dl-step" hidden>Download STEP (your CAD file with the design changes)</button>
-          <button id="copy-report">Copy report (to share it)</button>
-          <details id="paste-block" class="paste" data-min="expert" hidden>
-            <summary>Paste an AI answer</summary>
-            <p class="hint">Paste the report into any AI chat (your ChatGPT, Claude or Gemini subscription works), ask your question, then paste its whole reply here. The tool applies the orientation, settings and design changes it suggests.</p>
-            <textarea id="paste-input" rows="4" placeholder="Paste the AI's reply (with its JSON block) here"></textarea>
-            <button id="paste-apply">Apply the answer</button>
-            <ul id="paste-result" class="paste-result"></ul>
-          </details>
-        </div>
-      </section>
-
-      <details id="ai-block" data-min="expert" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
-        <summary>Ask AI <small>with your own API key</small></summary>
-        <form class="ai-config" onsubmit="return false" autocomplete="off">
-          <input type="text" name="username" autocomplete="username" value="api-key" hidden />
-          <label>Provider
-            <select id="ai-provider">
-              <option value="anthropic">Anthropic (Claude)</option>
-              <option value="gemini">Google (Gemini)</option>
-              <option value="openai">OpenAI (GPT)</option>
-            </select>
-          </label>
-          <label>API key <input id="ai-key" type="password" autocomplete="new-password" placeholder="sk-ant-..." /></label>
-          <label>Model <select id="ai-model"></select></label>
-          <label class="toggle"><input id="ai-remember" type="checkbox" /> Remember key on this computer</label>
-        </form>
-        <div id="ai-log" class="ai-log"></div>
-        <form id="ai-form" class="ai-form">
-          <textarea id="ai-input" rows="2" placeholder="e.g. Will this hold 5 kg? How can it print without supports?"></textarea>
-          <button class="primary">Send</button>
-        </form>
-        <p class="hint">The key goes only from this browser to the provider (api.anthropic.com, generativelanguage.googleapis.com or api.openai.com); usage is billed to your account there. The assistant can change orientation, loads, settings and apply design edits when you ask.</p>
-      </details>
-
-      <ul class="legend">
+    <main id="viewer">
+      <div id="view-empty" class="view-empty">Your part shows up here</div>
+      <div id="legend" class="fea-legend" hidden></div>
+      <div class="view-info">
+      <p id="view-label" class="view-label" hidden></p>
+      <ul id="view-key" class="view-key" aria-label="Colours on the part" hidden>
         <li><i style="background: var(--ok)"></i>Prints fine</li>
         <li><i style="background: var(--borderline)"></i>May droop</li>
         <li><i style="background: var(--support)"></i>Needs support</li>
         <li><i style="background: var(--bed)"></i>On the bed</li>
-        <li class="legend-wip"><i></i>Yellow frame = not finished yet</li>
       </ul>
-    </aside>
-    <main id="viewer"><div id="legend" class="fea-legend" hidden></div>
-      <div id="working" class="working" role="status" aria-live="polite" hidden><span id="working-text"></span> <span id="working-time"></span> <button type="button" id="working-cancel">Cancel</button></div>
+      </div>
+      <div id="working" class="working" role="status" aria-live="polite" hidden>
+        <div class="working-head">
+          <span class="spinner" aria-hidden="true"></span>
+          <b id="working-text"></b>
+          <span id="working-time"></span>
+          <button type="button" id="working-cancel" class="ghost small">Cancel</button>
+        </div>
+        <div id="progress" class="progress" hidden><progress id="progress-bar" max="1"></progress></div>
+        <p id="working-affects" class="working-affects" hidden></p>
+      </div>
     </main>
+
+    <section id="panel" class="panel">
+      <div class="panes">
+        <!-- Step panes: steps.js shows one at a time (all of them in Expert) and moves the blocks
+             between panes per level, e.g. the findings sit in "Result" in Simple. -->
+        <section class="pane" data-pane="part">
+          <h2>Your part</h2>
+          <div id="blk-part">
+            <label id="drop" class="drop">
+              <input id="file" type="file" accept=".stl,.3mf,.step,.stp" hidden />
+              <strong>Drop an STL, 3MF or STEP file here</strong>
+              <span>or click to choose one. It stays on your computer.</span>
+            </label>
+            <label id="body-pick" class="field" hidden>This file has several bodies. Check <select id="body"></select></label>
+            <div id="unit-hint" class="unit-hint" hidden><span id="unit-text"></span> <button id="unit-scale"></button></div>
+            <div class="samples">
+              <span>No file at hand? Try a sample:</span>
+              <button data-sample="l_bracket">L-bracket</button>
+              <button data-sample="hook">Hook</button>
+              <button data-sample="mushroom">Mushroom</button>
+              <button data-sample="test_block">Test block</button>
+              <button data-sample="detail_plate">Small details</button>
+              <button data-sample="enclosure">Enclosure</button>
+              <button data-sample="dumbbell">Neck</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="have">
+          <h2>What you have</h2>
+          <div id="blk-have">
+            <div class="presets">
+              <label>Printer <select id="printer"></select></label>
+              <label>Material <select id="material"></select></label>
+              <label data-min="basic">Nozzle <select id="nozzle"></select></label>
+            </div>
+            <label class="toggle" id="mm-row" data-min="basic"><input id="multi-material" type="checkbox" /> Multi-material (AMS / MMU) available</label>
+            <details id="advice" class="more-block" data-min="basic">
+              <summary>Which material suits it?</summary>
+              <div class="row">
+                <label class="toggle"><input id="adv-outdoors" type="checkbox" /> Used outdoors in the sun</label>
+                <label class="toggle"><input id="adv-flexible" type="checkbox" /> Must be flexible</label>
+                <button id="run-advice">Compare materials</button>
+              </div>
+              <ul id="advice-list" class="options"></ul>
+            </details>
+
+            <div class="choice" role="radiogroup" aria-label="What matters most" data-min="basic">
+              <span class="choice-label">What matters most?</span>
+              <div class="seg">
+                <label><input type="radio" name="goal" value="balanced" checked /> Balanced</label>
+                <label><input type="radio" name="goal" value="strength" /> Strong</label>
+                <label><input type="radio" name="goal" value="speed" /> Fast</label>
+                <label><input type="radio" name="goal" value="material" /> Light</label>
+              </div>
+              <p id="goal-note" class="note"></p>
+            </div>
+
+            <label class="field" data-min="basic">Where is it used?
+              <select id="use-temp" title="Plastic gets weaker as it warms up, and soft near its limit (PLA around 60 °C)">
+                <option value="">Indoors (room temperature)</option>
+                <option value="40">Warm spot: sunny window, near electronics (40 °C)</option>
+                <option value="55">Outdoors in the sun (55 °C)</option>
+                <option value="70">In a car in summer (70 °C)</option>
+                <option value="90">Near a motor or heater (90 °C)</option>
+              </select></label>
+
+            <div class="choice" role="radiogroup" aria-label="What can you change?" data-min="advanced">
+              <span class="choice-label">What can you change?</span>
+              <div class="seg">
+                <label><input type="radio" name="mode" value="print" checked /> Just print it</label>
+                <label><input type="radio" name="mode" value="design" /> The design</label>
+                <label><input type="radio" name="mode" value="both" /> Both</label>
+              </div>
+              <p id="mode-note" class="note"></p>
+            </div>
+
+            <details id="my-presets" class="more-block" data-min="basic">
+              <summary>My printers &amp; materials</summary>
+              <p class="hint">Add your own printer or filament, starting from a similar one. Saved in this browser only.</p>
+              <div class="row">
+                <button id="new-material">New material…</button>
+                <button id="new-printer">New printer…</button>
+                <label class="file-button">Import OrcaSlicer filament…<input id="import-orca" type="file" accept=".json" hidden /></label>
+              </div>
+              <form id="preset-form" class="preset-form" hidden>
+                <div id="preset-fields"></div>
+                <div id="calibration" class="calibration" hidden>
+                  <h3>Measure it on your printer</h3>
+                  <p class="hint"><button type="button" data-calibration="layer_strength">Layer strength test (STL)</button>
+                    Print one bar lying flat and one standing on its end. Hang each by one hole, add weight at the other until it breaks.</p>
+                  <div class="row">
+                    <label>Flat broke at <input id="cal-flat" type="number" step="0.1" min="0" /> kg</label>
+                    <label>Standing at <input id="cal-upright" type="number" step="0.1" min="0" /> kg</label>
+                    <button type="button" id="cal-z">Use</button>
+                  </div>
+                  <p class="hint"><button type="button" data-calibration="warping">Warping test (STL)</button>
+                    Print the four bars without a brim, in an enclosure if you have one.</p>
+                  <div class="row">
+                    <label>Longest bar that stayed flat
+                      <select id="cal-warp"><option value="">pick one</option><option value="40">40 mm</option><option value="80">80 mm</option><option value="120">120 mm</option><option value="160">160 mm (all)</option></select></label>
+                    <button type="button" id="cal-warp-use">Use</button>
+                  </div>
+                  <p class="hint"><button type="button" data-calibration="fit">Fit test (STL)</button>
+                    A 6 mm peg and holes 6.0 … 6.5 mm (the notched end is 6.0). Try the peg in each hole.</p>
+                  <div class="row">
+                    <label>Pushes in snugly at <select id="cal-fit-snug"><option value="">pick one</option></select></label>
+                    <label>Slides and turns at <select id="cal-fit-slide"><option value="">pick one</option></select></label>
+                    <button type="button" id="cal-fit-use">Use</button>
+                  </div>
+                  <p class="hint"><button type="button" data-calibration="overhang">Overhang test (STL)</button>
+                    Seven blocks leaning 40° … 70° (the short end is 40°), printed without support.</p>
+                  <div class="row">
+                    <label>Steepest one that's still clean <select id="cal-overhang"><option value="">pick one</option></select></label>
+                    <button type="button" id="cal-overhang-use">Use</button>
+                  </div>
+                  <p class="hint"><button type="button" data-calibration="bridge">Bridge test (STL)</button>
+                    Bridges 10 … 50 mm long between pillars, printed without support.</p>
+                  <div class="row">
+                    <label>Longest one that doesn't sag <select id="cal-bridge"><option value="">pick one</option></select></label>
+                    <button type="button" id="cal-bridge-use">Use</button>
+                  </div>
+                  <p class="hint">More free test prints from the community:
+                    <a href="https://www.printables.com/model/32321-tolerance-test-prusa-performance-level" target="_blank" rel="noopener">tolerance test</a> (fits down to 0.1 mm),
+                    <a href="https://www.printables.com/model/578061-stringing-bridging-test" target="_blank" rel="noopener">stringing and bridging test</a>,
+                    <a href="https://teachingtechyt.github.io/calibration.html" target="_blank" rel="noopener">Teaching Tech calibration guide</a> (first layer, temperature, retraction).</p>
+                </div>
+                <div class="row">
+                  <button class="primary">Save</button>
+                  <button type="button" id="preset-cancel">Cancel</button>
+                </div>
+              </form>
+              <ul id="my-list" class="my-list"></ul>
+              <button id="copy-yaml" hidden>Copy as YAML (to share in a pull request)</button>
+            </details>
+          </div>
+          <details id="load-optional" class="more-block load-optional">
+            <summary>Something pushes or pulls on it <small>optional</small></summary>
+          </details>
+        </section>
+
+        <section class="pane" data-pane="orient">
+          <h2>How it lies on the bed</h2>
+          <p class="lead">The first one is our pick. Tap another to compare.</p>
+          <div id="blk-orient"><ol id="options" class="cards"></ol></div>
+        </section>
+
+        <section class="pane" data-pane="problems">
+          <h2>Problems</h2>
+          <p id="stats" class="note"></p>
+          <div id="blk-problems">
+            <p class="lead">Tap one to see where it is on the part.</p>
+            <ol id="findings" class="impact-groups"></ol>
+            <details id="nozzle-block" class="more-block" data-min="basic">
+              <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
+              <table id="nozzle-table"></table>
+            </details>
+            <div class="extra" data-min="advanced">
+              <label class="toggle" title="Rough estimate of heat build-up: small pins and tips get the next layer before they have cooled"><input id="show-temp" type="checkbox" /> Show heat while printing (red = still soft when the next layer goes on)</label>
+              <button id="run-warp" title="Simulates the print layer by layer: upper layers shrink onto the warm bottom and pull the corners off the bed">Simulate warping</button>
+              <div id="warp-result"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="strength">
+          <h2>Will it hold?</h2>
+          <div id="blk-strength" class="strength wip" data-wip="rough estimate, not yet checked against real test prints (T-032).">
+            <p class="lead" id="pick-hint">Tap a face on the part. Then say if it's <b>held</b> there (screwed, glued, clamped) or <b>loaded</b> (a weight hangs on it, something pushes or pulls). You need one of each.</p>
+            <div id="pick-panel" hidden>
+              <p class="hint">Selected: <span id="pick-info"></span></p>
+              <div class="row" data-min="basic">
+                <button id="mark-clean" title="Orientations that put supports on this face rank lower">Keep this face clean</button>
+                <button id="mark-bed" title="Only orientations with this face on the bed are recommended">Put this face on the bed</button>
+                <button id="mark-vertical" title="Upright faces and holes print most accurately (a hole stands with its axis up, so it comes out round)">Keep this upright</button>
+              </div>
+              <label class="toggle" data-min="advanced"><input id="at-spot" type="checkbox" /> Only around the tapped spot (Ø6 mm): an edge, a corner or part of a big face</label>
+              <div class="pick-step">
+                <b>Held here?</b>
+                <div class="row">
+                  <select id="hold" aria-label="How it is held">
+                    <option value="clamped">clamped or glued (can't move at all)</option>
+                    <option value="resting">resting on something (only pushes back, can lift off)</option>
+                    <option value="screw">a screw or bolt through this hole</option>
+                  </select>
+                  <button id="as-fixed" class="mark-held">Held here</button>
+                </div>
+              </div>
+              <div class="pick-step">
+                <b>Or loaded here?</b>
+                <div class="row">
+                  <input id="kg" type="number" value="2" min="0.1" step="0.5" aria-label="Load in kg" /> kg
+                  <select id="dir" aria-label="Load direction">
+                    <option value="push">pushing on the face</option>
+                    <option value="pull">pulling the face</option>
+                    <option value="down">hanging down (−Z as modelled)</option>
+                  </select>
+                </div>
+                <div class="row">
+                  <label data-min="advanced">in <select id="load-case" aria-label="Load case">
+                    <option value="1">case 1</option><option value="2">case 2</option><option value="3">case 3</option>
+                  </select></label>
+                  <button id="as-load" class="primary mark-load">Load here</button>
+                </div>
+              </div>
+              <p class="hint" data-min="advanced">Loads in the same case act together. Use separate cases for different situations (hanging, being knocked sideways): the weakest one counts.</p>
+            </div>
+            <ul id="marks" class="marks"></ul>
+            <ul id="loads" class="loads"></ul>
+            <label class="toggle" title="Plastic slowly stretches under a load that never goes away (creep): it needs a bigger margin"><input id="constant-load" type="checkbox" /> The load stays on (hangs there for good)</label>
+            <details class="more-block shells" data-min="basic">
+              <summary>How it's printed: <span id="shells-summary"></span></summary>
+              <p class="hint">Most strength comes from the solid outside: <b>walls</b> around the sides and solid <b>layers</b> on top and bottom. Inside is a light <b>infill</b> grid. These go into the 3MF too.</p>
+              <div class="row">
+                <label>Walls <input id="sh-walls" type="number" min="1" max="20" step="1" /></label>
+                <label>Top layers <input id="sh-top" type="number" min="0" max="30" step="1" /></label>
+                <label>Bottom layers <input id="sh-bottom" type="number" min="0" max="30" step="1" /></label>
+                <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
+              </div>
+            </details>
+            <details class="more-block shells" id="detailed" data-min="advanced">
+              <summary>Detailed check from your sliced print <span id="gcode-summary"></span></summary>
+              <p class="hint">The most exact check. Download the 3MF in this orientation, slice it, save the G-code and load it here.
+                The check then uses the walls, infill and line directions your printer will really print.</p>
+              <div class="row">
+                <label>G-code <input id="gcode-file" type="file" accept=".gcode,.gco,.g,.3mf" /></label>
+                <label class="toggle"><input id="use-gcode" type="checkbox" disabled /> Use it for the strength check</label>
+              </div>
+            </details>
+            <div class="actions">
+              <button id="run-strength" class="primary" disabled>Check strength</button>
+              <button id="run-optimise" disabled data-min="basic" title="Tries walls, top/bottom layers and infill, and finds the lightest print that holds your load with a safety margin">Find the lightest settings that hold</button>
+            </div>
+            <div id="optimise-result"></div>
+            <div id="strength-result"></div>
+            <div id="dynamics" class="dynamics" data-min="advanced" hidden>
+              <h3>Extra checks <small>optional</small></h3>
+              <label class="toggle"><input id="dyn-shake" type="checkbox" /> Shaking: something is mounted on it</label>
+              <label class="field sub" id="dyn-shake-row" hidden>Weight mounted on the loaded face <span><input id="dyn-kg" type="number" value="0.5" min="0" step="0.1" /> kg</span></label>
+              <label class="toggle"><input id="dyn-drop" type="checkbox" /> Knocks: the load can drop onto it</label>
+              <label class="field sub" id="dyn-drop-row" hidden>Drop height <span><input id="dyn-mm" type="number" value="50" min="0" step="10" /> mm</span></label>
+              <button id="run-dynamics" disabled>Run the extra checks</button>
+              <p id="dynamics-result" class="dynamics-result"></p>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="design">
+          <h2>Design changes <small><span class="swatch cut"></span>cut away <span class="swatch add"></span>added</small></h2>
+          <div id="blk-design">
+            <p id="design-off" class="note">Design changes are off while "What can you change?" is <b>Just print it</b>.
+              <button type="button" id="design-on" class="link">Show design changes</button></p>
+            <div id="design-block" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Look at the preview before applying, and check fits after thickening walls.">
+              <p class="hint" id="features-summary">Let the tool suggest shape changes for this orientation.</p>
+              <ul id="features" class="features"></ul>
+              <ol id="edits" class="edits"></ol>
+              <div id="edit-params" class="edit-params" hidden>
+                <label>Round bed corners <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
+                <label>Teardrop tip <input id="param-teardrop_angle_deg" data-param="teardrop_angle_deg" type="number" step="5" />° from vertical</label>
+                <label>Fill ledges up to <input id="param-ledge_max_mm" data-param="ledge_max_mm" type="number" step="1" /> mm wide</label>
+                <label>Thin walls to <input id="param-wall_lines" data-param="wall_lines" type="number" step="1" /> lines</label>
+                <label>Bottom edge chamfer <input id="param-foot_chamfer_mm" data-param="foot_chamfer_mm" type="number" step="0.1" /> mm</label>
+                <label>Chamfer at the weak spot <input id="param-stress_chamfer_mm" data-param="stress_chamfer_mm" type="number" step="0.5" /> mm</label>
+              </div>
+              <div class="actions">
+                <button id="suggest-design">Suggest design changes</button>
+                <button id="apply-edits" class="primary" hidden>Apply selected changes</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="settings">
+          <h2>Slicer settings</h2>
+          <div id="blk-settings">
+            <div id="settings-block">
+              <p class="lead">What we change from your slicer's defaults. Hover a row for why.</p>
+              <details id="settings-fold" class="more-block settings-fold" open>
+                <summary>Show the slicer settings</summary>
+                <table id="settings"></table>
+              </details>
+              <button type="button" id="edit-shells" class="link" data-min="basic">Change walls, layers, infill</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="download">
+          <h2>Download</h2>
+          <div id="blk-download" class="actions">
+            <label id="zones-for" class="field" hidden>Your strengthening zones need a file for one slicer:
+              <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio</option><option value="prusa">PrusaSlicer</option></select></label>
+            <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
+            <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>
+            <div class="more-downloads" data-min="basic">
+              <button id="dl-stl">STL, turned for printing</button>
+              <button id="dl-stl-model">STL as modelled (with design changes)</button>
+              <button id="dl-step" hidden>STEP: your CAD file with the design changes</button>
+              <button id="copy-report">Copy report (to share it)</button>
+            </div>
+            <details id="paste-block" class="more-block paste" data-min="advanced" hidden>
+              <summary>Paste an AI answer</summary>
+              <p class="hint">Paste the report into any AI chat, ask your question, then paste its whole reply here. The tool applies the orientation, settings and design changes it suggests.</p>
+              <textarea id="paste-input" rows="4" placeholder="Paste the AI's reply (with its JSON block) here"></textarea>
+              <button id="paste-apply">Apply the answer</button>
+              <ul id="paste-result" class="paste-result"></ul>
+            </details>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="result">
+          <div id="verdict" class="summary"></div>
+        </section>
+
+        <details id="ai-block" data-min="expert" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
+          <summary>Ask AI <small>with your own API key</small></summary>
+          <form class="ai-config" onsubmit="return false" autocomplete="off">
+            <input type="text" name="username" autocomplete="username" value="api-key" hidden />
+            <label>Provider
+              <select id="ai-provider">
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="gemini">Google (Gemini)</option>
+                <option value="openai">OpenAI (GPT)</option>
+              </select>
+            </label>
+            <label>API key <input id="ai-key" type="password" autocomplete="new-password" placeholder="sk-ant-..." /></label>
+            <label>Model <select id="ai-model"></select></label>
+            <label class="toggle"><input id="ai-remember" type="checkbox" /> Remember key on this computer</label>
+          </form>
+          <div id="ai-log" class="ai-log"></div>
+          <form id="ai-form" class="ai-form">
+            <textarea id="ai-input" rows="2" placeholder="e.g. Will this hold 5 kg? How can it print without supports?"></textarea>
+            <button class="primary">Send</button>
+          </form>
+          <p class="hint">The key goes only from this browser to the provider; usage is billed to your account there.</p>
+        </details>
+        <div id="parking" hidden></div>
+      </div>
+
+      <footer class="pane-foot">
+        <p id="status" class="status">Starting the engine… (the first visit downloads about 15 MB)</p>
+        <div class="foot-buttons">
+          <button type="button" id="step-back" class="ghost">Back</button>
+          <button type="button" id="step-next" class="primary">Next</button>
+        </div>
+      </footer>
+    </section>
+
     <dialog id="guide" class="guide">
-      <h2>What do you want to do?</h2>
-      <p class="hint">You can change this any time at the top (Simple / Advanced / Expert).</p>
-      <button data-guide="settings"><b>Get good slicer settings for my part</b><span>Best orientation, what could go wrong, and settings to print it. Simple.</span></button>
-      <button data-guide="strength"><b>Make a part strong enough — or lighter</b><span>Say where it's held and loaded; the tool finds the orientation and settings that hold. Simple.</span></button>
-      <button data-guide="steps"><b>Go through everything step by step</b><span>Also design changes, walls and infill, heat and nozzle size. Advanced.</span></button>
-      <button data-guide="expert"><b>Expert: show me every tool</b><span>Detailed check from your sliced G-code, FEA views, accuracy checks.</span></button>
+      <h2>How much do you want to see?</h2>
+      <p class="hint">You can switch any time at the top.</p>
+      <button data-guide="settings"><b>Simple</b><span>Pick your printer and material. Get the problems, settings and a file to print.</span></button>
+      <button data-guide="strength"><b>Basic</b><span>Every choice, step by step: orientation, problems, strength, settings.</span></button>
+      <button data-guide="steps"><b>Advanced</b><span>Also detailed strength views, shaking and knocks, design changes and the G-code check.</span></button>
+      <button data-guide="expert"><b>Expert</b><span>Every tool on one long page.</span></button>
     </dialog>
     <script type="module" src="app.js"></script>
   </body>

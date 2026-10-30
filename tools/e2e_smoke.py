@@ -163,9 +163,9 @@ def main():
         def levels_and_guide():
             page.click("#show-guide")
             page.click("[data-guide=settings]")
-            simple = page.evaluate("() => [document.body.dataset.level, getComputedStyle(document.getElementById('design-block')).display, getComputedStyle(document.getElementById('my-presets')).display]")
-            assert simple == ["simple", "none", "none"], simple
-            page.check("input[name=level][value=expert]")
+            simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
+            assert simple == ["simple", False, False], simple
+            page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
             return f"guide -> {simple[0]}; back to expert"
         run.step("levels and start guide", levels_and_guide)
@@ -463,7 +463,7 @@ def main():
             page.click("input[name=goal][value=strength] >> xpath=..")  # slow: checks several orientations
             page.wait_for_selector("#progress:not([hidden])", timeout=30_000)
             page.wait_for_function("() => document.getElementById('progress-bar').value > 0", timeout=30_000)
-            run.act(lambda: page.click("#cancel"), 60_000)
+            run.act(lambda: page.click("#working-cancel"), 60_000)
             status = page.locator("#status").inner_text()
             assert status.startswith("Cancelled"), status
             # The restarted engine must have the part again: re-orienting works.

@@ -53,9 +53,9 @@ export class Viewer {
 
   setBed([w, d]) {
     this.bedGroup.clear();
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: "#dfe3e8" }));
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: "#dde3df" }));
     plate.position.z = -0.05;
-    const grid = new THREE.GridHelper(Math.max(w, d), Math.round(Math.max(w, d) / 10), "#b9bec6", "#cdd1d7");
+    const grid = new THREE.GridHelper(Math.max(w, d), Math.round(Math.max(w, d) / 10), "#bac4bd", "#ccd4ce");
     grid.rotation.x = Math.PI / 2;
     this.bedGroup.add(plate, grid);
   }
