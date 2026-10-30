@@ -122,6 +122,10 @@ fasteners:
   # recommended for M3/M4 [DigiKey Maker.io heat-set inserts; Sovol "Design strong screw bosses"].
   insert_min_wall_mm: 1.6
   insert_match_mm: 0.15   # a round hole this close to an insert's hole size counts as an insert hole
+  # A screw cut straight into the plastic needs about its own diameter of wall around the hole (M5: 5 mm)
+  # [Hubs, How to assemble 3D printed parts with threaded fasteners,
+  # https://www.hubs.com/knowledge-base/how-assemble-3d-printed-parts-threaded-fasteners/].
+  pilot_match_mm: 0.1     # a round hole this close to a screw's pilot size counts as a pilot hole
 
 fits:
   # Gap to add to the mating part's size (diameter, mm) when modelling a round hole, or to take off a

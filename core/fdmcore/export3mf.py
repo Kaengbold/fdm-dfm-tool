@@ -62,6 +62,8 @@ def prusa_settings(settings: dict[str, str]) -> dict[str, str]:
         out["ironing_type"] = settings["ironing_type"]  # same values: top | topmost | solid
     if out.get("support_material") == "1":
         out["support_material_auto"] = "1"
+    if out.get("brim_type") == "brim_ears":  # PrusaSlicer has no mouse ears
+        out["brim_type"] = "outer_only"
     return out
 
 

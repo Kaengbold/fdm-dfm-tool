@@ -102,6 +102,19 @@ def test_ironing_and_precise_wall():
     assert run_checks(orient(sample("l_bracket"), np.eye(3)), p)["stats"]["top_flat_mm2"] > 0
 
 
+def test_brim_ears_when_only_corners_lift():
+    from fdmcore.export3mf import prusa_settings
+    from fdmcore.recommend import recommend_settings
+
+    p = Profile.from_dict({})
+    brim = lambda findings: {s["key"]: s["value"] for s in recommend_settings(p, findings)}["brim_type"]
+    assert brim([{"rule": "warping"}]) == "brim_ears"
+    # A small footprint or a tall part needs the full brim all round, warping or not.
+    assert brim([{"rule": "warping"}, {"rule": "tipping_risk"}]) == "outer_only"
+    assert brim([]) == "no_brim"
+    assert prusa_settings({"brim_type": "brim_ears"}) == {"brim_type": "outer_only"}
+
+
 def test_scarf_seam_for_round_parts():
     from shapely.geometry import Point, box
 
@@ -133,6 +146,24 @@ def test_nut_trap_and_insert_wall():
     assert found["insert_wall_thin"]["metrics"]["wall_mm"] == pytest.approx(1.0, abs=0.05)
     loose = {f["rule"] for f in run_checks(plate(5.8, 22.0), p)["findings"]}
     assert not loose & {"nut_trap_tight", "insert_wall_thin"}
+
+
+def test_screw_wall():
+    from shapely.geometry import Point, Polygon
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+
+    def plate(x):  # a Ø2.5 hole: pilot size for an M3 screw cut into the plastic
+        shape = Polygon([(0, 0), (30, 0), (30, 20), (0, 20)]).difference(Point(x, 10).buffer(1.25, quad_segs=16))
+        return orient(Mesh(extrude(shape, 0, 6)), np.eye(3))
+
+    p = Profile.from_dict({})
+    found = {f["rule"]: f for f in run_checks(plate(27.75), p)["findings"]}
+    assert found["screw_wall_thin"]["metrics"]["fastener"] == "M3"
+    assert found["screw_wall_thin"]["metrics"]["wall_mm"] == pytest.approx(1.0, abs=0.05)
+    assert "insert_wall_thin" not in found
+    assert "screw_wall_thin" not in {f["rule"] for f in run_checks(plate(15), p)["findings"]}
 
 
 def test_export_3mf():
