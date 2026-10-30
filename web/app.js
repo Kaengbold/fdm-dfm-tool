@@ -323,6 +323,8 @@ async function selectOption(i) {
   $("strength-result").replaceChildren();
   $("dynamics").hidden = true;
   $("dynamics-result").textContent = "";
+  state.swing = null;
+  state.showSwing = false;
   renderGcode();
   setZones([]); // zones belong to one orientation
   state.warp = null;
@@ -531,10 +533,30 @@ function renderSettings() {
   $("settings-block").hidden = !settings.length;
   $("settings").replaceChildren(
     ...settings.map((s) =>
-      el("tr", { title: s.reason }, el("td", { textContent: s.label + (s.changed ? " ★" : "") }), el("td", { textContent: s.value })),
+      el("tr", { title: s.reason },
+        el("td", {}, s.label, s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : ""),
+        el("td", { textContent: settingText(s.key, s.value) })),
     ),
   );
   renderShells();
+}
+
+// Slicer values as a person reads them; the 3MF keeps the raw values.
+const ON_OFF = new Set(["enable_support", "hole_to_polyhole", "slow_down_for_layer_cooling", "precise_outer_wall"]);
+const VALUE_WORDS = {
+  brim_type: { no_brim: "Off", outer_only: "Outside only", brim_ears: "Brim ears", outer_and_inner: "Outside and inside" },
+  support_type: { "tree(auto)": "Tree (automatic)", "normal(auto)": "Normal (automatic)" },
+  ironing_type: { topmost: "Top surface only", top: "All top surfaces", no_ironing: "Off" },
+  seam_slope_type: { external: "Outer wall", all: "All walls", none: "Off" },
+  support_interface_pattern: { rectilinear_interlaced: "Rectilinear, crossed" },
+};
+const UNITS = { layer_height: "mm", brim_width: "mm", xy_hole_compensation: "mm", elefant_foot_compensation: "mm", support_threshold_angle: "°", bridge_speed: "mm/s" };
+function settingText(key, value) {
+  const v = String(value);
+  if (ON_OFF.has(key)) return v === "1" || v === "true" ? "On" : "Off";
+  if (VALUE_WORDS[key]?.[v]) return VALUE_WORDS[key][v];
+  if (UNITS[key]) return `${v}${UNITS[key] === "°" ? "" : " "}${UNITS[key]}`;
+  return /^[a-z_()]+$/.test(v) ? (v[0].toUpperCase() + v.slice(1)).replaceAll("_", " ") : v;
 }
 
 function fmtTime(min) {
@@ -875,6 +897,7 @@ async function runStrength(fine = false) {
     state.strength = r;
     state.showHeat = true;
     state.showWarp = false;
+    state.showSwing = false;
     $("show-temp").checked = false;
     recolor();
     viewer.showFindings([]);
@@ -901,7 +924,19 @@ $("run-dynamics").onclick = () =>
       mounted_kg: $("dyn-shake").checked ? Number($("dyn-kg").value) || 0 : 0,
       drop_mm: $("dyn-drop").checked ? Number($("dyn-mm").value) || 0 : 0,
     });
-    $("dynamics-result").textContent = r.explanation.replace(" Shown: how it swings (exaggerated).", "");
+    state.swing = r;
+    state.showSwing = true;
+    const show = el("input", { type: "checkbox", checked: true });
+    show.onchange = () => {
+      state.showSwing = show.checked;
+      if (show.checked) state.showWarp = false;
+      recolor();
+    };
+    $("dynamics-result").replaceChildren(
+      el("span", { textContent: r.explanation.replace(" Shown: how it swings (exaggerated).", "") }),
+      el("label", { className: "toggle" }, show, " Show how it swings on the part"),
+    );
+    recolor();
     setStatus(state.summary);
   }, ["strength"]);
 
@@ -922,6 +957,8 @@ const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
+  if (state.showSwing && state.swing) return swingView();
+  stopSwing();
   if (state.showWarp && state.warp) return warpView();
   const r = state.strength;
   if (!(state.showHeat && r)) {
@@ -954,6 +991,49 @@ function renderLegend(f, max) {
   $("legend").replaceChildren(el("strong", { textContent: f.title }), f.note ? el("small", { textContent: f.note }) : "", ...bands,
     el("div", { className: "band-0", textContent: f.fmt(0) }));
   $("legend").hidden = false;
+}
+
+// ---------- shaking: the part rocks in its lowest mode ----------
+const SWING_FIELD = { title: "Swings most here", note: "how it moves when it shakes (exaggerated)", fmt: (v) => `${Math.round(v * 100)} %` };
+let swingFrame = 0;
+
+/** The swing shape as colours, and the part rocking back and forth in it: you see where it moves and how. */
+function swingView() {
+  const s = state.swing;
+  const values = f32(s.vertex_value);
+  let max = 1e-9; // not Math.max(...values): hundreds of thousands of arguments overflow the stack
+  for (const v of values) if (v > max) max = v;
+  const key = `swing|${s.frequency_hz}|${activeOption().up}`;
+  if (viewer.fieldKey !== key || !viewer.field) {
+    viewer.showField({ triangles: f32(s.field_triangles), values: values.map((v) => v / max), disp: f32(s.vertex_disp), max: 1 });
+    viewer.fieldKey = key;
+  }
+  renderLegend(SWING_FIELD, 1);
+  viewer.showFindings([]);
+  const amplitude = (0.08 * viewer.part.geometry.boundingSphere.radius) / max;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!swingFrame) {
+    const t0 = performance.now();
+    let last = 0;
+    const step = (t) => {
+      // About one swing a second: slow enough to follow, whatever the real frequency is.
+      // ~20 updates a second keep big parts light on the CPU.
+      if (t - last > 50) {
+        last = t;
+        viewer.setDeformation(still ? amplitude : amplitude * Math.sin(((t - t0) / 1000) * 2 * Math.PI), false);
+      }
+      swingFrame = still ? 0 : requestAnimationFrame(step);
+    };
+    swingFrame = requestAnimationFrame(step);
+  }
+  return true;
+}
+
+function stopSwing() {
+  if (!swingFrame) return;
+  cancelAnimationFrame(swingFrame);
+  swingFrame = 0;
+  viewer.setDeformation(0);
 }
 
 // ---------- warping simulation ----------
@@ -1491,8 +1571,12 @@ $("ai-input").addEventListener("keydown", (e) => {
 // ---------- presets ----------
 async function initPresets() {
   await engineReady;
-  await applyMine(loadMine(), { printer: "bambu_p1s", material: "pla", nozzle: "0.4" });
-  setStatus("Ready — drop an STL, 3MF or STEP file, or try a sample.");
+  // The printer and material you have, remembered from your last visit: Simple is then one drop.
+  const saved = JSON.parse(localStorage.getItem("fdm-setup") ?? "{}");
+  await applyMine(loadMine(), { printer: "bambu_p1s", material: "pla", nozzle: "0.4", ...saved });
+  setStatus(saved.printer
+    ? `Ready. Set up for your ${state.presets.printers[$("printer").value].name} with ${state.presets.materials[$("material").value].name}: drop a part, or try a sample.`
+    : "Ready — drop an STL, 3MF or STEP file, or try a sample.");
 }
 
 /** Send the user's own presets to the engine and refill the dropdowns, keeping (or setting) the selection. */
@@ -1669,6 +1753,7 @@ $("nozzle-block").ontoggle = (e) => e.target.open && state.triangles && compareN
 
 for (const id of ["printer", "material", "nozzle", "multi-material"]) {
   $(id).onchange = () => {
+    localStorage.setItem("fdm-setup", JSON.stringify({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value }));
     viewer.setBed(state.presets.printers[$("printer").value].bed);
     syncMultiMaterial();
     $("nozzle-block").open = false; // comparison belongs to the old setup

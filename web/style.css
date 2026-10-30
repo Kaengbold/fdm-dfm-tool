@@ -65,11 +65,10 @@ body {
   grid-template-rows: 56px minmax(0, 1fr);
   background: var(--panel);
 }
-body[data-level="expert"] { grid-template-columns: 0 minmax(0, 1fr) 480px; }
+body[data-level="expert"] { grid-template-columns: 210px minmax(0, 1fr) 520px; }
 .steps { grid-area: 2 / 1; }
 main#viewer { grid-area: 2 / 2; }
 .panel { grid-area: 2 / 3; }
-body[data-level="expert"] .steps { display: none; }
 
 /* ---------- header ---------- */
 .top {
@@ -467,3 +466,4 @@ body[data-level="simple"] #settings-block > .lead { display: none; }
 .pane[data-pane="result"] #findings > li.ok { display: none; }
 /* A disabled main button keeps readable text (it often says why: "Load a part first"). */
 button.primary:disabled { opacity: 1; background: var(--soft); border-color: var(--line); color: var(--muted); }
+#settings .changed { color: var(--accent); font-weight: 700; font-size: 12px; }
