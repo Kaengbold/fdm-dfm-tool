@@ -111,17 +111,8 @@ def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fi
     """Displacements for nodal ``forces`` (n_nodes, 3) with ``fixed`` node mask (n_nodes,).
     ``springs`` (nodes, directions (m, 3), stiffness (m,) N/mm): supports that only hold along a
     direction, e.g. the face normal of a part resting on a surface."""
-    ke = element_stiffness(c, model.grid.h)
+    k = stiffness(model, c, scale, springs)
     n = model.n_nodes * 3
-    rows = np.repeat(model.edof, 24, axis=1).ravel()
-    cols = np.tile(model.edof, (1, 24)).ravel()
-    vals = (scale[:, None] * ke.ravel()[None, :]).ravel()
-    k = sp.csr_matrix((vals, (rows, cols)), shape=(n, n))
-    if springs is not None and len(springs[0]):
-        nodes, d, ks = springs
-        block = ks[:, None, None] * d[:, :, None] * d[:, None, :]  # k · d dᵀ per node
-        dof = nodes[:, None] * 3 + np.arange(3)
-        k = k + sp.csr_matrix((block.ravel(), (np.repeat(dof, 3, axis=1).ravel(), np.tile(dof, (1, 3)).ravel())), shape=(n, n))
     free = np.repeat(~fixed, 3)
     kf = k[free][:, free]
     f = forces.ravel()[free]
@@ -137,6 +128,46 @@ def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fi
     u = np.zeros(n)
     u[free] = uf
     return u.reshape(-1, 3), info
+
+
+def stiffness(model: Model, c: np.ndarray, scale: np.ndarray, springs: tuple | None = None) -> sp.csr_matrix:
+    """Global stiffness matrix (N/mm), with ``springs`` as in ``solve``."""
+    ke = element_stiffness(c, model.grid.h)
+    n = model.n_nodes * 3
+    rows = np.repeat(model.edof, 24, axis=1).ravel()
+    cols = np.tile(model.edof, (1, 24)).ravel()
+    vals = (scale[:, None] * ke.ravel()[None, :]).ravel()
+    k = sp.csr_matrix((vals, (rows, cols)), shape=(n, n))
+    if springs is not None and len(springs[0]):
+        nodes, d, ks = springs
+        block = ks[:, None, None] * d[:, :, None] * d[:, None, :]  # k · d dᵀ per node
+        dof = nodes[:, None] * 3 + np.arange(3)
+        k = k + sp.csr_matrix((block.ravel(), (np.repeat(dof, 3, axis=1).ravel(), np.tile(dof, (1, 3)).ravel())), shape=(n, n))
+    return k
+
+
+def lowest_mode(model: Model, c: np.ndarray, scale: np.ndarray, node_mass: np.ndarray, fixed: np.ndarray,
+                springs: tuple | None = None) -> tuple[float, np.ndarray]:
+    """Lowest natural frequency (Hz) and its mode shape (n_nodes, 3, largest movement 1) with lumped
+    node masses (kg). K is in N/mm, so ω² = 1000 · λ for K x = λ M x."""
+    k = stiffness(model, c, scale, springs)
+    free = np.repeat(~fixed, 3)
+    kf = k[free][:, free].tocsr()
+    m = sp.diags(np.repeat(node_mass, 3)[free])
+    # LOBPCG with the same multigrid preconditioner as the static solve: a direct factorisation
+    # (eigsh shift-invert) took a minute on 47k unknowns. A few start vectors: the lowest two modes
+    # are often a pair (bending one way or the other) and converge slowly alone.
+    rng = np.random.default_rng(0)
+    x0 = rng.standard_normal((kf.shape[0], 3))
+    precond = two_level_preconditioner(kf, prolongation(model)[free])
+    lam, vec = spla.lobpcg(kf, x0, B=m, M=precond, largest=False, tol=1e-5, maxiter=200)
+    i = int(np.argmin(lam))
+    shape = np.zeros(model.n_nodes * 3)
+    shape[free] = vec[:, i]
+    lam = lam[i:i + 1]
+    shape = shape.reshape(-1, 3)
+    shape /= max(np.linalg.norm(shape, axis=1).max(), 1e-12)
+    return float(np.sqrt(max(lam[0], 0.0) * 1000) / (2 * np.pi)), shape
 
 
 def prolongation(model: Model) -> sp.csr_matrix:

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .fea import Material, Model, build_model, element_stress, rotate_stiffness, solve
+from .fea import Material, Model, build_model, element_stress, lowest_mode, rotate_stiffness, solve
 from .mesh import Mesh
 from .orientation import rotation_to_z
 from .profile import Profile
@@ -445,6 +445,35 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
     out["vm"] = von_mises(stress)
     out["u"] = u
     return out
+
+
+def vibration(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), extra_kg: float = 0.0) -> tuple[float, np.ndarray]:
+    """Lowest natural frequency (Hz) of the part as it is held, and how it swings (mode shape).
+    The plastic's own mass (walls, infill) plus ``extra_kg`` spread over the loaded nodes (something
+    mounted on it). Resting faces and screw holes hold like springs here (they don't let go)."""
+    mat = material_for(profile)
+    c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
+    scale = element_scale(case.model, up, shells, profile)
+    solid, infill = _zoned(case.model, up, shells, profile)
+    kg = (solid + (1 - solid) * infill) * case.model.grid.h**3 * 1e-6 * profile.material["density_g_cm3"]  # mm³ · g/cm³ -> kg
+    nodes = (case.model.edof[:, 0::3] // 3).ravel()
+    mass = np.bincount(nodes, np.repeat(kg / 8, 8), minlength=case.model.n_nodes)
+    loaded = np.linalg.norm(case.forces, axis=1) > 0
+    if extra_kg > 0 and loaded.any():
+        mass[loaded] += extra_kg / loaded.sum()
+    springs = None
+    if case.contact is not None and len(case.contact[0]):
+        nodes_c, n = case.contact
+        k = CONTACT_STIFFNESS * mat.e_xy * case.model.grid.h
+        springs = (nodes_c, n, np.full(len(nodes_c), k))
+    return lowest_mode(case.model, c, scale, np.maximum(mass, 1e-12), case.fixed, springs)
+
+
+def impact_factor(drop_mm: float, deflection_mm: float) -> float:
+    """How many times its weight a load hits with when it falls ``drop_mm`` onto the part, which bends
+    ``deflection_mm`` under the same load held still: 1 + √(1 + 2h/δ) (energy method, e.g. Hibbeler,
+    Mechanics of Materials, impact loading). A load set down gently (h = 0) still counts double."""
+    return 1 + float(np.sqrt(1 + 2 * max(drop_mm, 0.0) / max(deflection_mm, 1e-6)))
 
 
 def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None) -> dict:

@@ -931,6 +931,49 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     return r
 
 
+def dynamics(up, loads: list[dict], profile: dict | None = None, drop_mm: float = 0.0, mounted_kg: float = 0.0) -> dict:
+    """Simplified dynamics: the lowest natural frequency as held (shakes along at that rate: a motor,
+    fan or printer running near it makes it resonate) and its swing shape for the FEA view; and the
+    load falling ``drop_mm`` onto the part (or the part being knocked): the impact factor and the
+    safety factor that leaves. ``mounted_kg``: something fixed on the loaded face that swings with it."""
+    from .strength import evaluate_cases, impact_factor, sample_nodes, vibration
+    from .strength import refine
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    cases = _load_case(loads)
+    sh = _shells(p)
+    hz, shape = vibration(cases[0], up, p, sh, mounted_kg)
+    r = evaluate_cases(cases, up, p, sh)
+    model = cases[0].model
+    worst = cases[[c.number for c in cases].index(r["case"])]
+    loaded = np.linalg.norm(worst.forces, axis=1) > 0
+    sag = float(np.abs(np.einsum("ij,ij->i", r["u"][loaded], worst.forces[loaded] / np.linalg.norm(worst.forces[loaded], axis=1, keepdims=True))).mean())
+    factor = impact_factor(drop_mm, sag)
+    fine = refine(s.mesh.triangles, model.grid.h)
+    disp = sample_nodes(model, shape, fine.reshape(-1, 3))
+    out = {"frequency_hz": round(hz, 1), "sag_mm": round(sag, 3), "impact_factor": round(factor, 2),
+           "static_safety": r["safety_factor"], "impact_safety": r["safety_factor"] / factor if np.isfinite(r["safety_factor"]) else None,
+           "field_triangles": fine.astype(np.float32).tobytes(), "vertex_disp": disp.astype(np.float32).tobytes(),
+           "vertex_value": np.linalg.norm(disp, axis=1).astype(np.float32).tobytes(), "drop_mm": drop_mm}
+    out["explanation"] = _dynamics_story(out)
+    return out
+
+
+def _dynamics_story(r: dict) -> str:
+    hz = r["frequency_hz"]
+    where = ("very low: it sways visibly and anything shaking nearby can rock it" if hz < 20 else
+             "in the range of motors, fans and printers (20–200 Hz): if something near it runs at that rate it can resonate and rattle loose"
+             if hz < 200 else "high: everyday shaking won't make it resonate")
+    out = f"It swings fastest-free at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
+    if r["drop_mm"] > 0 and r["impact_safety"] is not None:
+        isf = r["impact_safety"]
+        out += (f" If the load drops {r['drop_mm']:.0f} mm onto it, it hits about {r['impact_factor']:.1f}× as hard as when held still"
+                f" (the part gives only {r['sag_mm']:.2f} mm), so the safety drops from ×{r['static_safety']:.1f} to ×{isf:.1f}"
+                + (": still fine." if isf >= 2 else ": it may break when that happens." if isf >= 1 else ": it will likely break."))
+    return out
+
+
 def strength_options(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
@@ -1393,6 +1436,7 @@ METHODS = {
     "warping": warping,
     "set_fit": set_fit,
     "material_advice": material_advice,
+    "dynamics": dynamics,
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,
