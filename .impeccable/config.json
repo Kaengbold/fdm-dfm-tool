@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "hyperlegible\",system-ui,sans-serif",
+        "createdAt": "2026-10-30T19:40:33.998Z",
+        "reason": "agent: Atkinson Hyperlegible is the documented face in DESIGN.md; the detector mis-parses the font stack"
+      }
+    ]
+  }
+}
