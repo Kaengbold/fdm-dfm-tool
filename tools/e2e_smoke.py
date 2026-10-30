@@ -370,11 +370,11 @@ def main():
         def detailed():
             # Slice the part shown with the local OrcaSlicer (like a user would), then load the G-code.
             sys.path.insert(0, str(ROOT / "core"))
-            from fdmcore import api, mcp_server
-            from fdmcore.slicer_cli import find_orca
+            from fdmcore.slicer_cli import find_orca  # standard library only: CI has no engine packages
 
             if find_orca() is None:
                 return "skipped: OrcaSlicer not installed"
+            from fdmcore import api, mcp_server
             name, data, up = page.evaluate("() => [fdm.state.source.name, Array.from(fdm.state.source.bytes), fdm.state.options[fdm.state.active].up]")
             api.load(bytes(data), name)
             sliced = mcp_server._slice(up, page.input_value("#printer"), page.input_value("#material"), page.input_value("#nozzle"), None, keep_gcode=True)
