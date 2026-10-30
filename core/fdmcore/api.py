@@ -69,7 +69,10 @@ def custom_presets(printers: dict | None = None, materials: dict | None = None) 
     return presets()
 
 
-CALIBRATION = ("layer_strength", "warping")
+CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge")
+FIT_GAUGE_GAPS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)  # hole sizes of the fit gauge: 6 mm + these
+OVERHANG_TEST_DEG = (40, 45, 50, 55, 60, 65, 70)  # from vertical
+BRIDGE_TEST_MM = (10, 20, 30, 40, 50)
 
 
 def calibration_part(kind: str) -> dict:
@@ -79,8 +82,38 @@ def calibration_part(kind: str) -> dict:
       standing on its end, hang each by one hole and add weight at the other until it breaks:
       upright kg / flat kg is the layer strength factor.
     warping: bars 40, 80, 120 and 160 mm long (10 × 3 mm, sharp corners), printed without brim:
-      the longest one that stays flat on the bed is the warping length for that printer's enclosure."""
+      the longest one that stays flat on the bed is the warping length for that printer's enclosure.
+    fit: a 6 mm peg and a strip with holes 6.0, 6.1 … 6.5 mm (the notched end is 6.0): the hole the peg
+      pushes into snugly and the one it slides and turns in give the fit gaps for your printer.
+    overhang: seven blocks leaning out 40° … 70° from vertical (the short end is 40°): the steepest one
+      that prints clean is the material's max overhang.
+    bridge: bridges 10 … 50 mm long between two pillars: the longest one that doesn't sag is the max bridge."""
+    from shapely.geometry import Point, Polygon, box as sbox
+
+    from .additions import extrude
     from .mesh import to_binary_stl
+
+    def lying(profile_xz, y0, depth):
+        """A profile drawn in x/z, extruded along y from y0 (extrude works in x/y, then turned up)."""
+        tris = extrude(profile_xz, y0, y0 + depth)[:, :, [0, 2, 1]]  # (x, z, y) -> (x, y, z)
+        return tris[:, ::-1]  # swapping two axes mirrors: flip the winding back
+
+    if kind == "fit":
+        strip = sbox(0, 0, 10 * len(FIT_GAUGE_GAPS) + 4, 12).difference(Polygon([(0, 0), (4, 0), (0, 4)]))  # notch: the 6.0 end
+        for i, gap in enumerate(FIT_GAUGE_GAPS):
+            strip = strip.difference(Point(7 + 10 * i, 6).buffer((6 + gap) / 2, 64))
+        peg = extrude(Point(0, 0).buffer(3, 64), 0, 12) + [30, 25, 0]
+        return {"stl": to_binary_stl(Mesh(np.concatenate([extrude(strip, 0, 5), peg]))), "name": "fit_test.stl"}
+    if kind == "overhang":
+        tris = [lying(Polygon([(0, 0), (8, 0), (8 + 15 * np.tan(np.radians(a)), 15), (0, 15)]), i * 12, 8)
+                for i, a in enumerate(OVERHANG_TEST_DEG)]
+        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "overhang_test.stl"}
+    if kind == "bridge":
+        tris = []
+        for i, span in enumerate(BRIDGE_TEST_MM):
+            shape = sbox(0, 0, 5, 10).union(sbox(5 + span, 0, 10 + span, 10)).union(sbox(0, 10, 10 + span, 11.2))
+            tris.append(lying(shape, i * 14, 8))
+        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "bridge_test.stl"}
 
     if kind == "layer_strength":
         from shapely.geometry import Point, box as sbox
@@ -1006,7 +1039,7 @@ def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     }
 
 
-def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "sliding") -> dict:
+def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "sliding", profile: dict | None = None) -> dict:
     """Say what goes into a round hole (or what a round post goes into): the mating part's diameter
     and the fit ("press", "snug", "sliding", "loose"). Returns the diameter to model and why; design()
     then offers the resize as an edit. ``partner_mm`` None forgets it."""
@@ -1022,7 +1055,7 @@ def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "slidin
     if partner_mm is None:
         s.fits.pop(region, None)
         return {"region": region}
-    size, why = fit_size(feats[region], float(partner_mm), fit, up)
+    size, why = fit_size(feats[region], float(partner_mm), fit, up, Profile.from_dict(profile))
     s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit}
     return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why}
 

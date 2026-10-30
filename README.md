@@ -21,7 +21,7 @@ browser, no install, your files never leave your computer.
 | **Design fixes** | Detects holes and round posts and asks when unsure ("is this a hole?"); suggests teardrop holes, corner chamfers, 45° fills under ledges, sacrificial layers over holes that start in mid-air and thicker walls; previews them (red = cut, green = added), applies them and re-checks; STEP parts are written back as STEP with only the edited spots changed |
 | **AI** | *Ask AI* panel with your own Anthropic, Google Gemini or OpenAI API key (it can switch orientations, set loads, run checks and apply fixes); MCP server so Claude Code / Codex / Gemini CLI / Claude Desktop can operate the tool with *your own* subscription; or copy the report into any AI chat and paste its answer back — the tool applies it |
 
-Add your own printer or filament (or import an OrcaSlicer filament profile) and measure layer strength and warping with two small test prints.
+Add your own printer or filament (or import an OrcaSlicer filament profile) and measure it with small test prints: layer strength, warping, fits (snug / sliding gaps), overhang angle and bridge length.
 
 Autodesk Fusion users: an add-in in [`fusion/`](fusion/README.md) runs the same checks on a body and can add teardrops as real CAD features (early, not yet tested inside Fusion).
 

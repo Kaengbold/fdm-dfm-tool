@@ -155,7 +155,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
                 f"teardrop-{f['region']}", "short_bridge", f"Teardrop for the horizontal Ø{f['diameter']:.1f} mm hole",
                 f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
                 [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg"))
-    edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up)
+    edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     r = rotation_to_z(up)
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
@@ -185,7 +185,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
 FIT_NAMES = {"press": "be pressed in (stays put)", "snug": "push in snugly", "sliding": "slide and turn freely", "loose": "drop in loosely"}
 
 
-def fit_size(feature: dict, partner_mm: float, fit: str, up) -> tuple[float, str]:
+def fit_size(feature: dict, partner_mm: float, fit: str, up, profile=None) -> tuple[float, str]:
     """Diameter to model a hole (or round post) so a ``partner_mm`` part fits it the ``fit`` way,
     and why, in plain words."""
     F = load_data("thresholds")["fits"]
@@ -193,7 +193,8 @@ def fit_size(feature: dict, partner_mm: float, fit: str, up) -> tuple[float, str
         raise ValueError(f"fit must be one of {tuple(F['gap_mm'])}")
     up = np.asarray(up, float) / np.linalg.norm(up)
     sideways = abs(np.asarray(feature["axis"]) @ up) < 0.7
-    gap = F["gap_mm"][fit] + (F["sideways_extra_mm"] if sideways else 0.0)
+    measured = (profile.material.get("fit_gap_mm") or {}) if profile is not None else {}  # from the fit test print
+    gap = measured.get(fit, F["gap_mm"][fit]) + (F["sideways_extra_mm"] if sideways else 0.0)
     hole = feature["type"] == "hole"
     size = partner_mm + gap if hole else partner_mm - gap
     what = (f"For a Ø{partner_mm:g} mm part to {FIT_NAMES[fit]}, model this hole Ø{size:.2f} mm" if hole else
@@ -201,10 +202,12 @@ def fit_size(feature: dict, partner_mm: float, fit: str, up) -> tuple[float, str
     why = f" (now Ø{feature['diameter']:.2f}: {size - feature['diameter']:+.2f} mm)."
     if sideways:
         why += " It lies on its side when printed, so it comes out a little smaller at the top: that's included."
-    return size, what + why + " Printers differ by a tenth or two: a small test print of the fit is worth it."
+    note = (" Using the gaps from your fit test print." if measured.get(fit) is not None
+            else " Printers differ by a tenth or two: the fit test print (My materials) gives your printer's numbers.")
+    return size, what + why + note
 
 
-def _fit_edits(features: list[dict], fits: dict, up) -> list[dict]:
+def _fit_edits(features: list[dict], fits: dict, up, profile=None) -> list[dict]:
     """Resize holes and posts the user said something fits into: a ring cut away or added."""
     F = load_data("thresholds")["fits"]
     out = []
@@ -212,7 +215,7 @@ def _fit_edits(features: list[dict], fits: dict, up) -> list[dict]:
         want = fits.get(f["region"])
         if not want:
             continue
-        size, why = fit_size(f, want["partner_mm"], want["fit"], up)
+        size, why = fit_size(f, want["partner_mm"], want["fit"], up, profile)
         change = size - f["diameter"]
         if abs(change) < F["min_change_mm"]:
             continue

@@ -536,11 +536,20 @@ def main():
             page.click("#cal-z")
             page.select_option("#cal-warp", "120")
             page.click("#cal-warp-use")
+            page.select_option("#cal-fit-snug", "0.2")
+            page.select_option("#cal-fit-slide", "0.4")
+            page.click("#cal-fit-use")
+            page.select_option("#cal-overhang", "60")
+            page.click("#cal-overhang-use")
+            page.select_option("#cal-bridge", "30")
+            page.click("#cal-bridge-use")
             run.act(lambda: page.click("#preset-form button.primary"))
             chosen = page.evaluate("() => document.getElementById('material').value")
             mat = page.evaluate(f"() => fdm.state.presets.materials['{chosen}']")
             assert chosen.startswith("my_") and mat["name"] == "My PETG" and mat["z_strength_factor"]["none"] == 0.4, mat
             assert mat["warp_length_mm"]["none"] == 185, mat
+            assert mat["fit_gap_mm"] == {"snug": 0.2, "press": 0.1, "sliding": 0.4, "loose": 0.55}, mat["fit_gap_mm"]
+            assert mat["max_overhang_deg"] == 60 and mat["max_bridge_mm"] == 30, mat
             orca = OUT / "orca_filament.json"
             orca.write_text('{"name": "Test PETG @BBL X1C", "filament_type": ["PETG"], "filament_density": ["1.27"], "filament_max_volumetric_speed": ["11"]}')
             page.set_input_files("#import-orca", str(orca))

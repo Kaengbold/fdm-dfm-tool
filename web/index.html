@@ -75,6 +75,25 @@
                 <select id="cal-warp"><option value="">—</option><option value="40">40 mm</option><option value="80">80 mm</option><option value="120">120 mm</option><option value="160">160 mm (all)</option></select></label>
               <button type="button" id="cal-warp-use">Use</button>
             </div>
+            <p class="hint"><button type="button" data-calibration="fit">Fit test (STL)</button>
+              A 6 mm peg and holes 6.0 … 6.5 mm (the notched end is 6.0). Try the peg in each hole.</p>
+            <div class="row">
+              <label>Pushes in snugly at <select id="cal-fit-snug"><option value="">—</option></select></label>
+              <label>Slides and turns at <select id="cal-fit-slide"><option value="">—</option></select></label>
+              <button type="button" id="cal-fit-use">Use</button>
+            </div>
+            <p class="hint"><button type="button" data-calibration="overhang">Overhang test (STL)</button>
+              Seven blocks leaning 40° … 70° (the short end is 40°), printed without support.</p>
+            <div class="row">
+              <label>Steepest one that's still clean <select id="cal-overhang"><option value="">—</option></select></label>
+              <button type="button" id="cal-overhang-use">Use</button>
+            </div>
+            <p class="hint"><button type="button" data-calibration="bridge">Bridge test (STL)</button>
+              Bridges 10 … 50 mm long between pillars, printed without support.</p>
+            <div class="row">
+              <label>Longest one that doesn't sag <select id="cal-bridge"><option value="">—</option></select></label>
+              <button type="button" id="cal-bridge-use">Use</button>
+            </div>
           </div>
           <div class="row">
             <button class="primary">Save</button>

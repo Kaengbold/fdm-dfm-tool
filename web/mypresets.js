@@ -15,6 +15,8 @@ export const MATERIAL_FIELDS = [
   ["warp_risk", "Warping", ["low", "medium", "high"]],
   ["z_strength", "Layer strength factor (0–1, from the test below)", "number", 0.01],
   ["warp_length", "Warping length on your printer (mm, from the test below)", "number", 1],
+  ["fit_snug", "Gap for a snug fit (mm, from the fit test below)", "number", 0.05],
+  ["fit_sliding", "Gap for a sliding fit (mm, from the fit test below)", "number", 0.05],
 ];
 export const PRINTER_FIELDS = [
   ["name", "Name", "text"],
@@ -54,6 +56,7 @@ export function toSpec(kind, values) {
     if (v === "" || v == null) continue;
     if (key === "z_strength") spec.z_strength_factor = Object.fromEntries(ENCLOSURES.map((e) => [e, Number(v)]));
     else if (key === "warp_length") spec.warp_length_mm = Object.fromEntries(ENCLOSURES.map((e) => [e, Number(v)]));
+    else if (key === "fit_snug" || key === "fit_sliding") spec.fit_gap_mm = { ...spec.fit_gap_mm, ...fitGaps(key, Number(v)) };
     else spec[key] = key === "name" || key === "warp_risk" ? v : Number(v);
   }
   return spec;
@@ -65,7 +68,14 @@ export function toForm(kind, preset) {
     const [bed_x, bed_y, bed_z] = preset.bed;
     return { ...preset, bed_x, bed_y, bed_z };
   }
-  return { ...preset, z_strength: preset.z_strength_factor?.none, warp_length: preset.warp_length_mm?.none ?? "" };
+  return { ...preset, z_strength: preset.z_strength_factor?.none, warp_length: preset.warp_length_mm?.none ?? "",
+    fit_snug: preset.fit_gap_mm?.snug ?? "", fit_sliding: preset.fit_gap_mm?.sliding ?? "" };
+}
+
+/** Measured snug / sliding gaps; press and loose follow them (a tenth tighter, 0.15 mm looser). */
+function fitGaps(key, gap) {
+  const r = (v) => Math.round(Math.max(0, v) * 100) / 100;
+  return key === "fit_snug" ? { snug: r(gap), press: r(gap - 0.1) } : { sliding: r(gap), loose: r(gap + 0.15) };
 }
 
 const ORCA_TYPES = { PLA: "pla", "PLA+": "pla_plus", PETG: "petg", ABS: "abs", ASA: "asa", PC: "pc", TPU: "tpu_95a", "PA-CF": "pa_cf", PA: "pa_cf" };

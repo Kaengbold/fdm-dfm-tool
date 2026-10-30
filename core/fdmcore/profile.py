@@ -55,8 +55,10 @@ MATERIAL_FIELDS = {
     "shrinkage_pct": (float, 0, 5),
     "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
     "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
+    "fit_gap_mm": ("fits", 0.0, 2.0),  # measured with the fit test print: {"press", "snug", "sliding", "loose"}
 }
 ENCLOSURES = ("none", "passive", "heated")
+FITS = ("press", "snug", "sliding", "loose")
 
 
 def _custom_entry(kind: str, key: str, spec: dict, fields: dict, base_table: dict) -> dict:
@@ -70,7 +72,11 @@ def _custom_entry(kind: str, key: str, spec: dict, fields: dict, base_table: dic
         if field not in fields:
             raise ValueError(f"{key}: unknown field {field!r}")
         kind_, lo, hi = fields[field]
-        if isinstance(kind_, tuple):
+        if kind_ == "fits":
+            value = {k: float(v) for k, v in dict(value).items() if k in FITS}
+            if not all(lo <= v <= hi for v in value.values()):
+                raise ValueError(f"{key}.{field} gaps must be between {lo} and {hi} mm")
+        elif isinstance(kind_, tuple):
             if value not in kind_:
                 raise ValueError(f"{key}.{field} must be one of {', '.join(kind_)}")
         elif kind_ is bool:

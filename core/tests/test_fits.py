@@ -55,3 +55,23 @@ def test_only_round_features_take_a_fit():
     flat = max(api.regions()["regions"], key=lambda r: r["normal"][2])["id"]
     with pytest.raises(ValueError, match="not a round hole"):
         api.set_fit(flat, [0, 0, 1], 6.0)
+
+
+def test_measured_gaps_from_the_fit_test_print_are_used():
+    hole = plate_with_hole()
+    api.custom_presets(materials={"mine": {"based_on": "pla", "name": "My PLA", "fit_gap_mm": {"sliding": 0.25}}})
+    try:
+        r = api.set_fit(hole["region"], [0, 0, 1], 6.0, "sliding", {"material": "my_mine"})
+        assert r["suggested_mm"] == pytest.approx(6.25) and "fit test" in r["explanation"]
+        assert api.set_fit(hole["region"], [0, 0, 1], 6.0, "snug", {"material": "my_mine"})["suggested_mm"] == pytest.approx(6.2)  # not measured: default
+    finally:
+        api.custom_presets()
+
+
+def test_calibration_prints():
+    from fdmcore.mesh import load_stl
+
+    for kind, size in (("fit", (64, 28, 12)), ("overhang", (49.2, 80, 15)), ("bridge", (60, 64, 11.2))):
+        m = load_stl(api.calibration_part(kind)["stl"])
+        lo, hi = m.bounds()
+        assert np.allclose(hi - lo, size, atol=0.2) and m.volume() > 0, kind

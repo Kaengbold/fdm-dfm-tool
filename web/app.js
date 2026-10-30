@@ -1155,7 +1155,7 @@ function fitControls(f) {
   const note = state.fitNotes?.[f.region]?.text;
   const go = el("button", { textContent: "Size it", onclick: () =>
     busy("Working out the size…", async () => {
-      const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value });
+      const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
       state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
       await suggestDesign();
     }) });
@@ -1508,6 +1508,21 @@ $("cal-z").onclick = () => {
   if (!(flat > 0 && upright > 0)) return setStatus("Enter both weights first.", true);
   $("preset-fields").querySelector("[name=z_strength]").value = zFactor(flat, upright).toFixed(2);
 };
+// Fit / overhang / bridge test results go straight into the form fields they measure.
+const options = (id, values, label) => $(id).append(...values.map((v) => el("option", { value: v, textContent: label(v) })));
+options("cal-fit-snug", [0, 0.1, 0.2, 0.3, 0.4, 0.5], (g) => `Ø${(6 + g).toFixed(1)} mm`);
+options("cal-fit-slide", [0, 0.1, 0.2, 0.3, 0.4, 0.5], (g) => `Ø${(6 + g).toFixed(1)} mm`);
+options("cal-overhang", [40, 45, 50, 55, 60, 65, 70], (a) => `${a}°`);
+options("cal-bridge", [10, 20, 30, 40, 50], (l) => `${l} mm`);
+const setField = (name, value) => ($("preset-fields").querySelector(`[name=${name}]`).value = value);
+$("cal-fit-use").onclick = () => {
+  const snug = $("cal-fit-snug").value, slide = $("cal-fit-slide").value;
+  if (snug === "" && slide === "") return setStatus("Pick the holes first.", true);
+  if (snug !== "") setField("fit_snug", snug);
+  if (slide !== "") setField("fit_sliding", slide);
+};
+$("cal-overhang-use").onclick = () => $("cal-overhang").value ? setField("max_overhang_deg", $("cal-overhang").value) : setStatus("Pick the steepest clean block first.", true);
+$("cal-bridge-use").onclick = () => $("cal-bridge").value ? setField("max_bridge_mm", $("cal-bridge").value) : setStatus("Pick the longest bridge first.", true);
 $("cal-warp-use").onclick = () => {
   const longest = Number($("cal-warp").value);
   if (!longest) return setStatus("Pick the longest bar that stayed flat.", true);
