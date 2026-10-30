@@ -165,7 +165,7 @@ def main():
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
-            page.check("input[name=level][value=expert]")
+            page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
             return f"guide -> {simple[0]}; back to expert"
         run.step("levels and start guide", levels_and_guide)
