@@ -83,7 +83,7 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         put("wall_generator", "arachne", "Wall generator", "Arachne varies line width so thin details still print")
     if "small_hole_undersized" in rules:
         put("xy_hole_compensation", T["holes"]["xy_hole_compensation_mm"], "Hole compensation", "Small holes print undersized; this opens them up")
-        put("hole_to_polyhole", 1, "Polyholes", "Prints round holes as polygons with fewer, longer sides: they come out much closer to size (OrcaSlicer, not PrusaSlicer)")
+        put("hole_to_polyhole", 1, "Polyholes", "Prints round holes as polygons with fewer, longer sides: they come out much closer to size (OrcaSlicer only: Bambu Studio and PrusaSlicer ignore it)")
     if rules & {"small_layers_cooling", "tall_thin_feature"}:
         put("slow_down_for_layer_cooling", 1, "Slow down small layers", "Gives small layers time to cool")
     # The first layer is squashed onto the bed and bulges out; pulling it in a little keeps bottom

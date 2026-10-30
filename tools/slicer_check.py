@@ -4,6 +4,9 @@ Exports a 20 mm cube with a small overhanging tab twice, with two clearly differ
 per-object setting sets, slices both with each installed slicer's command line and
 measures the G-code: wall loops in a middle layer, sparse infill present, support
 present, brim present. A setting counts as applied when the measurement follows it.
+A second part, a plate with a Ø6 mm hole, checks the hole helpers: polyholes (fewer corners around the hole; OrcaSlicer only, Bambu Studio
+and PrusaSlicer don't have them) and elephant-foot compensation (a smaller first layer; not
+per object in PrusaSlicer).
 
     python tools/slicer_check.py            # all slicers found in the default install folders
     python tools/slicer_check.py --keep     # keep the G-code in e2e-output/slicer-check
@@ -35,6 +38,11 @@ SETS = {
     "B": {"wall_loops": "5", "sparse_infill_density": "40%", "enable_support": "1", "brim_type": "outer_only", "brim_width": "6"},
 }
 
+# Hole helpers (T-136), on the hole plate.
+HOLE_SETS = {
+    "A": {"hole_to_polyhole": "0", "elefant_foot_compensation": "0"},
+    "B": {"hole_to_polyhole": "1", "elefant_foot_compensation": "0.3"},
+}
 PF = Path("C:/Program Files")
 SLICERS = {
     "orca": {
@@ -66,8 +74,17 @@ def test_part() -> bytes:
     return to_binary_stl(Mesh(tris[:, ::-1]))  # so flip the winding back
 
 
-def export(settings: dict) -> bytes:
-    api.load(test_part(), "slicer_check")
+def hole_plate() -> bytes:
+    """30 × 30 × 4 mm plate with a Ø6 mm hole in the middle."""
+    from shapely.geometry import Point, box
+
+    from fdmcore.additions import extrude
+
+    return to_binary_stl(Mesh(extrude(box(0, 0, 30, 30).difference(Point(15, 15).buffer(3, 64)), 0, 4)))
+
+
+def export(settings: dict, part: bytes | None = None) -> bytes:
+    api.load(part or test_part(), "slicer_check")
     return api.export([0, 0, 1], {}, settings)
 
 
@@ -129,6 +146,24 @@ def measure(gcode: Path) -> dict:
     }
 
 
+def measure_holes(gcode: Path) -> dict:
+    """Corners of the hole's outer wall in a middle layer, and how much smaller the first layer's
+    outline is than the middle layer's (mm, per side)."""
+    from fdmcore import gcode as gc
+
+    tp = gc.parse(gcode.read_text(errors="replace"))
+    outer = tp.kind == gc.WALL
+    pts = tp.p1[outer]
+    centre = (pts[:, :2].min(axis=0) + pts[:, :2].max(axis=0)) / 2
+    mid = tp.layer[outer] == len(tp.layer_z) // 2
+    first = tp.layer[outer] == 0
+    r = np.linalg.norm(pts[:, :2] - centre, axis=1)
+    hole = mid & (r < 4.5)
+    corners = len({tuple(np.round(p, 2)) for p in pts[hole & (r < r[hole].min() + 0.2), :2]})
+    width = lambda sel: float(np.ptp(pts[sel, 0]))
+    return {"hole_corners": corners, "foot_mm": round((width(mid) - width(first)) / 2, 2)}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true")
@@ -155,6 +190,16 @@ def main():
             "enable_support": (a["support"], b["support"], not a["support"] and b["support"]),
             "brim_type": (a["brim"], b["brim"], not a["brim"] and b["brim"]),
         }
+        if name != "prusa":
+            holes = {}
+            for label, settings in HOLE_SETS.items():
+                model = work / f"{name}_hole_{label}.3mf"
+                model.write_bytes(export(settings, hole_plate()))
+                holes[label] = measure_holes(slice_with(name, cfg, model, work / f"{name}_hole_{label}"))
+            a, b = holes["A"], holes["B"]
+            if name == "orca":  # Bambu Studio has no polyholes (an OrcaSlicer feature): it ignores the key
+                checks["hole_to_polyhole"] = (a["hole_corners"], b["hole_corners"], b["hole_corners"] <= a["hole_corners"] * 0.6)
+            checks["elefant_foot_compensation"] = (a["foot_mm"], b["foot_mm"], b["foot_mm"] - a["foot_mm"] >= 0.15)
         for key, (va, vb, applied) in checks.items():
             ok &= applied
             print(f"{'PASS' if applied else 'FAIL'} {name} {key}: A={va} B={vb}")
