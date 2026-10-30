@@ -102,6 +102,25 @@ def test_ironing_and_precise_wall():
     assert run_checks(orient(sample("l_bracket"), np.eye(3)), p)["stats"]["top_flat_mm2"] > 0
 
 
+def test_nut_trap_and_insert_wall():
+    from shapely.geometry import Point, Polygon
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+
+    def plate(af, insert_x):
+        hexagon = Polygon([(8 + af / np.sqrt(3) * np.cos(a), 10 + af / np.sqrt(3) * np.sin(a)) for a in np.arange(6) * np.pi / 3])
+        insert = Point(insert_x, 10).buffer(2.0, quad_segs=16)  # Ø4.0: an M3 insert hole
+        return orient(Mesh(extrude(Polygon([(0, 0), (30, 0), (30, 20), (0, 20)]).difference(hexagon).difference(insert), 0, 6)), np.eye(3))
+
+    p = Profile.from_dict({})
+    found = {f["rule"]: f for f in run_checks(plate(5.5, 27.0), p)["findings"]}
+    assert found["nut_trap_tight"]["metrics"]["fastener"] == "M3"
+    assert found["insert_wall_thin"]["metrics"]["wall_mm"] == pytest.approx(1.0, abs=0.05)
+    loose = {f["rule"] for f in run_checks(plate(5.8, 22.0), p)["findings"]}
+    assert not loose & {"nut_trap_tight", "insert_wall_thin"}
+
+
 def test_export_3mf():
     api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
     data = api.export([1, 0, 0])

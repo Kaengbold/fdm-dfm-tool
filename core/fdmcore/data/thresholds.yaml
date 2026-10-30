@@ -106,6 +106,16 @@ fasteners:
   M5:   {d: 5.0, clearance_close_mm: 5.3, clearance_normal_mm: 5.5, pilot_mm: 4.3, insert_hole_mm: 6.4, nut_af_mm: 8.0, nut_thickness_mm: 4.7}
   M6:   {d: 6.0, clearance_close_mm: 6.4, clearance_normal_mm: 6.6, pilot_mm: 5.2, insert_hole_mm: 8.0, nut_af_mm: 10.0, nut_thickness_mm: 5.2}
   match_tol_mm: 0.1   # a hole within this of a screw's nominal size is "modelled at screw size"
+  # Nut traps: a hexagonal pocket needs ~0.2-0.3 mm more across the flats than the nut (M3: 5.7 mm to slide
+  # in, 5.8 mm to press into a recess) because printed holes come out small
+  # [OpenFlexure nut traps, ISO 4032 https://gitlab.com/openflexure/openflexure-microscope/-/merge_requests/371;
+  # fb-library bolt fittings https://fb-library.readthedocs.io/en/latest/bolt_fittings/].
+  nut_clearance_mm: 0.2   # less than this over the nut's size: the nut won't go in
+  nut_match_mm: [-0.1, 0.8]  # a hex pocket this much smaller / bigger than a nut counts as that nut's trap
+  # Heat-set inserts press melted plastic outwards: thinner walls bulge or split. ~1.6 mm minimum, ~2 mm
+  # recommended for M3/M4 [DigiKey Maker.io heat-set inserts; Sovol "Design strong screw bosses"].
+  insert_min_wall_mm: 1.6
+  insert_match_mm: 0.15   # a round hole this close to an insert's hole size counts as an insert hole
 
 fits:
   # Gap to add to the mating part's size (diameter, mm) when modelling a round hole, or to take off a
