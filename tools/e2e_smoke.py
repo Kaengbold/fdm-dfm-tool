@@ -399,6 +399,16 @@ def main():
             return f"{n[0]} faces coloured by heat"
         run.step("heat while printing colours", heat_map)
 
+        def warping():
+            run.act(lambda: page.click("#run-warp"), 600_000)
+            text = page.locator("#warp-result").inner_text()
+            assert "bar" in text, text
+            assert page.locator("#legend").is_visible() and "Curls" in page.locator("#legend").inner_text()
+            page.locator("#warp-result input[type=checkbox]").uncheck()
+            assert page.locator("#legend").is_hidden()
+            return text.splitlines()[0] + " | " + text.splitlines()[1][:120]
+        run.step("warping simulation", warping)
+
         def marked_faces():
             run.act(lambda: page.click("[data-sample=mushroom]"))
             before = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")

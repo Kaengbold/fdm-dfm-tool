@@ -23,5 +23,6 @@
  "regions.py",
  "slicer.py",
  "strength.py",
- "voxel.py"
+ "voxel.py",
+ "warp.py"
 ]

@@ -119,6 +119,10 @@
         <h2>Findings <small id="stats"></small></h2>
         <ol id="findings" class="impact-groups"></ol>
         <label class="toggle" data-min="advanced" title="Rough estimate of heat build-up: small pins and tips get the next layer before they have cooled"><input id="show-temp" type="checkbox" /> Show heat while printing (red = still soft when the next layers go on)</label>
+        <div class="actions" data-min="advanced">
+          <button id="run-warp" title="Simulates the print layer by layer: upper layers shrink onto the warm bottom and pull the corners off the bed">Simulate warping</button>
+        </div>
+        <div id="warp-result" data-min="advanced"></div>
         <details id="nozzle-block" class="nozzles" data-min="advanced">
           <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
           <table id="nozzle-table"></table>

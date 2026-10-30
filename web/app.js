@@ -285,6 +285,9 @@ async function selectOption(i) {
   $("strength-result").replaceChildren();
   renderGcode();
   setZones([]); // zones belong to one orientation
+  state.warp = null;
+  state.showWarp = false;
+  $("warp-result").replaceChildren();
   clearEdits();
   recolor();
   await runCheck();
@@ -804,6 +807,7 @@ async function runStrength(fine = false) {
     }
     state.strength = r;
     state.showHeat = true;
+    state.showWarp = false;
     $("show-temp").checked = false;
     recolor();
     viewer.showFindings([]);
@@ -833,6 +837,7 @@ const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
+  if (state.showWarp && state.warp) return warpView();
   const r = state.strength;
   if (!(state.showHeat && r)) {
     viewer.hideField();
@@ -865,6 +870,45 @@ function renderLegend(f, max) {
     el("div", { className: "band-0", textContent: f.fmt(0) }));
   $("legend").hidden = false;
 }
+
+// ---------- warping simulation ----------
+const WARP_FIELD = { title: "Curls by (mm)", note: "exaggerated shape, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+
+function warpView() {
+  const w = state.warp;
+  const key = `warp|${w.curl_mm}|${activeOption().up}`;
+  if (viewer.fieldKey !== key || !viewer.field) {
+    viewer.showField({ triangles: f32(w.field_triangles), values: f32(w.vertex_value), disp: f32(w.vertex_disp), max: Math.max(w.max_mm, 1e-9) });
+    viewer.fieldKey = key;
+  }
+  viewer.setDeformation((0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
+  renderLegend(WARP_FIELD, Math.max(w.max_mm, 1e-9));
+  viewer.showFindings([]);
+  for (const p of w.lift_points_print) viewer.mark(p);
+  return true;
+}
+
+$("run-warp").onclick = () =>
+  busy("Simulating the print layer by layer (up to a minute)…", async () => {
+    const w = await call("warping", { up: activeOption().up, profile: profile() });
+    state.warp = w;
+    state.showWarp = true;
+    state.showHeat = false;
+    $("show-temp").checked = false;
+    const show = el("input", { type: "checkbox", checked: true });
+    show.onchange = () => {
+      state.showWarp = show.checked;
+      if (!show.checked) viewer.showFindings(state.check?.findings ?? []);
+      recolor();
+    };
+    $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
+      el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
+      el("p", { textContent: w.explanation }),
+      el("label", { className: "toggle" }, show, "Show the curled shape (red dots = lifts first)"),
+      el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)." })));
+    recolor();
+    setStatus(state.summary);
+  });
 
 function strengthViewControls(r) {
   const heat = el("input", { type: "checkbox", checked: state.showHeat });

@@ -621,6 +621,83 @@ def _optimise_story(best: dict, target: float, compared: bool) -> str:
             "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, or use a stronger material.")
 
 
+WARP_VOXELS = 6000  # warping solves once per group of layers: a coarser grid than strength
+WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, like the warping check's length ratio
+_warp_reference: dict = {}
+
+
+def warping(up, profile: dict | None = None) -> dict:
+    """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
+    longest bar that stays flat (1 = like that bar), where it lifts first, and the curled shape
+    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm)."""
+    from . import warp
+    from .strength import refine, sample_nodes
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    sh = _shells(p)
+    r = warp.simulate(s.mesh, up, p, sh, WARP_VOXELS)
+    model = r["model"]
+    key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
+    if key not in _warp_reference:
+        _warp_reference[key] = warp.reference(p, model.grid.h, sh)
+    ref = _warp_reference[key]
+    curl = warp.curl(r)
+    ratio = float(np.sqrt(curl / ref)) if ref else None
+    verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
+    # Shape for the view: the part's own movement without the rigid shift and tilt it gets off the bed.
+    pos = model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h
+    u = _without_rigid_motion(pos, r["u"])
+    fine = refine(s.mesh.triangles, model.grid.h)
+    disp = sample_nodes(model, u, fine.reshape(-1, 3))
+    size = np.linalg.norm(disp, axis=1)
+    rot = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    pull = r["pull"]
+    order = np.argsort(-pull)
+    spots = []
+    for i in order[: 40]:
+        if pull[i] <= 0 or len(spots) == 3:
+            break
+        if all(np.linalg.norm(pos[i] - q) > 10 for q in spots):
+            spots.append(pos[i])
+    out = {"lift_ratio": ratio, "verdict": verdict, "curl_mm": round(curl, 3), "reference_mm": warp.warp_limit(p),
+           "field_triangles": fine.astype(np.float32).tobytes(), "vertex_disp": disp.astype(np.float32).tobytes(),
+           "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
+           "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"]}
+    out["explanation"] = _warp_story(out, p)
+    return out
+
+
+def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
+    """``u`` minus the best-fitting shift and small rotation (u ≈ t + ω × (x − centre))."""
+    x = pos - pos.mean(axis=0)
+    n = len(x)
+    a = np.zeros((3 * n, 6))
+    for i in range(3):
+        a[i::3, i] = 1.0
+    # ω × x = [ω1 x3 - ω2 x2 ... ] written out per component
+    a[0::3, 4], a[0::3, 5] = x[:, 2], -x[:, 1]
+    a[1::3, 3], a[1::3, 5] = -x[:, 2], x[:, 0]
+    a[2::3, 3], a[2::3, 4] = x[:, 1], -x[:, 0]
+    coef = np.linalg.lstsq(a, u.ravel(), rcond=None)[0]
+    return u - (a @ coef).reshape(-1, 3)
+
+
+def _warp_story(r: dict, p: Profile) -> str:
+    ratio, ref, name = r["lift_ratio"], r["reference_mm"], p.material["name"]
+    where = f"{p.printer['name']}" + {"none": " (open)", "passive": " (enclosed)", "heated": " (heated chamber)"}[p.enclosure]
+    if ratio is None:
+        return "No warping reference for this material and printer."
+    head = {
+        "fine": f"It should stay flat: the base pulls on the bed about like a {ratio * ref:.0f} mm bar, and in {name} on the {where} bars up to about {ref:.0f} mm stay down.",
+        "might lift": f"The corners might lift: the base pulls on the bed like a {ratio * ref:.0f} mm bar, and in {name} on the {where} bars longer than about {ref:.0f} mm tend to lift.",
+        "likely to lift": f"The corners will likely lift: the base pulls on the bed like a {ratio * ref:.0f} mm bar, past the {ref:.0f} mm that stays down in {name} on the {where}.",
+    }[r["verdict"]]
+    fix = "" if r["verdict"] == "fine" else (" A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
+                                              " or rounding the corners of the base help. Upper layers shrinking onto the warm bottom cause it.")
+    return head + fix + " The shape shown is exaggerated."
+
+
 def regions() -> dict:
     """Clickable faces: region id per triangle (uint32 bytes) and region summaries."""
     from .regions import find_regions, region_info
@@ -1164,6 +1241,7 @@ METHODS = {
     "calibration_part": calibration_part,
     "load": load,
     "load_gcode": load_gcode,
+    "warping": warping,
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,
