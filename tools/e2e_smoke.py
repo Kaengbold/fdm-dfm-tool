@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import functools
 import http.server
+import re
 import socketserver
 import sys
 import threading
@@ -80,7 +81,9 @@ class Run:
         except Exception as e:  # noqa: BLE001 - report and continue
             self.failures.append(name)
             print(f"FAIL {name}: {e}")
-        self.page.screenshot(path=str(OUT / f"{len(self.failures):02d}_{name.replace(' ', '_').replace('/', '_')[:60]}.png"))
+        # Only letters, digits, - and _: CI's artifact upload refuses names with ':' and the like.
+        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", name)[:60]
+        self.page.screenshot(path=str(OUT / f"{len(self.failures):02d}_{safe}.png"))
 
 
 def _box_stl(boxes) -> bytes:
