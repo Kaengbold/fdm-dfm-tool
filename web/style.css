@@ -115,7 +115,7 @@ body[data-level="expert"] .steps { display: none; }
 .step.now .dot { background: var(--now); color: var(--text); }
 .step.done .dot { background: var(--good); color: #fff; }
 .step.busy .dot { background: none; border: 3px solid var(--line-strong); border-top-color: var(--accent); animation: spin 0.8s linear infinite; color: transparent; }
-.step.locked { color: var(--muted); cursor: default; }
+.step.locked, .step:disabled { color: var(--muted); cursor: default; opacity: 1; }
 .step.locked .dot { background: none; border: 1.5px dashed var(--line-strong); }
 
 /* ---------- 3D view ---------- */
@@ -124,7 +124,7 @@ main#viewer canvas { display: block; }
 #viewer canvas.hovering { cursor: pointer; }
 .view-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 17px; pointer-events: none; }
 .view-info { position: absolute; left: 12px; top: 12px; right: 160px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none; }
-.view-label { padding: 5px 10px; font-size: 14px; font-weight: 700; background: #fdfdfce6; border-radius: var(--r); }
+.view-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 10px; font-size: 14px; font-weight: 700; background: #fdfdfce6; border-radius: var(--r); }
 .view-key {
   margin: 0; padding: 5px 10px; list-style: none;
   display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px;
@@ -286,7 +286,7 @@ summary::marker { color: var(--accent); }
 .f-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
 .f-head b::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 2px 1px; border: solid var(--accent); border-width: 0 2px 2px 0; transform: rotate(-45deg); transition: transform 0.15s; }
 .findings details[open] > summary .f-head b::before { transform: rotate(45deg); }
-.gist { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.gist { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .findings details[open] > summary .gist { display: none; }
 .paths { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .findings .sev { flex: none; font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--soft); color: var(--muted); }
@@ -465,3 +465,5 @@ body:not([data-level="simple"]) .settings-fold > summary { display: none; }
 }
 body[data-level="simple"] #settings-block > .lead { display: none; }
 .pane[data-pane="result"] #findings > li.ok { display: none; }
+/* A disabled main button keeps readable text (it often says why: "Load a part first"). */
+button.primary:disabled { opacity: 1; background: var(--soft); border-color: var(--line); color: var(--muted); }

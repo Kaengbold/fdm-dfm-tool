@@ -1,0 +1,641 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-30T00:00:00Z",
+  "title": "Design System: FDM Check",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Workshop Green",
+        "tonalRamp": [
+          "oklch(15% 0.040 167)",
+          "oklch(26% 0.053 167)",
+          "oklch(38% 0.066 167)",
+          "oklch(49% 0.065 167)",
+          "oklch(61% 0.052 167)",
+          "oklch(72% 0.038 167)",
+          "oklch(84% 0.025 167)",
+          "oklch(95% 0.012 167)"
+        ],
+        "cssVar": "--accent"
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "Bench Shadow Green",
+        "tonalRamp": [
+          "oklch(15% 0.040 168)",
+          "oklch(26% 0.051 168)",
+          "oklch(38% 0.061 168)",
+          "oklch(49% 0.050 168)",
+          "oklch(61% 0.038 168)",
+          "oklch(72% 0.027 168)",
+          "oklch(84% 0.016 168)",
+          "oklch(95% 0.009 168)"
+        ],
+        "cssVar": "--accent-hover"
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Pale Leaf",
+        "tonalRamp": [
+          "oklch(15% 0.002 163)",
+          "oklch(26% 0.002 163)",
+          "oklch(38% 0.002 163)",
+          "oklch(49% 0.005 163)",
+          "oklch(61% 0.008 163)",
+          "oklch(72% 0.011 163)",
+          "oklch(84% 0.014 163)",
+          "oklch(95% 0.016 163)"
+        ],
+        "cssVar": "--accent-soft"
+      },
+      "deep-green": {
+        "role": "primary",
+        "displayName": "Night Green",
+        "tonalRamp": [
+          "oklch(15% 0.034 168)",
+          "oklch(26% 0.042 168)",
+          "oklch(38% 0.042 168)",
+          "oklch(49% 0.033 168)",
+          "oklch(61% 0.025 168)",
+          "oklch(72% 0.016 168)",
+          "oklch(84% 0.008 168)",
+          "oklch(95% 0.007 168)"
+        ]
+      },
+      "now": {
+        "role": "secondary",
+        "displayName": "Signal Yellow",
+        "tonalRamp": [
+          "oklch(15% 0.024 89)",
+          "oklch(26% 0.024 89)",
+          "oklch(38% 0.044 89)",
+          "oklch(49% 0.073 89)",
+          "oklch(61% 0.102 89)",
+          "oklch(72% 0.131 89)",
+          "oklch(84% 0.158 89)",
+          "oklch(95% 0.129 89)"
+        ],
+        "cssVar": "--now"
+      },
+      "good": {
+        "role": "tertiary",
+        "displayName": "Good",
+        "tonalRamp": [
+          "oklch(15% 0.046 155)",
+          "oklch(26% 0.066 155)",
+          "oklch(38% 0.086 155)",
+          "oklch(49% 0.106 155)",
+          "oklch(61% 0.092 155)",
+          "oklch(72% 0.072 155)",
+          "oklch(84% 0.052 155)",
+          "oklch(95% 0.032 155)"
+        ],
+        "cssVar": "--good"
+      },
+      "good-soft": {
+        "role": "tertiary",
+        "displayName": "Good Soft",
+        "tonalRamp": [
+          "oklch(15% 0.003 160)",
+          "oklch(26% 0.003 160)",
+          "oklch(38% 0.003 160)",
+          "oklch(49% 0.006 160)",
+          "oklch(61% 0.010 160)",
+          "oklch(72% 0.014 160)",
+          "oklch(84% 0.018 160)",
+          "oklch(95% 0.022 160)"
+        ],
+        "cssVar": "--good-soft"
+      },
+      "warn": {
+        "role": "tertiary",
+        "displayName": "Warn",
+        "tonalRamp": [
+          "oklch(15% 0.048 67)",
+          "oklch(26% 0.069 67)",
+          "oklch(38% 0.089 67)",
+          "oklch(49% 0.110 67)",
+          "oklch(61% 0.094 67)",
+          "oklch(72% 0.074 67)",
+          "oklch(84% 0.053 67)",
+          "oklch(95% 0.033 67)"
+        ],
+        "cssVar": "--warn"
+      },
+      "warn-soft": {
+        "role": "tertiary",
+        "displayName": "Warn Soft",
+        "tonalRamp": [
+          "oklch(15% 0.005 85)",
+          "oklch(26% 0.005 85)",
+          "oklch(38% 0.005 85)",
+          "oklch(49% 0.008 85)",
+          "oklch(61% 0.014 85)",
+          "oklch(72% 0.020 85)",
+          "oklch(84% 0.026 85)",
+          "oklch(95% 0.032 85)"
+        ],
+        "cssVar": "--warn-soft"
+      },
+      "bad": {
+        "role": "tertiary",
+        "displayName": "Bad",
+        "tonalRamp": [
+          "oklch(15% 0.072 23)",
+          "oklch(26% 0.104 23)",
+          "oklch(38% 0.136 23)",
+          "oklch(49% 0.168 23)",
+          "oklch(61% 0.150 23)",
+          "oklch(72% 0.118 23)",
+          "oklch(84% 0.086 23)",
+          "oklch(95% 0.054 23)"
+        ],
+        "cssVar": "--bad"
+      },
+      "bad-soft": {
+        "role": "tertiary",
+        "displayName": "Bad Soft",
+        "tonalRamp": [
+          "oklch(15% 0.004 14)",
+          "oklch(26% 0.004 14)",
+          "oklch(38% 0.004 14)",
+          "oklch(49% 0.007 14)",
+          "oklch(61% 0.011 14)",
+          "oklch(72% 0.016 14)",
+          "oklch(84% 0.020 14)",
+          "oklch(95% 0.024 14)"
+        ],
+        "cssVar": "--bad-soft"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "tonalRamp": [
+          "oklch(15% 0.016 175)",
+          "oklch(26% 0.020 175)",
+          "oklch(38% 0.017 175)",
+          "oklch(49% 0.013 175)",
+          "oklch(61% 0.010 175)",
+          "oklch(72% 0.006 175)",
+          "oklch(84% 0.003 175)",
+          "oklch(95% 0.003 175)"
+        ],
+        "cssVar": "--text"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "tonalRamp": [
+          "oklch(15% 0.009 172)",
+          "oklch(26% 0.012 172)",
+          "oklch(38% 0.016 172)",
+          "oklch(49% 0.019 172)",
+          "oklch(61% 0.015 172)",
+          "oklch(72% 0.012 172)",
+          "oklch(84% 0.008 172)",
+          "oklch(95% 0.005 172)"
+        ],
+        "cssVar": "--muted"
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel White",
+        "tonalRamp": [
+          "oklch(15% 0.001 106)",
+          "oklch(26% 0.001 106)",
+          "oklch(38% 0.001 106)",
+          "oklch(49% 0.001 106)",
+          "oklch(61% 0.001 106)",
+          "oklch(72% 0.001 106)",
+          "oklch(84% 0.001 106)",
+          "oklch(95% 0.001 106)"
+        ],
+        "cssVar": "--panel"
+      },
+      "chrome": {
+        "role": "neutral",
+        "displayName": "Chrome",
+        "tonalRamp": [
+          "oklch(15% 0.004 135)",
+          "oklch(26% 0.004 135)",
+          "oklch(38% 0.004 135)",
+          "oklch(49% 0.004 135)",
+          "oklch(61% 0.004 135)",
+          "oklch(72% 0.004 135)",
+          "oklch(84% 0.004 135)",
+          "oklch(95% 0.004 135)"
+        ],
+        "cssVar": "--chrome"
+      },
+      "soft": {
+        "role": "neutral",
+        "displayName": "Soft",
+        "tonalRamp": [
+          "oklch(15% 0.006 154)",
+          "oklch(26% 0.006 154)",
+          "oklch(38% 0.006 154)",
+          "oklch(49% 0.006 154)",
+          "oklch(61% 0.006 154)",
+          "oklch(72% 0.006 154)",
+          "oklch(84% 0.006 154)",
+          "oklch(95% 0.006 154)"
+        ],
+        "cssVar": "--soft"
+      },
+      "stage": {
+        "role": "neutral",
+        "displayName": "Stage Grey",
+        "tonalRamp": [
+          "oklch(15% 0.004 157)",
+          "oklch(26% 0.004 157)",
+          "oklch(38% 0.004 157)",
+          "oklch(49% 0.004 157)",
+          "oklch(61% 0.004 157)",
+          "oklch(72% 0.004 157)",
+          "oklch(84% 0.004 157)",
+          "oklch(95% 0.004 157)"
+        ],
+        "cssVar": "--bg"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "tonalRamp": [
+          "oklch(15% 0.002 155)",
+          "oklch(26% 0.002 155)",
+          "oklch(38% 0.002 155)",
+          "oklch(49% 0.003 155)",
+          "oklch(61% 0.005 155)",
+          "oklch(72% 0.007 155)",
+          "oklch(84% 0.009 155)",
+          "oklch(95% 0.009 155)"
+        ],
+        "cssVar": "--line"
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Line Strong",
+        "tonalRamp": [
+          "oklch(15% 0.002 156)",
+          "oklch(26% 0.002 156)",
+          "oklch(38% 0.004 156)",
+          "oklch(49% 0.006 156)",
+          "oklch(61% 0.009 156)",
+          "oklch(72% 0.012 156)",
+          "oklch(84% 0.014 156)",
+          "oklch(95% 0.012 156)"
+        ],
+        "cssVar": "--line-strong"
+      },
+      "part-ok": {
+        "role": "part",
+        "displayName": "Prints Fine",
+        "tonalRamp": [
+          "oklch(15% 0.002 245)",
+          "oklch(26% 0.004 245)",
+          "oklch(38% 0.006 245)",
+          "oklch(49% 0.009 245)",
+          "oklch(61% 0.012 245)",
+          "oklch(72% 0.015 245)",
+          "oklch(84% 0.013 245)",
+          "oklch(95% 0.010 245)"
+        ],
+        "cssVar": "--ok"
+      },
+      "part-borderline": {
+        "role": "part",
+        "displayName": "May Droop",
+        "tonalRamp": [
+          "oklch(15% 0.023 83)",
+          "oklch(26% 0.023 83)",
+          "oklch(38% 0.050 83)",
+          "oklch(49% 0.078 83)",
+          "oklch(61% 0.107 83)",
+          "oklch(72% 0.135 83)",
+          "oklch(84% 0.148 83)",
+          "oklch(95% 0.119 83)"
+        ],
+        "cssVar": "--borderline"
+      },
+      "part-support": {
+        "role": "part",
+        "displayName": "Needs Support",
+        "tonalRamp": [
+          "oklch(15% 0.046 23)",
+          "oklch(26% 0.082 23)",
+          "oklch(38% 0.117 23)",
+          "oklch(49% 0.152 23)",
+          "oklch(61% 0.188 23)",
+          "oklch(72% 0.164 23)",
+          "oklch(84% 0.128 23)",
+          "oklch(95% 0.093 23)"
+        ],
+        "cssVar": "--support"
+      },
+      "part-bed": {
+        "role": "part",
+        "displayName": "On the Bed",
+        "tonalRamp": [
+          "oklch(15% 0.029 158)",
+          "oklch(26% 0.053 158)",
+          "oklch(38% 0.077 158)",
+          "oklch(49% 0.101 158)",
+          "oklch(61% 0.126 158)",
+          "oklch(72% 0.116 158)",
+          "oklch(84% 0.091 158)",
+          "oklch(95% 0.067 158)"
+        ],
+        "cssVar": "--bed"
+      },
+      "part-fixed": {
+        "role": "part",
+        "displayName": "Held Fixed",
+        "tonalRamp": [
+          "oklch(15% 0.039 252)",
+          "oklch(26% 0.074 252)",
+          "oklch(38% 0.109 252)",
+          "oklch(49% 0.145 252)",
+          "oklch(61% 0.180 252)",
+          "oklch(72% 0.171 252)",
+          "oklch(84% 0.135 252)",
+          "oklch(95% 0.100 252)"
+        ],
+        "cssVar": "--fixed"
+      },
+      "part-force": {
+        "role": "part",
+        "displayName": "Pushed",
+        "tonalRamp": [
+          "oklch(15% 0.064 306)",
+          "oklch(26% 0.098 306)",
+          "oklch(38% 0.131 306)",
+          "oklch(49% 0.165 306)",
+          "oklch(61% 0.168 306)",
+          "oklch(72% 0.134 306)",
+          "oklch(84% 0.101 306)",
+          "oklch(95% 0.067 306)"
+        ],
+        "cssVar": "--force"
+      },
+      "part-clean": {
+        "role": "part",
+        "displayName": "Clean Surface",
+        "tonalRamp": [
+          "oklch(15% 0.023 182)",
+          "oklch(26% 0.044 182)",
+          "oklch(38% 0.064 182)",
+          "oklch(49% 0.085 182)",
+          "oklch(61% 0.106 182)",
+          "oklch(72% 0.100 182)",
+          "oklch(84% 0.080 182)",
+          "oklch(95% 0.059 182)"
+        ],
+        "cssVar": "--clean"
+      },
+      "part-vertical": {
+        "role": "part",
+        "displayName": "Vertical",
+        "tonalRamp": [
+          "oklch(15% 0.029 45)",
+          "oklch(26% 0.061 45)",
+          "oklch(38% 0.096 45)",
+          "oklch(49% 0.130 45)",
+          "oklch(61% 0.165 45)",
+          "oklch(72% 0.182 45)",
+          "oklch(84% 0.147 45)",
+          "oklch(95% 0.112 45)"
+        ],
+        "cssVar": "--vertical"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Step title at the top of the panel; guide dialog title."
+      },
+      "brand": {
+        "displayName": "Brand",
+        "purpose": "Product name in the header."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Sub-headings and problem group heads inside a pane."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Leads and running text; the root font."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Buttons, selects, inputs, list rows, findings."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field and choice labels, primary button text, selected segments."
+      },
+      "hint": {
+        "displayName": "Hint",
+        "purpose": "Muted hints, notes, status line, what-this-updates lines."
+      },
+      "badge": {
+        "displayName": "Badge",
+        "purpose": "Severity badges, fix chips, tags (pill shaped)."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating-bar",
+        "value": "0 8px 24px #10241c40",
+        "purpose": "Working bar floating over the 3D stage."
+      },
+      {
+        "name": "stage-overlay",
+        "value": "0 2px 8px #1d2b271f",
+        "purpose": "FEA legend over the 3D stage."
+      },
+      {
+        "name": "dialog",
+        "value": "0 12px 40px #10241c4d",
+        "purpose": "Start guide dialog; backdrop #10241c66."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "border-color 0.12s, background-color 0.12s",
+        "purpose": "Button hover state changes."
+      },
+      {
+        "name": "spin",
+        "value": "rotate 360deg, 0.8s linear infinite",
+        "purpose": "Working-bar spinner and busy step dot."
+      },
+      {
+        "name": "pulse",
+        "value": "box-shadow 0 0 0 3px #f2c12e to transparent, 0.5s ease-out",
+        "purpose": "Flashes a control the app just changed."
+      },
+      {
+        "name": "chevron",
+        "value": "transform 0.15s",
+        "purpose": "Finding disclosure chevron rotation."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce disables animations and transitions",
+        "purpose": "All motion is optional."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow",
+        "value": "820px",
+        "purpose": "At or below: one column, step strip on top, sticky 42vh stage, sticky panel foot, 40px min control height."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The step's one next move, right of the panel foot.",
+      "html": "<button class=\"ds-btn-primary\">Next: Will it hold?</button>",
+      "css": ".ds-btn-primary{font:700 14px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;background:var(--accent,#1f5c47);border:1px solid var(--accent,#1f5c47);color:#fff;padding:9px 16px;border-radius:6px;cursor:pointer;transition:border-color .12s,background-color .12s}.ds-btn-primary:hover{background:var(--accent-hover,#174a39)}.ds-btn-primary:focus-visible{outline:3px solid var(--now,#f2c12e);outline-offset:2px}.ds-btn-primary:disabled{opacity:.55;cursor:not-allowed}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Back, sample picks, list actions.",
+      "html": "<button class=\"ds-btn\">Back</button>",
+      "css": ".ds-btn{font:400 14px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;color:var(--text,#1d2b27);background:var(--panel,#fdfdfc);border:1px solid var(--line-strong,#c3cdc6);border-radius:6px;padding:6px 12px;cursor:pointer;transition:border-color .12s,background-color .12s}.ds-btn:hover{border-color:var(--accent,#1f5c47)}.ds-btn:focus-visible{outline:3px solid var(--now,#f2c12e);outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-priority actions such as Cancel.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost{font:400 14px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;background:none;border:1px solid var(--line,#dbe2dd);color:var(--muted,#56645f);border-radius:6px;padding:6px 12px;cursor:pointer}.ds-btn-ghost:hover{color:var(--text,#1d2b27);border-color:var(--accent,#1f5c47)}.ds-btn-ghost:focus-visible{outline:3px solid var(--now,#f2c12e);outline-offset:2px}"
+    },
+    {
+      "name": "Level Switch",
+      "kind": "nav",
+      "refersTo": "segment-selected",
+      "description": "Simple / Basic / Advanced / Expert segmented radio group in the header.",
+      "html": "<div class=\"ds-levels\"><label><input type=\"radio\" name=\"ds-l\" checked>Simple</label><label><input type=\"radio\" name=\"ds-l\">Basic</label><label><input type=\"radio\" name=\"ds-l\">Advanced</label><label><input type=\"radio\" name=\"ds-l\">Expert</label></div>",
+      "css": ".ds-levels{display:inline-flex;padding:3px;gap:2px;background:#e3e9e4;border-radius:9px;font:14px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif}.ds-levels label{position:relative;cursor:pointer;border-radius:6px;padding:5px 13px;color:var(--muted,#56645f)}.ds-levels label:hover{color:var(--text,#1d2b27)}.ds-levels input{position:absolute;opacity:0}.ds-levels label:has(input:checked){background:var(--accent,#1f5c47);color:#fff;font-weight:700}.ds-levels label:has(input:focus-visible){outline:3px solid var(--now,#f2c12e);outline-offset:1px}"
+    },
+    {
+      "name": "Step Rail",
+      "kind": "nav",
+      "refersTo": "step-now",
+      "description": "Checklist of steps: done, current, upcoming, locked.",
+      "html": "<nav class=\"ds-steps\"><button class=\"ds-step done\"><span class=\"dot\"><svg viewBox=\"0 0 16 16\" width=\"15\" height=\"15\"><path d=\"M3.5 8.5l3 3 6-7\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg></span>Your part</button><button class=\"ds-step now\"><span class=\"dot\">2</span>Problems</button><button class=\"ds-step\"><span class=\"dot\">3</span>Will it hold?</button><button class=\"ds-step locked\" disabled><span class=\"dot\">4</span>Download</button></nav>",
+      "css": ".ds-steps{display:flex;flex-direction:column;gap:2px;padding:16px 10px;background:var(--chrome,#f3f5f2);width:210px}.ds-step{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:6px;background:none;text-align:left;font:15px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;color:var(--text,#1d2b27);cursor:pointer}.ds-step:hover:not(:disabled):not(.now){background:#e6ebe7}.ds-step:focus-visible{outline:3px solid var(--now,#f2c12e);outline-offset:2px}.ds-step .dot{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;background:#e1e7e2;color:var(--muted,#56645f)}.ds-step.now{background:var(--accent-soft,#e2efe8);font-weight:700}.ds-step.now .dot{background:var(--now,#f2c12e);color:var(--text,#1d2b27)}.ds-step.done .dot{background:var(--good,#22784a);color:#fff}.ds-step.locked{color:var(--muted,#56645f);cursor:default}.ds-step.locked .dot{background:none;border:1.5px dashed var(--line-strong,#c3cdc6)}"
+    },
+    {
+      "name": "Select Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Label stacked over a select or input.",
+      "html": "<label class=\"ds-field\">Material<select><option>PLA</option><option>PETG</option></select></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:5px;font:700 14px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;color:var(--text,#1d2b27);width:200px}.ds-field select{font:400 14px 'Atkinson Hyperlegible',system-ui,sans-serif;color:var(--text,#1d2b27);background:var(--panel,#fdfdfc);border:1px solid var(--line-strong,#c3cdc6);border-radius:6px;padding:5px 7px}.ds-field select:hover{border-color:var(--muted,#56645f)}.ds-field select:focus-visible{outline:3px solid var(--now,#f2c12e);outline-offset:2px}"
+    },
+    {
+      "name": "Finding Card",
+      "kind": "card",
+      "refersTo": "finding-card",
+      "description": "One problem: chevron, title, severity badge, one-line gist, fix chip.",
+      "html": "<div class=\"ds-finding\" tabindex=\"0\"><div class=\"ds-f-head\"><b>Small hole prints undersized</b><span class=\"ds-sev\">Warning</span></div><p class=\"ds-gist\">The CAD model has an exact diameter hole for a bolt.</p><span class=\"ds-chip\">Fix: a slicer setting</span></div>",
+      "css": ".ds-finding{font:14px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;color:var(--text,#1d2b27);border:1px solid var(--line,#dbe2dd);border-radius:6px;padding:9px 11px;background:var(--panel,#fdfdfc);display:flex;flex-direction:column;gap:4px;max-width:360px;cursor:pointer}.ds-finding:hover{border-color:var(--line-strong,#c3cdc6)}.ds-finding:focus-visible{outline:3px solid var(--now,#f2c12e);outline-offset:2px}.ds-f-head{display:flex;gap:8px;align-items:baseline;justify-content:space-between}.ds-f-head b::before{content:'';display:inline-block;width:6px;height:6px;margin:0 9px 2px 1px;border:solid var(--accent,#1f5c47);border-width:0 2px 2px 0;transform:rotate(-45deg)}.ds-sev{font-size:12px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--warn-soft,#fbf0d9);color:var(--warn,#8f5600)}.ds-gist{margin:0;color:var(--muted,#56645f);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-chip{align-self:flex-start;font-size:12px;font-weight:700;border-radius:999px;padding:1px 8px;background:var(--accent-soft,#e2efe8);color:var(--accent,#1f5c47)}"
+    },
+    {
+      "name": "Verdict Box",
+      "kind": "card",
+      "refersTo": "",
+      "description": "Result statement on a soft meaning fill.",
+      "html": "<div class=\"ds-verdict\"><strong>Prints as designed</strong><span>Turned the best way. 10 slicer settings for PLA on your Bambu Lab P1S.</span></div>",
+      "css": ".ds-verdict{display:flex;flex-direction:column;gap:3px;padding:13px 14px;border-radius:6px;background:var(--good-soft,#e1f2e8);font:14px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;color:var(--text,#1d2b27);max-width:360px}.ds-verdict strong{font-size:19px;color:var(--good,#22784a)}"
+    },
+    {
+      "name": "Working Bar",
+      "kind": "custom",
+      "refersTo": "working-bar",
+      "description": "Floats over the 3D stage while the engine runs: what, how long, cancel, progress, what it updates.",
+      "html": "<div class=\"ds-working\"><div class=\"ds-wh\"><span class=\"ds-spin\"></span><b>Checking strength</b><span class=\"ds-time\">0:12</span><button class=\"ds-wbtn\">Cancel</button></div><div class=\"ds-prog\"><i></i></div><p class=\"ds-aff\">Will update: Will it hold?</p></div>",
+      "css": ".ds-working{width:480px;padding:11px 14px;border-radius:10px;background:#173a2e;color:#f3f5f2;box-shadow:0 8px 24px #10241c40;font:15px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif}.ds-wh{display:flex;align-items:center;gap:10px}.ds-wh b{flex:1}.ds-time{color:#b9c9c1;font-size:13px;font-variant-numeric:tabular-nums}.ds-spin{width:15px;height:15px;border-radius:50%;border:3px solid #ffffff33;border-top-color:#f2c12e;animation:ds-spin .8s linear infinite}@keyframes ds-spin{to{transform:rotate(360deg)}}.ds-wbtn{font:14px 'Atkinson Hyperlegible',system-ui,sans-serif;background:none;color:#f3f5f2;border:1px solid #f3f5f259;border-radius:6px;padding:6px 12px;cursor:pointer}.ds-wbtn:hover{border-color:#f3f5f2;background:#ffffff14}.ds-wbtn:focus-visible{outline:3px solid #f2c12e;outline-offset:2px}.ds-prog{margin-top:9px;height:5px;border-radius:3px;background:#ffffff26;overflow:hidden}.ds-prog i{display:block;width:40%;height:100%;background:#f2c12e}.ds-aff{margin:7px 0 0;font-size:13px;color:#f6d77a}"
+    },
+    {
+      "name": "Drop Zone",
+      "kind": "custom",
+      "refersTo": "",
+      "description": "Where a part file is dropped or picked.",
+      "html": "<div class=\"ds-drop\" tabindex=\"0\"><strong>Drop an STL, 3MF or STEP file here</strong><span>or click to choose one. It stays on your computer.</span></div>",
+      "css": ".ds-drop{display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;padding:34px 14px;border:2px dashed var(--line-strong,#c3cdc6);border-radius:10px;background:var(--soft,#eef2ef);color:var(--muted,#56645f);cursor:pointer;font:15px/1.45 'Atkinson Hyperlegible',system-ui,sans-serif;max-width:360px}.ds-drop strong{color:var(--text,#1d2b27);font-size:16px}.ds-drop:hover{border-color:var(--accent,#1f5c47);background:var(--accent-soft,#e2efe8)}.ds-drop:focus-visible{outline:3px solid var(--now,#f2c12e);outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Workbench",
+    "overview": "FDM Check is a bench, not a form. Three fixed zones sit side by side at full viewport height: a pale step rail that reads like a checklist, the part itself large in the middle on a calm grey stage, and a near-white panel on the right holding only the current step's controls, with one primary action pinned at its foot. Nothing scrolls the whole page on desktop; the part never leaves view.\n\nThe world is light and quiet: near-white surfaces with a faint green cast, dark-green ink and actions, hairline borders, small 6px corners, no gradients. One loud colour exists, a signal yellow, and it means exactly two things: \"you are here\" (the current step's dot) and keyboard focus. Every other colour is either green ink or a meaning colour (good, warn, bad) or a colour painted on the part in the 3D view. Atkinson Hyperlegible carries everything at modest sizes; hierarchy comes from weight, not scale.\n\nDensity is calm but working: 14px controls, 13px hints, 14px vertical rhythm inside a pane. Detail lives behind closed disclosures (\"More information\", \"Which nozzle?\"), so the panel stays short.",
+    "keyCharacteristics": [
+      "Three-zone grid (step rail, 3D stage, step panel) with a 56px header.",
+      "Faint-green near-white surfaces, dark-green ink and buttons.",
+      "Signal yellow reserved for \"you are here\" and focus.",
+      "One primary button per step, at the panel foot.",
+      "Hairline borders and 6px corners; shadows only on things floating over the 3D stage.",
+      "Background work shown in a dark-green bar over the stage, never in the panel."
+    ],
+    "rules": [
+      {
+        "name": "The One Signal Rule",
+        "body": "Signal Yellow means \"you are here\" or \"keyboard focus\" (plus progress inside the working bar). It is never a decoration, a heading colour or a warning colour; warnings use Warn.",
+        "section": "colors"
+      },
+      {
+        "name": "The Part Palette Stays on the Part Rule",
+        "body": "The saturated part colours belong to the 3D view and its keys. They never fill buttons, panels or headings.",
+        "section": "colors"
+      },
+      {
+        "name": "The Read From CSS Rule",
+        "body": "Any colour the 3D view paints is a CSS custom property read at runtime. No colour is defined twice.",
+        "section": "colors"
+      },
+      {
+        "name": "The Weight Not Size Rule",
+        "body": "The ramp tops out at 23px. Emphasis is 700 weight or a meaning colour, never a bigger size.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Headings, labels, buttons and badges are written in sentence case. No uppercase labels, no letter-spaced small caps.",
+        "section": "typography"
+      },
+      {
+        "name": "The Float Only Rule",
+        "body": "A shadow means \"this hovers over something\". Cards, buttons and inputs in the panel never carry one.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the three zones; a new step adds a pane to the panel and a row to the rail, not a new page.",
+      "Do give each step one primary button, at the right of the panel foot, phrased as the next move.",
+      "Do use Signal Yellow (#f2c12e) only for the current step, focus and progress.",
+      "Do say what a change updates, in a 13px muted line under the control or in the working bar.",
+      "Do put detail in closed disclosures with a bold green summary.",
+      "Do read every 3D colour from a CSS custom property.",
+      "Do use soft meaning fills (good, warn, bad) for verdicts and badges, with the strong colour on the text."
+    ],
+    "donts": [
+      "Don't add gradients, a cutting-mat texture, or any pattern behind the 3D view; the stage stays a flat calm grey.",
+      "Don't put shadows on panel cards, buttons or inputs; shadows are for things floating over the stage or page.",
+      "Don't use the part colours (support red, droop amber, force violet…) as UI fills or text colours outside keys and swatches.",
+      "Don't raise headings above 23px or add a second typeface.",
+      "Don't add uppercase or letter-spaced labels above headings.",
+      "Don't show background work only in the panel; it belongs in the working bar over the stage."
+    ]
+  }
+}

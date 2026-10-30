@@ -144,6 +144,7 @@ let doneCount = 0;
 let progressTimer = 0;
 let workingClock = 0;
 let workFraction = null;
+let workingTick = () => {};
 
 /** The "working" badge over the 3D view: what runs, for how long, and Cancel — visible wherever the sidebar is scrolled. */
 function showWorking(text) {
@@ -151,12 +152,12 @@ function showWorking(text) {
   if (workingClock) return;
   const start = performance.now();
   workFraction = null;
-  const tick = () => {
+  const tick = (workingTick = () => {
     const s = (performance.now() - start) / 1000;
     // Once the engine reports progress, extrapolate: rough, but says whether to wait or come back.
     const left = workFraction > 0.05 && workFraction < 1 ? Math.max(1, Math.round((s * (1 - workFraction)) / workFraction)) : null;
     $("working-time").textContent = left ? `${Math.round(s)} s, about ${left} s left` : `${Math.round(s)} s`;
-  };
+  });
   tick();
   workingClock = setInterval(tick, 1000);
   $("working").hidden = false;
@@ -207,6 +208,7 @@ function showAffects() {
 function showProgress(fraction) {
   const bar = $("progress-bar");
   workFraction = fraction;
+  if (workingClock) workingTick();
   if (fraction == null) bar.removeAttribute("value");
   else bar.value = fraction;
 }
@@ -314,7 +316,7 @@ async function selectOption(i) {
   [...$("options").children].forEach((li, k) => li.classList.toggle("active", k === i));
   state.placed = viewer.showPart(state.triangles, activeOption().rotation);
   $("view-label").hidden = false;
-  $("view-label").textContent = `${i === 0 ? "Best orientation" : activeOption().label}, ${state.summary.split(": ").pop()}`;
+  $("view-label").textContent = i === 0 ? "Best orientation" : activeOption().label;
   viewer.clearMarkers(); // remove old orientation's warning boxes immediately
   state.strength = null;
   state.showHeat = false;
@@ -464,7 +466,7 @@ function findingCard(findings, items) {
         // Readable without opening: what happens, and what kind of fix there is.
         el("span", { className: "gist", textContent: first.why.split(/(?<=\.)\s/)[0] }),
         el("span", { className: "paths" },
-          ...[...new Set(first.fixes.map((fx) => fx.domain))].map((d) => el("span", { className: `chip ${d}`, textContent: FIX_PATH[d] })),
+          first.fixes.length ? el("span", { className: `chip ${first.fixes[0].domain}`, textContent: FIX_PATH[first.fixes[0].domain] }) : "",
           first.goal_note ? el("small", { className: "goal-tag", textContent: first.goal_note }) : ""),
       ),
       items.length > 1 ? el("ul", { className: "places" }, ...places) : el("p", {
