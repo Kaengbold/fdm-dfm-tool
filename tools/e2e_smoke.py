@@ -463,7 +463,7 @@ def main():
             page.click("input[name=goal][value=strength] >> xpath=..")  # slow: checks several orientations
             page.wait_for_selector("#progress:not([hidden])", timeout=30_000)
             page.wait_for_function("() => document.getElementById('progress-bar').value > 0", timeout=30_000)
-            run.act(lambda: page.click("#cancel"), 60_000)
+            run.act(lambda: page.click("#working-cancel"), 60_000)
             status = page.locator("#status").inner_text()
             assert status.startswith("Cancelled"), status
             # The restarted engine must have the part again: re-orienting works.
