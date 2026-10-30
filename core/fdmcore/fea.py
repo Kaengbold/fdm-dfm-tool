@@ -147,27 +147,48 @@ def stiffness(model: Model, c: np.ndarray, scale: np.ndarray, springs: tuple | N
 
 
 def lowest_mode(model: Model, c: np.ndarray, scale: np.ndarray, node_mass: np.ndarray, fixed: np.ndarray,
-                springs: tuple | None = None) -> tuple[float, np.ndarray]:
+                springs: tuple | None = None, block: int = 3, rtol: float = 1e-4, max_rounds: int = 30) -> tuple[float, np.ndarray]:
     """Lowest natural frequency (Hz) and its mode shape (n_nodes, 3, largest movement 1) with lumped
-    node masses (kg). K is in N/mm, so ω² = 1000 · λ for K x = λ M x."""
+    node masses (kg). K is in N/mm, so ω² = 1000 · λ for K x = λ M x.
+
+    Subspace iteration: each round solves K Y = M X for a few vectors with the same preconditioned CG
+    as the static solve, then picks the best mix of them (Rayleigh-Ritz). Memory stays at a few vectors
+    the size of the model; eigsh shift-invert (a direct factorisation) and LOBPCG both needed gigabytes
+    on a 47k-unknown part. Several vectors because the lowest two modes are often a pair (bending one
+    way or the other) that a single vector converges to only slowly."""
     k = stiffness(model, c, scale, springs)
     free = np.repeat(~fixed, 3)
     kf = k[free][:, free].tocsr()
-    m = sp.diags(np.repeat(node_mass, 3)[free])
-    # LOBPCG with the same multigrid preconditioner as the static solve: a direct factorisation
-    # (eigsh shift-invert) took a minute on 47k unknowns. A few start vectors: the lowest two modes
-    # are often a pair (bending one way or the other) and converge slowly alone.
-    rng = np.random.default_rng(0)
-    x0 = rng.standard_normal((kf.shape[0], 3))
+    m = np.repeat(node_mass, 3)[free]
     precond = two_level_preconditioner(kf, prolongation(model)[free])
-    lam, vec = spla.lobpcg(kf, x0, B=m, M=precond, largest=False, tol=1e-5, maxiter=200)
-    i = int(np.argmin(lam))
+    x = np.random.default_rng(0).standard_normal((kf.shape[0], block))
+    y = np.zeros_like(x)
+    lam = np.inf
+    for i in range(max_rounds):
+        report(i / max_rounds, "Finding how it swings")
+        for j in range(block):
+            y[:, j], _ = spla.cg(kf, m * x[:, j], x0=y[:, j], rtol=1e-6, maxiter=2000, M=precond)
+        kr, mr = y.T @ (kf @ y), y.T @ (m[:, None] * y)
+        vals, vecs = _small_eig((kr + kr.T) / 2, (mr + mr.T) / 2)
+        x = y @ vecs
+        y = x / vals  # next round's CG starts close: K⁻¹ M x ≈ x / λ
+        done = abs(vals[0] - lam) <= rtol * vals[0]
+        lam = vals[0]
+        if done:
+            break
     shape = np.zeros(model.n_nodes * 3)
-    shape[free] = vec[:, i]
-    lam = lam[i:i + 1]
+    shape[free] = x[:, 0]
     shape = shape.reshape(-1, 3)
     shape /= max(np.linalg.norm(shape, axis=1).max(), 1e-12)
-    return float(np.sqrt(max(lam[0], 0.0) * 1000) / (2 * np.pi)), shape
+    return float(np.sqrt(max(lam, 0.0) * 1000) / (2 * np.pi)), shape
+
+
+def _small_eig(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Generalised eigenpairs of a small symmetric pair (a, b positive definite), ascending, b-normalised."""
+    w, v = np.linalg.eigh(b)
+    t = v / np.sqrt(np.maximum(w, 1e-300))  # b = (t⁻¹)ᵀ t⁻¹, so tᵀ a t is the ordinary problem
+    vals, u = np.linalg.eigh(t.T @ a @ t)
+    return vals, t @ u
 
 
 def prolongation(model: Model) -> sp.csr_matrix:

@@ -25,7 +25,7 @@ def test_cantilever_frequency_matches_beam_theory():
     expected = 1.875**2 / (2 * np.pi) * np.sqrt(e * i / (rho * a * l**4))
     assert hz == pytest.approx(expected, rel=0.1)
     swing = lambda plane: np.linalg.norm(shape[plane.ravel()[plane.ravel() >= 0]], axis=1).mean()
-    assert swing(model.node_index[-1]) > 3 * swing(model.node_index[25])  # the free end swings most
+    assert swing(model.node_index[-1]) > 5 * swing(model.node_index[12])  # the free end swings most (beam: 10x a quarter in)
 
 
 def test_impact_factor():

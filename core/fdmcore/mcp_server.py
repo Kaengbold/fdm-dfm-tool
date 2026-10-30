@@ -144,6 +144,24 @@ def check_strength(
 
 
 @server.tool()
+def check_dynamics(
+    up: list[float],
+    loads: list[dict],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    drop_mm: float = 0.0,
+    mounted_kg: float = 0.0,
+) -> dict:
+    """Vibration and knocks (simplified). frequency_hz: how fast the part swings as held — 20–200 Hz is
+    where motors, fans and printers shake, so it may resonate; drop_mm: the load falls this far onto the
+    part (impact_factor = how many times harder than held still, impact_safety = safety factor then);
+    mounted_kg: something fixed on the loaded face that swings with it. loads as in check_strength."""
+    r = api.dynamics(up, loads, _profile(printer, material, nozzle), drop_mm, mounted_kg)
+    return _clean({k: v for k, v in r.items() if not isinstance(v, bytes)})
+
+
+@server.tool()
 def detailed_strength(
     up: list[float],
     loads: list[dict],
