@@ -44,6 +44,7 @@ class Session:
     tags: dict = field(default_factory=dict)  # region id -> what the user says the feature is (features.TAGS)
     weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
     gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
+    fits: dict = field(default_factory=dict)  # region id -> {"partner_mm", "fit"}: what goes into a hole / onto a post
 
 
 _session: Session | None = None
@@ -978,10 +979,31 @@ def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     p = Profile.from_dict(profile)
     return {
         "features": detect_features(s.mesh, s.regions, s.tags),
-        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0))),
+        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
+
+
+def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "sliding") -> dict:
+    """Say what goes into a round hole (or what a round post goes into): the mating part's diameter
+    and the fit ("press", "snug", "sliding", "loose"). Returns the diameter to model and why; design()
+    then offers the resize as an edit. ``partner_mm`` None forgets it."""
+    from .features import accepted, detect_features, fit_size
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    feats = {f["region"]: f for f in accepted(detect_features(s.mesh, s.regions, s.tags))}
+    if region not in feats:
+        raise ValueError(f"Face {region} is not a round hole or post")
+    if partner_mm is None:
+        s.fits.pop(region, None)
+        return {"region": region}
+    size, why = fit_size(feats[region], float(partner_mm), fit, up)
+    s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit}
+    return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why}
 
 
 def tag_feature(region: int, tag: str | None) -> dict:
@@ -1242,6 +1264,7 @@ METHODS = {
     "load": load,
     "load_gcode": load_gcode,
     "warping": warping,
+    "set_fit": set_fit,
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,

@@ -165,6 +165,14 @@ def detailed_strength(
 
 
 @server.tool()
+def set_fit(region: int, up: list[float], partner_mm: float | None = None, fit: str = "sliding") -> dict:
+    """Say what goes into a round hole (or what a round post goes into): the mating part's diameter in mm
+    and the fit: "press", "snug", "sliding" or "loose". Returns the diameter to model and why;
+    suggest_design_changes then offers the resize. partner_mm None forgets it. Region ids from list_faces."""
+    return api.set_fit(region, up, partner_mm, fit)
+
+
+@server.tool()
 def strength_options(
     up: list[float],
     loads: list[dict],

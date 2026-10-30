@@ -84,6 +84,16 @@ fasteners:
   M6:   {d: 6.0, clearance_close_mm: 6.4, clearance_normal_mm: 6.6, pilot_mm: 5.2, insert_hole_mm: 8.0, nut_af_mm: 10.0, nut_thickness_mm: 5.2}
   match_tol_mm: 0.1   # a hole within this of a screw's nominal size is "modelled at screw size"
 
+fits:
+  # Gap to add to the mating part's size (diameter, mm) when modelling a round hole, or to take off a
+  # round post, for a 0.4 mm nozzle. Rule of thumb from clearance-gauge prints: ~0.2 mm pushes in
+  # snugly, ~0.3–0.4 mm slides and turns [Maker's Muse clearance gauge https://www.youtube.com/watch?v=TYuLVN3YHw8;
+  # Prusa KB "Modeling with 3D printing in mind" https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135].
+  # Printers differ: a fit test print (T-170) gives the real numbers.
+  gap_mm: {press: 0.1, snug: 0.2, sliding: 0.35, loose: 0.5}
+  sideways_extra_mm: 0.1   # holes lying on their side come out a little smaller at the top
+  min_change_mm: 0.05      # smaller differences are left alone
+
 shrinkage:
   # Parts shrink as they cool (linear %, per material in presets.yaml). Report when the longest
   # dimension comes out this much short. Rough: depends on brand, infill and part shape.

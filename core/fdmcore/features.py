@@ -138,9 +138,10 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
 
 
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
-                 weak_spot=None, voxel_mm: float = 1.0) -> list[dict]:
+                 weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
-    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner."""
+    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner.
+    ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
 
     up = np.asarray(up, float) / np.linalg.norm(up)
@@ -154,6 +155,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
                 f"teardrop-{f['region']}", "short_bridge", f"Teardrop for the horizontal Ø{f['diameter']:.1f} mm hole",
                 f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
                 [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg"))
+    edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up)
     r = rotation_to_z(up)
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
@@ -178,6 +180,71 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             "much stronger. It grows on both sides; check that nothing needs to fit there.",
             [to_part(p) for p in w["pieces"]], op="add", param="wall_lines"))
     return edits
+
+
+FIT_NAMES = {"press": "be pressed in (stays put)", "snug": "push in snugly", "sliding": "slide and turn freely", "loose": "drop in loosely"}
+
+
+def fit_size(feature: dict, partner_mm: float, fit: str, up) -> tuple[float, str]:
+    """Diameter to model a hole (or round post) so a ``partner_mm`` part fits it the ``fit`` way,
+    and why, in plain words."""
+    F = load_data("thresholds")["fits"]
+    if fit not in F["gap_mm"]:
+        raise ValueError(f"fit must be one of {tuple(F['gap_mm'])}")
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    sideways = abs(np.asarray(feature["axis"]) @ up) < 0.7
+    gap = F["gap_mm"][fit] + (F["sideways_extra_mm"] if sideways else 0.0)
+    hole = feature["type"] == "hole"
+    size = partner_mm + gap if hole else partner_mm - gap
+    what = (f"For a Ø{partner_mm:g} mm part to {FIT_NAMES[fit]}, model this hole Ø{size:.2f} mm" if hole else
+            f"For this post to {FIT_NAMES[fit]} into a Ø{partner_mm:g} mm hole, model it Ø{size:.2f} mm")
+    why = f" (now Ø{feature['diameter']:.2f}: {size - feature['diameter']:+.2f} mm)."
+    if sideways:
+        why += " It lies on its side when printed, so it comes out a little smaller at the top: that's included."
+    return size, what + why + " Printers differ by a tenth or two: a small test print of the fit is worth it."
+
+
+def _fit_edits(features: list[dict], fits: dict, up) -> list[dict]:
+    """Resize holes and posts the user said something fits into: a ring cut away or added."""
+    F = load_data("thresholds")["fits"]
+    out = []
+    for f in features:
+        want = fits.get(f["region"])
+        if not want:
+            continue
+        size, why = fit_size(f, want["partner_mm"], want["fit"], up)
+        change = size - f["diameter"]
+        if abs(change) < F["min_change_mm"]:
+            continue
+        r_old, r_new = f["radius"], size / 2
+        hole = f["type"] == "hole"
+        grow_part = (change < 0) == hole  # a smaller hole or a bigger post means adding plastic
+        overlap = 0.3  # reach into the existing plastic so the pieces join cleanly
+        if hole:
+            inner, outer = (r_new, r_old + overlap) if grow_part else (0.0, r_new)
+        else:
+            inner, outer = (r_old - overlap, r_new) if grow_part else (r_new, r_old + overlap)
+        name = "hole" if hole else "post"
+        out.append(_edit(f"fit-{f['region']}", "fit_size", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm {name} for a {want['fit']} fit",
+                         why, [_ring(f, inner, outer)], op="add" if grow_part else "cut"))
+    return out
+
+
+def _ring(f: dict, inner: float, outer: float) -> np.ndarray:
+    """A ring (or disc, inner = 0) along a hole / post's axis, over its length."""
+    from shapely.geometry import Point
+
+    from .additions import extrude
+
+    shape = Point(0, 0).buffer(outer, 64)
+    if inner > 0:
+        shape = shape.difference(Point(0, 0).buffer(inner, 64))
+    axis, c = np.asarray(f["axis"]), np.asarray(f["center"])
+    u = np.cross(axis, [1.0, 0, 0] if abs(axis[0]) < 0.9 else [0, 1.0, 0])
+    u /= np.linalg.norm(u)
+    s = np.cross(axis, u)
+    local = extrude(shape, -f["length"] / 2, f["length"] / 2)
+    return c + local[..., :1] * u + local[..., 1:2] * s + local[..., 2:] * axis
 
 
 def _to_part(mesh: Mesh, r: np.ndarray):

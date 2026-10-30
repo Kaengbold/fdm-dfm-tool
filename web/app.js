@@ -104,6 +104,7 @@ const state = {
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
+  fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
 };
@@ -231,7 +232,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {} });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {} });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   renderGcode();
   renderMarks();
@@ -1125,9 +1126,30 @@ function renderFeatures(features) {
            el("button", { textContent: "Undo", onclick: () => tagFeature(f.region, null) })]
         : [el("button", { textContent: "Yes", title: `It is a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, f.type) }),
            el("button", { textContent: `Not a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, "none") })];
-      return el("li", { className: [f.tag === "none" ? "rejected" : "", f.confidence === "low" && !f.tag ? "ask" : ""].join(" ") }, name, ...answer);
+      return el("li", { className: [f.tag === "none" ? "rejected" : "", f.confidence === "low" && !f.tag ? "ask" : ""].join(" ") }, name, ...answer,
+        f.tag !== "none" && f.full_circle ? fitControls(f) : "");
     }),
   );
+}
+
+const FIT_LABEL = { press: "pressed in", snug: "snug", sliding: "sliding / turning", loose: "loose" };
+
+/** "What fits in it?": the mating part's size and the fit → the size to model, offered as a design change. */
+function fitControls(f) {
+  const hole = f.type === "hole";
+  const size = el("input", { type: "number", min: 0.5, step: 0.1, value: state.fitNotes?.[f.region]?.partner ?? Math.round(f.diameter * 2) / 2,
+    title: hole ? "Diameter of what goes into the hole (rod, pin, bearing, screw…)" : "Diameter of the hole the post goes into" });
+  const kind = el("select", {}, ...Object.entries(FIT_LABEL).map(([v, t]) => el("option", { value: v, textContent: t })));
+  kind.value = state.fitNotes?.[f.region]?.fit ?? "sliding";
+  const note = state.fitNotes?.[f.region]?.text;
+  const go = el("button", { textContent: "Size it", onclick: () =>
+    busy("Working out the size…", async () => {
+      const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value });
+      state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
+      await suggestDesign();
+    }) });
+  return el("div", { className: "fit row" }, el("span", { className: "hint", textContent: hole ? "What goes in: Ø" : "Goes into: Ø" }), size, "mm,", kind, go,
+    note ? el("p", { className: "hint", textContent: note }) : "");
 }
 
 async function showFeature(f) {

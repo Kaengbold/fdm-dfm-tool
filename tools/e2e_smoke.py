@@ -257,6 +257,17 @@ def main():
             return f"{page.locator('#features').inner_text()!r} | findings after reject: {found}"
         run.step("feature confirm - not a hole", feature_confirm)
 
+        def fit_a_hole():
+            row = page.locator("#features li", has_text="Ø8.0 mm hole")
+            row.locator(".fit input").fill("8")
+            row.locator(".fit select").select_option("sliding")
+            run.act(lambda: row.get_by_role("button", name="Size it").click())
+            note = page.locator("#features li", has_text="Ø8.0 mm hole").locator(".fit p").inner_text()
+            edits = page.locator("#edits label").all_inner_texts()
+            assert any("sliding fit" in e for e in edits), edits
+            return note[:110]
+        run.step("what fits in a hole", fit_a_hole)
+
         def pick_face():
             # Click the centre of the triangle nearest to the camera's view centre that is visible.
             x, y = page.evaluate(

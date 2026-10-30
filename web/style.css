@@ -18,6 +18,10 @@ body[data-level="advanced"] [data-min="expert"] { display: none !important; }
 .guide button:hover { border-color: var(--accent); }
 .guide button span { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
 
+.fit { flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px 12px; }
+.fit input { width: 64px; }
+.fit p { flex-basis: 100%; margin: 0; }
+
 :root {
   --ok: #9aa5b1;
   --borderline: #f0b429;
