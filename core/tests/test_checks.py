@@ -382,3 +382,24 @@ def test_shallow_raised_and_engraved_details():
     shallow = Mesh(np.concatenate([extrude(plate.difference(deep), 0, 3), extrude(deep, 0, 2.7)]))
     eng = [f for f in run_checks(shallow, prof)["findings"] if f["rule"] == "shallow_relief"]
     assert len(eng) == 1 and "Engraved" in eng[0]["detail"] and eng[0]["severity"] == "warn"
+
+
+def test_overhang_follows_the_material_angle():
+    """A block leaning out along one edge: within PLA's 55° no support, well past it support (T-172:
+    edge strips used to count as short bridges and the angle got half a line width extra)."""
+    from shapely.geometry import Polygon
+
+    from fdmcore.additions import extrude
+    from fdmcore.checks import run_checks
+    from fdmcore.mesh import Mesh
+    from fdmcore.profile import Profile
+
+    prof = Profile.from_dict({"material": "pla"})
+
+    def leaning(deg):
+        side = Polygon([(0, 0), (8, 0), (8 + 15 * np.tan(np.radians(deg)), 15), (0, 15)])
+        return Mesh(extrude(side, 0, 8)[:, :, [0, 2, 1]][:, ::-1])
+
+    rules = lambda deg: {f["rule"] for f in run_checks(leaning(deg), prof)["findings"]}
+    assert "support_marks" not in rules(50)
+    assert "support_marks" in rules(65)

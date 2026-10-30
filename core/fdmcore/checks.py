@@ -166,6 +166,14 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
 # ---------------------------------------------------------------- layer scan
 
 
+# A layer may reach this far past the overhang angle: slicing noise on walls and curves, not a real
+# overhang. (Was half a line width, which let PLA's 55° pass up to ~68° at 0.2 mm layers, T-172.)
+OVERHANG_TOL_MM = 0.05
+# Smallest overhang strip per layer: just past the angle limit, each layer only sticks out a little
+# along a long edge. Specks are dropped later by volume (_support_findings).
+OVERHANG_MIN_PIECE_MM2 = 0.25
+
+
 def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dict):
     lw, nozzle = profile.line_width, float(profile.nozzle)
     tan_lim = np.tan(np.radians(profile.material["max_overhang_deg"]))
@@ -189,10 +197,12 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
         # Areas that need support: reach further out than the overhang limit allows.
         # (Nothing can overhang when the layer equals the one below.)
         if prev is not None and not prev.is_empty and not (same and prev is cached[2]):
-            reach = layer.dz * tan_lim + 0.5 * lw
+            reach = layer.dz * tan_lim + OVERHANG_TOL_MM
             anchor_zone = prev.buffer(reach + lw, quad_segs=QUAD)  # must reach past the supported zone
-            for piece in parts(_safe_diff(g, prev.buffer(reach, quad_segs=QUAD)), min_piece):
-                span, anchors = _bridge_span(piece, anchor_zone, max_bridge)
+            supported = prev.buffer(reach, quad_segs=QUAD)
+            held_zone = prev.buffer(reach + OVERHANG_TOL_MM, quad_segs=QUAD)
+            for piece in parts(_safe_diff(g, supported), OVERHANG_MIN_PIECE_MM2):
+                span, anchors = _bridge_span(piece, anchor_zone, max_bridge, held_zone)
                 holes = _open_holes(piece, g)
                 if holes:
                     tracker.add("hole_start", piece, layer, hole_d=max(holes))
@@ -255,19 +265,22 @@ def _is_enclosed(piece: Polygon, layer_geom) -> bool:
     return piece.boundary.distance(outer) > 0.05
 
 
-def _bridge_span(piece: Polygon, anchor_zone, max_span: float = np.inf) -> tuple[float, int]:
+def _bridge_span(piece: Polygon, anchor_zone, max_span: float = np.inf, held_zone=None) -> tuple[float, int]:
     """Number of separate anchors on the layer below, and the largest gap between them.
 
     A piece held all the way round (roof of a pocket, ring over a counterbore) is one closed anchor;
     it bridges across its narrow width, so it counts as two anchors that far apart when that width is
-    at most ``max_span`` (wider, the slicer supports it instead)."""
+    at most ``max_span`` (wider, the slicer supports it instead). ``held_zone`` (the layer below, barely
+    grown) decides "all the way round": a strip along an edge that is narrower than ``anchor_zone``'s
+    margin lies inside it entirely, but its outer edge is free — an overhang, not a bridge (T-172)."""
     touch = piece.boundary.intersection(anchor_zone)
     if touch.is_empty:
         return 0.0, 0
     merged = shapely.line_merge(touch) if touch.geom_type == "MultiLineString" else touch
     anchors = [a for a in getattr(merged, "geoms", [merged]) if a.length > 0.05]
     if len(anchors) < 2:
-        if anchors and piece.exterior.intersection(anchor_zone).length >= 0.9 * piece.exterior.length:
+        held = anchor_zone if held_zone is None else held_zone
+        if anchors and piece.exterior.intersection(held).length >= 0.9 * piece.exterior.length:
             width = _min_width(Polygon(piece.exterior))
             if width <= max_span:
                 return width, 2
