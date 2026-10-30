@@ -25,6 +25,7 @@ Used at a desk next to the printer, between CAD and slicer, on desktop mostly. P
 - Short text; explanations only behind "More information".
 - English only for now.
 - Engine runs in a web worker (Pyodide); static site, no build step, plain ES modules.
+- Simulations must leave the computer usable (video, browser) while they run: one web worker (one core) in the browser, maths threads capped at half the cores when run natively, bounded memory.
 
 ## Brand Commitments
 Name for now: FDM Check (working title "FDM DFM Tool"). Plain language for hobbyists.

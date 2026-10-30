@@ -26,8 +26,9 @@ CASES = {
     "tray": (UP, {"warping"}, {"support_marks", "trapped_support"}),  # long flat PLA base: corners can lift
     "text_sign": (UP, set(), {"support_marks"}),  # plate down, letters up
     "gear": (UP, set(), {"support_marks"}),
-    # Standing it tips, wobbles and snaps along the layers: these must be reported. (Lying down
-    # isn't offered for a round pin yet, so the orientation itself isn't pinned here.)
+    # Standing it tips, wobbles and snaps along the layers: these must be reported. Lying down
+    # isn't better as modelled (a round pin touches the bed in a line and needs support all along),
+    # so the orientation itself isn't pinned here (T-190).
     "tall_pin": (None, {"tipping_risk", "tall_thin_feature", "weak_upright_pin"}, set()),
 }
 
@@ -43,3 +44,12 @@ def test_corpus_part(name):
     rules = {f["rule"] for f in api.check(top["up"])["findings"]}
     assert must <= rules, f"{name}: missing {must - rules}"
     assert not rules & must_not, f"{name}: unexpected {rules & must_not}"
+
+
+def test_standing_tall_on_a_narrow_base_is_penalised():
+    from fdmcore.mesh import load_stl
+    from fdmcore.orientation import evaluate
+
+    pin = load_stl((CORPUS / "tall_pin.stl").read_bytes())
+    assert evaluate(pin, [0, 0, 1]).terms["stability"] == pytest.approx(1.0)  # 80 mm on a Ø10 foot
+    assert evaluate(load_stl((CORPUS / "spool_hub.stl").read_bytes()), [0, 0, 1]).terms["stability"] == 0.0

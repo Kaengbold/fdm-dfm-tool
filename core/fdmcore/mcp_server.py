@@ -14,9 +14,15 @@ check_strength -> strength_options) -> suggest_design_changes -> apply_design_ch
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from mcp.server.mcpserver import MCPServer
+# Simulations must leave the computer usable (video, browser) while they run: cap the maths
+# libraries at half the cores. Set before numpy loads; the user's own settings win.
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_var, str(max(1, (os.cpu_count() or 2) // 2)))
+
+from mcp.server.mcpserver import MCPServer  # noqa: E402  (after the thread cap)
 
 from . import api
 from .mesh import to_binary_stl
