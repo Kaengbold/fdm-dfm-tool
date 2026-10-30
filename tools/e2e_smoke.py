@@ -331,6 +331,17 @@ def main():
             return f"loads: {loads} | {text.splitlines()[0]}"
         run.step("strength with a load on a spot", spot_load)
 
+        def shaking():
+            page.check("#dyn-shake")
+            run.act(lambda: page.click("#run-dynamics"), 300_000)
+            text = page.locator("#dynamics-result").inner_text()
+            assert "Hz" in text, text
+            swings = page.evaluate("() => !!fdm.viewer.field && fdm.state.showSwing")
+            assert swings, "swing shape not shown on the part"
+            page.uncheck("#dynamics-result input[type=checkbox]")  # back to the strength colours for the next steps
+            return text.splitlines()[0][:120]
+        run.step("shaking: natural frequency and swing view", shaking)
+
         def fea_view():
             assert page.locator("#legend").is_visible(), "no legend"
             colours = page.evaluate("() => fdm.viewer.field.mesh.geometry.getAttribute('color').count")
@@ -353,7 +364,7 @@ def main():
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('6 walls')", timeout=300_000)
             text = page.locator("#strength-result").inner_text()
             settings = page.locator("#settings").inner_text()
-            assert "Walls ★" in settings, settings
+            assert "Walls changed by you" in settings, settings
             return text.splitlines()[1][:120]
         run.step("walls set by hand go into strength and the 3MF", shells)
 
@@ -510,7 +521,7 @@ def main():
         def step_round_trip():
             fixture = ROOT / "tools" / "fixtures" / "l_bracket.step"
             run.act(lambda: page.set_input_files("#file", str(fixture)), 300_000)
-            if "Sideways Hole Prints Oval" not in " ".join(findings(page)):
+            if "Sideways hole prints oval" not in " ".join(findings(page)):
                 run.act(lambda: page.locator("#options > li").nth(1).click())
             if not page.locator("input[name=mode][value=both]").is_checked():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
@@ -534,7 +545,7 @@ def main():
             if ups.index(up) != page.evaluate("() => fdm.state.active"):
                 run.act(lambda: page.locator("#options > li").nth(ups.index(up)).click())
             seen = findings(page)
-            assert not any("Sideways Hole Prints Oval" in f for f in seen), f"teardrop missing in the written STEP: {seen}"
+            assert not any("Sideways hole prints oval" in f for f in seen), f"teardrop missing in the written STEP: {seen}"
             return f"{out.stat().st_size // 1024} kB STEP, {text.count('ADVANCED_FACE')} faces; reloaded: {page.locator('#status').inner_text()}"
         run.step("STEP in, design change, STEP out", step_round_trip)
 

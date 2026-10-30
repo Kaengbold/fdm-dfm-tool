@@ -46,6 +46,17 @@ export class Steps {
       note.dataset.affects = list.join(" ");
       this.panes[step].append(note);
     }
+    // Expert is one long page: the step list becomes its table of contents and follows the scrolling.
+    this.scroller = document.querySelector(".panes");
+    this.scroller.addEventListener("scroll", () => {
+      if (this.level !== "expert" || this.jumping) return;
+      const top = this.scroller.getBoundingClientRect().top + 80;
+      const inView = this.steps.filter((s) => !this.panes[s].hidden && this.panes[s].getBoundingClientRect().top <= top).pop() ?? this.steps[0];
+      if (inView !== this.current) {
+        this.current = inView;
+        this.renderList();
+      }
+    }, { passive: true });
     document.getElementById("step-back").onclick = () => this.go(this.neighbour(-1));
     document.getElementById("step-next").onclick = () => this.go(this.neighbour(1));
   }
@@ -81,16 +92,24 @@ export class Steps {
   go(step) {
     if (!step || this.ready(step) !== true) return;
     this.current = step;
+    if (this.level === "expert") {
+      // Jump, and don't let the scroll listener re-pick the step on the way there.
+      this.jumping = true;
+      this.panes[step].scrollIntoView({ behavior: "smooth", block: "start" });
+      clearTimeout(this.jumpTimer);
+      this.jumpTimer = setTimeout(() => (this.jumping = false), 700);
+      return this.renderList();
+    }
     this.render();
-    document.querySelector(".panes").scrollTop = 0;
+    this.scroller.scrollTop = 0;
   }
 
   /** Open the step that holds ``node`` (and any closed <details> around it), e.g. after a face was tapped. */
   reveal(node) {
-    if (this.level === "expert") return node.scrollIntoView({ behavior: "smooth", block: "center" });
     for (let d = node.closest("details"); d; d = d.parentElement.closest("details")) d.open = true;
     const pane = node.closest(".pane")?.dataset.pane;
-    if (pane && pane !== this.current) this.go(pane);
+    if (this.level === "expert") node.scrollIntoView({ behavior: "smooth", block: "center" });
+    else if (pane && pane !== this.current) this.go(pane);
   }
 
   /** ``steps`` will be updated by work that just started (``on``) or ended. */
@@ -121,21 +140,7 @@ export class Steps {
       note.textContent = `Changing this updates ${names.join(", ")}.`;
     }
 
-    const nav = document.getElementById("steps");
-    nav.replaceChildren(...steps.map((s, i) => {
-      const ready = this.ready(s);
-      const state = s === this.current ? "now" : this.busy.has(s) ? "busy" : ready !== true ? "locked" : i < at ? "done" : "open";
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = `step ${state}`;
-      b.disabled = ready !== true;
-      if (ready !== true) b.title = ready;
-      if (state === "now") b.setAttribute("aria-current", "step");
-      b.innerHTML = `<span class="dot">${state === "done" ? CHECK : i + 1}</span><span class="name"></span>`;
-      b.querySelector(".name").textContent = STEP_NAMES[s];
-      b.onclick = () => this.go(s);
-      return b;
-    }));
+    this.renderList();
 
     const back = document.getElementById("step-back");
     const next = document.getElementById("step-next");
@@ -147,5 +152,26 @@ export class Steps {
       next.disabled = ready !== true;
       next.textContent = ready !== true ? ready : following === "result" ? "Show my result" : `Next: ${STEP_NAMES[following]}`;
     }
+  }
+
+  renderList() {
+    const steps = this.steps;
+    const at = steps.indexOf(this.current);
+    const expert = this.level === "expert";
+    const nav = document.getElementById("steps");
+    nav.replaceChildren(...steps.map((s, i) => {
+      const ready = this.ready(s);
+      const state = s === this.current ? "now" : this.busy.has(s) ? "busy" : ready !== true ? "locked" : i < at && !expert ? "done" : "open";
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `step ${state}`;
+      b.disabled = ready !== true;
+      if (ready !== true) b.title = ready;
+      if (state === "now") b.setAttribute("aria-current", "step");
+      b.innerHTML = `<span class="dot">${state === "done" ? CHECK : i + 1}</span><span class="name"></span>`;
+      b.querySelector(".name").textContent = STEP_NAMES[s];
+      b.onclick = () => this.go(s);
+      return b;
+    }));
   }
 }

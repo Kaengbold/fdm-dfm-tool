@@ -189,14 +189,15 @@ export class Viewer {
     if (this.part) this.part.visible = true;
   }
 
-  /** Bend the shown result by ``scale`` × the computed displacement (FEA software exaggerates it). */
-  setDeformation(scale) {
+  /** Bend the shown result by ``scale`` × the computed displacement (FEA software exaggerates it).
+   * ``shade: false`` skips recomputing the normals: cheap enough for an animation. */
+  setDeformation(scale, shade = true) {
     if (!this.field?.disp) return;
     const pos = this.field.mesh.geometry.getAttribute("position");
     const { base, disp } = this.field;
     for (let i = 0; i < base.length; i++) pos.array[i] = base[i] + scale * disp[i];
     pos.needsUpdate = true;
-    this.field.mesh.geometry.computeVertexNormals();
+    if (shade) this.field.mesh.geometry.computeVertexNormals();
   }
 
   /** Cut through the result: hide everything beyond a plane across ``axis`` ("x"/"y"/"z" on the bed)
