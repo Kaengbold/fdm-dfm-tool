@@ -130,8 +130,15 @@
             </div>
             <label class="row"><input id="at-spot" type="checkbox" /> Only around the clicked spot (Ø6 mm): an edge, a corner or part of a big face</label>
             <div class="pick-step">
-              <b>1. Is it held?</b> Screwed, glued or clamped:
-              <button id="as-fixed">🔒 Held here</button>
+              <b>1. Is it held here?</b>
+              <div class="row">
+                <select id="hold" aria-label="How it is held">
+                  <option value="clamped">clamped or glued (can't move at all)</option>
+                  <option value="resting">resting on something (only pushes back, can lift off)</option>
+                  <option value="screw">a screw or bolt through this hole</option>
+                </select>
+                <button id="as-fixed">🔒 Held here</button>
+              </div>
             </div>
             <div class="pick-step">
               <b>2. Or does a load act on it?</b>

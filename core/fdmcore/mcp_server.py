@@ -127,7 +127,7 @@ def check_strength(
 ) -> dict:
     """Rough strength check. fine=True: a finer grid (slower); compare with the normal one to see how
     far to trust the answer. walls (lines), infill (0–1), top/bottom (solid layers): how it is
-    printed; omitted = the goal's usual settings. loads: [{"region": id, "kind": "fixed"},
+    printed; omitted = the goal's usual settings. loads: [{"region": id, "kind": "fixed", "hold": "clamped"|"resting"|"screw"},
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm

@@ -505,8 +505,9 @@ $("viewer").addEventListener("pointerup", async (e) => {
   hoverTip.hidden = true;
   const info = state.regionInfo[state.selectedRegion];
   $("pick-info").textContent = info.hole_diameter
-    ? `Ø${info.hole_diameter.toFixed(1)} mm hole — "Held here" means a screw or pin through it holds the part`
+    ? `Ø${info.hole_diameter.toFixed(1)} mm hole`
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
+  $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
   state.showHeat = false;
   recolor();
@@ -567,7 +568,7 @@ $("mark-clean").onclick = () => setMark("clean");
 $("mark-bed").onclick = () => setMark("bed");
 $("mark-vertical").onclick = () => setMark("vertical");
 
-$("as-fixed").onclick = () => addLoad({ ...target(), kind: "fixed" });
+$("as-fixed").onclick = () => addLoad({ ...target(), kind: "fixed", ...($("hold").value === "clamped" ? {} : { hold: $("hold").value }) });
 $("as-load").onclick = () =>
   addLoad({ ...target(), kind: "force", kg: Number($("kg").value), direction: $("dir").value, case: Number($("load-case").value) });
 $("at-spot").onchange = recolor;
@@ -630,7 +631,8 @@ function loadEditor(l) {
     el("p", { className: "hint", textContent: "Changes apply the next time you check strength." }));
 }
 
-const loadText = (l) => (l.kind === "fixed" ? "🔒 Held here" : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
+const HOLD_TEXT = { clamped: "🔒 Clamped / glued here", resting: "🔒 Resting here (only pushes back)", screw: "🔒 Screw / bolt here" };
+const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
 
 // The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
 const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,
@@ -1105,7 +1107,7 @@ const aiActions = {
     for (const l of loads) if (!l.point && !state.regionInfo[l.region]) throw new Error(`Unknown face ${l.region}`);
     state.loads = loads.map((l) => {
       const at = l.point ? { point: l.point, radius: l.radius ?? SPOT_RADIUS } : { region: l.region };
-      return l.kind === "fixed" ? { ...at, kind: "fixed" } : { ...at, kind: "force", kg: l.kg ?? 1, direction: l.direction ?? "push", case: l.case ?? 1 };
+      return l.kind === "fixed" ? { ...at, kind: "fixed", ...(l.hold && l.hold !== "clamped" ? { hold: l.hold } : {}) } : { ...at, kind: "force", kg: l.kg ?? 1, direction: l.direction ?? "push", case: l.case ?? 1 };
     });
     renderLoads();
     recolor();

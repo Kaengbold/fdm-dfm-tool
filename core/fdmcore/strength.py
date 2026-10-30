@@ -2,7 +2,9 @@
 
 Loads are given on regions (see regions.py), or around a point on the surface (an edge, a
 corner, a spot on a big face — part coordinates, ``radius`` mm, default 3):
-  {"region": 3, "kind": "fixed"}
+  {"region": 3, "kind": "fixed"}                      # clamped or glued: can't move at all
+  {"region": 3, "kind": "fixed", "hold": "resting"}   # resting on a surface: only pushes back, can lift off
+  {"region": 5, "kind": "fixed", "hold": "screw"}     # a screw or bolt in this hole: bears on the hole wall
   {"region": 7, "kind": "force", "kg": 5, "direction": "push" | "pull" | "down" | [x, y, z], "case": 2}
   {"point": [10, 0, 5], "radius": 2, "kind": "force", "kg": 1}
 ``down`` means -Z in the part's own (as-modelled) coordinates, like a hanging weight.
@@ -37,6 +39,13 @@ SINGULAR_RINGS = 2
 NEAR_SUPPORT_VOXELS = 4  # weakest spot this close to a held face: say the clamp may spread the load
 E_Z_RATIO = 0.85  # layer-direction stiffness vs. in-plane (stiffness drops far less than strength)
 INFILL_EXPONENT = 1.5  # Gibson–Ashby-style scaling for stiffness and strength of sparse infill
+# Resting faces and screw holes: springs along the surface normal that only push (released where the
+# part pulls away, re-solved), much stiffer than the part next to them, plus a little friction sideways
+# (which also keeps a part that only rests from sliding away in the solve).
+CONTACT_STIFFNESS = 10.0  # × E·h per node
+FRICTION = 0.02  # sideways spring vs. the normal one
+CONTACT_ROUNDS = 8
+HOLDS = ("clamped", "resting", "screw")
 MIN_SCALE = 0.01  # empty cubes inside a hollow print: soft, but not zero (the solver needs some stiffness)
 
 
@@ -99,6 +108,14 @@ class LoadCase:
     fixed: np.ndarray  # (n_nodes,) bool
     ignore: np.ndarray  # (E,) bool — elements at load/support points (stress singularities)
     number: int = 1  # load case number (see module docstring)
+    contact: tuple | None = None  # (nodes, outward normals): resting faces and screw holes, push-only
+
+    def held(self) -> np.ndarray:
+        """Nodes held in any way (clamped, resting, screw)."""
+        out = self.fixed.copy()
+        if self.contact is not None:
+            out[self.contact[0]] = True
+        return out
 
 
 def prepare_cases(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000) -> list[LoadCase]:
@@ -125,6 +142,7 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
     elem_id[tuple(model.elems.T)] = np.arange(len(model.elems))
     ignore = np.zeros(len(model.elems), dtype=bool)
     surface = None
+    contact_nodes, contact_normals = [], []
 
     for load in loads:
         sel = _load_faces(mesh, region, load, grid.h)
@@ -140,7 +158,14 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
         ignore[elems] = True
         nodes = np.unique(_element_nodes(model, elems))
         if load["kind"] == "fixed":
-            fixed[nodes] = True
+            hold = load.get("hold", "clamped")
+            if hold not in HOLDS:
+                raise ValueError(f"hold must be one of {HOLDS}")
+            if hold == "clamped":
+                fixed[nodes] = True
+            else:
+                contact_nodes.append(nodes)
+                contact_normals.append(_node_normals(model, nodes, mesh.triangles[sel], normals[sel]))
         else:
             n = (normals[sel] * mesh.normals_and_areas()[1][sel, None]).sum(axis=0)
             n /= np.linalg.norm(n)
@@ -148,11 +173,19 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
             vec = {"push": -n, "pull": n, "down": np.array([0.0, 0.0, -1.0])}.get(d) if isinstance(d, str) else np.asarray(d, float)
             vec = vec / np.linalg.norm(vec)
             forces[nodes] += vec * float(load["kg"]) * G / len(nodes)
-    if not fixed.any():
+    contact = None
+    if contact_nodes:
+        nodes, first = np.unique(np.concatenate(contact_nodes), return_index=True)
+        keep = ~fixed[nodes]  # clamped wins where both touch
+        contact = (nodes[keep], np.concatenate(contact_normals)[first][keep])
+    held = fixed.copy()
+    if contact is not None:
+        held[contact[0]] = True
+    if not held.any():
         raise ValueError("Mark at least one face as fixed (where the part is held)")
     if not forces.any():
         raise ValueError("Add at least one load")
-    loose = _loose_nodes(model, fixed)
+    loose = _loose_nodes(model, held)
     if loose.any():
         if not np.abs(forces[~loose]).sum():
             raise ValueError("The load isn't connected to a held face (at the analysis resolution, thin links are lost)")
@@ -160,7 +193,45 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
         forces[loose] = 0.0
     for _ in range(SINGULAR_RINGS):  # stresses right at supports and loads are an artefact of rigid clamps / point loads
         ignore = _grow(ignore, model, elem_id)
-    return LoadCase(model, forces, fixed, ignore)
+    if contact is not None:
+        contact = (contact[0][~loose[contact[0]]], contact[1][~loose[contact[0]]])
+    return LoadCase(model, forces, fixed, ignore, contact=contact)
+
+
+def _node_normals(model: Model, nodes: np.ndarray, tris: np.ndarray, normals: np.ndarray) -> np.ndarray:
+    """Outward surface normal at each node: that of the nearest point sampled on the faces (a screw
+    hole's wall turns, so one normal per face isn't enough)."""
+    from scipy.spatial import cKDTree
+
+    fine, src = _refine_with_source(tris, model.grid.h / 2)
+    pos = model.grid.origin + np.argwhere(model.node_index >= 0)[nodes] * model.grid.h  # node ids follow this order
+    _, i = cKDTree(fine.mean(axis=1)).query(pos)
+    return normals[src[i]]
+
+
+def _solve(case: LoadCase, c: np.ndarray, scale: np.ndarray, e: float):
+    """``solve`` with the case's supports. Resting faces and screw holes only push: springs where the
+    part pulls away are released and the solve repeated until nothing changes."""
+    if case.contact is None or not len(case.contact[0]):
+        return solve(case.model, c, scale, case.forces, case.fixed)
+    nodes, n = case.contact
+    k = CONTACT_STIFFNESS * e * case.model.grid.h
+    active = np.ones(len(nodes), dtype=bool)
+    for _ in range(CONTACT_ROUNDS):
+        m = int(active.sum())
+        if m == 0:
+            if case.fixed.any():  # lifts off the rest, the clamp alone holds it
+                return solve(case.model, c, scale, case.forces, case.fixed)
+            raise ValueError("The part lifts off everywhere it rests: hold it somewhere too (clamped or a screw)")
+        sel = nodes[active]
+        springs = (np.concatenate([sel] + [sel] * 3), np.concatenate([n[active]] + [np.tile(np.eye(3)[i], (m, 1)) for i in range(3)]),
+                   np.concatenate([np.full(m, k * (1 - FRICTION))] + [np.full(m, k * FRICTION)] * 3))
+        u, info = solve(case.model, c, scale, case.forces, case.fixed, springs=springs)
+        pressed = np.einsum("ij,ij->i", u[nodes], n) >= 0  # moving into the support: it pushes back
+        if np.array_equal(pressed, active):
+            break
+        active = pressed
+    return u, info
 
 
 def _loose_nodes(model: Model, fixed: np.ndarray) -> np.ndarray:
@@ -292,7 +363,7 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
     r = rotation_to_z(up)
     c = rotate_stiffness(mat.stiffness_print_frame(), r)
     scale = element_scale(case.model, up, shells, profile) if printed is None else printed.scale
-    u, info = solve(case.model, c, scale, case.forces, case.fixed)
+    u, info = _solve(case, c, scale, mat.e_xy)
     stress = element_stress(case.model, c, scale, u)
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
     fi_lines = None if printed is None else lines_index(stress, np.asarray(up, float), mat, printed)
@@ -327,7 +398,7 @@ def orientation_safety(case: LoadCase, ups: np.ndarray, profile: Profile, shells
     iso = Material(mat.e_xy, mat.e_xy, mat.nu_xy, mat.nu_xy)
     c = iso.stiffness_print_frame()
     scale = element_scale(case.model, None, shells, profile)
-    u, _ = solve(case.model, c, scale, case.forces, case.fixed)
+    u, _ = _solve(case, c, scale, mat.e_xy)
     stress = element_stress(case.model, c, scale, u)
     out = []
     for up in ups:
@@ -439,7 +510,7 @@ def _summary(case: LoadCase, fi_layer, fi_plane, u, info, fi_lines=None) -> dict
     crit = int(np.argmax({"layers": fl, "material": fp, "lines": fs}[mode]))
     sf = float(1 / worst) if worst > 0 else float("inf")
     grid = case.model.grid
-    held = grid.origin + np.argwhere(case.model.node_index >= 0)[case.fixed] * grid.h  # node ids follow this order
+    held = grid.origin + np.argwhere(case.model.node_index >= 0)[case.held()] * grid.h  # node ids follow this order
     centre = grid.centers(case.model.elems[crit])
     near = bool(len(held)) and float(np.linalg.norm(held - centre, axis=1).min()) <= NEAR_SUPPORT_VOXELS * grid.h
     return {

@@ -68,8 +68,8 @@ def _solid(mesh: Mesh, origin: np.ndarray, h: float, shape: np.ndarray) -> np.nd
     with np.errstate(divide="ignore", invalid="ignore"):
         u = (v2[:, 0] * v1[:, 1] - v1[:, 0] * v2[:, 1]) / den
         v = (v0[:, 0] * v2[:, 1] - v2[:, 0] * v0[:, 1]) / den
-    inside = (den != 0) & (u >= 0) & (v >= 0) & (u + v <= 1)
-    z = (1 - u - v) * tz[tri, 0] + u * tz[tri, 1] + v * tz[tri, 2]
+        inside = (den != 0) & (u >= 0) & (v >= 0) & (u + v <= 1)  # walls (den = 0) give inf/nan, dropped here
+        z = (1 - u - v) * tz[tri, 0] + u * tz[tri, 1] + v * tz[tri, 2]
     ci, cj, z = ci[inside], cj[inside], z[inside]
     ok = (ci >= 0) & (ci < shape[0]) & (cj >= 0) & (cj < shape[1])
     ci, cj, z = ci[ok], cj[ok], z[ok]

@@ -54,6 +54,7 @@ export const TOOLS = [
               point: { type: "array", items: { type: "number" }, description: "[x, y, z] in part coordinates, instead of region" },
               radius: { type: "number", description: "mm around point (default 3)" },
               kind: { type: "string", enum: ["fixed", "force"] },
+              hold: { type: "string", enum: ["clamped", "resting", "screw"], description: "fixed only: clamped/glued (default), resting on a surface (only pushes back), or a screw/bolt in a hole" },
               kg: { type: "number", description: "Load in kg (force only)" },
               direction: { type: "string", enum: ["push", "pull", "down"], description: "push into the face, pull it away, or hang down (-Z as modelled)" },
               case: { type: "integer", minimum: 1, description: "Load case number (force only, default 1)" },

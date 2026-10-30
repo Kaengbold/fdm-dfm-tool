@@ -106,14 +106,22 @@ def build_model(grid: VoxelGrid) -> Model:
     return Model(grid, elems, edof, len(used), node_index.reshape(shape))
 
 
-def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fixed: np.ndarray, rtol: float = 1e-4):
-    """Displacements for nodal ``forces`` (n_nodes, 3) with ``fixed`` node mask (n_nodes,)."""
+def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fixed: np.ndarray, rtol: float = 1e-4,
+          springs: tuple | None = None):
+    """Displacements for nodal ``forces`` (n_nodes, 3) with ``fixed`` node mask (n_nodes,).
+    ``springs`` (nodes, directions (m, 3), stiffness (m,) N/mm): supports that only hold along a
+    direction, e.g. the face normal of a part resting on a surface."""
     ke = element_stiffness(c, model.grid.h)
     n = model.n_nodes * 3
     rows = np.repeat(model.edof, 24, axis=1).ravel()
     cols = np.tile(model.edof, (1, 24)).ravel()
     vals = (scale[:, None] * ke.ravel()[None, :]).ravel()
     k = sp.csr_matrix((vals, (rows, cols)), shape=(n, n))
+    if springs is not None and len(springs[0]):
+        nodes, d, ks = springs
+        block = ks[:, None, None] * d[:, :, None] * d[:, None, :]  # k · d dᵀ per node
+        dof = nodes[:, None] * 3 + np.arange(3)
+        k = k + sp.csr_matrix((block.ravel(), (np.repeat(dof, 3, axis=1).ravel(), np.tile(dof, (1, 3)).ravel())), shape=(n, n))
     free = np.repeat(~fixed, 3)
     kf = k[free][:, free]
     f = forces.ravel()[free]
