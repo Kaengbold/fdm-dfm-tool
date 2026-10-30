@@ -109,4 +109,4 @@ print time/filament are rough. Use it to make better decisions, not to sign off 
 ## License
 
 [AGPL-3.0-or-later](LICENSE). Uses three.js (MIT), Pyodide (MPL-2.0), shapely (BSD),
-manifold-3d (Apache-2.0), occt-import-js and replicad-opencascadejs / OpenCascade (LGPL-2.1), Anthropic TypeScript SDK (MIT).
+manifold-3d (Apache-2.0), occt-import-js and replicad-opencascadejs / OpenCascade (LGPL-2.1), Anthropic TypeScript SDK (MIT). The Atkinson Hyperlegible font (SIL OFL 1.1, Braille Institute) ships in `web/fonts/`.

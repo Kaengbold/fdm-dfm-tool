@@ -163,8 +163,8 @@ def main():
         def levels_and_guide():
             page.click("#show-guide")
             page.click("[data-guide=settings]")
-            simple = page.evaluate("() => [document.body.dataset.level, getComputedStyle(document.getElementById('design-block')).display, getComputedStyle(document.getElementById('my-presets')).display]")
-            assert simple == ["simple", "none", "none"], simple
+            simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
+            assert simple == ["simple", False, False], simple
             page.check("input[name=level][value=expert]")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
             return f"guide -> {simple[0]}; back to expert"

@@ -6,6 +6,7 @@ import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
+import { Steps } from "./steps.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -109,8 +110,15 @@ const state = {
   features: [], // detected holes/posts from the last design suggestion
 };
 
+// Which step can open: everything after the part needs one, everything after "What you have" a finished check.
+const steps = new Steps({
+  ready: (step) => step === "part" ? true
+    : !state.triangles ? "Load a part first"
+    : step === "have" || state.check ? true : "Checking your part…",
+});
+
 // Debug/test hook: lets automated browser tests and devtools inspect the app.
-globalThis.fdm = { state, viewer, call: (...args) => call(...args) };
+globalThis.fdm = { state, viewer, steps, call: (...args) => call(...args) };
 
 const profile = () => ({
   printer: $("printer").value,
@@ -135,13 +143,20 @@ let doneCount = 0;
 
 let progressTimer = 0;
 let workingClock = 0;
+let workFraction = null;
 
 /** The "working" badge over the 3D view: what runs, for how long, and Cancel — visible wherever the sidebar is scrolled. */
 function showWorking(text) {
   $("working-text").textContent = text;
   if (workingClock) return;
   const start = performance.now();
-  const tick = () => ($("working-time").textContent = `${Math.round((performance.now() - start) / 1000)} s`);
+  workFraction = null;
+  const tick = () => {
+    const s = (performance.now() - start) / 1000;
+    // Once the engine reports progress, extrapolate: rough, but says whether to wait or come back.
+    const left = workFraction > 0.05 && workFraction < 1 ? Math.max(1, Math.round((s * (1 - workFraction)) / workFraction)) : null;
+    $("working-time").textContent = left ? `${Math.round(s)} s, about ${left} s left` : `${Math.round(s)} s`;
+  };
   tick();
   workingClock = setInterval(tick, 1000);
   $("working").hidden = false;
@@ -153,9 +168,12 @@ function hideWorking() {
   $("working").hidden = true;
 }
 
-async function busy(text, fn) {
+/** Run ``fn`` with the working badge; ``affects``: the steps whose results it will update. */
+async function busy(text, fn, affects = []) {
   setStatus(text);
   document.body.dataset.busy = ++busyCount;
+  steps.setBusy(affects, true);
+  showAffects();
   // Only show the bar for work that takes a moment; quick checks would just flicker.
   if (busyCount === 1) progressTimer = setTimeout(() => (($("progress").hidden = false), showWorking($("status").textContent)), 400);
   else if (workingClock) showWorking(text);
@@ -166,6 +184,8 @@ async function busy(text, fn) {
     else setStatus(err.message, true);
     throw err;
   } finally {
+    steps.setBusy(affects, false);
+    showAffects();
     document.body.dataset.busy = --busyCount;
     document.body.dataset.done = ++doneCount;
     if (!busyCount) {
@@ -176,9 +196,17 @@ async function busy(text, fn) {
   }
 }
 
+/** Under the working badge: which other steps will change when this finishes. */
+function showAffects() {
+  const names = steps.busyNames();
+  $("working-affects").hidden = !names.length;
+  $("working-affects").textContent = `Updates ${names.join(", ")}`;
+}
+
 /** ``fraction`` 0..1 from the engine, or null for "working, amount unknown". */
 function showProgress(fraction) {
   const bar = $("progress-bar");
+  workFraction = fraction;
   if (fraction == null) bar.removeAttribute("value");
   else bar.value = fraction;
 }
@@ -212,7 +240,7 @@ function showBodyPicker(bodies, active, pick) {
 
 /** ``step``: the STEP file this part came from (and the edits applied so far), or null. */
 async function loadFile(name, bytes, faceIds = null, step = null) {
-  await busy("Reading part…", async () => {
+  await busy("Reading the part…", async () => {
     await engineReady;
     const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
     state.step = step;
@@ -248,7 +276,10 @@ async function partLoaded(info) {
   state.options = [];
   state.check = null;
   renderOptions();
-  $("results").hidden = true;
+  $("view-empty").hidden = true;
+  $("view-key").hidden = false;
+  if (steps.current === "part") steps.go("have");
+  else steps.render();
   await findOrientations();
 }
 
@@ -275,17 +306,21 @@ async function findOrientations(withLoads = false) {
     state.options = [...r.orientations, r.as_loaded];
     renderOptions();
     await selectOption(0);
-  });
+  }, ["orient", "problems", "strength", "settings", "result"]);
 }
 
 async function selectOption(i) {
   state.active = i;
   [...$("options").children].forEach((li, k) => li.classList.toggle("active", k === i));
   state.placed = viewer.showPart(state.triangles, activeOption().rotation);
+  $("view-label").hidden = false;
+  $("view-label").textContent = `${i === 0 ? "Best orientation" : activeOption().label}, ${state.summary.split(": ").pop()}`;
   viewer.clearMarkers(); // remove old orientation's warning boxes immediately
   state.strength = null;
   state.showHeat = false;
   $("strength-result").replaceChildren();
+  $("dynamics").hidden = true;
+  $("dynamics-result").textContent = "";
   renderGcode();
   setZones([]); // zones belong to one orientation
   state.warp = null;
@@ -314,8 +349,8 @@ async function runCheck() {
     $("ai-block").hidden = !AI_ENABLED;
     $("paste-block").hidden = !AI_ENABLED;
     setStatus(state.summary);
-    $("results").hidden = false;
-  });
+    steps.render();
+  }, ["problems", "settings", "result"]);
 }
 
 // ---------- rendering ----------
@@ -335,6 +370,7 @@ function renderOptions() {
 
 const SEVERITY_LABEL = { problem: "Problem", warn: "Warning", info: "Tip" };
 const DOMAIN_LABEL = { geometry: "Design", slicer: "Slicer", process: "Printer & material" };
+const FIX_PATH = { geometry: "Fix: change the design", slicer: "Fix: a slicer setting", process: "Fix: printer or material" };
 
 // Findings are grouped by how the print differs from the CAD model; "info" starts collapsed.
 const IMPACTS = [
@@ -379,7 +415,8 @@ function findingCard(findings, items) {
   );
   if (first.hidden_fixes?.length) {
     const hiddenLabels = first.hidden_fixes.map((d) => DOMAIN_LABEL[d]).join(" / ");
-    fixes.push(el("li", { className: "hint-fix", textContent: `+ More fixes in ${hiddenLabels} (switch "What can you change?" to see them)` }));
+    const where = document.body.dataset.level === "simple" || document.body.dataset.level === "basic" ? "in Advanced" : "with \"What can you change?\"";
+    fixes.push(el("li", { className: "hint-fix", textContent: `More fixes in ${hiddenLabels} ${where}.` }));
   }
 
   const selectFinding = (idx, targetNode = null) => {
@@ -421,9 +458,14 @@ function findingCard(findings, items) {
           selectFinding(items[0].i);
         }
       },
-        el("span", { className: "sev", textContent: SEVERITY_LABEL[worst] }), " ",
-        first.title, items.length > 1 ? ` ×${items.length}` : "",
-        first.goal_note ? el("small", { className: "goal-tag", textContent: ` (${first.goal_note})` }) : ""
+        el("span", { className: "f-head" },
+          el("b", { textContent: first.title + (items.length > 1 ? ` ×${items.length}` : "") }),
+          el("span", { className: "sev", textContent: SEVERITY_LABEL[worst] })),
+        // Readable without opening: what happens, and what kind of fix there is.
+        el("span", { className: "gist", textContent: first.why.split(/(?<=\.)\s/)[0] }),
+        el("span", { className: "paths" },
+          ...[...new Set(first.fixes.map((fx) => fx.domain))].map((d) => el("span", { className: `chip ${d}`, textContent: FIX_PATH[d] })),
+          first.goal_note ? el("small", { className: "goal-tag", textContent: first.goal_note }) : ""),
       ),
       items.length > 1 ? el("ul", { className: "places" }, ...places) : el("p", {
         className: "detail clickable",
@@ -441,13 +483,31 @@ function findingCard(findings, items) {
 function renderCheck() {
   if (!state.check) return;
   const { findings, stats } = state.check;
-  $("stats").textContent = `≈${fmtTime(stats.print_time_min)} · ≈${Math.round(stats.filament_g)} g`;
+  $("stats").textContent = `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament.`;
   $("findings").replaceChildren(
     ...(findings.length ? renderImpactGroups(findings) : [el("li", { className: "ok", textContent: "Should print as designed in this orientation." })]),
   );
   viewer.showFindings(findings);
   renderSettings();
+  renderVerdict();
   recolor();
+}
+
+/** One line on top of Simple's result: can it fail, and what the settings already handle. */
+function renderVerdict() {
+  const { findings } = state.check;
+  const rules = (pred) => new Set(findings.filter(pred).map((f) => f.rule)).size;
+  const fails = rules((f) => f.impact === "fails" && f.severity !== "info");
+  const others = rules((f) => !(f.impact === "fails" && f.severity !== "info") && f.impact !== "info");
+  const settings = effectiveSettings().length;
+  const [kind, head] = fails ? ["warn", `Prints, but ${fails === 1 ? "one thing" : `${fails} things`} can fail`]
+    : others ? ["ok", `Prints, with ${others === 1 ? "one thing" : `${others} things`} to know`]
+    : ["ok", "Prints as designed"];
+  const p = profile();
+  $("verdict").replaceChildren(el("div", { className: `summary-box ${kind}` },
+    el("strong", { textContent: head }),
+    el("span", { textContent: `${state.active === 0 ? "Turned the best way" : `Turned as you picked: ${activeOption()?.label}`}. ${settings} slicer settings for ${state.presets.materials[p.material]?.name ?? p.material} on your ${state.presets.printers[p.printer]?.name ?? p.printer}.` }),
+  ));
 }
 $("show-temp").onchange = () => {
   if ($("show-temp").checked) state.showHeat = false;
@@ -540,6 +600,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
+  steps.reveal($("pick-panel"));
   state.showHeat = false;
   recolor();
 });
@@ -662,8 +723,8 @@ function loadEditor(l) {
     el("p", { className: "hint", textContent: "Changes apply the next time you check strength." }));
 }
 
-const HOLD_TEXT = { clamped: "🔒 Clamped / glued here", resting: "🔒 Resting here (only pushes back)", screw: "🔒 Screw / bolt here" };
-const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `➜ ${multiCase() ? `Case ${l.case}: ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
+const HOLD_TEXT = { clamped: "Held: clamped or glued", resting: "Held: resting (only pushes back)", screw: "Held: screw or bolt" };
+const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
 
 // The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
 const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,
@@ -732,6 +793,7 @@ function renderLoads() {
   );
   $("run-strength").disabled = !readyForStrength();
   $("run-optimise").disabled = !readyForStrength();
+  $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
   $("pick-hint").hidden = state.loads.length > 1;
 }
 
@@ -819,9 +881,27 @@ async function runStrength(fine = false) {
     renderStrength();
     setStatus(state.summary);
     return r;
-  });
+  }, ["strength", "result"]);
 }
 $("run-strength").onclick = () => runStrength();
+
+// ---------- strength: shaking and knocks (optional, Advanced) ----------
+for (const [box, row] of [["dyn-shake", "dyn-shake-row"], ["dyn-drop", "dyn-drop-row"]]) {
+  $(box).onchange = () => {
+    $(row).hidden = !$(box).checked;
+    $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
+  };
+}
+$("run-dynamics").onclick = () =>
+  busy("Working out how it swings and how hard a drop hits…", async () => {
+    const r = await call("dynamics", {
+      up: activeOption().up, loads: state.loads, profile: profile(),
+      mounted_kg: $("dyn-shake").checked ? Number($("dyn-kg").value) || 0 : 0,
+      drop_mm: $("dyn-drop").checked ? Number($("dyn-mm").value) || 0 : 0,
+    });
+    $("dynamics-result").textContent = r.explanation.replace(" Shown: how it swings (exaggerated).", "");
+    setStatus(state.summary);
+  }, ["strength"]);
 
 // ---------- strength: FEA result view ----------
 const f32 = (b) => new Float32Array(b.slice().buffer);
@@ -945,15 +1025,16 @@ function strengthViewControls(r) {
     from("advanced", el("label", {}, "Show bending (exaggerated) ", bend)),
     from("advanced", el("div", { className: "row" }, axis, cut)),
     from("advanced", el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." })),
-    from("expert", el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` })),
+    from("advanced", el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` })),
     r.accuracy ? el("p", { className: "hint", textContent: r.accuracy }) : "",
-    r.fine ? "" : from("expert", el("button", { textContent: "Check accuracy with a finer grid (slower)", onclick: () => runStrength(true),
+    r.fine ? "" : from("advanced", el("button", { textContent: "Check accuracy with a finer grid (slower)", onclick: () => runStrength(true),
       title: "Runs again with 3× more cubes. If the answer barely changes, you can trust it (the usual check in FEA software)." })));
 }
 
 function renderStrength() {
   const r = state.strength;
   const sf = r.safety_factor;
+  $("dynamics").hidden = false;
   $("strength-result").replaceChildren(
     el(
       "div",
@@ -1624,7 +1705,7 @@ $("design-on").onclick = () => {
 };
 $("edit-shells").onclick = () => {
   const d = document.querySelector(".shells");
-  d.open = true;
+  steps.reveal(d);
   d.scrollIntoView({ behavior: "smooth", block: "center" });
 };
 // Clicking the option that is already chosen still answers, so it doesn't look frozen.
@@ -1646,16 +1727,18 @@ document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () =>
 updateModeNote();
 updateGoalNote();
 
-$("cancel").onclick = cancelEngine;
 $("working-cancel").onclick = cancelEngine;
 
 // ---------- levels and the start guide ----------
-const LEVELS = ["simple", "advanced", "expert"];
+const LEVELS = ["simple", "basic", "advanced", "expert"];
 function setLevel(level) {
+  if (level === "advanced-old") level = "advanced";
   if (!LEVELS.includes(level)) return;
   document.body.dataset.level = level;
   document.querySelector(`input[name=level][value=${level}]`).checked = true;
   localStorage.setItem("fdm-level", level);
+  steps.setLevel(level);
+  setTimeout(() => viewer.resize()); // the step list comes and goes (Expert), so the 3D view changes size
 }
 for (const r of document.querySelectorAll("input[name=level]")) r.onchange = () => setLevel(r.value);
 setLevel(new URLSearchParams(location.search).get("level") ?? localStorage.getItem("fdm-level") ?? "simple");
@@ -1669,10 +1752,10 @@ function setMode(value) {
 }
 
 const GUIDE = {
-  settings: { level: "simple", mode: "print", next: "Drop your part (or try a sample): you get the best orientation, what could go wrong, and slicer settings." },
-  strength: { level: "simple", mode: "print", next: "Drop your part, then click the face where it's held and the face where the load is (Strength). The tool finds what holds." },
-  steps: { level: "advanced", mode: "both", next: "Drop your part. Then go down the list: orientation, problems, strength, design changes, slicer settings." },
-  expert: { level: "expert", mode: "both", next: "Everything is shown. Drop a part to start." },
+  settings: { level: "simple", mode: "print", next: "Drop your part, or try a sample." },
+  strength: { level: "basic", mode: "print", next: "Drop your part, or try a sample. Then follow the steps on the left." },
+  steps: { level: "advanced", mode: "both", next: "Drop your part, or try a sample. Then follow the steps on the left." },
+  expert: { level: "expert", mode: "both", next: "Everything is on this page. Drop a part to start." },
 };
 for (const b of document.querySelectorAll("[data-guide]")) {
   b.onclick = () => {
@@ -1684,8 +1767,18 @@ for (const b of document.querySelectorAll("[data-guide]")) {
     setStatus(g.next);
   };
 }
-$("show-guide").onclick = () => $("guide").showModal();
-if (!localStorage.getItem("fdm-guided") && !new URLSearchParams(location.search).has("level")) $("guide").showModal();
+/** The guide marks the level you are on and starts there, so Enter keeps it. */
+function openGuide() {
+  const level = document.body.dataset.level;
+  for (const b of document.querySelectorAll("[data-guide]")) {
+    const now = GUIDE[b.dataset.guide].level === level;
+    b.classList.toggle("current", now);
+    b.toggleAttribute("autofocus", now);
+  }
+  $("guide").showModal();
+}
+$("show-guide").onclick = openGuide;
+if (!localStorage.getItem("fdm-guided") && !new URLSearchParams(location.search).has("level")) openGuide();
 
 // ---------- input ----------
 $("file").onchange = async (e) => {
