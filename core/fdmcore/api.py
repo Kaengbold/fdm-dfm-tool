@@ -994,15 +994,11 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "The plastic itself is the limit there: more cross-section is the direct fix.", "changes the shape")
 
     # Other materials: stresses don't depend on stiffness here, only the strengths change.
-    lay, mat_fi = base["fi_layers_max"], base["fi_material_max"]
-    cur = p.material
-    cur_z = cur["tensile_xy_mpa"] * p.z_strength_factor
     for mid, m in presets()["materials"].items():
         if mid == p.material_id or mid.startswith("tpu") or m.get("based_on", "").startswith("tpu"):
             continue
         other = Profile.from_dict({**(profile or {}), "material": mid})
-        worst = max(lay * cur_z / (m["tensile_xy_mpa"] * other.z_strength_factor), mat_fi * cur["tensile_xy_mpa"] / m["tensile_xy_mpa"])
-        sf = 1 / worst if worst > 0 else float("inf")
+        sf = _scaled_safety(base, p, other)
         if sf <= base["safety_factor"] * 1.15:  # only clearly stronger ones
             continue
         needs = []
@@ -1016,6 +1012,83 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             f"{m['name']} is stronger{' and its layers bond better' if other.z_strength_factor > p.z_strength_factor else ''}.",
             "needs " + ", ".join(needs) if needs else "", material=mid)
     out.sort(key=lambda o: -(o["safety_factor"] or 0))
+    return out
+
+
+def _scaled_safety(base: dict, p: Profile, other: Profile) -> float:
+    """Safety factor of ``base`` (a strength result in ``p``'s material) printed in ``other``'s
+    material instead: stresses barely depend on stiffness here, only the strengths change — at room
+    temperature and at the temperature it's used at (service.heat_factor)."""
+    from .service import heat_factor
+
+    cur, m = p.material, other.material
+    k = heat_factor(other) / max(heat_factor(p), 1e-9)
+    worst = max(base["fi_layers_max"] * cur["tensile_xy_mpa"] * p.z_strength_factor / (m["tensile_xy_mpa"] * other.z_strength_factor),
+                base["fi_material_max"] * cur["tensile_xy_mpa"] / m["tensile_xy_mpa"]) / k
+    return 1 / worst if worst > 0 else float("inf")
+
+
+UV_WORDS = {"good": "made for sunlight", "fair": "fades a little in sunlight over the years", "poor": "turns brittle and yellow in sunlight"}
+
+
+def material_advice(profile: dict | None = None, up=None, loads: list[dict] | None = None, outdoors: bool = False,
+                    flexible: bool = False) -> list[dict]:
+    """Which material to print it in: every material with "good" / "with care" / "not suitable" and
+    the reasons — heat where it's used (profile ``use_temp_c``), sunlight (``outdoors``), a flexible
+    part, what this printer can print (enclosure, hardened nozzle), and with ``up`` and ``loads``
+    the safety factor for the load. Best first."""
+    from .service import heat_factor, heat_limit, required_safety
+    from .strength import verdict
+
+    p = Profile.from_dict(profile)
+    base = None
+    if up is not None and loads:
+        from .strength import evaluate_cases
+
+        base = evaluate_cases(_load_case(loads), up, p, _shells(p))
+    need = required_safety(p)
+    out = []
+    for mid, m in presets()["materials"].items():
+        other = Profile.from_dict({**(profile or {}), "material": mid})
+        bad, care, good = [], [], []
+        is_flexible = mid.startswith("tpu") or m.get("based_on", "").startswith("tpu")
+        if flexible != is_flexible:
+            bad.append("flexible (rubbery)" if is_flexible else "stiff, not flexible")
+        elif flexible:
+            good.append("flexible")
+        t = p.use_temp_c
+        if t is not None and t > 23:
+            limit = heat_limit(other)
+            if t >= limit:
+                bad.append(f"goes soft around {limit:.0f} °C (you need {t:.0f} °C)")
+            elif t >= limit - 15:
+                care.append(f"close to where it goes soft (~{limit:.0f} °C)")
+            else:
+                good.append(f"takes the heat (soft only from ~{limit:.0f} °C)")
+        if outdoors:
+            uv = m.get("uv_resistance", "fair")
+            (bad if uv == "poor" else care if uv == "fair" else good).append(UV_WORDS[uv])
+        if m["abrasive"] and not p.printer.get("hardened_nozzle"):
+            bad.append(f"needs a hardened nozzle (the {p.printer['name']} doesn't have one)")
+        if m["warp_risk"] == "high" and p.enclosure == "none":
+            care.append("warps on an open printer: needs an enclosure")
+        elif m["warp_risk"] != "low" and p.enclosure == "none":
+            care.append("may warp on an open printer")
+        if m["hygroscopic"] == "high":
+            care.append("keep the filament dry")
+        sf = None
+        if base is not None:
+            sf = float(_scaled_safety(base, p, other))
+            v = verdict(sf, need)
+            (good if v == "fine" else care if v == "borderline" else bad).append(f"holds your load ×{sf:.1f}")
+        rating = "not suitable" if bad else "with care" if care else "good"
+        fuss = {"low": 0, "medium": 1, "high": 2}[m["warp_risk"]] + (m["hygroscopic"] == "high") + bool(m["abrasive"])
+        out.append({"material": mid, "name": m["name"], "rating": rating, "safety_factor": sf,
+                    "reasons": bad + care + good, "current": mid == p.material_id, "_fuss": fuss})
+    order = {"good": 0, "with care": 1, "not suitable": 2}
+    out.sort(key=lambda r: (order[r["rating"]], r["_fuss"], -(r["safety_factor"] or 0)))  # easiest of the good ones first
+    for r in out:
+        del r["_fuss"]
     return out
 
 
@@ -1319,6 +1392,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "warping": warping,
     "set_fit": set_fit,
+    "material_advice": material_advice,
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,

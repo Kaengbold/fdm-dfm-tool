@@ -55,6 +55,7 @@ MATERIAL_FIELDS = {
     "shrinkage_pct": (float, 0, 5),
     "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
     "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
+    "uv_resistance": (("good", "fair", "poor"), None, None),
     "fit_gap_mm": ("fits", 0.0, 2.0),  # measured with the fit test print: {"press", "snug", "sliding", "loose"}
 }
 ENCLOSURES = ("none", "passive", "heated")

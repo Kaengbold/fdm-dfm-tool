@@ -121,6 +121,8 @@ materials:
   # transition for PLA (~60 °C, Grasso et al. 2018, Rapid Prototyping Journal, doi:10.1108/RPJ-04-2017-0055),
   # PETG, ABS, ASA and PC (typical datasheet values); for semi-crystalline PA-CF and soft TPU a conservative
   # heat-deflection value. Approximate: brand datasheets (research job G-3) should replace them.
+  # uv_resistance: how it lasts in sunlight. ASA is made for outdoor use (it replaces ABS there); PLA and ABS
+  # turn brittle / yellow; PETG, PC, nylon and TPU are in between. General polymer knowledge, approximate (G-3).
   pla:
     name: PLA
     max_overhang_deg: 55
@@ -141,6 +143,7 @@ materials:
     fan_pct: 100          # part cooling on small layers
     softening_c: 45       # Orca's temperature_vitrification
     heat_limit_c: 60      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: poor     # outdoors in sunlight: good | fair | poor (see note above materials)
   petg:
     name: PETG
     max_overhang_deg: 45
@@ -160,6 +163,7 @@ materials:
     fan_pct: 100          # part cooling on small layers
     softening_c: 70       # Orca's temperature_vitrification
     heat_limit_c: 80      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
   abs:
     name: ABS
     max_overhang_deg: 40
@@ -179,6 +183,7 @@ materials:
     fan_pct: 80          # part cooling on small layers
     softening_c: 110       # Orca's temperature_vitrification
     heat_limit_c: 105      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: poor     # outdoors in sunlight: good | fair | poor (see note above materials)
   pa_cf:
     name: PA-CF (carbon fibre nylon)
     max_overhang_deg: 45
@@ -198,6 +203,7 @@ materials:
     fan_pct: 60          # part cooling on small layers
     softening_c: 108       # Orca's temperature_vitrification
     heat_limit_c: 120      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
 
   # Added in T-026 (typical TDS values: Polymaker, eSUN, Prusament; rough, for estimates only).
   pla_plus:
@@ -219,6 +225,7 @@ materials:
     fan_pct: 100          # part cooling on small layers
     softening_c: 45       # Orca's temperature_vitrification
     heat_limit_c: 60      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: poor     # outdoors in sunlight: good | fair | poor (see note above materials)
   asa:
     name: ASA
     max_overhang_deg: 45
@@ -238,6 +245,7 @@ materials:
     fan_pct: 80          # part cooling on small layers
     softening_c: 110       # Orca's temperature_vitrification
     heat_limit_c: 100      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: good     # outdoors in sunlight: good | fair | poor (see note above materials)
   pc:
     name: PC (polycarbonate)
     max_overhang_deg: 40
@@ -257,6 +265,7 @@ materials:
     fan_pct: 60          # part cooling on small layers
     softening_c: 120       # Orca's temperature_vitrification
     heat_limit_c: 145      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
   tpu_95a:
     name: TPU 95A (flexible)
     max_overhang_deg: 40
@@ -276,6 +285,7 @@ materials:
     fan_pct: 100          # part cooling on small layers
     softening_c: 30       # Orca's temperature_vitrification
     heat_limit_c: 70      # loses most stiffness here (glass transition; approx., see note above materials)
+    uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
 
 nozzles:
   "0.2": {line_width: 0.22, layer_height: 0.1}

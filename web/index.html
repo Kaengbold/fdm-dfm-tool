@@ -48,6 +48,16 @@
         <label>Material <select id="material"></select></label>
         <label>Nozzle <select id="nozzle"></select></label>
       </div>
+      <details id="advice" class="advice">
+        <summary>Which material suits it?</summary>
+        <div class="row">
+          <label class="toggle"><input id="adv-outdoors" type="checkbox" /> Used outdoors in the sun</label>
+          <label class="toggle"><input id="adv-flexible" type="checkbox" /> Must be flexible</label>
+          <button id="run-advice">Compare materials</button>
+        </div>
+        <p class="hint">Uses where it's used (heat), what your printer can print and — once you've set loads — how strong each one is.</p>
+        <ul id="advice-list" class="options"></ul>
+      </details>
       <label class="toggle" id="mm-row" data-min="advanced"><input id="multi-material" type="checkbox" /> Multi-material (AMS / MMU) available</label>
       <details id="my-presets" class="my-presets" data-min="advanced">
         <summary>My printers &amp; materials</summary>

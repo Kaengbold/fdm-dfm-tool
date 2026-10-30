@@ -172,6 +172,23 @@ def detailed_strength(
 
 
 @server.tool()
+def material_advice(
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    use_temp_c: float | None = None,
+    outdoors: bool = False,
+    flexible: bool = False,
+    up: list[float] | None = None,
+    loads: list[dict] | None = None,
+) -> list[dict]:
+    """Which material to print it in: each one rated good / with care / not suitable with reasons —
+    heat where it's used, sunlight, flexible or not, what the printer can print, and with ``up`` and
+    ``loads`` (as in check_strength) the safety factor for the load. Best (and easiest) first."""
+    return api.material_advice(_profile(printer, material, nozzle, use_temp_c=use_temp_c), up, loads, outdoors, flexible)
+
+
+@server.tool()
 def set_fit(region: int, up: list[float], partner_mm: float | None = None, fit: str = "sliding", material: str = "pla") -> dict:
     """Say what goes into a round hole (or what a round post goes into): the mating part's diameter in mm
     and the fit: "press", "snug", "sliding" or "loose". Returns the diameter to model and why;

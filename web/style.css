@@ -25,6 +25,8 @@ body[data-level="advanced"] [data-min="expert"] { display: none !important; }
 .use { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .use select { width: 100%; }
 
+.advice .row { flex-wrap: wrap; gap: 8px; }
+
 :root {
   --ok: #9aa5b1;
   --borderline: #f0b429;

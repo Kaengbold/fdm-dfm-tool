@@ -367,6 +367,18 @@ def main():
             return text.splitlines()[1][:140]
         run.step("used in a hot car", hot_car)
 
+        def material_advisor():
+            page.locator("#advice > summary").click()
+            page.check("#adv-outdoors")
+            run.act(lambda: page.click("#run-advice"), 300_000)
+            items = page.locator("#advice-list > li").all_inner_texts()
+            assert len(items) >= 6 and any("holds your load" in i for i in items), items
+            assert any(i.startswith("ASA") for i in items[:3]), items[:3]  # made for sunlight
+            page.uncheck("#adv-outdoors")
+            page.locator("#advice > summary").click()
+            return " | ".join(i.splitlines()[0] for i in items[:4])
+        run.step("material advisor", material_advisor)
+
         def detailed():
             # Slice the part shown with the local OrcaSlicer (like a user would), then load the G-code.
             sys.path.insert(0, str(ROOT / "core"))

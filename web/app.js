@@ -1038,6 +1038,24 @@ async function runOptimise() {
 }
 $("run-optimise").onclick = runOptimise;
 
+// ---------- material advisor ----------
+const RATING_CLASS = { good: "fine", "with care": "borderline", "not suitable": "likely-to-break" };
+$("run-advice").onclick = () =>
+  busy("Comparing materials…", async () => {
+    const withLoad = Boolean(activeOption()) && readyForStrength();
+    const list = await call("material_advice", { profile: profile(), outdoors: $("adv-outdoors").checked, flexible: $("adv-flexible").checked,
+      ...(withLoad ? { up: activeOption().up, loads: state.loads } : {}) });
+    $("advice-list").replaceChildren(...list.map((r) =>
+      el("li", { className: `verdict ${RATING_CLASS[r.rating]}` },
+        el("strong", { textContent: `${r.name} — ${r.rating}${r.current ? " (selected)" : ""}` }),
+        el("p", { className: "hint", textContent: r.reasons.join(" · ") || "Nothing against it." }),
+        r.current || r.rating === "not suitable" ? "" : el("button", { textContent: `Use ${r.name}`, onclick: () => {
+          $("material").value = r.material;
+          $("material").dispatchEvent(new Event("change"));
+        } }))));
+    setStatus(withLoad ? "Materials compared, including your load." : "Materials compared (set a load in Strength to compare strength too).");
+  });
+
 // Where the part is used changes the checks (too hot?) and the strength (weaker when warm, more margin for loads that stay on).
 for (const id of ["use-temp", "constant-load"]) {
   $(id).onchange = async () => {

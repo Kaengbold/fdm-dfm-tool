@@ -43,7 +43,8 @@ const NEEDS_SCIPY = new Set(["regions", "strength", "strength_options", "optimis
 // Loads and marked faces need face regions (scipy) too.
 const marksFaces = (args) => args?.faces && Object.values(args.faces).some((ids) => ids?.length);
 const needsScipy = (method, args) =>
-  NEEDS_SCIPY.has(method) || (method === "orientations" && (args?.loads?.length || marksFaces(args))) || (method === "check" && marksFaces(args));
+  NEEDS_SCIPY.has(method) || (method === "orientations" && (args?.loads?.length || marksFaces(args))) || (method === "check" && marksFaces(args)) ||
+  (method === "material_advice" && args?.loads?.length);
 
 onmessage = async ({ data: { id, method, args, data } }) => {
   try {
