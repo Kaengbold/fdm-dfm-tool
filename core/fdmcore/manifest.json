@@ -21,6 +21,7 @@
  "recommend.py",
  "refine.py",
  "regions.py",
+ "service.py",
  "slicer.py",
  "strength.py",
  "voxel.py",

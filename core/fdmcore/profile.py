@@ -54,6 +54,7 @@ MATERIAL_FIELDS = {
     "density_g_cm3": (float, 0.5, 3.0),
     "shrinkage_pct": (float, 0, 5),
     "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
+    "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
 }
 ENCLOSURES = ("none", "passive", "heated")
 
@@ -116,6 +117,8 @@ class Profile:
     nozzle: str = "0.4"
     multi_material: bool = False  # AMS / MMU / second nozzle available (support interfaces in another material)
     goal: str = "balanced"  # what orientation and settings optimise for: see GOALS
+    use_temp_c: float | None = None  # hottest the part gets in use (sun, car, near a heater); None = room
+    constant_load: bool = False  # the load stays on (hangs permanently): plastic slowly creeps
 
     @property
     def printer(self) -> dict:
@@ -154,6 +157,8 @@ class Profile:
             nozzle=str(d.get("nozzle", cls.nozzle)),
             multi_material=bool(d.get("multi_material", False)),
             goal=d.get("goal", "balanced"),
+            use_temp_c=None if d.get("use_temp_c") in (None, "") else float(d["use_temp_c"]),
+            constant_load=bool(d.get("constant_load", False)),
         )
         if p.goal not in GOALS:
             raise ValueError(f"Unknown goal: {p.goal} (use one of {', '.join(GOALS)})")

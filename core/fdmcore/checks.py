@@ -55,6 +55,7 @@ RULE_IMPACT = {
     "support_marks": "surface",
     "fine_detail_rough": "surface",
     "shallow_relief": "surface",
+    "too_hot_in_use": "weak",
     "dry_filament": "surface",
     "weak_upright_pin": "weak",
     "thin_neck": "weak",
@@ -146,6 +147,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
     findings += _relief_findings(mesh, profile, T)
+    findings += _use_heat_findings(profile, T)
 
     for f in findings:
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
@@ -540,6 +542,24 @@ def _inside(box, outer, tol: float = 1.0) -> bool:
     """Box centre inside ``outer`` (both [[x0,y0,z0],[x1,y1,z1]]), with some slack."""
     c = (np.asarray(box[0]) + np.asarray(box[1])) / 2
     return bool(np.all(c >= np.asarray(outer[0]) - tol) and np.all(c <= np.asarray(outer[1]) + tol))
+
+
+def _use_heat_findings(profile: Profile, T: dict) -> list[dict]:
+    """The part gets near or past the temperature where the material goes soft."""
+    from .service import heat_factor, heat_limit
+
+    t = profile.use_temp_c
+    if t is None:
+        return []
+    limit = heat_limit(profile)
+    if t < limit - T["use_heat"]["warn_within_c"]:
+        return []
+    name, k = profile.material["name"], heat_factor(profile)
+    if t >= limit:
+        return [_finding("too_hot_in_use", "problem", f"At {t:.0f} °C {name} is soft (it goes soft around {limit:.0f} °C): "
+                         f"only about {k:.0%} of its stiffness is left, it will bend or sag", use_temp_c=t, heat_limit_c=limit)]
+    return [_finding("too_hot_in_use", "warn", f"At {t:.0f} °C {name} is close to where it goes soft (~{limit:.0f} °C): "
+                     f"about {k:.0%} of its strength is left, and loads that stay on make it creep", use_temp_c=t, heat_limit_c=limit)]
 
 
 def _relief_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:

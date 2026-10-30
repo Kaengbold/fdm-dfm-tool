@@ -357,6 +357,16 @@ def main():
             return text.splitlines()[1][:120]
         run.step("walls set by hand go into strength and the 3MF", shells)
 
+        def hot_car():
+            run.act(lambda: page.select_option("#use-temp", "70"), 300_000)
+            page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('°C')", timeout=300_000)
+            text = page.locator("#strength-result").inner_text()
+            found = findings(page)
+            run.act(lambda: page.select_option("#use-temp", ""), 300_000)
+            assert any("Too Hot" in f for f in found) or "ASA" in page.input_value("#material").upper(), found
+            return text.splitlines()[1][:140]
+        run.step("used in a hot car", hot_car)
+
         def detailed():
             # Slice the part shown with the local OrcaSlicer (like a user would), then load the G-code.
             sys.path.insert(0, str(ROOT / "core"))

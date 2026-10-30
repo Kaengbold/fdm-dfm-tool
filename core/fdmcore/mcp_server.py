@@ -32,8 +32,9 @@ server = MCPServer(
 )
 
 
-def _profile(printer: str, material: str, nozzle: str, goal: str = "balanced") -> dict:
-    return {"printer": printer, "material": material, "nozzle": nozzle, "goal": goal}
+def _profile(printer: str, material: str, nozzle: str, goal: str = "balanced", use_temp_c: float | None = None,
+             constant_load: bool = False) -> dict:
+    return {"printer": printer, "material": material, "nozzle": nozzle, "goal": goal, "use_temp_c": use_temp_c, "constant_load": constant_load}
 
 
 def _clean(value):
@@ -99,11 +100,13 @@ def check_print(
     nozzle: str = "0.4",
     mode: str = "both",
     faces: dict[str, list[int]] | None = None,
+    use_temp_c: float | None = None,
 ) -> dict:
     """Printability findings, rough print time/filament and recommended slicer settings for one orientation.
     mode: 'print' (can't change the model), 'design' (can't change slicer settings) or 'both'.
-    ``faces`` as in find_orientations: support on a "clean" face is reported as a problem."""
-    return _clean(api.check(up, _profile(printer, material, nozzle), mode, faces))
+    ``faces`` as in find_orientations: support on a "clean" face is reported as a problem.
+    use_temp_c: hottest the part gets in use (warns near the material's heat limit)."""
+    return _clean(api.check(up, _profile(printer, material, nozzle, use_temp_c=use_temp_c), mode, faces))
 
 
 @server.tool()
@@ -124,8 +127,11 @@ def check_strength(
     top: int | None = None,
     bottom: int | None = None,
     fine: bool = False,
+    use_temp_c: float | None = None,
+    constant_load: bool = False,
 ) -> dict:
-    """Rough strength check. fine=True: a finer grid (slower); compare with the normal one to see how
+    """Rough strength check. use_temp_c: hottest the part gets in use (weaker when warm, soft near the
+    material's heat limit); constant_load: the load stays on (creep: needs ×3 instead of ×2). fine=True: a finer grid (slower); compare with the normal one to see how
     far to trust the answer. walls (lines), infill (0–1), top/bottom (solid layers): how it is
     printed; omitted = the goal's usual settings. loads: [{"region": id, "kind": "fixed", "hold": "clamped"|"resting"|"screw"},
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
@@ -133,7 +139,8 @@ def check_strength(
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
     (default 3) — for an edge, a corner or part of a big face.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
-    return _clean(api.strength(up, loads, _profile(printer, material, nozzle), walls, infill, top, bottom, fine))
+    return _clean(api.strength(up, loads, _profile(printer, material, nozzle, use_temp_c=use_temp_c, constant_load=constant_load),
+                               walls, infill, top, bottom, fine))
 
 
 @server.tool()
@@ -198,13 +205,15 @@ def optimise_strength(
     goal: str = "balanced",
     target: float | None = None,
     zones: bool = False,
+    use_temp_c: float | None = None,
+    constant_load: bool = False,
 ) -> dict:
     """Lightest walls / top-bottom layers / infill that reach ``target`` safety (default ×2, ×3 for
     goal "strength"), for this orientation and the strongest one. Returns slicer ``settings``,
     grams, ``explanation`` and the steps tried. Takes up to a minute. ``zones=True`` also tries
     stronger zones only around the most stressed places (returned as ``zoned``, with ``zones`` to
     pass to export_3mf)."""
-    return _clean(api.optimise_strength(up, loads, _profile(printer, material, nozzle, goal), target, zones))
+    return _clean(api.optimise_strength(up, loads, _profile(printer, material, nozzle, goal, use_temp_c, constant_load), target, zones))
 
 
 @server.tool()

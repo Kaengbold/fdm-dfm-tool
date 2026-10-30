@@ -118,6 +118,8 @@ const profile = () => ({
   nozzle: $("nozzle").value,
   multi_material: $("multi-material").checked,
   goal: document.querySelector("input[name=goal]:checked").value,
+  use_temp_c: $("use-temp").value === "" ? null : Number($("use-temp").value),
+  constant_load: $("constant-load").checked,
 });
 const mode = () => document.querySelector("input[name=mode]:checked").value;
 const activeOption = () => state.options[state.active];
@@ -1035,6 +1037,15 @@ async function runOptimise() {
   });
 }
 $("run-optimise").onclick = runOptimise;
+
+// Where the part is used changes the checks (too hot?) and the strength (weaker when warm, more margin for loads that stay on).
+for (const id of ["use-temp", "constant-load"]) {
+  $(id).onchange = async () => {
+    if (!activeOption()) return;
+    await runCheck();
+    if (state.strength) await runStrength();
+  };
+}
 
 /** Strengthening zones (slicer modifier volumes) from the optimiser; shown as boxes and put in the 3MF. */
 function setZones(zones) {

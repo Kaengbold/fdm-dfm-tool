@@ -29,6 +29,7 @@ from .profile import Profile, load_data, presets
 from . import progress
 from .progress import stage
 from .recommend import recommend_settings
+from .service import required_safety
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
 
@@ -187,13 +188,14 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
             sfs = cases_safety(case, ups, p, _shells(p))
         strongest = float(max(sfs[:-1].max(initial=0.0), 1e-9))
         relative = STRENGTH_RATIO_WEIGHT.get(p.goal, STRENGTH_RATIO_WEIGHT["balanced"])
+        need = required_safety(p)
         for r, sf in zip([*candidates, as_loaded], sfs):
             sf = float(sf)
             safety[id(r)] = sf
-            r.reasons.append(_strength_reason(sf, verdict(sf), strongest))
+            r.reasons.append(_strength_reason(sf, verdict(sf, need), strongest))
             # Below ×2 it may break; above, a much stronger direction is still worth something
             # (how much depends on the goal), so "strong enough either way" doesn't hide a 2× difference.
-            r.penalize("strength", STRENGTH_WEIGHT * max(0.0, 2.0 - sf) + relative * np.log2(strongest / max(sf, 1e-9)))
+            r.penalize("strength", STRENGTH_WEIGHT * max(0.0, need - sf) + relative * np.log2(strongest / max(sf, 1e-9)))
         candidates.sort(key=lambda r: r.score)
         strongest_option = max(candidates, key=lambda r: safety[id(r)])
     elif p.goal == "strength":
@@ -446,7 +448,7 @@ MAX_SCORE_GAP = 3.0  # options scoring this much worse than the best are not sho
 
 
 def _strength_reason(sf: float, verdict: str, strongest: float | None = None) -> str:
-    out = f"Strong enough for your load (safety ×{sf:.1f})" if sf >= 2 else f"{verdict.capitalize()} under your load (safety ×{sf:.1f})"
+    out = f"Strong enough for your load (safety ×{sf:.1f})" if verdict == "fine" else f"{verdict.capitalize()} under your load (safety ×{sf:.1f})"
     if strongest and strongest / max(sf, 1e-9) >= 1.2:
         out += f" — the strongest direction holds {strongest / sf:.1f}× more"
     elif strongest:
@@ -472,7 +474,26 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     }[r["mode"]]
     near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
             " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
-    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red arrow). {why}{near}"
+    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red arrow). {why}{near}{_use_story(p)}"
+
+
+def _use_story(p: Profile) -> str:
+    """What heat and a load that stays on do to the result, in plain words."""
+    from .service import CONSTANT_LOAD_SAFETY, heat_factor, heat_limit
+
+    out = ""
+    k = heat_factor(p)
+    if k < 0.999:
+        name, limit, t = p.material["name"], heat_limit(p), p.use_temp_c
+        if t >= limit:
+            out += (f" At {t:.0f} °C {name} is past the point where it goes soft (about {limit:.0f} °C): it keeps only about {k:.0%} of"
+                    " its stiffness and strength and will sag or bend over time even under a small load. A material that takes more heat is the real fix.")
+        else:
+            out += f" At {t:.0f} °C {name} keeps only about {k:.0%} of its strength and stiffness (already included above)."
+    if p.constant_load:
+        out += (f" The load stays on: plastic slowly stretches under a constant load (creep), so it needs about ×{CONSTANT_LOAD_SAFETY:.0f}"
+                " instead of ×2. Warmth makes creep much worse.")
+    return out
 
 
 OPT_TARGET = {"strength": 3.0}  # safety the optimiser aims for, by goal (default 2.0)
@@ -493,7 +514,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     s = _require()
     p = Profile.from_dict(profile)
     cases = _load_case(loads)
-    target = float(target or OPT_TARGET.get(p.goal, 2.0))
+    target = float(target or max(OPT_TARGET.get(p.goal, 2.0), required_safety(p)))
     up = (np.asarray(up, float) / np.linalg.norm(up)).tolist()
     axes = np.vstack([np.eye(3), -np.eye(3)])
     strongest = axes[int(np.argmax(cases_safety(cases, axes, p, _shells(p))))]
@@ -900,7 +921,7 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
 
     def add(change, kind, sf, why, cost="", **extra):
         out.append({"change": change, "kind": kind, "safety_factor": None if sf is None else float(sf),
-                    "verdict": None if sf is None else verdict(sf), "why": why, "cost": cost, **extra})
+                    "verdict": None if sf is None else verdict(sf, required_safety(p)), "why": why, "cost": cost, **extra})
 
     def slicer(change, shells, why, settings):
         sf = evaluate_strength(case, up, p, shells)["safety_factor"]

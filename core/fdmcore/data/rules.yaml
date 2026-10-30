@@ -201,6 +201,26 @@ rules:
     - strength
     - fillet
     - stress-concentration
+  too_hot_in_use:
+    title: Gets Too Hot Where It's Used
+    why: Printed plastic loses stiffness and strength as it warms up and goes soft near its glass transition
+      (PLA around 60 °C, measured on printed PLA it keeps only about a quarter of its stiffness there). In a car
+      in the sun, near a heater or a motor, it bends, sags or slowly creeps out of shape, even under small loads.
+    fixes:
+    - domain: process
+      text: Print it in a material that takes more heat — PETG (~80 °C), ASA or ABS (~100 °C), PC (~145 °C).
+    - domain: process
+      text: Annealing some PLA blends in an oven raises their heat resistance, but the part shrinks and may warp;
+        test with a spare print first.
+    - domain: geometry
+      text: Keep loads small and support the part well; thicker sections help a little, but not past the softening point.
+    tags:
+    - heat
+    - material
+    - creep
+    sources:
+    - Grasso et al. 2018, Effect of temperature on the mechanical properties of 3D-printed PLA tensile specimens,
+      Rapid Prototyping Journal, https://doi.org/10.1108/RPJ-04-2017-0055
   shallow_relief:
     title: Raised or Engraved Detail Too Shallow
     why: Text, logos or other details raised from or sunk into a face that points up are only a layer or two high.

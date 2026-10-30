@@ -8,6 +8,10 @@ features:
   single_wall_below_nozzle: 2.0   # walls thinner than this get only one perimeter -> weak [min_wall_thickness_and_arachne]
   single_wall_min_height_mm: 5    # only report single-perimeter walls that stand at least this tall
 
+use_heat:
+  # Warned when the part is used this close to (or above) the material's heat limit (presets heat_limit_c).
+  warn_within_c: 15
+
 relief:
   # Raised (embossed) or sunk (engraved) text and details on faces that point up when printed: the
   # slicer cuts the part once per layer, so a step of one layer or less may vanish, and under 0.4 mm /

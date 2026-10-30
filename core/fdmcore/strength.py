@@ -29,6 +29,7 @@ from .fea import Material, Model, build_model, element_stress, rotate_stiffness,
 from .mesh import Mesh
 from .orientation import rotation_to_z
 from .profile import Profile
+from .service import heat_factor, required_safety
 from .voxel import VoxelGrid, depth, voxelize
 
 G = 9.81
@@ -46,7 +47,8 @@ CONTACT_STIFFNESS = 10.0  # × E·h per node
 FRICTION = 0.02  # sideways spring vs. the normal one
 CONTACT_ROUNDS = 8
 HOLDS = ("clamped", "resting", "screw")
-MIN_SCALE = 0.01  # empty cubes inside a hollow print: soft, but not zero (the solver needs some stiffness)
+MIN_SCALE = 0.01
+ # empty cubes inside a hollow print: soft, but not zero (the solver needs some stiffness)
 
 
 @dataclass(frozen=True)
@@ -308,12 +310,14 @@ def _where(load: dict) -> str:
 
 def material_for(profile: Profile) -> Material:
     m = profile.material
+    k = heat_factor(profile)
     return Material(
-        e_xy=m["modulus_xy_mpa"],
-        e_z=m["modulus_xy_mpa"] * E_Z_RATIO,
-        strength_xy=m["tensile_xy_mpa"],
-        strength_z=m["tensile_xy_mpa"] * profile.z_strength_factor,
+        e_xy=m["modulus_xy_mpa"] * k,
+        e_z=m["modulus_xy_mpa"] * E_Z_RATIO * k,
+        strength_xy=m["tensile_xy_mpa"] * k,
+        strength_z=m["tensile_xy_mpa"] * profile.z_strength_factor * k,
     )
+
 
 
 def solid_fraction(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
@@ -437,6 +441,7 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
     fi_lines = None if printed is None else lines_index(stress, np.asarray(up, float), mat, printed)
     out = _summary(case, fi_layer, fi_plane, u, info, fi_lines)
+    out["verdict"] = verdict(out["safety_factor"], required_safety(profile))
     out["vm"] = von_mises(stress)
     out["u"] = u
     return out
@@ -565,8 +570,8 @@ def sample_nodes(model: Model, node_values: np.ndarray, pts: np.ndarray) -> np.n
     return out[:, 0] if node_values.ndim == 1 else out
 
 
-def verdict(sf: float) -> str:
-    return "fine" if sf >= 2 else "borderline" if sf >= 1 else "likely to break"
+def verdict(sf: float, need: float = 2.0) -> str:
+    return "fine" if sf >= need else "borderline" if sf >= 1 else "likely to break"
 
 
 def _summary(case: LoadCase, fi_layer, fi_plane, u, info, fi_lines=None) -> dict:

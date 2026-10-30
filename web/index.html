@@ -98,6 +98,18 @@
         </div>
       </div>
 
+      <div class="use">
+        <label>Where is it used?
+          <select id="use-temp" title="Plastic gets weaker as it warms up, and soft near its limit (PLA around 60 °C)">
+            <option value="">Indoors (room temperature)</option>
+            <option value="40">Warm spot: sunny window, near electronics (40 °C)</option>
+            <option value="55">Outdoors in the sun (55 °C)</option>
+            <option value="70">In a car in summer (70 °C)</option>
+            <option value="90">Near a motor or heater (90 °C)</option>
+          </select></label>
+        <label class="toggle" title="Plastic slowly stretches under a load that never goes away (creep): it needs a bigger margin"><input id="constant-load" type="checkbox" /> The load stays on (hangs there permanently)</label>
+      </div>
+
       <div class="mode" role="radiogroup" aria-label="What can you change?" data-min="advanced">
         <span>What can you change?</span>
         <div>
