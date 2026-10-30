@@ -53,3 +53,11 @@ def test_standing_tall_on_a_narrow_base_is_penalised():
     pin = load_stl((CORPUS / "tall_pin.stl").read_bytes())
     assert evaluate(pin, [0, 0, 1]).terms["stability"] == pytest.approx(1.0)  # 80 mm on a Ø10 foot
     assert evaluate(load_stl((CORPUS / "spool_hub.stl").read_bytes()), [0, 0, 1]).terms["stability"] == 0.0
+
+
+def test_cooling_finding_names_the_settings():
+    api.load((CORPUS / "tall_pin.stl").read_bytes(), "tall_pin")
+    cool = {f["rule"]: f for f in api.check([0, 0, 1], profile={"material": "petg"})["findings"]}["small_layers_cooling"]
+    # The slicer's slow-down stops at the minimum print speed: the finding says how low to set it.
+    assert cool["metrics"]["min_speed_mm_s"] in (5, 3, 2)
+    assert "minimum print speed" in cool["detail"]

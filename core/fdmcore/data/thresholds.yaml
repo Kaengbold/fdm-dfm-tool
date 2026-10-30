@@ -100,6 +100,11 @@ cooling:
   hot_margin_c: 45                # "will droop / blob" (warn)
   above_bed_mm: 2.0               # the bed keeps the first layers warm anyway
   min_run_mm: 1.0
+  # Minimum print speeds tried when small layers stay soft (highest first): the slicer's slow-down for layer
+  # cooling stops at the filament's slow_down_min_speed (Orca default 10 mm/s), so a thin pin never gets the
+  # full minimum layer time (OrcaSlicer wiki, Material cooling: Min print speed).
+  try_min_speeds: [5, 3, 2]
+  try_layer_times_s: [15, 20]     # then a longer minimum layer time (at the lowest speed above)
 
 fasteners:
   # Metric screws. Clearance: ISO 273 close / medium series. Nuts: ISO 4032 (across flats, max height).

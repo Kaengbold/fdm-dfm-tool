@@ -129,7 +129,9 @@ rules:
       the plastic into a melting, drooping blob before it can solidify.
     fixes:
     - domain: slicer
-      text: Increase the minimum layer time setting so the printer slows down and lets tiny cross-sections cool.
+      text: "Let the printer slow tiny layers down further so they can cool. The slow-down stops at the filament's
+      minimum print speed (OrcaSlicer: Cooling → Min print speed, often 10 mm/s), so lower that too; the finding
+      says how low."
       settings:
         slow_down_for_layer_cooling: '1'
         slow_down_layer_time: '8'
