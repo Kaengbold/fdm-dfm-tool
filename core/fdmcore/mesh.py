@@ -18,6 +18,8 @@ class Mesh:
     triangles: np.ndarray  # (M, 3, 3) float64
     _normals: np.ndarray | None = field(default=None, init=False, repr=False)
     _areas: np.ndarray | None = field(default=None, init=False, repr=False)
+    _bounds: tuple | None = field(default=None, init=False, repr=False)
+    _volume: float | None = field(default=None, init=False, repr=False)
 
     @property
     def face_count(self) -> int:
@@ -35,13 +37,19 @@ class Mesh:
         return self._normals, self._areas
 
     def bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        pts = self.triangles.reshape(-1, 3)
-        return pts.min(axis=0), pts.max(axis=0)
+        """Cached (called many times per orientation search; 1M faces take ~0.1 s each)."""
+        if self._bounds is None:
+            pts = self.triangles.reshape(-1, 3)
+            self._bounds = (pts.min(axis=0), pts.max(axis=0))
+        lo, hi = self._bounds
+        return lo.copy(), hi.copy()
 
     def volume(self) -> float:
-        """Signed volume via divergence theorem; positive for outward-wound closed meshes."""
-        t = self.triangles
-        return float(np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6.0)
+        """Signed volume via divergence theorem; positive for outward-wound closed meshes. Cached."""
+        if self._volume is None:
+            t = self.triangles
+            self._volume = float(np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6.0)
+        return self._volume
 
 
 def load_stl(data: bytes) -> Mesh:
