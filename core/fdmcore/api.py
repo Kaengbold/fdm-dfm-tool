@@ -481,11 +481,13 @@ OPT_INFILL = (0.10, 0.15, 0.20, 0.25, 0.35, 0.50, 0.75, 1.0)
 OPT_MAX_STEPS = 16
 
 
-def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None) -> dict:
+def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None, zones: bool = False) -> dict:
     """The least plastic that reaches ``target`` safety (default ×2, ×3 for the strength goal):
     start from a light print and add, one step at a time, whatever buys the most safety per gram
-    — walls, top/bottom layers or infill. Tried for this orientation and the strongest one."""
-    from .strength import cases_safety
+    — walls, top/bottom layers or infill. Tried for this orientation and the strongest one.
+    ``zones``: also try stronger zones only around the most stressed places (slicer modifier
+    volumes), the rest of the part light; returned as ``zoned`` with the plastic it saves."""
+    from .strength import cases_safety, evaluate_cases, find_zones
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -507,10 +509,46 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     best["alternatives"] = [q for q in plans if q is not best]
     best["target"] = target
     best["explanation"] = _optimise_story(best, target, len(plans) > 1)
+    if zones:
+        with stage(0.9, 1.0):
+            light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
+            r = evaluate_cases(cases, best["up"], p, light)
+            worst = cases[[c.number for c in cases].index(r["case"])]
+            boxes = find_zones(cases[0].model, r["fi"], worst.ignore, best["up"], OPT_WALLS[0], OPT_INFILL[0])
+            if boxes:
+                zoned = _climb(cases, best["up"], p, target, s.mesh, boxes)
+                zoned["up"] = best["up"]
+                zoned["saves_grams"] = round(best["grams"] - zoned["grams"], 1)
+                zoned["explanation"] = _zoned_story(zoned, best, target)
+                best["zoned"] = zoned
     return best
 
 
-def _climb(cases, up, p: Profile, target: float, mesh: Mesh) -> dict:
+def _zone_info(z, mesh: Mesh, up, bed) -> dict:
+    """A zone for the UI and the export: its box (build frame), settings and corners on the bed."""
+    from itertools import product
+
+    r0 = rotation_to_z(up)
+    rot = print_rotation(mesh, up, bed)[0]
+    corners = np.array(list(product(*zip(z.lo, z.hi)))) @ r0  # build frame -> part
+    return {"lo": list(z.lo), "hi": list(z.hi), "walls": z.walls, "infill": z.infill,
+            "corners_print": [_to_print_frame(mesh, rot, c) for c in corners]}
+
+
+def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
+    z = zoned["zones"][0]
+    head = (f"Stronger only where it's needed: {len(zoned['zones'])} zone{'s' if len(zoned['zones']) > 1 else ''} with "
+            f"{z['infill']:.0%} infill and {z['walls']} walls, the rest {zoned['walls']} walls and {zoned['infill']:.0%} infill")
+    if not zoned["met"]:
+        return f"{head} only reach ×{zoned['safety_factor']:.1f} (you need ×{target:.0f})."
+    if zoned["saves_grams"] > 0.5:
+        return f"{head}: ×{zoned['safety_factor']:.1f} with {zoned['grams']:.0f} g — {zoned['saves_grams']:.0f} g less than the same settings everywhere."
+    return f"{head}: ×{zoned['safety_factor']:.1f}, but it saves almost nothing here — the load spreads through most of the part."
+
+
+def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None = None) -> dict:
+    """Greedy search from a light print: each step takes the change with the most safety per gram.
+    With ``zones`` the zones' own infill and walls are steps too."""
     from dataclasses import replace
 
     from .strength import Shells, evaluate_cases, material_volume
@@ -527,8 +565,9 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh) -> dict:
     def grams(sh):
         return material_volume(model, up, sh, p) * to_grams
 
-    sh = Shells(walls=OPT_WALLS[0], infill=OPT_INFILL[0], top=OPT_LAYERS[0], bottom=OPT_LAYERS[0])
-    solid = Shells(walls=OPT_WALLS[-1], infill=OPT_INFILL[-1], top=OPT_LAYERS[-1], bottom=OPT_LAYERS[-1])
+    sh = Shells(walls=OPT_WALLS[0], infill=OPT_INFILL[0], top=OPT_LAYERS[0], bottom=OPT_LAYERS[0], zones=tuple(zones or ()))
+    solid = Shells(walls=OPT_WALLS[-1], infill=OPT_INFILL[-1], top=OPT_LAYERS[-1], bottom=OPT_LAYERS[-1],
+                   zones=tuple(replace(z, walls=OPT_WALLS[-1], infill=OPT_INFILL[-1]) for z in zones or ()))
     if sf(solid) < target:  # not even a solid print is enough: no need to search
         sh = solid
     steps = []
@@ -544,6 +583,13 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh) -> dict:
         k = OPT_INFILL.index(sh.infill)
         if k + 1 < len(OPT_INFILL):
             moves.append((replace(sh, infill=OPT_INFILL[k + 1]), f"{OPT_INFILL[k + 1]:.0%} infill"))
+        if sh.zones:  # all zones step together
+            z = sh.zones[0]
+            k = OPT_INFILL.index(z.infill)
+            if k + 1 < len(OPT_INFILL):
+                moves.append((replace(sh, zones=tuple(replace(q, infill=OPT_INFILL[k + 1]) for q in sh.zones)), f"{OPT_INFILL[k + 1]:.0%} infill in the zones"))
+            if z.walls + 1 in OPT_WALLS:
+                moves.append((replace(sh, zones=tuple(replace(q, walls=z.walls + 1) for q in sh.zones)), f"{z.walls + 1} walls in the zones"))
         gain = [(np.log(sf(m) / sf(sh)) / max(grams(m) - grams(sh), 0.05), m, label) for m, label in moves if np.isfinite(sf(m))]
         gain = [g for g in gain if g[0] > 1e-4]
         if not gain:
@@ -554,8 +600,12 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh) -> dict:
                 "sparse_infill_density": f"{sh.infill:.0%}"}
     if p.goal == "material":  # lightning infill only holds up the top surface, not a load
         settings["sparse_infill_pattern"] = "gyroid"
-    return {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1),
-            "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": sh.infill, "settings": settings, "steps": steps}
+    out = {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1),
+           "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": sh.infill, "settings": settings, "steps": steps}
+    if sh.zones:
+        out["zones"] = [_zone_info(replace(z, walls=max(z.walls, sh.walls), infill=max(z.infill, sh.infill)), mesh, up, p.printer["bed"])
+                        for z in sh.zones]
+    return out
 
 
 def _optimise_story(best: dict, target: float, compared: bool) -> str:
@@ -606,14 +656,17 @@ def _load_case(loads: list[dict], voxels: int = STRENGTH_VOXELS):
     return s.load_case[1]
 
 
-def _shells(p: Profile, walls: int | None = None, infill: float | None = None, top: int | None = None, bottom: int | None = None):
-    """How the part will be printed; anything not given comes from the goal's usual settings."""
+def _shells(p: Profile, walls: int | None = None, infill: float | None = None, top: int | None = None, bottom: int | None = None,
+            zones: list[dict] | None = None):
+    """How the part will be printed; anything not given comes from the goal's usual settings.
+    ``zones``: stronger zones (lo, hi, walls, infill, as optimise_strength returns them)."""
     from .recommend import goal_plan
-    from .strength import Shells
+    from .strength import Shells, Zone
 
     plan = goal_plan(p)
     return Shells(walls=int(plan["walls"] if walls is None else walls), infill=float(plan["infill"] / 100 if infill is None else infill),
-                  top=int(plan["top"] if top is None else top), bottom=int(plan["bottom"] if bottom is None else bottom))
+                  top=int(plan["top"] if top is None else top), bottom=int(plan["bottom"] if bottom is None else bottom),
+                  zones=tuple(Zone(tuple(z["lo"]), tuple(z["hi"]), int(z["walls"]), float(z["infill"])) for z in zones or ()))
 
 
 def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
@@ -681,20 +734,22 @@ def _printed(model):
 
 
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
-             top: int | None = None, bottom: int | None = None, fine: bool = False, detailed: bool = False) -> dict:
+             top: int | None = None, bottom: int | None = None, fine: bool = False, detailed: bool = False,
+             zones: list[dict] | None = None) -> dict:
     """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks).
     ``walls`` (lines), ``infill`` (0–1), ``top``/``bottom`` (solid layers) say how it will be printed
     (default: the goal's usual settings). With several load cases (``case`` on forces) the weakest
     decides; ``cases`` lists them all. ``fine`` uses a finer grid (slower): if the answer barely
     changes, the coarse one can be trusted (the usual mesh-convergence check in FEA). ``detailed``
     uses the G-code from ``load_gcode`` instead of walls/infill/top/bottom: the plastic really in
-    each spot and which way its lines run (lines pulled apart sideways become a third way to break)."""
+    each spot and which way its lines run (lines pulled apart sideways become a third way to break).
+    ``zones``: stronger zones from optimise_strength (slicer modifier volumes)."""
     from .strength import evaluate_cases, face_values, refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
     cases = _load_case(loads, FINE_VOXELS if fine else STRENGTH_VOXELS)
-    sh = _shells(p, walls, infill, top, bottom)
+    sh = _shells(p, walls, infill, top, bottom, zones)
     model = cases[0].model
     printed = None
     if detailed:
@@ -1021,15 +1076,34 @@ def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
     return out
 
 
-def export(up, profile: dict | None = None, settings: dict | None = None) -> bytes:
-    """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio."""
+def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca") -> bytes:
+    """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio / PrusaSlicer.
+    ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes;
+    then the file is for one slicer: ``slicer`` "orca" (also Bambu Studio) or "prusa"."""
     s = _require()
     p = Profile.from_dict(profile)
     if settings is None:
         settings = {r["key"]: r["value"] for r in check(up, profile)["settings"]}
     bed = p.printer["bed"]
     rotation, _ = print_rotation(s.mesh, up, bed)
-    return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2))
+    modifiers = [(_zone_box(s.mesh, up, rotation, z), {"wall_loops": str(int(z["walls"])), "sparse_infill_density": f"{float(z['infill']):.0%}"})
+                 for z in zones or []]
+    return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer)
+
+
+def _zone_box(mesh: Mesh, up, rotation: np.ndarray, zone: dict) -> np.ndarray:
+    """A zone's box as triangles, in the frame of the oriented part (see orient()), kept between the
+    bed and the top of the part: a modifier reaching below the bed lifts the part in PrusaSlicer."""
+    r0 = rotation_to_z(up)
+    zs = (mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2]
+    lo, hi = np.array(zone["lo"], float), np.array(zone["hi"], float)
+    lo[2], hi[2] = max(lo[2], zs.min()), min(hi[2], zs.max())
+    v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * (hi - lo) + lo
+    f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
+    part = v[np.array(f)] @ r0  # build frame -> part
+    turned = mesh.triangles.reshape(-1, 3) @ rotation.T
+    lo_t, hi_t = turned.min(axis=0), turned.max(axis=0)
+    return part @ rotation.T - [(lo_t[0] + hi_t[0]) / 2, (lo_t[1] + hi_t[1]) / 2, lo_t[2]]
 
 
 def compare_nozzles(up, profile: dict | None = None) -> list[dict]:

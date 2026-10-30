@@ -316,6 +316,30 @@ export class Viewer {
     this.markers.add(arrow);
   }
 
+  /** Strengthening zones: translucent orange boxes, each given by its 8 corners (print frame, in the
+   * order lo/hi per axis with z fastest). */
+  showZones(zones) {
+    this.zones?.clear();
+    if (!this.zones) this.scene.add((this.zones = new THREE.Group()));
+    const color = css("--vertical");
+    for (const c of zones) {
+      const idx = [];
+      for (let axis = 0; axis < 3; axis++) {
+        for (const side of [0, 1]) {
+          const bit = 2 - axis; // corner index = 4·ix + 2·iy + iz
+          const others = [0, 1, 2].filter((a) => a !== axis).map((a) => 2 - a);
+          const face = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => (side << bit) | (u << others[0]) | (v << others[1]));
+          idx.push(face[0], face[1], face[2], face[0], face[2], face[3]);
+        }
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(c.flat()), 3));
+      geometry.setIndex(idx);
+      this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
+      this.zones.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color })));
+    }
+  }
+
   /** Small sphere marking a point (e.g. where the part would break). */
   mark(point, color = "--support") {
     const dot = new THREE.Mesh(new THREE.SphereGeometry(1.5), new THREE.MeshBasicMaterial({ color: css(color), depthTest: false }));

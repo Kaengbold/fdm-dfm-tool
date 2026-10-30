@@ -103,6 +103,7 @@ const state = {
   strength: null,
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
+  zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
 };
@@ -283,6 +284,7 @@ async function selectOption(i) {
   state.showHeat = false;
   $("strength-result").replaceChildren();
   renderGcode();
+  setZones([]); // zones belong to one orientation
   clearEdits();
   recolor();
   await runCheck();
@@ -792,7 +794,7 @@ $("use-gcode").onchange = () => state.strength && runStrength();
 async function runStrength(fine = false) {
   const before = state.strength;
   return busy(fine ? "Simulating again with a finer grid (up to a minute)…" : "Simulating the load…", async () => {
-    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode() });
+    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: state.zones });
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
       r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
@@ -953,25 +955,48 @@ async function showStrengthOptions() {
 
 async function runOptimise() {
   return busy("Trying settings to find the lightest print that holds (up to a minute or two)…", async () => {
-    const o = await call("optimise_strength", { up: activeOption().up, loads: state.loads, profile: profile() });
+    const o = await call("optimise_strength", { up: activeOption().up, loads: state.loads, profile: profile(), zones: true });
     const use = el("button", { className: "primary", textContent: "Use these settings", onclick: async () => {
+      setZones([]);
       Object.assign(state.overrides, o.settings);
       renderSettings();
       if (o.orientation === "strongest") await applyOption({ up: o.up });
       else runStrength();
     } });
+    const z = o.zoned;
+    const zoned = z?.met && z.zones?.length
+      ? el("div", { className: "verdict fine" },
+        el("strong", { textContent: "Or: stronger only where it's needed" }),
+        el("p", { textContent: z.explanation }),
+        el("p", { className: "hint", textContent: "The zones go into the 3MF as modifier volumes: the slicer prints them with more walls and infill (orange boxes)." }),
+        el("button", { textContent: "Use the zones", onclick: async () => {
+          Object.assign(state.overrides, z.settings);
+          renderSettings();
+          if (o.orientation === "strongest") await applyOption({ up: z.up }); // clears zones: set them after
+          setZones(z.zones);
+          runStrength();
+        } }))
+      : "";
     $("optimise-result").replaceChildren(
       el("div", { className: `verdict ${o.met ? "fine" : "likely-to-break"}` },
         el("strong", { textContent: o.met ? `Lightest print that holds ×${o.target}` : "Settings alone aren't enough" }),
         el("p", { textContent: o.explanation }),
         o.steps.length ? el("p", { className: "hint", textContent: `Added step by step, cheapest first: ${o.steps.map((s) => s.change).join(" → ")}` }) : "",
         use),
+      zoned,
     );
     setStatus(state.summary);
     return o;
   });
 }
 $("run-optimise").onclick = runOptimise;
+
+/** Strengthening zones (slicer modifier volumes) from the optimiser; shown as boxes and put in the 3MF. */
+function setZones(zones) {
+  state.zones = zones;
+  viewer.showZones(zones.map((z) => z.corners_print));
+  $("zones-for").hidden = !zones.length;
+}
 
 async function applyOption(o) {
   if (o.settings) {
@@ -1588,7 +1613,7 @@ function download(bytes, filename, type) {
 $("dl-3mf").onclick = async () => {
   await busy("Exporting 3MF for OrcaSlicer / Bambu Studio…", async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings });
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: state.zones, slicer: $("dl-slicer").value });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
   });

@@ -6,7 +6,9 @@ measures the G-code: wall loops in a middle layer, sparse infill present, suppor
 present, brim present. A setting counts as applied when the measurement follows it.
 A second part, a plate with a Ø6 mm hole, checks the hole helpers: polyholes (fewer corners around the hole; OrcaSlicer only, Bambu Studio
 and PrusaSlicer don't have them) and elephant-foot compensation (a smaller first layer; not
-per object in PrusaSlicer).
+per object in PrusaSlicer). A third, a 40 × 20 × 10 mm block at 10 % infill with a zone (modifier
+volume) at 100 % over one half, checks that each slicer fills the zone (T-150; the file layout
+differs per slicer, see export3mf.py).
 
     python tools/slicer_check.py            # all slicers found in the default install folders
     python tools/slicer_check.py --keep     # keep the G-code in e2e-output/slicer-check
@@ -146,6 +148,31 @@ def measure(gcode: Path) -> dict:
     }
 
 
+ZONE = {"lo": [-1, -1, 0], "hi": [20, 21, 10], "walls": 2, "infill": 1.0}
+
+
+def zone_block(layout: str) -> bytes:
+    from fdmcore.additions import extrude
+    from shapely.geometry import box
+
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 40, 20), 0, 10))), "zone_block")
+    return api.export([0, 0, 1], {}, {"sparse_infill_density": "10%", "wall_loops": "2"}, zones=[ZONE], slicer=layout)
+
+
+def measure_zone(gcode: Path) -> dict:
+    """Infill plastic (cm³) in the half with the zone and in the other half."""
+    from fdmcore import gcode as gc
+
+    tp = gc.parse(gcode.read_text(errors="replace"))
+    a, b = gc.bead_centres(tp)
+    x = (a[:, 0] + b[:, 0]) / 2
+    part = tp.part()
+    cx = (x[part].min() + x[part].max()) / 2
+    inner = np.isin(tp.kind, [gc.SPARSE, gc.SOLID])
+    return {"zone": round(float(tp.volume[inner & (x < cx)].sum()) / 1000, 2), "rest": round(float(tp.volume[inner & (x >= cx)].sum()) / 1000, 2),
+            "width": round(float(np.ptp(np.concatenate([a[part, 1], b[part, 1]]))), 1)}
+
+
 def measure_holes(gcode: Path) -> dict:
     """Corners of the hole's outer wall in a middle layer, and how much smaller the first layer's
     outline is than the middle layer's (mm, per side)."""
@@ -200,6 +227,12 @@ def main():
             if name == "orca":  # Bambu Studio has no polyholes (an OrcaSlicer feature): it ignores the key
                 checks["hole_to_polyhole"] = (a["hole_corners"], b["hole_corners"], b["hole_corners"] <= a["hole_corners"] * 0.6)
             checks["elefant_foot_compensation"] = (a["foot_mm"], b["foot_mm"], b["foot_mm"] - a["foot_mm"] >= 0.15)
+        layout = "prusa" if name == "prusa" else "orca"
+        model = work / f"{name}_zone.3mf"
+        model.write_bytes(zone_block(layout))
+        z = measure_zone(slice_with(name, cfg, model, work / f"{name}_zone"))
+        # The zone half is filled (≥ 2.5× the plastic of the 10 % half), and the part didn't grow by the zone's box.
+        checks["zone_modifier"] = (z["zone"], z["rest"], z["zone"] >= 2.5 * z["rest"] and z["width"] < 20.0)
         for key, (va, vb, applied) in checks.items():
             ok &= applied
             print(f"{'PASS' if applied else 'FAIL'} {name} {key}: A={va} B={vb}")

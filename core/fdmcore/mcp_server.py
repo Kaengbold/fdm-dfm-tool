@@ -189,11 +189,14 @@ def optimise_strength(
     nozzle: str = "0.4",
     goal: str = "balanced",
     target: float | None = None,
+    zones: bool = False,
 ) -> dict:
     """Lightest walls / top-bottom layers / infill that reach ``target`` safety (default ×2, ×3 for
     goal "strength"), for this orientation and the strongest one. Returns slicer ``settings``,
-    grams, ``explanation`` and the steps tried. Takes up to a minute."""
-    return api.optimise_strength(up, loads, _profile(printer, material, nozzle, goal), target)
+    grams, ``explanation`` and the steps tried. Takes up to a minute. ``zones=True`` also tries
+    stronger zones only around the most stressed places (returned as ``zoned``, with ``zones`` to
+    pass to export_3mf)."""
+    return _clean(api.optimise_strength(up, loads, _profile(printer, material, nozzle, goal), target, zones))
 
 
 @server.tool()
@@ -247,13 +250,17 @@ def export_3mf(
     material: str = "pla",
     nozzle: str = "0.4",
     settings: dict[str, str] | None = None,
+    zones: list[dict] | None = None,
+    slicer: str = "orca",
 ) -> str:
-    """Write the oriented part as 3MF with slicer settings (recommended ones unless overridden)."""
+    """Write the oriented part as 3MF with slicer settings (recommended ones unless overridden).
+    ``zones`` (from optimise_strength's ``zoned``) become modifier volumes; then the file is for one
+    slicer: ``slicer`` "orca" (OrcaSlicer and Bambu Studio) or "prusa"."""
     prof = _profile(printer, material, nozzle)
     merged = {r["key"]: r["value"] for r in api.check(up, prof)["settings"]}
     merged.update(settings or {})
     out = Path(output_path).expanduser()
-    out.write_bytes(api.export(up, prof, merged))
+    out.write_bytes(api.export(up, prof, merged, zones, slicer))
     return str(out)
 
 

@@ -370,8 +370,25 @@ def main():
             run.act(lambda: page.click("#run-optimise"), 900_000)
             text = page.locator("#optimise-result").inner_text()
             assert "g of plastic" in text or "aren't enough" in text, text
-            run.act(lambda: page.locator("#optimise-result button").click(), 300_000)
-            return text.splitlines()[1][:160]
+            zones = page.get_by_role("button", name="Use the zones")
+            if zones.count():
+                run.act(lambda: zones.click(), 300_000)
+                assert page.locator("#zones-for").is_visible(), "no slicer choice for the zones"
+                boxes = page.evaluate("() => fdm.viewer.zones?.children.length ?? 0")
+                assert boxes >= 2, "zones not shown"
+                with page.expect_download() as dl:
+                    run.act(lambda: page.click("#dl-3mf"), 300_000)
+                path = dl.value.path()
+                import zipfile
+
+                conf = zipfile.ZipFile(path).read("Metadata/model_settings.config").decode()
+                assert "modifier_part" in conf, "no modifier volume in the 3MF"
+                note = f" | zones used: {boxes // 2} box(es) in the 3MF"
+            else:
+                note = " | no zones offered"
+            run.act(lambda: page.get_by_role("button", name="Use these settings").click(), 300_000)
+            assert page.locator("#zones-for").is_hidden(), "zones kept after choosing plain settings"
+            return text.splitlines()[1][:160] + note
         run.step("find the lightest settings that hold", optimise)
 
         def heat_map():

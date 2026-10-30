@@ -50,13 +50,26 @@ MIN_SCALE = 0.01  # empty cubes inside a hollow print: soft, but not zero (the s
 
 
 @dataclass(frozen=True)
+class Zone:
+    """A box printed with more walls and infill than the rest (never fewer): a slicer modifier volume.
+    Corners in the build frame (``rotation_to_z(up) @ part``), so it stands upright on the bed."""
+
+    lo: tuple[float, float, float]
+    hi: tuple[float, float, float]
+    walls: int
+    infill: float
+
+
+@dataclass(frozen=True)
 class Shells:
-    """How the slicer fills the part: wall lines, solid top/bottom layers, infill fraction."""
+    """How the slicer fills the part: wall lines, solid top/bottom layers, infill fraction, and
+    zones that are printed differently (``Zone``, later ones win where they overlap)."""
 
     walls: int = 2
     infill: float = 0.15
     top: int = 4
     bottom: int = 3
+    zones: tuple = ()
 
 
 @dataclass
@@ -330,14 +343,70 @@ def solid_fraction(model: Model, up, shells: Shells, profile: Profile) -> np.nda
 def element_scale(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
     """Effective stiffness/strength fraction per element: solid shells, sparse infill inside.
     At least ``MIN_SCALE``: a hollow part (0 % infill) would leave cubes without stiffness."""
-    solid = solid_fraction(model, up, shells, profile)
-    return np.maximum(solid + (1 - solid) * shells.infill**INFILL_EXPONENT, MIN_SCALE)
+    solid, infill = _zoned(model, up, shells, profile)
+    return np.maximum(solid + (1 - solid) * infill**INFILL_EXPONENT, MIN_SCALE)
 
 
 def material_volume(model: Model, up, shells: Shells, profile: Profile) -> float:
     """Plastic in the part (mm³) with these shells: what more walls or infill cost."""
-    solid = solid_fraction(model, up, shells, profile)
-    return float((solid + (1 - solid) * shells.infill).sum() * model.grid.h**3)
+    solid, infill = _zoned(model, up, shells, profile)
+    return float((solid + (1 - solid) * infill).sum() * model.grid.h**3)
+
+
+def _zoned(model: Model, up, shells: Shells, profile: Profile) -> tuple[np.ndarray, np.ndarray]:
+    """Solid-shell fraction and infill per element, with each zone's own walls and infill inside it.
+    Shell fractions are cached on the model: the optimiser asks for the same walls many times."""
+    cache = model.__dict__.setdefault("_solid_cache", {})
+
+    def solid(walls):
+        key = (None if up is None else tuple(np.round(np.asarray(up, float), 6)), walls, shells.top, shells.bottom,
+               profile.line_width, profile.layer_height)
+        if key not in cache:
+            cache[key] = solid_fraction(model, up, Shells(walls, shells.infill, shells.top, shells.bottom), profile)
+        return cache[key]
+
+    out = solid(shells.walls).copy()
+    infill = np.full(len(out), shells.infill)
+    if shells.zones and up is not None:
+        q = model.grid.centers(model.elems) @ rotation_to_z(up).T
+        for z in shells.zones:
+            inside = np.all((q >= z.lo) & (q <= z.hi), axis=1)
+            out[inside] = solid(max(z.walls, shells.walls))[inside]  # a zone only ever adds strength
+            infill[inside] = max(z.infill, shells.infill)
+    return out, infill
+
+
+ZONE_SHARE = 0.5  # cubes using at least this share of the worst cube's strength make a zone
+ZONE_PAD_MM = 2.0  # zones reach this far past the stressed cubes
+MAX_ZONES = 3
+
+
+def find_zones(model: Model, fi: np.ndarray, ignore: np.ndarray, up, walls: int, infill: float) -> list[Zone]:
+    """Boxes around the most stressed places (up to ``MAX_ZONES``, the most loaded first), upright in
+    the build frame and inside the part's height, starting with the given walls and infill."""
+    from scipy.ndimage import label
+
+    worst = fi[~ignore].max(initial=0)
+    if worst <= 0:
+        return []
+    hot = np.zeros(model.grid.solid.shape, dtype=bool)
+    hot[tuple(model.elems.T)] = fi >= ZONE_SHARE * worst
+    groups, n = label(hot, structure=np.ones((3, 3, 3)))
+    if n == 0:
+        return []
+    ids = groups[tuple(model.elems.T)]
+    load = np.bincount(ids, np.where(ids > 0, fi, 0), minlength=n + 1)[1:]
+    r = rotation_to_z(up)
+    q = model.grid.centers(model.elems) @ r.T
+    part_lo, part_hi = q.min(axis=0) - model.grid.h / 2, q.max(axis=0) + model.grid.h / 2
+    pad = model.grid.h / 2 + ZONE_PAD_MM
+    out = []
+    for g in np.argsort(-load)[:MAX_ZONES] + 1:
+        pts = q[ids == g]
+        lo = np.maximum(pts.min(axis=0) - pad, part_lo)
+        hi = np.minimum(pts.max(axis=0) + pad, part_hi)
+        out.append(Zone(tuple(np.round(lo, 2).tolist()), tuple(np.round(hi, 2).tolist()), walls, infill))
+    return out
 
 
 def _depth_along(grid: VoxelGrid, pts: np.ndarray, dirs: np.ndarray, cap: float) -> np.ndarray:
