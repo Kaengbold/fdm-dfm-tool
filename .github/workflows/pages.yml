@@ -31,6 +31,14 @@ jobs:
           rsync -a --exclude '__pycache__' core/fdmcore/ _site/core/fdmcore/
           cp LICENSE _site/
           printf '<!doctype html><meta http-equiv="refresh" content="0; url=web/"><a href="web/">FDM DFM Tool</a>\n' > _site/index.html
+      - name: Serve the libraries ourselves (no CDN at run time)
+        # Pinned three.js, manifold, OpenCascade and Pyodide (+ the engine's packages) under _site/vendor;
+        # the five files that load them switch their base URL to it. The AI panel's SDK stays on the CDN.
+        run: |
+          python3 tools/vendor.py _site/vendor
+          cd _site/web
+          sed -i 's#https://cdn.jsdelivr.net#../vendor#g' index.html worker.js geometry.js step.js stepwrite.js
+          ! grep -n "cdn.jsdelivr.net" index.html worker.js geometry.js step.js stepwrite.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
