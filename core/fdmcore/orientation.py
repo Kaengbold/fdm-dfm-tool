@@ -38,6 +38,11 @@ class OrientationSettings:
     # supports just to hold the part, poor first layers and a tilted part that's hard to slice.
     w_small_bed: float = 3.0
     good_bed_fraction: float = 0.15  # bed area / L² at which the small-contact penalty reaches zero
+    # Tall on a narrow footprint tips over and wobbles (the tipping check's height / base width limit,
+    # thresholds.yaml stability.tip_aspect). Full penalty at twice that: a lying pin then beats a standing one
+    # even though it needs a little support.
+    w_tipping: float = 1.0
+    tip_aspect: float = 4.0
 
 
 @dataclass
@@ -203,6 +208,7 @@ def _score(
             "height": s.w_height * height / L,
             "bed": s.w_small_bed * np.clip(1.0 - bed_frac / s.good_bed_fraction, 0.0, 1.0)
             - s.w_bed_contact * np.minimum(bed_frac, 1.0),
+            "stability": stability_term(height, bed_area, s),
         }
         score = sum(terms.values())
         for k in range(len(U)):
@@ -218,6 +224,15 @@ def _score(
                 )
             )
     return results
+
+
+def stability_term(height, bed_area, s: OrientationSettings):
+    """Penalty for standing tall on a narrow footprint. The base width is taken from the contact area
+    (the width of a circle that size): cheap enough for every candidate, and the refinement passes
+    the sliced first layer's real area."""
+    width = 2.0 * np.sqrt(np.maximum(bed_area, 1e-6) / np.pi)
+    aspect = np.asarray(height) / width
+    return s.w_tipping * np.clip((aspect - s.tip_aspect) / s.tip_aspect, 0.0, 1.0)
 
 
 def _bed_mask(nz, z, mesh, s):

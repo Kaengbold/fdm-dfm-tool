@@ -280,6 +280,7 @@ WORSE = {
     "support": "needs more support",
     "height": "prints taller (takes longer)",
     "bed": "has less contact with the bed",
+    "stability": "stands tall on a narrow base (can tip or wobble)",
     "weak": "has more weak spots along the layers",
     "strength": "is weaker under your load",
     "faces": "doesn't keep to the faces you marked",
@@ -382,7 +383,7 @@ REFINE_BUDGET = 3e7  # faces × layers for all finalists together
 def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettings, p: Profile) -> None:
     """Re-score the finalists with sliced layers: real bed contact, real support volume, and
     support that lands on the part instead of the bed (see refine.py)."""
-    from .orientation import _size
+    from .orientation import _size, stability_term
     from .refine import support_stats
 
     L = _size(mesh)
@@ -398,6 +399,7 @@ def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettin
             + SCAR_WEIGHT * st["scar_area"] / L**2,
             "bed": settings.w_small_bed * float(np.clip(1.0 - frac / settings.good_bed_fraction, 0.0, 1.0))
             - settings.w_bed_contact * min(frac, 1.0),
+            "stability": float(stability_term(r.height, st["bed_area"], settings)),
         }
         for k, v in new.items():
             r.penalize(k, v - r.terms.get(k, 0.0))
