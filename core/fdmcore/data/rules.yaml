@@ -325,6 +325,11 @@ rules:
         enable_support: '1'
         support_type: tree(auto)
         support_interface_pattern: rectilinear
+    - domain: slicer
+      text: In OrcaSlicer, "Make overhangs printable" turns steep overhangs into 45° slopes while slicing, so many of
+        them need no support at all (the underside changes shape a little).
+      settings:
+        make_overhang_printable: '1'
     - domain: process
       text: Use a deburring tool, scraper, or fine sandpaper to clean up rough contact pockmarks left by support
         removal.
@@ -337,6 +342,7 @@ rules:
     - Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698
     - Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA
     - Slant 3D — Stop Using Slicer Supports | Design for 3D Printing — https://www.youtube.com/watch?v=_R2E8VwyNz0
+    - OrcaSlicer wiki — Overhangs (Make overhangs printable) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_overhangs
   trapped_support:
     title: Support Trapped Where It Can't Be Removed
     why: The CAD model shows a hollow internal pocket, a blind hole or a long narrow tunnel, but any support
@@ -535,7 +541,52 @@ rules:
     sources:
     - 'Nophead (Chris Palmer) — Hydraraptor: Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.html'
     - Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA
-    - OrcaSlicer Wiki — Precise wall — https://github.com/SoftFever/OrcaSlicer/wiki/Precise-wall
+    - OrcaSlicer Wiki — Precise wall — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision
+  nut_trap_tight:
+    title: Nut Trap Too Tight for the Nut
+    why: A hexagonal pocket modelled at the nut's exact size prints a little small, like every printed hole, so the
+      nut won't go in or cracks the walls when forced. Nut traps need about 0.2–0.3 mm more across the flats than the
+      nut (an M3 nut is 5.5 mm, so 5.7–5.8 mm).
+    fixes:
+    - domain: geometry
+      text: Make the hexagon 0.2–0.3 mm bigger across the flats than the nut (M3 5.7–5.8 mm, M4 7.2–7.3 mm), and the
+        pocket a little deeper than the nut is thick.
+    - domain: slicer
+      text: Positive X-Y hole compensation opens all holes, nut traps included, a little.
+      settings:
+        xy_hole_compensation: '0.15'
+    - domain: process
+      text: Pull the nut in with a screw from the other side, or press it in with a soldering iron set low.
+    tags:
+    - holes
+    - tolerances
+    - fasteners
+    sources:
+    - OpenFlexure — nut trap sizes from ISO 4032 — https://gitlab.com/openflexure/openflexure-microscope/-/merge_requests/371
+    - fb-library — Bolt fittings — https://fb-library.readthedocs.io/en/latest/bolt_fittings/
+  insert_wall_thin:
+    title: Thin Wall Around a Heat-Set Insert
+    why: A heat-set insert is pressed in hot and pushes the melted plastic outwards. With less than about 1.6 mm of
+      plastic around the hole, the wall bulges, splits, or lets the insert pull out under load.
+    fixes:
+    - domain: geometry
+      text: Give the hole about 2 mm of wall all round (a boss around twice the insert's diameter), and make it about
+        1 mm deeper than the insert is long.
+    - domain: slicer
+      text: Print more walls so the plastic around the insert is solid, not infill.
+      settings:
+        wall_loops: '4'
+    - domain: process
+      text: Press the insert in slowly at the temperature the insert maker gives, so it melts its way in instead of
+        pushing the wall apart.
+    tags:
+    - holes
+    - fasteners
+    - strength
+    sources:
+    - CNC Kitchen — Tips & Tricks for Heat-Set Inserts — https://cnckitchen.com/blog/tips-and-tricks-for-heat-set-inserts
+    - DigiKey Maker.io — How to use heat-set inserts — https://www.digikey.com/es/maker/tutorials/2025/intro-to-freecad-part-4-how-to-use-heat-set-inserts
+    - Sovol — Design strong screw bosses for heat-set inserts — https://www.sovol3d.com/blogs/news/3d-printing-with-heat-set-inserts-design-strong-screw-bosses-that-last
   first_layer_detail:
     title: Fine Detail Squashed on Bed Surface
     why: The CAD model shows crisp letters, logos, or shallow grooves on the bottom face, but on the finished print
@@ -614,7 +665,7 @@ rules:
     - mouse-ears
     sources:
     - CNC Kitchen — How to Prevent Warping in 3D Printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y
-    - 'OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/SoftFever/OrcaSlicer/wiki/other_settings_brim'
+    - 'OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_brim'
     - Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf
   weak_upright_pin:
     title: Upright Pin Weak Along Layer Seams
@@ -670,7 +721,7 @@ rules:
     - fillets
     - perimeters
     sources:
-    - CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints
+    - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
     - Rahix — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
     - CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion
   single_line_wall:
@@ -699,4 +750,4 @@ rules:
     sources:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
-    - CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints
+    - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition

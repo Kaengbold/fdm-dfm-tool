@@ -35,7 +35,7 @@
   numbers: "4 walls + 20% infill is ~30% stronger in bending and prints faster with less plastic than 2 walls + 50% infill."
   exceptions: "Pure Z-axis compressive anvil loads or transparent solid PETG prints."
   sources:
-    - "CNC Kitchen — INFILL pattern and SHELLS — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints — Shell count vs infill percentage strength data"
+    - "CNC Kitchen — INFILL pattern and SHELLS — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints (article not found 2026-10-30; claim unverified) — Shell count vs infill percentage strength data"
   confidence: high
 
 - id: mistake_04_fillets_on_bottom_bed_edge
@@ -107,7 +107,7 @@
   numbers: "1–2 layers (0.20–0.40 mm) per bridge-stack stage."
   exceptions: "Counterbores oriented facing upward (top of print)."
   sources:
-    - "OrcaSlicer Wiki — Bridge counterbore hole — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_bridging — Automated counterbore bridging"
+    - "OrcaSlicer Wiki — Bridge counterbore hole — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_bridging — Automated counterbore bridging"
   confidence: high
 
 - id: mistake_09_printing_wet_petg_tpu_pa
@@ -133,7 +133,7 @@
   numbers: "Minimum reliable printed thread size at 0.16–0.20 mm layer height: M6x1.0 (M8x1.25+ preferred, using a stubby 90° flank trapezoidal/ACME profile instead of 60° ISO)."
   exceptions: "0.2 mm nozzle at 0.06–0.08 mm layer height can resolve M4/M5 threads with low stripping strength."
   sources:
-    - "CNC Kitchen — Threaded Inserts in 3D Prints — https://www.cnckitchen.com/blog/tipps-amp-tricks-fr-gewindeeinstze-im-3d-druck-3a862 — Pull-out comparison of inserts vs printed threads"
+    - "CNC Kitchen — Threaded Inserts in 3D Prints — https://cnckitchen.com/blog/tips-and-tricks-for-heat-set-inserts — Pull-out comparison of inserts vs printed threads"
   confidence: high
 
 - id: mistake_11_floating_bottom_bosses_unflat_base
@@ -233,7 +233,7 @@
   numbers: "STEP import in OrcaSlicer triangulates at fine resolution automatically and pairs with `resolution: 0.012 mm`."
   exceptions: "Intentional low-poly artistic models."
   sources:
-    - "OrcaSlicer Wiki — Quality Settings: Precision (Arc fitting & Resolution) — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_precision — G2/G3 arc fitting and STEP file handling"
+    - "OrcaSlicer Wiki — Quality Settings: Precision (Arc fitting & Resolution) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision — G2/G3 arc fitting and STEP file handling"
   confidence: high
 
 - id: mistake_18_large_horizontal_circular_holes
@@ -276,7 +276,7 @@
   numbers: "Rule of thumb: `layer_height` <= 0.75 * `nozzle_diameter` AND `line_width` >= 1.5 * `layer_height`."
   exceptions: "Using a larger 0.6 mm or 0.8 mm nozzle."
   sources:
-    - "CNC Kitchen — 3D Printing Layer Height: How much does it matter for strength? — https://www.cnckitchen.com/blog/3d-printing-layer-height-how-much-does-it-matter-for-strength — Delamination when layer height exceeds ~75% of nozzle width"
+    - "CNC Kitchen — 3D Printing Layer Height: How much does it matter for strength? — https://www.cnckitchen.com/blog/the-influence-of-layer-height-on-the-strength-of-fdm-3d-prints — Delamination when layer height exceeds ~75% of nozzle width"
     - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — Layer height vs nozzle diameter limits"
   confidence: high
 

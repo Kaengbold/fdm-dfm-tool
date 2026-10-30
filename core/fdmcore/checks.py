@@ -46,6 +46,8 @@ RULE_IMPACT = {
     "elephant_foot": "shape",
     "first_layer_detail": "shape",
     "small_hole_undersized": "shape",
+    "nut_trap_tight": "shape",
+    "insert_wall_thin": "fails",
     "bridge_sag": "shape",
     "hole_starts_midair": "shape",
     "sideways_hole_oval": "shape",
@@ -138,6 +140,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _support_findings(layers, tracker, profile, T)
     findings += _feature_findings(tracker, profile, T)
     findings += _hole_findings(tracker, profile, T)
+    findings += _fastener_findings(tracker, profile, T)
     findings = _sideways_hole_findings(mesh, profile, T, findings)
     findings += _first_layer_findings(layers, profile, T)
     findings += _bed_findings(layers, profile, T)
@@ -155,7 +158,12 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
     findings.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
     del stats["layer_times"]
+    normals, areas = mesh.normals_and_areas()
+    z = mesh.triangles[..., 2]
+    top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
     stats.update(
+        top_flat_mm2=float(areas[top].sum()),
+        round_share=_round_share(layers, T["seam"]["round_min"]),
         layer_heat={"z": [l.z for l in layers], "temp_c": heat.round(1).tolist(), "softening_c": profile.material["softening_c"]},
         layers_analysed=len(layers),
         height_mm=float(mesh.triangles[..., 2].max()),
@@ -213,15 +221,15 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
                 else:
                     tracker.add("overhang", piece, layer, area=piece.area, enclosed=float(_is_enclosed(piece, g)))
         # Width/hole/pin analysis only depends on this layer's shape: reuse it while the shape repeats.
-        features = cached[1] if same else _layer_features(g, lw, vanish, rough, single, G, H, T["pins"])
+        features = cached[1] if same else _layer_features(g, lw, vanish, rough, single, G, H, T["pins"], T["fasteners"])
         cached = (key if not same else cached[0], features, g)
         for kind, piece, metrics in features:
             tracker.add(kind, piece, layer, **metrics)
         prev = g
 
 
-def _layer_features(g, lw, vanish, rough, single, G, H, P) -> list[tuple]:
-    """(kind, piece, metrics) for one layer: thin features, narrow gaps, round holes, slender islands."""
+def _layer_features(g, lw, vanish, rough, single, G, H, P, F) -> list[tuple]:
+    """(kind, piece, metrics) for one layer: thin features, narrow gaps, round and hexagonal holes, slender islands."""
     out = []
     # Positive features by width: vanish < rough < single-wall (morphological openings).
     too_thin = _safe_diff(g, _opening(g, vanish / 2))
@@ -234,13 +242,22 @@ def _layer_features(g, lw, vanish, rough, single, G, H, P) -> list[tuple]:
     for piece in parts(_safe_diff(_closing(g, G["fuse_below_mm"] / 2), g), 0.05):
         if _strip_width(piece) > 0.02:
             out.append(("gap", piece, {"width": _strip_width(piece)}))
-    # Round vertical holes (interior rings), for size checks.
+    # Round vertical holes (interior rings), for size checks; hexagonal ones are nut traps.
+    insert_d = [f["insert_hole_mm"] for f in F.values() if isinstance(f, dict)]
     for poly in parts(g):
-        for ring in poly.interiors:
+        for i, ring in enumerate(poly.interiors):
             hole = Polygon(ring)
+            af = _hex_across_flats(hole)
+            if af is not None:
+                out.append(("hex", hole, {"min_af": af}))
+                continue
             d = 2 * np.sqrt(hole.area / np.pi)
             if d <= H["undersize_up_to_mm"] and 4 * np.pi * hole.area / max(hole.length, 1e-9) ** 2 >= H["circularity_min"]:
-                out.append(("hole", hole, {"min_d": d}))
+                metrics = {"min_d": d}
+                if min(abs(d - x) for x in insert_d) <= F["insert_match_mm"]:
+                    others = [poly.exterior] + [r for j, r in enumerate(poly.interiors) if j != i]
+                    metrics["min_wall"] = min(ring.distance(o) for o in others)
+                out.append(("hole", hole, metrics))
     # Slender islands: pins/posts.
     for island in parts(g, 0.01):
         w, length = _rect_sides(island)
@@ -493,6 +510,56 @@ def _hole_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
             out.append(_finding("small_hole_undersized", "warn",
                                 f"Ø{d:.1f} mm hole prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling"
                                 + fastener_advice(d, T), r, profile, **_fastener(d, T)))
+    return out
+
+
+def _round_share(layers: list[Layer], round_min: float) -> float:
+    """Share of layers whose outlines are all round (no corner to hide the seam in)."""
+    shapes = [list(parts(l.geom, 0.5)) for l in layers if not l.geom.is_empty]
+    if not shapes:
+        return 0.0
+    round_layers = [all(4 * np.pi * p.area / max(p.exterior.length, 1e-9) ** 2 >= round_min for p in ps) for ps in shapes if ps]
+    return float(np.mean(round_layers)) if round_layers else 0.0
+
+
+def _hex_across_flats(hole: Polygon) -> float | None:
+    """Across-flats size of a regular hexagonal hole (a nut trap), None for other shapes."""
+    c = np.asarray(hole.simplify(0.05).exterior.coords)[:-1]
+    if len(c) != 6:
+        return None
+    sides = np.linalg.norm(np.roll(c, -1, axis=0) - c, axis=1)
+    if sides.std() > 0.05 * sides.mean():
+        return None
+    return float(np.sqrt(2 * hole.area / np.sqrt(3)))
+
+
+def _fastener_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
+    """Nut traps too tight for their nut, and heat-set insert holes with too little wall around them."""
+    F = T["fasteners"]
+    screws = {k: f for k, f in F.items() if isinstance(f, dict)}
+    lo, hi = F["nut_match_mm"]
+    out = []
+    for r in tracker.of("hex"):
+        af = r.metrics["min_af"]
+        fits = [k for k, f in screws.items() if f["nut_af_mm"] + lo <= af <= f["nut_af_mm"] + hi]
+        name = min(fits, key=lambda k: abs(screws[k]["nut_af_mm"] - af), default=None)
+        if name is None or af >= screws[name]["nut_af_mm"] + F["nut_clearance_mm"]:
+            continue
+        want = screws[name]["nut_af_mm"] + F["nut_clearance_mm"] + 0.1
+        out.append(_finding("nut_trap_tight", "warn",
+                            f"Nut trap for an {name} nut at {_zrange(r)} is {af:.2f} mm across the flats — the nut is "
+                            f"{screws[name]['nut_af_mm']} mm and printed holes come out small; make it about {want:.1f} mm",
+                            r, profile, fastener=name, across_flats=round(af, 2)))
+    for r in tracker.of("hole"):
+        wall = r.metrics.get("min_wall")
+        if wall is None or wall >= F["insert_min_wall_mm"] or r.z1 - r.z0 < 3 * profile.layer_height:
+            continue
+        d = r.metrics["min_d"]
+        name = min(screws, key=lambda k: abs(screws[k]["insert_hole_mm"] - d))
+        out.append(_finding("insert_wall_thin", "warn",
+                            f"If the Ø{d:.1f} mm hole at {_zrange(r)} is for an {name} heat-set insert: only {wall:.1f} mm of wall "
+                            f"around it — the melted plastic pushes out and can split it (aim for {F['insert_min_wall_mm']}–2 mm)",
+                            r, profile, fastener=name, wall_mm=round(wall, 2)))
     return out
 
 

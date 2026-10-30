@@ -57,6 +57,9 @@ def prusa_settings(settings: dict[str, str]) -> dict[str, str]:
     out = {PRUSA_KEYS[k]: str(v) for k, v in settings.items() if k in PRUSA_KEYS}
     if settings.get("support_type", "").startswith("tree"):
         out["support_material_style"] = "organic"
+    if settings.get("ironing_type", "no ironing") != "no ironing":
+        out["ironing"] = "1"
+        out["ironing_type"] = settings["ironing_type"]  # same values: top | topmost | solid
     if out.get("support_material") == "1":
         out["support_material_auto"] = "1"
     return out

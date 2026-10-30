@@ -136,7 +136,7 @@ small_hole_undersized:
   sources:
   - "Nophead (Chris Palmer) — Hydraraptor: Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.html"
   - "Maker's Muse — 7 Ways to Design Holes for 3D Printing — https://www.youtube.com/watch?v=j6508J94VsA"
-  - "OrcaSlicer Wiki — Precise wall — https://github.com/SoftFever/OrcaSlicer/wiki/Precise-wall"
+  - "OrcaSlicer Wiki — Precise wall — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision"
 
 first_layer_detail:
   title: Fine Detail Squashed on Bed Surface
@@ -205,7 +205,7 @@ warping:
   - mouse-ears
   sources:
   - "CNC Kitchen — How to Prevent Warping in 3D Printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y"
-  - "OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/SoftFever/OrcaSlicer/wiki/other_settings_brim"
+  - "OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_brim"
   - "Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf"
 
 weak_upright_pin:
@@ -251,7 +251,7 @@ thin_neck:
   - fillets
   - perimeters
   sources:
-  - "CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints"
+  - "CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition"
   - "Rahix — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/"
   - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion"
 
@@ -276,4 +276,4 @@ single_line_wall:
   sources:
   - "Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769"
   - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748"
-  - "CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints"
+  - "CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition"

@@ -67,7 +67,7 @@
   exceptions: "STEP file imports sliced with native arc fitting (G2/G3) eliminate STL chordal facet error, leaving only ~0.08–0.15 mm of thermal/viscous inward pull."
   sources:
     - "Nophead (Chris Palmer) — Hydraraptor: Polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.html — (Full article) — Derived chordal error and viscous inward pull physics"
-    - "OrcaSlicer Wiki — Precise wall — https://github.com/SoftFever/OrcaSlicer/wiki/Precise-wall — (Full page) — 'When this feature is enabled in OrcaSlicer, the overlap between the outer wall and its adjacent inner wall is set to zero.'"
+    - "OrcaSlicer Wiki — Precise wall — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision — (Full page) — 'When this feature is enabled in OrcaSlicer, the overlap between the outer wall and its adjacent inner wall is set to zero.'"
   confidence: high
 
 - id: counterbore_sacrificial_bridge_stack
@@ -84,7 +84,7 @@
   exceptions: "Not needed when the transition from counterbore to through-hole is tapered at a 45° countersink chamfer."
   sources:
     - "Maker's Muse — Secret to 3D Printing Counterbored Holes without Support — https://www.youtube.com/watch?v=am1026s43bd — (01:45–05:30) — Sequential 2-layer bridge-stack vs sacrificial layer"
-    - "OrcaSlicer Wiki — Quality Settings: Bridge Counterbore Hole — https://github.com/SoftFever/OrcaSlicer/wiki/quality_settings_bridging — (Section: Bridge counterbore hole) — Native slicer implementation of Partial/Sacrificial counterbore bridging"
+    - "OrcaSlicer Wiki — Quality Settings: Bridge Counterbore Hole — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_bridging — (Section: Bridge counterbore hole) — Native slicer implementation of Partial/Sacrificial counterbore bridging"
   confidence: high
 
 - id: bed_contact_chamfer_vs_fillet
@@ -117,7 +117,7 @@
   numbers: "Mouse ear diameter: 8–15 mm; thickness: 0.20–0.40 mm (1–2 layers); overlap into part corner: 1.5–3.0 mm."
   exceptions: "Cylindrical parts with no base corners or parts requiring full chamber draft sealing (where a continuous outer brim is superior)."
   sources:
-    - "OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/SoftFever/OrcaSlicer/wiki/other_settings_brim — (Section: Brim type) — Automatic corner detection and mouse ear generation"
+    - "OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_brim — (Section: Brim type) — Automatic corner detection and mouse ear generation"
     - "CNC Kitchen — How to Prevent Warping in 3D Printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y — (05:20–08:10) — Corner stress concentration and mouse ear effectiveness"
   confidence: high
 
@@ -204,7 +204,7 @@
   sources:
     - "CNC Kitchen — Are Our Heat-Set Insert Datasheets Wrong? — https://www.cnckitchen.com/blog/are-our-heat-set-insert-datasheets-wrong — (Full article, March 2026) — Pull-out tests across 3.6–4.6 mm bores for M3 inserts"
     - "Ruthex — Official Thread Insert Dimensions — https://www.ruthex.de/en/products/ruthex-hss-bohrer-set-5-tlg-fur-gewindeeinsatze-m2-m2-5-m3-m4-m5-m6-din-338-bohrer-3-2-4-0-5-6-6-4-8-0-mm-fur-kunststoff-stahl-alu-kupfer-messing-uvm — Nominal bore diameters 3.2, 4.0, 5.6, 6.4, 8.0 mm"
-    - "CNC Kitchen — Threaded Inserts in 3D Prints - How strong are they? — https://www.cnckitchen.com/blog/tipps-amp-tricks-fr-gewindeeinstze-im-3d-druck-3a862 — Wall loops and installation temperature"
+    - "CNC Kitchen — Threaded Inserts in 3D Prints - How strong are they? — https://cnckitchen.com/blog/tips-and-tricks-for-heat-set-inserts — Wall loops and installation temperature"
   confidence: high
 
 - id: ribs_gussets_and_part_splitting
@@ -220,7 +220,7 @@
   exceptions: "When the underside of the overhang must remain completely open for a mating component to slide underneath."
   sources:
     - "Slant 3D — How to Avoid Supports in 3D Printing — https://www.youtube.com/watch?v=cPKB6xX6hBA — (01:20–06:30) — Using 45° chamfers, ribs, and part splitting instead of supports"
-    - "OrcaSlicer Wiki — Cut Tool — https://github.com/SoftFever/OrcaSlicer/wiki/cut-tool — Built-in dowel, snap, and dovetail splitting connectors"
+    - "OrcaSlicer Wiki — Cut Tool — https://github.com/OrcaSlicer/OrcaSlicer/wiki/prepare_cutting_tool — Built-in dowel, snap, and dovetail splitting connectors"
   confidence: high
 
 - id: slant3d_dfam_complete_ruleset

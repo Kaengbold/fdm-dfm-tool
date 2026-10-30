@@ -1194,7 +1194,7 @@ def tag_feature(region: int, tag: str | None) -> dict:
     return {"features": detect_features(s.mesh, s.regions, s.tags)}
 
 
-HOLE_RULES = {"hole_closes", "small_hole_undersized", "sideways_hole_oval", "bridge_sag", "hole_starts_midair"}
+HOLE_RULES = {"hole_closes", "small_hole_undersized", "insert_wall_thin", "sideways_hole_oval", "bridge_sag", "hole_starts_midair"}
 
 
 def _drop_rejected(findings: list[dict], mesh: Mesh, r: np.ndarray) -> list[dict]:

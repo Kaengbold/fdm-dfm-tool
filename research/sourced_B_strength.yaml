@@ -9,7 +9,7 @@
   numbers: "CNC Kitchen measured tensile/bending tests (PLA): Increasing infill from 20% to 50% (at 2 perimeters) increases strength by ~25% while increasing weight by +28%; increasing perimeters from 2 to 4 (at 20% infill) increases strength by +55% to +70% for the same or lower weight increase (+22%). Above 50–60% infill, strength gains per gram plateau sharply."
   exceptions: "Pure Z-axis compressive crushing loads on large flat plates (e.g., hydraulic press tooling or coasters under heavy point loads), where high infill density (40–80%) directly supports the top skin against buckling."
   sources:
-    - "CNC Kitchen — INFILL pattern and SHELLS - How to get the maximum STRENGTH out of your 3D prints? — https://www.cnckitchen.com/blog/infill-pattern-and-shells-how-to-get-the-maximum-strength-out-of-your-3d-prints — (Full article & video 06:10–10:45) — Measured tensile and bending strength per gram for walls vs infill"
+    - "CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition — (Full article & video 06:10–10:45) — Measured tensile and bending strength per gram for walls vs infill"
     - "Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748 — (Section: Perimeters) — 'The strength of a model is mostly defined by the number of perimeters (not the infill). If you want a stronger print, increase the number of perimeters.'"
   confidence: high
 
@@ -30,8 +30,8 @@
   sources:
     - "CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion — (Full article) — Measured Z vs XY tensile strength across temperatures for PLA & PETG"
     - "CNC Kitchen — Transparent FDM 3D Prints are Clearly Stronger! — https://www.cnckitchen.com/blog/transparent-fdm-3d-prints-are-clearly-stronger — (Full article) — PETG Z-adhesion from 65% to 93% via fan and flow control"
-    - "CNC Kitchen — Extrusion Width - The magic parameter for strong 3D prints? — https://www.cnckitchen.com/blog/extrusion-width-the-magic-parameter-for-strong-3d-prints — (Full article) — 150–200% line width increases Z layer bond area"
-    - "CNC Kitchen — 3D Printing Layer Height: How much does it matter for strength? — https://www.cnckitchen.com/blog/3d-printing-layer-height-how-much-does-it-matter-for-strength — (Full article) — Strength drop when layer height exceeds 60% of nozzle diameter"
+    - "CNC Kitchen — Extrusion Width - The magic parameter for strong 3D prints? — https://www.cnckitchen.com/blog/the-effect-of-extrusion-width-on-strength-and-quality-of-3d-prints — (Full article) — 150–200% line width increases Z layer bond area"
+    - "CNC Kitchen — 3D Printing Layer Height: How much does it matter for strength? — https://www.cnckitchen.com/blog/the-influence-of-layer-height-on-the-strength-of-fdm-3d-prints — (Full article) — Strength drop when layer height exceeds 60% of nozzle diameter"
     - "CNC Kitchen — Does a HEATED CHAMBER make your 3D prints STRONGER? — https://www.cnckitchen.com/blog/does-a-heated-chamber-make-your-3d-prints-stronger — (Full article) — Chamber temperature impact on interlayer bond"
   confidence: high
 
@@ -46,7 +46,7 @@
   numbers: "CNC Kitchen measured strength-to-weight comparison at equal filament weight: Rectilinear/Aligned Rectilinear oriented along the load axis = 100% (highest unidirectional strength/weight); Honeycomb/Grid/Triangles = ~90–95% in XY but poor out-of-plane shear and Grid scrapes over its own crossings; Cubic & Gyroid = ~85–90% unidirectional XY strength of aligned rectilinear, but +30–50% higher multi-axial / Z-compression / shear resistance and zero same-layer nozzle crossings. Adaptive Cubic / Support Cubic reduces infill weight by 30–50% vs uniform Cubic while maintaining top-skin support. Lightning infill uses 60–80% less infill material than Grid but adds ~0% structural core strength."
   exceptions: "When load direction is strictly known and unidirectional in XY, `rectilinear` or `alignedrectilinear` aligned with the principal stress vector gives the highest stiffness per gram."
   sources:
-    - "CNC Kitchen — Testing 3D Printed Infill Patterns for their Strength — https://www.cnckitchen.com/blog/testing-3d-printed-infill-patterns-for-their-strength — (Full article & video 04:30–12:15) — Tensile and compression strength per gram across infill patterns"
+    - "CNC Kitchen — Testing 3D Printed Infill Patterns for their Strength — https://www.cnckitchen.com/blog/testing-3d-printed-infill-patterns-for-their-strength (article not found 2026-10-30; claim unverified) — (Full article & video 04:30–12:15) — Tensile and compression strength per gram across infill patterns"
     - "Prusa Knowledge Base — Infill patterns — https://help.prusa3d.com/article/infill-patterns_177130 — (Full article) — Mechanical properties, nozzle crossing behavior, and print time of every infill pattern"
   confidence: high
 
