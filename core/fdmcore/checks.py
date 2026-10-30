@@ -123,8 +123,9 @@ def orient(mesh: Mesh, rotation: np.ndarray) -> Mesh:
     return Mesh(t - [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
 
 
-def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
-    """Slice an oriented mesh and run all checks. Returns findings + stats."""
+def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict | None = None) -> dict:
+    """Slice an oriented mesh and run all checks. Returns findings + stats. ``sliced``: real layer
+    times and plastic from the G-code (gcode.layer_times) for the heat check."""
     T = load_data("thresholds")
     layers = slice_mesh(mesh, profile.layer_height, max_layers)
     tracker = Tracker(link=2 * profile.line_width)
@@ -139,7 +140,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160) -> dict:
     findings += _bed_findings(layers, profile, T)
     findings += _weak_findings(layers, tracker, profile, T)
     stats = _estimate(layers, profile)
-    heat = _layer_heat(layers, profile)
+    heat = _layer_heat(layers, profile, sliced)
     findings += _cooling_findings(layers, heat, profile, T)
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
@@ -748,12 +749,12 @@ def _skin_area(layers: list[Layer], zs: np.ndarray, i: int, top: float, bottom: 
     return exposed
 
 
-def _layer_heat(layers: list[Layer], profile: Profile) -> np.ndarray:
+def _layer_heat(layers: list[Layer], profile: Profile, sliced: dict | None = None) -> np.ndarray:
     """Temperature just below the top of each layer while printing (see heat.py)."""
     zs = np.array([l.z for l in layers])
     areas = np.array([l.geom.area for l in layers])
     perimeters = np.array([l.geom.length for l in layers])
-    return layer_heat(zs, areas, perimeters, profile)
+    return layer_heat(zs, areas, perimeters, profile, sliced)
 
 
 def _cooling_findings(layers, heat: np.ndarray, profile: Profile, T: dict) -> list[dict]:

@@ -119,8 +119,9 @@ def match_profiles(resources: Path, printer_name: str, nozzle: str, material: st
     return {k: profiles[n]["path"] for k, n in (("machine", machine), ("process", process), ("filament", filament))}
 
 
-def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int = 900) -> dict:
-    """Slice with OrcaSlicer; print time, filament and layers from the G-code it writes."""
+def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int = 900, keep_gcode: bool = False) -> dict:
+    """Slice with OrcaSlicer; print time, filament and layers from the G-code it writes
+    (and the G-code itself as ``gcode`` with ``keep_gcode``, for the detailed simulation)."""
     work = Path(tempfile.mkdtemp(prefix="fdm-orca-"))
     try:
         src = work / "part.3mf"
@@ -136,7 +137,8 @@ def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int 
                 raise RuntimeError(f"OrcaSlicer's command line won't combine {profiles['machine'].stem} with "
                                    f"{profiles['process'].stem} (it does in the app). Slice the exported 3MF in OrcaSlicer instead.")
             raise RuntimeError(f"OrcaSlicer did not slice the part (exit {code}): {(run.stdout + run.stderr)[-500:]}")
-        return parse_gcode(gcode[0].read_text(errors="replace"))
+        text = gcode[0].read_text(errors="replace")
+        return {**parse_gcode(text), **({"gcode": text} if keep_gcode else {})}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

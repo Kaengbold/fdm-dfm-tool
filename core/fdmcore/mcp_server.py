@@ -137,6 +137,34 @@ def check_strength(
 
 
 @server.tool()
+def detailed_strength(
+    up: list[float],
+    loads: list[dict],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    gcode_path: str | None = None,
+    settings: dict[str, str] | None = None,
+    fine: bool = False,
+) -> dict:
+    """Strength from the real sliced print: the plastic really in each spot (walls, solid layers, infill)
+    and which way the printed lines run — lines pulled apart sideways are a third way to break ('lines').
+    Uses ``gcode_path`` (sliced from our 3MF in this orientation), or slices with the installed OrcaSlicer
+    (our recommended settings, or ``settings`` overrides; tens of seconds). loads as in check_strength."""
+    prof = _profile(printer, material, nozzle)
+    if gcode_path:
+        text = Path(gcode_path).expanduser().read_text(errors="replace")
+        sliced = None
+    else:
+        sliced = _slice(up, printer, material, nozzle, settings, keep_gcode=True)
+        text = sliced["orcaslicer"].pop("gcode")
+    out = {"gcode": api.load_gcode(text, up, prof), **_clean(api.strength(up, loads, prof, fine=fine, detailed=True))}
+    if sliced:
+        out["slicer_settings"] = sliced["settings"]
+    return out
+
+
+@server.tool()
 def strength_options(
     up: list[float],
     loads: list[dict],
@@ -240,6 +268,10 @@ def slice_with_orcaslicer(
     """Slice for real with the installed OrcaSlicer (its own printer/process/filament profiles plus our
     recommended settings, or ``settings`` overrides). Returns OrcaSlicer's print time, filament use and
     layer count next to our quick estimate. Slow (tens of seconds) — use it to confirm a final choice."""
+    return _slice(up, printer, material, nozzle, settings)
+
+
+def _slice(up, printer: str, material: str, nozzle: str, settings: dict | None, keep_gcode: bool = False) -> dict:
     from .profile import Profile, presets
     from .slicer_cli import find_orca, match_profiles, slice_3mf
 
@@ -256,7 +288,7 @@ def slice_with_orcaslicer(
         resources = orca.parents[1] / "Resources" / "profiles"
     base_material = presets()["materials"][material].get("based_on", material)  # the user's own presets name one
     matched = match_profiles(resources, presets()["printers"][printer]["name"], nozzle, base_material, float(merged.get("layer_height", p.layer_height)))
-    sliced = slice_3mf(api.export(up, prof, merged), matched, orca)
+    sliced = slice_3mf(api.export(up, prof, merged), matched, orca, keep_gcode=keep_gcode)
     if "filament_cm3" in sliced:
         sliced["filament_g"] = round(sliced["filament_cm3"] * p.material["density_g_cm3"], 1)
     return {

@@ -43,6 +43,7 @@ class Session:
     body: int = 0  # which body is loaded
     tags: dict = field(default_factory=dict)  # region id -> what the user says the feature is (features.TAGS)
     weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
+    gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
 
 
 _session: Session | None = None
@@ -465,6 +466,8 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     why = {
         "layers": "There the layers get pulled or slid apart. The bond between layers is the weakest part of any print, so turning the part helps most.",
         "material": "There the plastic itself is overloaded, not the bond between layers. More walls, more infill or a thicker design help most.",
+        "lines": ("There the printed lines lying side by side get pulled apart, like a screw tearing out through the walls."
+                  " More walls around that spot, more material there, or turning the part so the lines run along the pull help most."),
     }[r["mode"]]
     near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
             " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
@@ -613,22 +616,97 @@ def _shells(p: Profile, walls: int | None = None, infill: float | None = None, t
                   top=int(plan["top"] if top is None else top), bottom=int(plan["bottom"] if bottom is None else bottom))
 
 
+def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
+    """Read the G-code the part was sliced to (from our 3MF, in this orientation ``up``) for the
+    detailed level: strength with the real walls, infill and line directions. Checks that it is this
+    part (sizes, and most of the plastic inside the model; a quarter turn on the bed is found).
+    Plain G-code, or a Bambu Studio / OrcaSlicer ``.gcode.3mf`` (the G-code is inside)."""
+    from .gcode import KIND_NAMES, PART_KINDS, parse, placement
+    from .voxel import voxelize
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    if isinstance(data, (bytes, bytearray)) and data[:2] == b"PK":
+        import io
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            names = sorted(n for n in z.namelist() if n.lower().endswith(".gcode"))
+            if not names:
+                raise ValueError("This 3MF has no G-code inside: slice it and use “Export plate sliced file”")
+            data = z.read(names[0])
+    if isinstance(data, (bytes, bytearray)) and data[:4] == b"GCDE":
+        raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
+    tp = parse(data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else data)
+    rot = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    turned = s.mesh.triangles.reshape(-1, 3) @ rot.T
+    lo, hi = turned.min(axis=0), turned.max(axis=0)
+    base = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])  # orient() moves the part by -base
+    grid = voxelize(orient(s.mesh, rot), 30_000)
+
+    def inside(pts):
+        idx = grid.index_of(pts)
+        ok = np.all((idx >= 0) & (idx < np.array(grid.solid.shape)), axis=1)
+        out = np.zeros(len(pts), dtype=bool)
+        out[ok] = grid.solid[tuple(idx[ok].T)]
+        return out
+
+    q, shift = placement(tp, lo - base, hi - base, inside)
+    s.gcode = {"up": np.asarray(up, float) / np.linalg.norm(up), "toolpath": tp, "q": q, "shift": shift + base, "rot": rot, "printed": {}}
+    vol = {KIND_NAMES[k]: round(float(tp.volume[tp.kind == k].sum()) / 1000, 2) for k in range(len(KIND_NAMES))}
+    return {"slicer": tp.slicer, "layers": int(len(tp.layer_z)), "lines": int(tp.part().sum()),
+            "print_time_min": round(tp.total_s / 60, 1), "plastic_cm3": vol,
+            "part_grams": round(sum(vol[KIND_NAMES[k]] for k in PART_KINDS) * p.material["density_g_cm3"], 1),
+            "turned_deg": int(round(np.degrees(np.arctan2(q[1, 0], q[0, 0])))) % 360}
+
+
+def _printed(model):
+    """What the loaded G-code puts in each cube of ``model`` (cached per analysis grid)."""
+    from .gcode import deposit
+    from .strength import printed_from
+    from .voxel import inside_fraction
+
+    s = _require()
+    g = s.gcode
+    if id(model) not in g["printed"]:
+        q, shift, rot = g["q"], g["shift"], g["rot"]
+
+        def to_part(x, is_direction):  # printer -> part: part = rotᵀ (q x + shift)
+            return (x @ q.T) @ rot if is_direction else (x @ q.T + shift) @ rot
+
+        dep = deposit(g["toolpath"], model.grid, model.elems, to_part)
+        pr = printed_from(dep, model, inside_fraction(s.mesh, model.grid))
+        g["printed"] = {id(model): (pr, dep["missed"])}  # one grid at a time: old ones are not used again
+    return g["printed"][id(model)]
+
+
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
-             top: int | None = None, bottom: int | None = None, fine: bool = False) -> dict:
+             top: int | None = None, bottom: int | None = None, fine: bool = False, detailed: bool = False) -> dict:
     """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks).
     ``walls`` (lines), ``infill`` (0–1), ``top``/``bottom`` (solid layers) say how it will be printed
     (default: the goal's usual settings). With several load cases (``case`` on forces) the weakest
     decides; ``cases`` lists them all. ``fine`` uses a finer grid (slower): if the answer barely
-    changes, the coarse one can be trusted (the usual mesh-convergence check in FEA)."""
+    changes, the coarse one can be trusted (the usual mesh-convergence check in FEA). ``detailed``
+    uses the G-code from ``load_gcode`` instead of walls/infill/top/bottom: the plastic really in
+    each spot and which way its lines run (lines pulled apart sideways become a third way to break)."""
     from .strength import evaluate_cases, face_values, refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
     cases = _load_case(loads, FINE_VOXELS if fine else STRENGTH_VOXELS)
     sh = _shells(p, walls, infill, top, bottom)
-    r = evaluate_cases(cases, up, p, sh)
-    r["fine"] = bool(fine)
     model = cases[0].model
+    printed = None
+    if detailed:
+        if s.gcode is None:
+            raise ValueError("Load the sliced G-code first (detailed check)")
+        if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
+            raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
+        printed, missed = _printed(model)
+    r = evaluate_cases(cases, up, p, sh, printed)
+    r["fine"] = bool(fine)
+    if printed is not None:
+        r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
     fi, vm, u = r.pop("fi"), r.pop("vm"), r.pop("u")
     heat = face_values(s.mesh, model.grid, model, fi)
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
@@ -828,14 +906,21 @@ def _to_print_frame(mesh: Mesh, r: np.ndarray, point) -> list[float]:
     return (r @ np.asarray(point) + shift).tolist()
 
 
-def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None) -> dict:
+def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None, detailed: bool = False) -> dict:
     """Run all printability checks for one orientation, explain them and recommend settings.
-    ``faces`` as in ``orientations``: support on a face marked clean becomes a problem."""
+    ``faces`` as in ``orientations``: support on a face marked clean becomes a problem.
+    ``detailed``: the heat check uses the real layer times of the loaded G-code (if it is for this orientation)."""
     s = _require()
     p = Profile.from_dict(profile)
     rotation, fit = print_rotation(s.mesh, up, p.printer["bed"])
     oriented = orient(s.mesh, rotation)
-    result = run_checks(oriented, p)
+    sliced = None
+    if detailed and s.gcode is not None and np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999:
+        from .gcode import layer_times
+
+        sliced = layer_times(s.gcode["toolpath"])
+    result = run_checks(oriented, p, sliced=sliced)
+    result["stats"]["heat_from_gcode"] = sliced is not None
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
     result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
     if not fit["fits"]:
@@ -1004,6 +1089,7 @@ METHODS = {
     "custom_presets": custom_presets,
     "calibration_part": calibration_part,
     "load": load,
+    "load_gcode": load_gcode,
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,

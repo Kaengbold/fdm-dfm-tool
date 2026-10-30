@@ -321,7 +321,7 @@ def main():
         run.step("FEA view: legend, section, finer grid", fea_view)
 
         def shells():
-            page.locator(".shells summary").click()
+            page.locator(".shells:not(#detailed) summary").click()
             page.fill("#sh-walls", "6")
             run.act(lambda: page.dispatch_event("#sh-walls", "change"), 300_000)
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('6 walls')", timeout=300_000)
@@ -330,6 +330,29 @@ def main():
             assert "Walls ★" in settings, settings
             return text.splitlines()[1][:120]
         run.step("walls set by hand go into strength and the 3MF", shells)
+
+        def detailed():
+            # Slice the part shown with the local OrcaSlicer (like a user would), then load the G-code.
+            sys.path.insert(0, str(ROOT / "core"))
+            from fdmcore import api, mcp_server
+            from fdmcore.slicer_cli import find_orca
+
+            if find_orca() is None:
+                return "skipped: OrcaSlicer not installed"
+            name, data, up = page.evaluate("() => [fdm.state.source.name, Array.from(fdm.state.source.bytes), fdm.state.options[fdm.state.active].up]")
+            api.load(bytes(data), name)
+            sliced = mcp_server._slice(up, page.input_value("#printer"), page.input_value("#material"), page.input_value("#nozzle"), None, keep_gcode=True)
+            gcode = OUT / "detailed.gcode"
+            gcode.write_text(sliced["orcaslicer"]["gcode"])
+            page.locator("#detailed summary").click()
+            run.act(lambda: page.set_input_files("#gcode-file", str(gcode)), 600_000)
+            assert page.is_checked("#use-gcode"), page.locator("#status").inner_text()
+            page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('as sliced in')", timeout=300_000)
+            text = page.locator("#strength-result").inner_text()
+            page.uncheck("#use-gcode")
+            page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('walls')", timeout=300_000)
+            return f"{page.locator('#gcode-summary').inner_text()} | {text.splitlines()[0]}"
+        run.step("detailed check from a sliced G-code", detailed)
 
         def optimise():
             run.act(lambda: page.click("#run-optimise"), 900_000)

@@ -73,6 +73,7 @@ function cancelEngine() {
       await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
       if (src.body) await post("select_body", { index: src.body });
       if (src.scale !== 1) await post("scale", { factor: src.scale });
+      if (state.gcode) await post("load_gcode", { up: state.gcode.up, profile: profile() }, state.gcode.bytes);
     }).catch((err) => setStatus(`Could not restart the engine: ${err.message}`, true));
   }
 }
@@ -207,6 +208,8 @@ async function partLoaded(info) {
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
   Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {} });
+  state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
+  renderGcode();
   renderMarks();
   viewer.framed = false;
   const [x, y, z] = info.size_mm.map((v) => v.toFixed(1));
@@ -256,6 +259,7 @@ async function selectOption(i) {
   state.strength = null;
   state.showHeat = false;
   $("strength-result").replaceChildren();
+  renderGcode();
   clearEdits();
   recolor();
   await runCheck();
@@ -270,7 +274,7 @@ async function runCheck() {
   // let an older result (or an older orientation's result) overwrite the newer one.
   const token = ++checkToken;
   await busy("Checking printability…", async () => {
-    const result = await call("check", { up: activeOption().up, profile: profile(), mode: mode(), faces: faceMarks() });
+    const result = await call("check", { up: activeOption().up, profile: profile(), mode: mode(), faces: faceMarks(), detailed: sameUp(state.gcode?.up, activeOption().up) });
     if (token !== checkToken) return;
     if (!result?.findings) throw new Error("The analysis returned no result — please try again");
     state.check = result;
@@ -724,12 +728,46 @@ for (const k of Object.keys(SHELL_KEYS)) {
 const MODE_TEXT = {
   layers: "The layers would separate first. Orientation matters most here — try the strongest orientation.",
   material: "The plastic itself is the limit. More walls or infill, or a thicker design, help most.",
+  lines: "Printed lines lying side by side would pull apart first. More walls there, or another orientation, help most.",
 };
+
+// ---------- strength: detailed check from the user's G-code ----------
+const sameUp = (a, b) => a && b && Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) > 0.999 * Math.hypot(...a) * Math.hypot(...b);
+/** The loaded G-code is used when ticked and it was sliced for the orientation shown. */
+const useGcode = () => $("use-gcode").checked && !!state.gcode && sameUp(state.gcode.up, activeOption()?.up);
+
+function renderGcode() {
+  const g = state.gcode;
+  const fits = g && sameUp(g.up, activeOption()?.up);
+  $("use-gcode").disabled = !fits;
+  if (!fits) $("use-gcode").checked = false;
+  $("gcode-summary").textContent = !g ? "" : fits
+    ? `— ${g.name}: ${g.info.layers} layers, ${g.info.part_grams} g, ${g.info.print_time_min} min`
+    : "— the loaded G-code is for another orientation";
+}
+
+$("gcode-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || !activeOption()) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const up = activeOption().up;
+  await busy("Reading the G-code…", async () => {
+    const info = await call("load_gcode", { up, profile: profile() }, bytes);
+    state.gcode = { name: file.name, bytes, up, info };
+    $("use-gcode").checked = true;
+    renderGcode();
+    setStatus(`G-code read: ${info.layers} layers, ${info.part_grams} g of part` + (info.turned_deg ? ` (the slicer turned it ${info.turned_deg}°)` : ""));
+    await runCheck(); // the heat check uses the real layer times now
+    if (readyForStrength()) await runStrength();
+  }).catch(() => {});
+};
+$("use-gcode").onchange = () => state.strength && runStrength();
 
 async function runStrength(fine = false) {
   const before = state.strength;
   return busy(fine ? "Simulating again with a finer grid (up to a minute)…" : "Simulating the load…", async () => {
-    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine });
+    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode() });
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
       r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
@@ -848,7 +886,9 @@ function renderStrength() {
       { className: `verdict ${r.verdict.replaceAll(" ", "-")}` },
       el("strong", { textContent: `${r.verdict[0].toUpperCase() + r.verdict.slice(1)} — safety ×${sf.toFixed(1)}` }),
       el("p", { textContent: r.explanation ?? MODE_TEXT[r.mode] }),
-      el("p", { className: "hint", textContent: `${r.material}, ${r.walls} walls, ${r.top} top / ${r.bottom} bottom layers, ${Math.round(r.infill * 100)}% infill · bends about ${r.max_displacement_mm.toFixed(1)} mm` }),
+      el("p", { className: "hint", textContent: (r.detailed
+        ? `${r.material}, as sliced in ${state.gcode.name} (${r.detailed.missed_pct}% of the plastic falls outside the analysis cubes)`
+        : `${r.material}, ${r.walls} walls, ${r.top} top / ${r.bottom} bottom layers, ${Math.round(r.infill * 100)}% infill`) + ` · bends about ${r.max_displacement_mm.toFixed(1)} mm` }),
     ),
     r.cases.length > 1
       ? el("p", { className: "hint", textContent: `Weakest is case ${r.case} (shown). ` + r.cases.map((c) => `Case ${c.case}: ×${c.safety_factor.toFixed(1)}`).join(" · ") })

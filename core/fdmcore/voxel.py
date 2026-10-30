@@ -30,7 +30,19 @@ def voxelize(mesh: Mesh, target_voxels: int = 30_000, h: float | None = None) ->
         h = max(h, float((hi - lo).max()) / 200)  # cap grid size for very thin parts
     shape = np.maximum(np.ceil((hi - lo) / h).astype(int), 1)
     origin = lo - (shape * h - (hi - lo)) / 2  # centre the part in the grid
+    return VoxelGrid(_solid(mesh, origin, float(h), shape), origin, float(h))
 
+
+def inside_fraction(mesh: Mesh, grid: VoxelGrid, k: int = 3) -> np.ndarray:
+    """Share of each voxel inside the part (k³ sub-voxels each): how much plastic a cube on the
+    surface can hold at most."""
+    fine = _solid(mesh, grid.origin, grid.h / k, np.array(grid.solid.shape) * k)
+    nx, ny, nz = grid.solid.shape
+    return fine.reshape(nx, k, ny, k, nz, k).mean(axis=(1, 3, 5))
+
+
+def _solid(mesh: Mesh, origin: np.ndarray, h: float, shape: np.ndarray) -> np.ndarray:
+    """Voxels of the grid (origin, h, shape) whose centre is inside the mesh."""
     # Ray through each column centre, nudged off exact edges/vertices.
     t = mesh.triangles[..., :2] - origin[:2]
     jitter = np.array([1.13e-4, 2.71e-4]) * h
@@ -66,8 +78,7 @@ def voxelize(mesh: Mesh, target_voxels: int = 30_000, h: float | None = None) ->
     k = np.clip(np.ceil((z - origin[2]) / h - 0.5).astype(int), 0, shape[2])
     hits = np.zeros((shape[0], shape[1], shape[2] + 1), dtype=np.int32)
     np.add.at(hits, (ci, cj, k), 1)
-    solid = (np.cumsum(hits, axis=2)[..., :-1] % 2) == 1
-    return VoxelGrid(solid, origin, float(h))
+    return (np.cumsum(hits, axis=2)[..., :-1] % 2) == 1
 
 
 def depth(solid: np.ndarray, max_depth: int = 4) -> np.ndarray:

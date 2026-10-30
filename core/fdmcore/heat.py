@@ -7,8 +7,8 @@ arrives at nozzle temperature, the nozzle and heater block keep warming the top 
 heat flows down into the part and the bed, and the sides and top lose heat to the air (more
 with the part fan). Layer times come from the time estimate, slowed to the material's minimum
 layer time like the slicer does. Rough: the constants below are typical values, not measured
-for a given printer, and heat spreading sideways inside a layer is ignored. The detailed level
-(G-code timing, T-126) replaces it.
+for a given printer, and heat spreading sideways inside a layer is ignored. At the detailed
+level the sliced G-code gives the real time between layers and the plastic in each.
 """
 
 from __future__ import annotations
@@ -32,14 +32,16 @@ SUBSTEPS = 3
 MIN_SPEED = 10.0  # mm/s: slicers slow small layers down to the minimum layer time, but not below this
 
 
-def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profile: Profile) -> np.ndarray:
+def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profile: Profile, sliced: dict | None = None) -> np.ndarray:
     """Temperature (°C) of each sampled layer once ``DEPTH_MM`` more plastic has been printed on top:
     above the softening point, the top of the part is still soft and can't hold its shape.
 
-    ``zs``: sampled layer heights (mm); ``areas`` (mm²) and ``perimeters`` (mm) of their cross-sections."""
+    ``zs``: sampled layer heights (mm); ``areas`` (mm²) and ``perimeters`` (mm) of their cross-sections.
+    ``sliced`` (detailed level, gcode.layer_times): the real time between layers and the plastic in
+    each, instead of estimates from the goal's settings."""
     mat = profile.material
     plan = goal_plan(profile)
-    lh = plan["layer_height"]
+    lh = plan["layer_height"] if sliced is None else float(np.median(sliced["layer_height"]))
     height = float(zs[-1] + lh / 2)
     n = int(min(MAX_CELLS, max(1, round(height / lh))))
     dz = height / n
@@ -47,9 +49,16 @@ def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profil
     src = np.clip(np.searchsorted((zs[:-1] + zs[1:]) / 2, centers), 0, len(zs) - 1)  # nearest sampled layer
     a = np.maximum(areas[src], 1e-3) * 1e-6  # m²
     p = perimeters[src] * 1e-3  # m
-    wall = np.minimum(perimeters[src] * plan["walls"] * profile.line_width, areas[src])
-    fill = np.where(areas[src] > 0, (wall + (areas[src] - wall) * plan["infill"] / 100) / np.maximum(areas[src], 1e-9), 1.0)
-    t = layer_seconds(areas[src], perimeters[src], profile) * (dz / lh)
+    if sliced is None:
+        wall = np.minimum(perimeters[src] * plan["walls"] * profile.line_width, areas[src])
+        fill = np.where(areas[src] > 0, (wall + (areas[src] - wall) * plan["infill"] / 100) / np.maximum(areas[src], 1e-9), 1.0)
+        t = layer_seconds(areas[src], perimeters[src], profile) * (dz / lh)
+    else:
+        mid = sliced["z"] - sliced["layer_height"] / 2
+        per_mm = np.interp(centers, mid, sliced["seconds"] / sliced["layer_height"])
+        plastic = np.interp(centers, mid, sliced["volume"] / sliced["layer_height"])  # mm³ per mm of height
+        fill = np.clip(plastic / np.maximum(areas[src], 1e-9), 0.05, 1.0)
+        t = per_mm * dz
     dzm = dz * 1e-3
     cap = mat["density_g_cm3"] * 1000 * fill * a * dzm * C_P  # J/K
     cond = K_PLASTIC * np.minimum(fill[:-1], fill[1:]) * np.minimum(a[:-1], a[1:]) / dzm  # between cell i and i+1

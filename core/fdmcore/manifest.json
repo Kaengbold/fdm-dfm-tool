@@ -10,6 +10,7 @@
  "fea.py",
  "features.py",
  "formats.py",
+ "gcode.py",
  "heat.py",
  "holes.py",
  "mesh.py",

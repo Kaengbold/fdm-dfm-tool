@@ -10,8 +10,8 @@ Forces with different ``case`` numbers are separate situations (e.g. "hanging" a
 pulled sideways"); fixed faces hold in every case and the weakest case decides.
 
 The model: voxels with an anisotropic material whose weak axis is the build
-direction. Within a layer it is the same in every direction (line directions are left to
-the detailed, G-code based level). How the slicer fills the part (``Shells``) is modelled by
+direction. Within a layer it is the same in every direction, except at the detailed level: there
+the sliced G-code gives the plastic in each spot and which way its lines run (``Printed``). How the slicer fills the part (``Shells``) is modelled by
 depth: walls on the sides (walls × line width), solid top and bottom layers on surfaces facing
 up and down (layers × layer height), and the much softer infill inside.
 Results are indications — "fine / borderline / likely to break" and why.
@@ -37,6 +37,7 @@ SINGULAR_RINGS = 2
 NEAR_SUPPORT_VOXELS = 4  # weakest spot this close to a held face: say the clamp may spread the load
 E_Z_RATIO = 0.85  # layer-direction stiffness vs. in-plane (stiffness drops far less than strength)
 INFILL_EXPONENT = 1.5  # Gibson–Ashby-style scaling for stiffness and strength of sparse infill
+MIN_SCALE = 0.01  # empty cubes inside a hollow print: soft, but not zero (the solver needs some stiffness)
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,48 @@ class Shells:
     infill: float = 0.15
     top: int = 4
     bottom: int = 3
+
+
+@dataclass
+class Printed:
+    """What the sliced G-code really puts in each analysis cube (the detailed level, see gcode.py)."""
+
+    scale: np.ndarray  # (E,) stiffness/strength fraction, like element_scale
+    fill: np.ndarray  # (E,) share of the cube filled with plastic
+    lines: np.ndarray  # (E, 3) main line direction, part frame
+    aligned: np.ndarray  # (E,) 1 = all lines one way (walls), 0 = crossing (grid infill, alternating solid layers)
+    first_s: np.ndarray  # (E,) when the cube was first printed (s since start)
+
+
+def printed_from(dep: dict, model: Model, inside: np.ndarray) -> Printed:
+    """``Printed`` from gcode.deposit and the share of each voxel inside the part (grid-shaped).
+
+    Walls and solid layers count with their plastic share of the room in the cube (a surface cube is
+    only partly part); sparse infill like the simple level (fraction^1.5), its density smoothed over
+    3×3×3 cubes because an infill cell is larger than a cube (a cube either has a line in it or not)."""
+    inside = inside[tuple(model.elems.T)]
+    room = np.maximum(inside, 0.05) * model.grid.h**3
+    dense = np.clip(dep["volume"][:, :2].sum(axis=1) / room, 0.0, 1.0)
+    sparse = _smooth(model.elems, model.grid.solid.shape, dep["volume"][:, 2] / room, inside)
+    rest = np.maximum(1 - dense, 1e-9)
+    scale = dense + rest * np.clip(sparse / rest, 0.0, 1.0) ** INFILL_EXPONENT
+    t = _tensor(dep["tensor"])
+    w, v = np.linalg.eigh(t)  # ascending; lines are horizontal, so the smallest is ~0 (the build direction)
+    lines = v[:, :, 2]
+    aligned = np.where(w[:, 2] > 0, (w[:, 2] - w[:, 1]) / np.maximum(w[:, 2] + w[:, 1], 1e-12), 0.0)
+    return Printed(scale=np.maximum(scale, MIN_SCALE), fill=np.clip(dense + sparse, 0, 1), lines=lines,
+                   aligned=aligned, first_s=dep["first_s"])
+
+
+def _smooth(elems: np.ndarray, shape, values: np.ndarray, weight: np.ndarray) -> np.ndarray:
+    """Average over each cube and its neighbours (3×3×3), weighted by how much of each is part."""
+    from scipy.ndimage import uniform_filter
+
+    num, den = np.zeros(shape), np.zeros(shape)
+    num[tuple(elems.T)] = values * weight
+    den[tuple(elems.T)] = weight
+    num, den = uniform_filter(num, 3, mode="constant"), uniform_filter(den, 3, mode="constant")
+    return num[tuple(elems.T)] / np.maximum(den[tuple(elems.T)], 1e-12)
 
 
 @dataclass
@@ -214,9 +257,10 @@ def solid_fraction(model: Model, up, shells: Shells, profile: Profile) -> np.nda
 
 
 def element_scale(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
-    """Effective stiffness/strength fraction per element: solid shells, sparse infill inside."""
+    """Effective stiffness/strength fraction per element: solid shells, sparse infill inside.
+    At least ``MIN_SCALE``: a hollow part (0 % infill) would leave cubes without stiffness."""
     solid = solid_fraction(model, up, shells, profile)
-    return solid + (1 - solid) * shells.infill**INFILL_EXPONENT
+    return np.maximum(solid + (1 - solid) * shells.infill**INFILL_EXPONENT, MIN_SCALE)
 
 
 def material_volume(model: Model, up, shells: Shells, profile: Profile) -> float:
@@ -241,24 +285,26 @@ def _depth_along(grid: VoxelGrid, pts: np.ndarray, dirs: np.ndarray, cap: float)
     return out
 
 
-def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells()) -> dict:
-    """Solve with the anisotropic material for build direction ``up``."""
+def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None) -> dict:
+    """Solve with the anisotropic material for build direction ``up``. With ``printed`` (from the
+    G-code) the plastic in each cube and the line directions replace the shells model."""
     mat = material_for(profile)
     r = rotation_to_z(up)
     c = rotate_stiffness(mat.stiffness_print_frame(), r)
-    scale = element_scale(case.model, up, shells, profile)
+    scale = element_scale(case.model, up, shells, profile) if printed is None else printed.scale
     u, info = solve(case.model, c, scale, case.forces, case.fixed)
     stress = element_stress(case.model, c, scale, u)
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
-    out = _summary(case, fi_layer, fi_plane, u, info)
+    fi_lines = None if printed is None else lines_index(stress, np.asarray(up, float), mat, printed)
+    out = _summary(case, fi_layer, fi_plane, u, info, fi_lines)
     out["vm"] = von_mises(stress)
     out["u"] = u
     return out
 
 
-def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells()) -> dict:
+def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None) -> dict:
     """``evaluate`` for every case; the weakest one is returned, with all safety factors in ``cases``."""
-    results = [evaluate(c, up, profile, shells) for c in cases]
+    results = [evaluate(c, up, profile, shells, printed) for c in cases]
     k = int(np.argmin([r["safety_factor"] for r in results]))
     worst = results[k]
     worst["case"] = cases[k].number
@@ -309,6 +355,20 @@ def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np
     vm = np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (syz**2 + sxz**2 + sxy**2))
     fi_plane = vm / mat.strength_xy / allow
     return fi_layer, fi_plane
+
+
+def lines_index(stress: np.ndarray, up: np.ndarray, mat: Material, printed: Printed) -> np.ndarray:
+    """Failure index for printed lines pulled or slid apart sideways (a bolt tearing out through
+    the walls). Neighbouring lines in a layer are welded like layers are, so their bond is taken as
+    the layer bond (until calibrated). Counts only as far as the lines in a cube run one way: where
+    they cross (grid infill, alternating solid layers) the other lines carry the load."""
+    up = up / np.linalg.norm(up)
+    across = np.cross(up, printed.lines)
+    across /= np.maximum(np.linalg.norm(across, axis=1, keepdims=True), 1e-12)
+    traction = np.einsum("eij,ej->ei", _tensor(stress), across)
+    normal = np.einsum("ei,ei->e", traction, across)
+    shear = np.linalg.norm(traction - normal[:, None] * across, axis=1)
+    return printed.aligned * np.hypot(np.maximum(normal, 0), shear) / mat.strength_z / np.maximum(printed.scale, 1e-3)
 
 
 def von_mises(stress: np.ndarray) -> np.ndarray:
@@ -369,13 +429,14 @@ def verdict(sf: float) -> str:
     return "fine" if sf >= 2 else "borderline" if sf >= 1 else "likely to break"
 
 
-def _summary(case: LoadCase, fi_layer, fi_plane, u, info) -> dict:
+def _summary(case: LoadCase, fi_layer, fi_plane, u, info, fi_lines=None) -> dict:
     ok = ~case.ignore
     fl, fp = np.where(ok, fi_layer, 0), np.where(ok, fi_plane, 0)
-    worst_layer, worst_plane = fl.max(initial=0), fp.max(initial=0)
-    mode = "layers" if worst_layer >= worst_plane else "material"
-    worst = max(worst_layer, worst_plane)
-    crit = int(np.argmax(fl if mode == "layers" else fp))
+    fs = np.zeros_like(fl) if fi_lines is None else np.where(ok, fi_lines, 0)
+    worst_layer, worst_plane, worst_lines = fl.max(initial=0), fp.max(initial=0), fs.max(initial=0)
+    mode = "layers" if worst_layer >= max(worst_plane, worst_lines) else "lines" if worst_lines > worst_plane else "material"
+    worst = max(worst_layer, worst_plane, worst_lines)
+    crit = int(np.argmax({"layers": fl, "material": fp, "lines": fs}[mode]))
     sf = float(1 / worst) if worst > 0 else float("inf")
     grid = case.model.grid
     held = grid.origin + np.argwhere(case.model.node_index >= 0)[case.fixed] * grid.h  # node ids follow this order
@@ -387,11 +448,13 @@ def _summary(case: LoadCase, fi_layer, fi_plane, u, info) -> dict:
         "near_support": near,
         "safety_factor": sf,
         "verdict": verdict(sf),
-        "mode": mode,  # "layers": layers pull/shear apart; "material": the plastic itself yields
+        # "layers": layers pull/shear apart; "material": the plastic itself yields;
+        # "lines": neighbouring lines in a layer pull apart (detailed level only)
+        "mode": mode,
         "critical_point": case.model.grid.centers(case.model.elems[crit]).tolist(),
         "max_displacement_mm": float(np.linalg.norm(u, axis=1).max()),
         "solver_converged": info == 0,
-        "fi": np.maximum(fi_layer, fi_plane),
+        "fi": np.maximum.reduce([fi_layer, fi_plane] + ([] if fi_lines is None else [fi_lines])),
     }
 
 

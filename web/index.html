@@ -164,6 +164,15 @@
               <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
             </div>
           </details>
+          <details class="shells" id="detailed">
+            <summary>Detailed check from your sliced print <span id="gcode-summary"></span></summary>
+            <p class="hint">The most exact check. Export the 3MF (below) in this orientation, slice it in OrcaSlicer, Bambu Studio or PrusaSlicer, save the G-code and load it here.
+              The check then uses the walls, infill and line directions your printer will really print. A printed line is strong along itself and weaker across, like the layers.</p>
+            <div class="row">
+              <label>G-code <input id="gcode-file" type="file" accept=".gcode,.gco,.g,.3mf" /></label>
+              <label><input id="use-gcode" type="checkbox" disabled /> Use it for the strength check</label>
+            </div>
+          </details>
           <div class="actions">
             <button id="run-strength" class="primary" disabled>Check strength</button>
             <button id="run-optimise" disabled title="Tries walls, top/bottom layers and infill, and finds the lightest print that holds your load with a safety margin">Find the lightest settings that hold</button>
