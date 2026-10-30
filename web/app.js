@@ -1001,7 +1001,8 @@ let swingFrame = 0;
 function swingView() {
   const s = state.swing;
   const values = f32(s.vertex_value);
-  const max = Math.max(...values, 1e-9);
+  let max = 1e-9; // not Math.max(...values): hundreds of thousands of arguments overflow the stack
+  for (const v of values) if (v > max) max = v;
   const key = `swing|${s.frequency_hz}|${activeOption().up}`;
   if (viewer.fieldKey !== key || !viewer.field) {
     viewer.showField({ triangles: f32(s.field_triangles), values: values.map((v) => v / max), disp: f32(s.vertex_disp), max: 1 });

@@ -374,7 +374,7 @@ def main():
             text = page.locator("#strength-result").inner_text()
             found = findings(page)
             run.act(lambda: page.select_option("#use-temp", ""), 300_000)
-            assert any("Too Hot" in f for f in found) or "ASA" in page.input_value("#material").upper(), found
+            assert any("too hot" in f.lower() for f in found) or "ASA" in page.input_value("#material").upper(), found
             return text.splitlines()[1][:140]
         run.step("used in a hot car", hot_car)
 
