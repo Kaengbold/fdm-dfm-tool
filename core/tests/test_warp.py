@@ -48,3 +48,21 @@ def test_warping_result_for_the_view():
     ends = [abs(p[0]) for p in r["lift_points_print"]]
     assert max(ends) > 35  # the bar's ends (it is centred on the bed origin), not its middle
     assert "brim" in r["explanation"]
+
+
+def test_thick_sections_stay_warm_higher_up():
+    p = Profile.from_dict(ABS_OPEN)
+    assert warp.fade_length(p, 5.0) > 2 * warp.fade_length(p, 1.0)
+    thin, thick = (warp.simulate(Mesh(extrude(box(0, 0, 40, w), 0, 10)), [0, 0, 1], p, h=1.0) for w in (2, 20))
+    zc = lambda r: r["model"].grid.centers(r["model"].elems)[:, 2]
+    at = lambda r, z: r["shrink"][np.abs(zc(r) - z) < 0.6].mean()
+    assert at(thick, 3.0) < at(thin, 3.0)  # 3 mm up: the thin wall has cooled, the block is still warm
+
+
+def test_residual_stress_in_the_result():
+    api.load(to_binary_stl(bar(90)), "bar")
+    r = api.warping([0, 0, 1], ABS_OPEN)
+    stress = np.frombuffer(r["stress_value"], np.float32)
+    assert len(stress) == len(np.frombuffer(r["vertex_value"], np.float32))
+    assert 0 < r["stress_max"] < 100 and r["stress_share"] > 0
+    assert "stress" in r["explanation"]
