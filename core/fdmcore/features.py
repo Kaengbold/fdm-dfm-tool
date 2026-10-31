@@ -119,6 +119,7 @@ PARAMS = {
     "teardrop_angle_deg": (45.0, 30.0, 60.0),  # tip half-angle from vertical; 45° is the classic choice
     "ledge_max_mm": (20.0, 2.0, 40.0),  # widest ledge to fill in at 45° underneath
     "wall_lines": (2.0, 2.0, 4.0),  # thin walls grow to this many printed lines
+    "thicken_mm": (1.5, 0.5, 5.0),  # plastic added all round the weak spot from the strength check
 }
 
 
@@ -164,6 +165,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     edits += _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"])
     edits += _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"])
     edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"])
+    edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"])
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
@@ -471,6 +473,81 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]
                   "The strength check found the most stress at this sharp inside corner. A 45° chamfer spreads the load "
                   "over more material, often the cheapest way to make a part much stronger (a chamfer prints cleanly where a round fillet would be an overhang).",
                   pieces, op="add", param="stress_chamfer_mm")]
+
+
+THICKEN_REACH_MM = 8.0  # the added plastic tapers out over at least this length either side of the weak spot
+THICKEN_TAPER = 10.0  # ... and at least this × the thickness added, and twice the member's own thickness:
+# a short, steep taper is a new step that takes the stress instead (on a 12 mm bar, 8 mm made it weaker)
+THICKEN_STEP_MM = 0.5  # slab height of the added plastic
+
+
+def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float) -> list[dict]:
+    """Grow the part's cross-section round the weak spot by ``grow`` mm, tapering to nothing either
+    side (see THICKEN_TAPER), so no new sharp step takes the stress instead. The cross-sections
+    are cut across the member the spot is on (its long direction nearby), so an arm gets thicker,
+    not longer."""
+    if weak_spot is None:
+        return []
+    from shapely.geometry import Point
+
+    from .additions import extrude
+    from .slicer import parts
+
+    spot = np.asarray(weak_spot, float)
+    axis, thickness = _member_axis(mesh, spot, 2.5 * THICKEN_REACH_MM)
+    reach = max(THICKEN_REACH_MM, THICKEN_TAPER * grow, 2 * thickness)
+    r = rotation_to_z(axis)
+    turned = mesh.triangles @ r.T
+    base = turned[..., 2].min()
+    s = r @ spot - [0, 0, base]
+    top = turned[..., 2].max() - base
+    layers = slice_mesh(Mesh(turned - [0, 0, base]), THICKEN_STEP_MM, max_layers=4000)
+    around = Point(s[:2]).buffer(reach + grow, quad_segs=8)
+    pieces = []
+    for layer in layers:
+        dz = abs(layer.z - s[2])
+        g = grow * (1 - dz / reach)
+        if dz > reach or g < 0.1 or layer.geom.is_empty:
+            continue
+        near = [p for p in parts(layer.geom, 0.05) if p.distance(Point(s[:2])) <= reach]
+        if not near:
+            continue
+        piece = min(near, key=lambda p: p.distance(Point(s[:2])))
+        x0, y0, x1, y1 = piece.bounds
+        grown = piece.buffer(g, quad_segs=4)
+        if max(x1 - x0, y1 - y0) > 2 * reach:  # a wide section (a plate): only round the spot
+            grown = grown.intersection(around)
+        for poly in parts(grown.simplify(0.05), 0.05):
+            # Slabs overlap a little so they join, but never stick out past the part's ends (a lip there
+            # would make a new face where a clamp or load sits).
+            prism = extrude(poly, max(layer.z - THICKEN_STEP_MM / 2 - 0.02, 0.0), min(layer.z + THICKEN_STEP_MM / 2 + 0.02, top))
+            if prism is not None:
+                pieces.append((prism + [0, 0, base]) @ r)
+    if not pieces:
+        return []
+    return [_edit("thicken-weak", "thin_neck", f"Make the weak spot {grow:.1f} mm thicker",
+                  f"Adds {grow:.1f} mm of plastic all round where the strength check found the most stress, tapering out over "
+                  f"{reach:.0f} mm either side. More cross-section is the direct fix when the plastic itself is the limit. "
+                  "Check that nothing needs to fit there.", pieces, op="add", param="thicken_mm")]
+
+
+def _member_axis(mesh: Mesh, spot: np.ndarray, reach: float) -> tuple[np.ndarray, float]:
+    """Long direction of the part near ``spot`` (the main axis of the solid within ``reach``) and its
+    thickness across (from the spread the other way: a bar of width w has variance w²/12)."""
+    from .voxel import voxelize
+
+    grid = voxelize(mesh, 20_000)
+    solid = grid.centers(np.argwhere(grid.solid))
+    centre = np.asarray(spot, float)
+    axis, spread = np.array([0.0, 0.0, 1.0]), 0.0
+    for _ in range(3):  # the spot is often on the surface or a corner: move the window to the member's middle
+        pts = solid[np.linalg.norm(solid - centre, axis=1) <= reach]
+        if len(pts) < 8:
+            break
+        w, v = np.linalg.eigh(np.cov((pts - pts.mean(axis=0)).T))
+        axis, spread = v[:, -1], float(w[1])
+        centre = pts.mean(axis=0)
+    return axis, float(np.sqrt(12 * max(spread, 0.0)))
 
 
 def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:

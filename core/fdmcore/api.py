@@ -1336,10 +1336,12 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             add("Add a 45° chamfer at the weak spot (design change)", "design", None,
                 "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. On a test part "
                 "2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
-                "changes the shape a little")
-    if base["mode"] == "material":
+                "changes the shape a little", edit="stress-chamfer")
+    if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
-            "The plastic itself is the limit there: more cross-section is the direct fix.", "changes the shape")
+            ("The plastic itself is the limit there: more cross-section is the direct fix. " if base["mode"] == "material" else "")
+            + "Adds 1.5 mm of plastic all round the weak spot, tapering out either side (size under Design changes). "
+            "Test it to see how much it helps.", "changes the shape", edit="thicken-weak")
 
     # Other materials: stresses don't depend on stiffness here, only the strengths change.
     for mid, m in presets()["materials"].items():

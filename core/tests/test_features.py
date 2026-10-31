@@ -198,3 +198,36 @@ def test_all_edits_together_give_a_clean_mesh(name, material):
     edits = api.design(up, prof)["edits"]
     assert len(edits) >= 4
     assert _clean(apply_edits(api._require().mesh, edits).triangles) == (0, 0)
+
+
+def test_thicker_weak_spot_helps():
+    """A bar clamped at one end and pulled down at the other breaks at the clamp: "make the weak spot
+    thicker" adds plastic round it (tapering out), and the strength check gets better on the result."""
+    import numpy as np
+
+    from fdmcore import api
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+    from test_hold import box, region_facing
+
+    prof = {"material": "pla"}
+
+    def loads():
+        api.regions()
+        return [{"region": region_facing([-1, 0, 0]), "kind": "fixed"}, {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 4, "direction": "down"}]
+
+    api.load(box(80, 12, 12), "bar")
+    before = api.strength([0, 0, 1], loads(), prof)
+    spot = np.asarray(api._require().weak_spot[0])
+    assert spot[0] < 15  # at the clamp
+    edit = next(e for e in api.design([0, 0, 1], prof, {"thicken_mm": 2})["edits"] if e["id"] == "thicken-weak")
+    assert edit["op"] == "add" and edit["param"] == "thicken_mm" and "2.0 mm" in edit["title"]
+    pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
+    assert pts[:, 0].max() < spot[0] + 30 and pts[:, 1].max() > 13 and pts[:, 2].max() > 13  # all round the bar, tapering out
+    assert any(o.get("edit") == "thicken-weak" for o in api.strength_options([0, 0, 1], loads(), prof))
+    part = api._require().mesh
+    thicker = apply_edits(part, [edit])
+    assert abs(thicker.volume()) > abs(part.volume())
+    api.load(to_binary_stl(thicker), "bar2")
+    after = api.strength([0, 0, 1], loads(), prof)
+    assert after["safety_factor"] > before["safety_factor"] * 1.1

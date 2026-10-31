@@ -1358,8 +1358,8 @@ function optionCard(o, now) {
     el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
     OPTION_ACTION[o.kind] || o.kind === "design" ? el("div", { className: "row" },
       OPTION_ACTION[o.kind] ? el("button", { textContent: OPTION_ACTION[o.kind], onclick: () => applyOption(o) }) : "",
-      o.kind === "design" && /chamfer/i.test(o.change) ? el("button", { textContent: "Test it", onclick: testStressChamfer,
-        title: "Adds the chamfer as a new version of your model and checks the strength again" }) : "") : "");
+      o.edit ? el("button", { textContent: "Test it", onclick: () => testDesignEdit(o.edit),
+        title: "Adds the change as a new version of your model and checks the strength again" }) : "") : "");
 }
 
 async function runOptimise() {
@@ -1786,16 +1786,20 @@ const designParams = () =>
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
 /** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
-async function testStressChamfer() {
+const EDIT_NAME = { "stress-chamfer": "the chamfer", "thicken-weak": "the thicker weak spot" };
+
+/** "Test it" on a strength suggestion: apply that design edit as a new version and check the strength again. */
+async function testDesignEdit(id) {
   const before = state.strength?.safety_factor;
+  const name = EDIT_NAME[id] ?? "the change";
   await suggestDesign();
-  const edit = state.edits.find((e) => e.rule === "stress_at_inside_corner");
-  if (!edit) return setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
+  const edit = state.edits.find((e) => e.id === id);
+  if (!edit) return setStatus(`No automatic edit fits there (${name}): change the part in your CAD.`);
   await applyEdits([edit]);
-  if (!readyForStrength()) return setStatus("The chamfer is on a new version, but the loads didn't carry over: set them again to compare.");
+  if (!readyForStrength()) return setStatus(`${name[0].toUpperCase()}${name.slice(1)} is on a new version, but the loads didn't carry over: set them again to compare.`);
   await runStrength();
   const after = state.strength.safety_factor;
-  setStatus(`With the chamfer: safety ×${after.toFixed(1)}${before ? ` (was ×${before.toFixed(1)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
+  setStatus(`With ${name}: safety ×${after.toFixed(1)}${before ? ` (was ×${before.toFixed(1)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
 }
 
 /** Apply ``chosen`` (default: the ticked suggestions) as a new version of the model. */
