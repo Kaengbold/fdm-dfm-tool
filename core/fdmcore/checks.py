@@ -918,11 +918,10 @@ def _runs(idx: list[int]) -> list[list[int]]:
 # ---------------------------------------------------------------- time, cooling, setup
 
 
-# Print-time model, fitted to OrcaSlicer's own estimates for the samples (P1S system profiles with
-# generic PLA, see tools/time_fit.py: typical ×1.08, worst ×1.21; also right for 0.6 / 0.8 mm nozzles
-# within ×0.8–1.2). Real moves rarely reach nominal speed. The K1C's OrcaSlicer times are ~3× shorter
-# with near-identical settings, not understood yet.
-TIME_EFFICIENCY = 0.2
+# Print-time model, fitted to OrcaSlicer's own estimates for the samples (P1S and K1C system
+# profiles, generic PLA, balanced and speed goals; tools/time_fit.py): typical ×1.11, worst ×1.16 of
+# the two printers' mean, which differ ×1.11 from each other. Real moves rarely reach nominal speed.
+TIME_EFFICIENCY = 0.6
 LAYER_OVERHEAD_S = 7.0  # layer change, travel, retractions, slow first moves
 START_MIN = 3.0  # heating, homing, bed levelling, purge line
 
@@ -935,9 +934,10 @@ def _estimate(layers: list[Layer], profile: Profile) -> dict:
     lw, lh = profile.line_width, plan["layer_height"]
     walls, infill = plan["walls"], plan["infill"] / 100
     sp = profile.speeds
+    # At the melt-rate limit the head runs slower and steadier, so the efficiency doesn't apply on top.
     flow_speed = profile.material["max_flow_mm3s"] / (lw * lh)  # mm/s at the volumetric limit
-    v_wall = min(sp["outer_wall"], flow_speed) * TIME_EFFICIENCY
-    v_inf = min(sp["infill"], flow_speed) * TIME_EFFICIENCY
+    v_wall = min(sp["outer_wall"] * TIME_EFFICIENCY, flow_speed)
+    v_inf = min(sp["infill"] * TIME_EFFICIENCY, flow_speed)
     min_layer = profile.material["min_layer_time_s"]
     zs = np.array([layer.z for layer in layers])
     times, volume, total = [], 0.0, 0.0
@@ -950,7 +950,8 @@ def _estimate(layers: list[Layer], profile: Profile) -> dict:
         wall_area = min(g.area, g.length * walls * lw)
         core = max(g.area - wall_area, 0.0)
         solid = min(solid, core)
-        t = g.length * walls / v_wall + (solid + (core - solid) * infill) / lw / v_inf + LAYER_OVERHEAD_S
+        # thin walls fit fewer loops than asked for: time follows the wall area that's really printed
+        t = wall_area / lw / v_wall + (solid + (core - solid) * infill) / lw / v_inf + LAYER_OVERHEAD_S
         times.append(t)
         real_layers = layer.dz / lh
         total += max(t, min_layer) * real_layers

@@ -160,7 +160,7 @@ Bugs first (P1), then UI clean-up, then new features.
 - [ ] **T-231 P2** Nozzle comparison with the built-in slicer: detect details lost with a bigger nozzle (walls thinner than the line, small holes / text / gaps that vanish). · owner: —
 - [ ] **T-232 P1** Too weak with every print setting → say so and suggest design changes, a lower load or another material. · owner: —
 - [ ] **T-233 P2** Slicer modifier regions in the UI: pick a region and give it its own settings (engine part exists from T-150 zones). · owner: —
-- [ ] **T-234 P2** Print time: OrcaSlicer gives the K1C ~3× shorter times than the P1S with near-identical settings (melt rate 14 vs 12 mm³/s, same speeds); find out why, then per-printer time constants. Our estimate is fitted to the P1S. · owner: —
+- [x] **T-234 P2** Print time: OrcaSlicer gives the K1C ~3× shorter times than the P1S with near-identical settings (melt rate 14 vs 12 mm³/s, same speeds); find out why, then per-printer time constants. Our estimate is fitted to the P1S. · owner: Claude (task/T-234-orca-times) · Cause: OrcaSlicer's CLI ignores `inherits`, so the P1S got a 2 mm³/s melt rate; we now pass flattened profiles. Real P1S/K1C difference is ×1.11, so one set of constants (refit: typical ×1.11, worst ×1.16). Wall time now follows the wall area that fits (thin walls) and the melt-rate cap isn't scaled again; 0.4/0.6/0.8 mm nozzles within ×0.92–1.26 of OrcaSlicer.
 
 ### Simulations
 
