@@ -281,6 +281,7 @@ WORSE = {
     "height": "prints taller (takes longer)",
     "bed": "has less contact with the bed",
     "stability": "stands tall on a narrow base (can tip or wobble)",
+    "first_layer": "has a trickier first layer (small spots or thin strips on the bed)",
     "weak": "has more weak spots along the layers",
     "strength": "is weaker under your load",
     "faces": "doesn't keep to the faces you marked",
@@ -400,10 +401,16 @@ def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettin
             "bed": settings.w_small_bed * float(np.clip(1.0 - frac / settings.good_bed_fraction, 0.0, 1.0))
             - settings.w_bed_contact * min(frac, 1.0),
             "stability": float(stability_term(r.height, st["bed_area"], settings)),
+            "first_layer": settings.w_small_spots * min(st["small_spots"], 3) + settings.w_thin_first_layer * st["thin_share"],
         }
         for k, v in new.items():
             r.penalize(k, v - r.terms.get(k, 0.0))
         r.bed_area, r.support_volume = st["bed_area"], st["support_volume"]
+        if st["small_spots"]:
+            n = st["small_spots"]
+            r.reasons.append(f"{n} small spot{'s' if n > 1 else ''} on the bed (a tip, post or corner): can come loose while printing")
+        if st["thin_share"] > 0.3:
+            r.reasons.append(f"Much of the first layer is thin strips ({st['thin_share']:.0%}): they stick badly")
         if st["scar_area"] > max(0.02 * L**2, 25.0):
             r.reasons.append(f"Some supports stand on the part itself (~{st['scar_area']:.0f} mm² of rough marks)")
 
@@ -418,9 +425,15 @@ def _placement(mesh: Mesh, r, p: Profile):
     return rotation, fit
 
 
+BED_CONTACT_WEIGHT = {"low": 0.0, "medium": 0.25, "high": 0.5}  # by the material's warp_risk
+
+
 def orientation_settings(p: Profile) -> OrientationSettings:
-    """Scoring weights for the user's goal. Multi-material makes supports cheaper (clean interfaces)."""
-    s = OrientationSettings(max_overhang_deg=p.material["max_overhang_deg"])
+    """Scoring weights for the user's goal. Multi-material makes supports cheaper (clean interfaces).
+    A footprint bigger than needed only helps materials that warp (ABS, ASA, PC, nylon): PLA and
+    PETG stick fine on any decent flat face, so there the other terms decide."""
+    s = OrientationSettings(max_overhang_deg=p.material["max_overhang_deg"],
+                            w_bed_contact=BED_CONTACT_WEIGHT[p.material.get("warp_risk", "high")])
     if p.goal == "speed":
         s.w_height, s.w_support_volume = 0.4, 1.5
     elif p.goal == "material":

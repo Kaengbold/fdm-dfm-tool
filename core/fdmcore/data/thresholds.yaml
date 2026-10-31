@@ -60,6 +60,11 @@ first_layer:
   zone_mm: 0.6                    # bottom layers affected by squish / elephant foot
   detail_min_mm: 0.65             # strokes/gaps on the bed side narrower than this get squashed or closed [text_embossing_debossing_limits, problem_elephant_foot]
   elephant_foot_mm: [0.1, 0.25]   # bulge per side [problem_elephant_foot]
+  # Orientation choice: separate spots on the bed smaller than this (a tip, a thin post, a corner)
+  # hold on by little and get pulled loose by the nozzle. Estimate, well below the 150 mm² a whole
+  # part needs [problem_bed_adhesion_moisture_heat_creep_ringing].
+  island_min_mm2: 25
+  thin_lines: 3                   # first-layer strips narrower than this many lines stick badly (estimate)
 
 warping:
   # Footprint length (mm, longest side of an island on the bed) where corner lifting becomes likely.

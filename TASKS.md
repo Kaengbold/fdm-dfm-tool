@@ -156,7 +156,7 @@ Bugs first (P1), then UI clean-up, then new features.
 
 ### Engine
 
-- [ ] **T-230 P1** Orientation ranking: bed contact area matters only for warping materials (ABS, ASA, PA…), not for PLA. Penalise risky first layers: small islands, thin walls, points or sharp tips touching the bed; prefer a simple first layer. · owner: —
+- [x] **T-230 P1** Orientation ranking: bed contact area matters only for warping materials (ABS, ASA, PA…), not for PLA. Penalise risky first layers: small islands, thin walls, points or sharp tips touching the bed; prefer a simple first layer. · owner: Claude (`task/T-230-first-layer`) — the footprint bonus now depends on the material's warp_risk (none for PLA/PETG/TPU, half for nylon, full for ABS/ASA/PC); the sliced refinement penalises small separate spots on the bed (< 25 mm², up to 3) and first layers made of thin strips (< 3 lines), with a plain reason. PLA L-bracket now prints on its side (lower, no supports), ABS keeps the base down.
 - [ ] **T-231 P2** Nozzle comparison with the built-in slicer: detect details lost with a bigger nozzle (walls thinner than the line, small holes / text / gaps that vanish). · owner: —
 - [ ] **T-232 P1** Too weak with every print setting → say so and suggest design changes, a lower load or another material. · owner: —
 - [ ] **T-233 P2** Slicer modifier regions in the UI: pick a region and give it its own settings (engine part exists from T-150 zones). · owner: —

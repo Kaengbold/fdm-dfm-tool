@@ -34,7 +34,7 @@ class OrientationSettings:
     w_support_area: float = 1.0
     w_support_volume: float = 1.0
     w_height: float = 0.15
-    w_bed_contact: float = 0.5
+    w_bed_contact: float = 0.5  # bonus for a big footprint: only warping materials need it (see api.orientation_settings)
     # Hobbyist parts should sit on a real flat face: no/tiny bed contact means brims, rafts or
     # supports just to hold the part, poor first layers and a tilted part that's hard to slice.
     w_small_bed: float = 3.0
@@ -44,6 +44,10 @@ class OrientationSettings:
     # even though it needs a little support.
     w_tipping: float = 1.0
     tip_aspect: float = 4.0
+    # Risky first layer (the sliced refinement only): per small separate spot on the bed (up to 3),
+    # and for a first layer made only of thin strips.
+    w_small_spots: float = 0.5
+    w_thin_first_layer: float = 1.0
 
 
 @dataclass
