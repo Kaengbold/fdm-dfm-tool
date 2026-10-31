@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import shapely
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 from .heat import layer_heat
 from .holes import horizontal_holes
@@ -311,11 +311,22 @@ def _bridge_span(piece: Polygon, anchor_zone, max_span: float = np.inf, held_zon
     return float(span), len(anchors)
 
 
+OVERLAY_GRID = 1e-4  # mm: precision of the robust overlay below, far finer than anything printed
+
+
 def _safe_diff(a, b):
+    """a − b with GEOS's robust overlay (snap-rounded to ``OVERLAY_GRID``). The morphological checks
+    subtract a shape from its own opening or closing, whose outlines run almost on top of each other:
+    the plain overlay of Pyodide's older GEOS then throws a TopologyException that try/except can't
+    catch in the browser (it kills the engine). Seen on a part with a fill and a chamfer crossing (T-201)."""
     if a.is_empty or b.is_empty:
         return a
     try:
-        return a.difference(b)
+        out = shapely.difference(a, b, grid_size=OVERLAY_GRID)
+        # Snap rounding can collapse a hair-thin piece into a line; a mixed result can't go into the next overlay.
+        if out.geom_type in ("Polygon", "MultiPolygon"):
+            return out
+        return MultiPolygon([q for g in shapely.get_parts(out) for q in shapely.get_parts(g) if q.geom_type == "Polygon"])
     except Exception:
         try:
             return shapely.set_precision(a, 1e-3).difference(shapely.set_precision(b, 1e-3))
