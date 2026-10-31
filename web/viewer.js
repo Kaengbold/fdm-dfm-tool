@@ -330,8 +330,8 @@ export class Viewer {
   showZones(zones) {
     this.zones?.clear();
     if (!this.zones) this.scene.add((this.zones = new THREE.Group()));
-    const color = css("--vertical");
-    for (const c of zones) {
+    for (const z of zones) { // corner arrays (zones, orange) or {corners, color}
+      const [c, color] = Array.isArray(z) ? [z, css("--vertical")] : [z.corners, css(z.color)];
       const idx = [];
       for (let axis = 0; axis < 3; axis++) {
         for (const side of [0, 1]) {

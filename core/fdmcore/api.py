@@ -642,6 +642,130 @@ def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARG
     return _zone_info(z, s.mesh, up, p.printer["bed"])
 
 
+VOLUME_KINDS = {"support": "Support here", "blocker": "No support here", "void": "Hidden gap (extra walls)", "keep_clear": "Keep clear"}
+VOID_MM = 0.6  # a gap picked on a spot: a thin upright pin hole, the "holes that force walls" trick
+VOID_COVER_MM = 1.0  # plastic left above and below such a pin hole, so it doesn't show
+
+
+def volume_at(up, kind: str, region: int | None = None, point=None, point2=None, margin: float | None = None,
+              profile: dict | None = None) -> dict:
+    """An advanced design box, upright in the build frame like a zone: around a face (``region``),
+    a spot (``point``) or between two spots (``point`` and ``point2``, part coordinates), ``margin``
+    mm bigger on every side. ``kind``: "support" / "blocker" (support enforcer / blocker in the 3MF),
+    "void" (a hidden gap: a negative volume the slicer prints walls round; on one spot a thin pin
+    hole up through the part that stays inside it), "keep_clear" (space that must stay empty; not
+    exported). Returns the box, its corners on the bed and plain notes on what it does here."""
+    from .regions import find_regions
+
+    if kind not in VOLUME_KINDS:
+        raise ValueError(f"Unknown kind {kind!r}: use one of {', '.join(VOLUME_KINDS)}")
+    s = _require()
+    p = Profile.from_dict(profile)
+    r0 = rotation_to_z(up)
+    if region is not None:
+        if s.regions is None:
+            s.regions = find_regions(s.mesh)
+        pts = s.mesh.triangles[np.asarray(s.regions) == int(region)].reshape(-1, 3)
+        if not len(pts):
+            raise ValueError(f"Unknown face {region}")
+    elif point is not None:
+        pts = np.asarray([point] + ([point2] if point2 is not None else []), float)
+    else:
+        raise ValueError("Give a face (region) or a point")
+    built = pts @ r0.T
+    zs = (s.mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2]
+    pin = kind == "void" and region is None and point2 is None
+    if margin is None:
+        margin = VOID_MM / 2 if pin else ZONE_MARGIN_MM
+    lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
+    inside = _inside_test(s.mesh, r0)
+    if pin:
+        lo[2], hi[2] = _solid_run(inside, built[0], zs.min(), zs.max())
+    # Slicer boxes stay between the bed and the top of the part (see _zone_box); keep-clear space may be above it.
+    lo[2], hi[2] = max(lo[2], zs.min()), (hi[2] if kind == "keep_clear" else min(hi[2], zs.max()))
+    if np.any(hi - lo <= 0):
+        raise ValueError("That box is outside the part's height")
+    box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0}
+    corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"])["corners_print"]
+    return {**box, "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
+
+
+def _box_zone(box: dict):
+    """A zone or advanced design box (dict) as the strength model's Zone."""
+    from .strength import Zone
+
+    return Zone(tuple(box["lo"]), tuple(box["hi"]), int(box.get("walls", 0)), float(box.get("infill", 0)), box.get("kind") == "void")
+
+
+def _inside_test(mesh: Mesh, r0: np.ndarray):
+    """Is a point (build frame) inside the part? A voxel test: fine enough for sizes and notes."""
+    from .voxel import voxelize
+
+    grid = voxelize(mesh, 60_000)
+
+    def inside(built):
+        idx = grid.index_of(np.asarray(built, float) @ r0)
+        ok = np.all((idx >= 0) & (idx < np.array(grid.solid.shape)), axis=1)
+        out = np.zeros(len(idx), dtype=bool)
+        out[ok] = grid.solid[tuple(idx[ok].T)]
+        return out
+
+    inside.h = grid.h
+    return inside
+
+
+def _solid_run(inside, at: np.ndarray, zmin: float, zmax: float) -> tuple[float, float]:
+    """Heights of the solid run straight up and down through ``at`` (build frame), less
+    ``VOID_COVER_MM`` at both ends: where a pin hole can go without showing."""
+    zs = np.linspace(zmin, zmax, 400)
+    solid = inside(np.column_stack([np.full_like(zs, at[0]), np.full_like(zs, at[1]), zs]))
+    if not solid.any():
+        raise ValueError("That spot isn't on the part")
+    rows = np.flatnonzero(solid)
+    k = int(rows[np.argmin(np.abs(zs[rows] - at[2]))])  # a click on the surface: the nearest solid point
+    a = b = k
+    while a > 0 and solid[a - 1]:
+        a -= 1
+    while b < len(zs) - 1 and solid[b + 1]:
+        b += 1
+    lo, hi = zs[a] + VOID_COVER_MM, zs[b] - VOID_COVER_MM
+    if hi <= lo:
+        raise ValueError("The part is too thin there for a hidden gap")
+    return lo, hi
+
+
+def _volume_notes(mesh: Mesh, r0: np.ndarray, inside, box: dict, p: Profile) -> list[str]:
+    """What an advanced design box does on this part, in plain words."""
+    lo, hi = np.asarray(box["lo"]), np.asarray(box["hi"])
+    kind = box["kind"]
+    if kind in ("void", "keep_clear"):
+        n = np.clip(np.ceil((hi - lo) / (inside.h / 2)).astype(int) + 1, 2, 40)
+        g = np.stack(np.meshgrid(*[np.linspace(lo[i], hi[i], n[i]) for i in range(3)], indexing="ij"), -1).reshape(-1, 3)
+        filled = inside(g)
+        if kind == "keep_clear":
+            if filled.mean() < 0.01:
+                return ["The part stays out of it."]
+            return [f"The part fills about {filled.mean():.0%} of this space ({filled.mean() * float(np.prod(hi - lo)) / 1000:.1f} cm³): "
+                    "change the design to clear it."]
+        notes = ["The slicer prints walls all round it, so the plastic next to it is solid: stronger there, a little heavier. "
+                 "The strength check counts it (roughly)."]
+        if not filled[np.any(np.isclose(g, lo) | np.isclose(g, hi), axis=1)].all():
+            notes.append("It reaches the outside of the part, so it shows as a hole in the surface. Keep it inside if it should stay hidden.")
+        return notes
+    normals, areas = mesh.normals_and_areas()
+    c = mesh.triangles.mean(axis=1) @ r0.T
+    inbox = np.all((c >= lo) & (c <= hi), axis=1)
+    steep = (normals @ r0.T)[:, 2] < -np.cos(np.radians(p.material["max_overhang_deg"]))
+    above_bed = c[:, 2] > (mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2].min() + 0.2
+    hang = float(areas[inbox & steep & above_bed].sum())
+    if kind == "support":
+        return ["Supports are printed here, even with the slicer's automatic supports off."
+                + ("" if hang > 1 else " Nothing here overhangs much: check it's the right place.")]
+    if hang > 1:
+        return [f"About {hang:.0f} mm² here hangs too far out to print in the air: it may sag or fail without support."]
+    return ["No support is printed here."]
+
+
 def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     z = zoned["zones"][0]
     head = (f"Stronger only where it's needed: {len(zoned['zones'])} zone{'s' if len(zoned['zones']) > 1 else ''} with "
@@ -859,13 +983,14 @@ def _evaluate(cases, up, p: Profile, sh) -> dict:
 def _shells(p: Profile, walls: int | None = None, infill: float | None = None, top: int | None = None, bottom: int | None = None,
             zones: list[dict] | None = None):
     """How the part will be printed; anything not given comes from the goal's usual settings.
-    ``zones``: stronger zones (lo, hi, walls, infill, as optimise_strength returns them)."""
-    from .strength import Shells, Zone
+    ``zones``: stronger zones (lo, hi, walls, infill, as optimise_strength returns them) and the
+    advanced design boxes (``kind``, see volume_at): hidden gaps count, supports don't change the part."""
+    from .strength import Shells
 
     plan = goal_plan(p)
     return Shells(walls=int(plan["walls"] if walls is None else walls), infill=float(plan["infill"] / 100 if infill is None else infill),
                   top=int(plan["top"] if top is None else top), bottom=int(plan["bottom"] if bottom is None else bottom),
-                  zones=tuple(Zone(tuple(z["lo"]), tuple(z["hi"]), int(z["walls"]), float(z["infill"])) for z in zones or ()))
+                  zones=tuple(_box_zone(z) for z in zones or () if z.get("kind", "stronger") in ("stronger", "void")))
 
 
 def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
@@ -1448,16 +1573,25 @@ def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
 
 def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca") -> bytes:
     """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio / PrusaSlicer.
-    ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes;
-    then the file is for one slicer: ``slicer`` "orca" (also Bambu Studio) or "prusa"."""
+    ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes, and
+    the advanced design boxes (volume_at) support enforcers, blockers and negative volumes; then the
+    file is for one slicer: ``slicer`` "orca" (also Bambu Studio) or "prusa"."""
     s = _require()
     p = Profile.from_dict(profile)
     if settings is None:
         settings = {r["key"]: r["value"] for r in check(up, profile)["settings"]}
     bed = p.printer["bed"]
     rotation, _ = print_rotation(s.mesh, up, bed)
-    modifiers = [(_zone_box(s.mesh, up, rotation, z), {"wall_loops": str(int(z["walls"])), "sparse_infill_density": f"{float(z['infill']):.0%}"})
-                 for z in zones or []]
+    modifiers = []
+    for z in zones or []:
+        kind = z.get("kind", "stronger")
+        if kind == "keep_clear":  # a design aid: nothing for the slicer
+            continue
+        conf = {"wall_loops": str(int(z["walls"])), "sparse_infill_density": f"{float(z['infill']):.0%}"} if kind == "stronger" else {}
+        modifiers.append((_zone_box(s.mesh, up, rotation, z), conf, kind))
+    if any(m[2] == "support" for m in modifiers) and str(settings.get("enable_support", "0")) == "0":
+        # Supports only where the user put them: the slicer's own placement stays off.
+        settings = {**settings, "enable_support": "1", "support_type": "tree(manual)"}
     return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer)
 
 
@@ -1565,6 +1699,7 @@ METHODS = {
     "regions": regions,
     "optimise_strength": optimise_strength,
     "zone_at": zone_at,
+    "volume_at": volume_at,
     "tag_feature": tag_feature,
     "strength": strength,
     "strength_options": strength_options,

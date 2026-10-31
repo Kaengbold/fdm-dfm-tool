@@ -506,3 +506,10 @@ button.primary:disabled { opacity: 1; background: var(--soft); border-color: var
 .features .link.quiet { margin-left: auto; font-weight: 400; font-size: 13px; color: var(--muted); }
 .features .fit input { width: 4.5em; }
 #design-block h3 small { font-weight: 400; }
+
+/* Advanced design boxes: a dot in the box's colour in the 3D view */
+.vol-list li strong::before { content: ""; display: inline-block; width: 0.6em; height: 0.6em; border-radius: 50%; margin-right: 0.4em; background: var(--dot); }
+.vol-list li[data-kind="support"] { --dot: var(--support); }
+.vol-list li[data-kind="blocker"] { --dot: var(--ok); }
+.vol-list li[data-kind="void"] { --dot: var(--fixed); }
+.vol-list li[data-kind="keep_clear"] { --dot: var(--clean); }

@@ -388,6 +388,30 @@
           </div>
         </section>
 
+        <section class="pane" data-pane="extra">
+          <h2>Advanced design changes</h2>
+          <div id="blk-extra">
+            <p class="lead">Boxes you place on the part for the slicer: supports where you want them, none where you don't, and hidden gaps that make it print solid walls inside.
+              They go into the 3MF; the strength check counts the gaps.</p>
+            <div class="sim-card" id="vol-card">
+              <label class="field">What to place
+                <select id="vol-kind">
+                  <option value="support">Support here</option>
+                  <option value="blocker">No support here</option>
+                  <option value="void">Hidden gap (solid walls inside)</option>
+                  <option value="keep_clear">Keep clear (space that stays empty)</option>
+                </select></label>
+              <p id="vol-kind-hint" class="hint"></p>
+              <div class="row">
+                <button id="vol-pick">Pick a face or spot</button>
+                <button id="vol-pick2">Between two spots</button>
+                <span id="vol-hint" class="hint" hidden></span>
+              </div>
+              <ul id="vol-list" class="zone-list vol-list"></ul>
+            </div>
+          </div>
+        </section>
+
         <section class="pane" data-pane="settings">
           <h2>Slicer settings</h2>
           <div id="blk-settings">
@@ -416,7 +440,7 @@
         <section class="pane" data-pane="download">
           <h2>Download</h2>
           <div id="blk-download" class="actions">
-            <label id="zones-for" class="field" hidden>Your strengthening zones need a file for one slicer:
+            <label id="zones-for" class="field" hidden>Your zones and boxes need a file for one slicer:
               <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio</option><option value="prusa">PrusaSlicer</option></select></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
             <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>

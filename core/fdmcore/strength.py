@@ -56,12 +56,15 @@ MIN_SCALE = 0.01
 @dataclass(frozen=True)
 class Zone:
     """A box printed with more walls and infill than the rest (never fewer): a slicer modifier volume.
-    Corners in the build frame (``rotation_to_z(up) @ part``), so it stands upright on the bed."""
+    Corners in the build frame (``rotation_to_z(up) @ part``), so it stands upright on the bed.
+    ``void``: a hidden gap instead (a negative volume inside the part): empty, and the slicer prints
+    walls all round it, so the plastic next to it is solid."""
 
     lo: tuple[float, float, float]
     hi: tuple[float, float, float]
     walls: int
     infill: float
+    void: bool = False
 
 
 @dataclass(frozen=True)
@@ -389,9 +392,19 @@ def _zoned(model: Model, up, shells: Shells, profile: Profile) -> tuple[np.ndarr
     if shells.zones and up is not None:
         q = model.grid.centers(model.elems) @ rotation_to_z(up).T
         for z in shells.zones:
+            if z.void:
+                continue
             inside = np.all((q >= z.lo) & (q <= z.hi), axis=1)
             out[inside] = solid(max(z.walls, shells.walls))[inside]  # a zone only ever adds strength
             infill[inside] = max(z.infill, shells.infill)
+        wall = shells.walls * profile.line_width
+        for z in shells.zones:  # gaps last: their walls are printed whatever the zone says
+            if not z.void:
+                continue
+            gap = np.linalg.norm(np.maximum(np.maximum(np.asarray(z.lo) - q, q - np.asarray(z.hi)), 0.0), axis=1)
+            ring = gap <= wall + model.grid.h / 2  # the cube reaches into the gap's walls
+            out[ring] = 1.0
+            out[gap == 0] = infill[gap == 0] = 0.0
     return out, infill
 
 
