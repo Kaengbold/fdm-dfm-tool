@@ -4,10 +4,10 @@
 
 export const STEP_NAMES = {
   part: "Your part", have: "What you have", orient: "On the bed", problems: "Problems", strength: "Will it hold?",
-  sims: "Optional simulations", design: "Design changes", settings: "Slicer settings", download: "Download", result: "Result",
+  sims: "Optional simulations", fits: "Tolerances & tuning", design: "Design changes", settings: "Slicer settings", download: "Download", result: "Result",
 };
 
-const ALL = ["part", "have", "orient", "problems", "strength", "sims", "design", "settings", "download"];
+const ALL = ["part", "have", "orient", "problems", "strength", "sims", "fits", "design", "settings", "download"];
 export const LEVEL_STEPS = {
   simple: ["part", "have", "result"],
   basic: ["part", "have", "orient", "problems", "strength", "settings", "download"],

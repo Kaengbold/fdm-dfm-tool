@@ -329,6 +329,33 @@
           </div>
         </section>
 
+        <section class="pane" data-pane="fits">
+          <h2>Tolerances &amp; tuning</h2>
+          <p class="lead">Make parts fit together: holes, pegs, bearings, screws, things that slide or press in.</p>
+          <div id="blk-fits">
+            <div class="sim-card">
+              <h3>Holes and what goes in them</h3>
+              <p class="hint">Say what goes into each hole (or which hole a post goes into) and how tight it should be. We work out the size
+                to model from your printer's usual tolerance, or from your own fit test below. The new size shows up under Design changes.</p>
+              <p id="fits-summary" class="hint">Looking for holes and posts…</p>
+              <ul id="fits" class="features"></ul>
+            </div>
+            <div class="sim-card">
+              <h3>Hole compensation in the slicer</h3>
+              <p class="hint">Small holes print a little too small. The slicer can make every hole bigger by a set amount: use it when you
+                can't change the model. For one exact fit, sizing the hole above is better.</p>
+              <label class="field sub">Make holes bigger by <span><input id="hole-comp" type="number" step="0.05" min="0" max="0.5" /> mm</span></label>
+              <label class="toggle"><input id="polyholes" type="checkbox" /> Polyholes: rounder small holes (OrcaSlicer only)</label>
+            </div>
+            <div class="sim-card">
+              <h3>Tune it to your printer</h3>
+              <p class="hint">Print the fit test once (a 6 mm peg and holes 6.0 … 6.5 mm) and say which hole fits how. Every size here then
+                uses your printer's real tolerance instead of a typical one. More test prints are in the same place.</p>
+              <button id="open-fit-test">Open the fit test</button>
+            </div>
+          </div>
+        </section>
+
         <section class="pane" data-pane="design">
           <h2>Design changes <small><span class="swatch cut"></span>cut away <span class="swatch add"></span>added</small></h2>
           <div id="blk-design">

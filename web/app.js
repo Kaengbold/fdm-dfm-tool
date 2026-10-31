@@ -562,18 +562,23 @@ $("show-temp").onchange = () => {
   recolor();
 };
 
+const OWN_LABEL = { xy_hole_compensation: "Hole compensation", hole_to_polyhole: "Polyholes" };
+
 /** Recommended settings with the user's applied strength suggestions on top. */
 function effectiveSettings() {
   if (!state.check) return [];
   const list = state.check.settings.map((s) => (s.key in state.overrides ? { ...s, value: state.overrides[s.key], changed: true } : s));
   for (const [key, value] of Object.entries(state.overrides)) {
-    if (!list.some((s) => s.key === key)) list.push({ key, value, label: key, reason: "From strength check", changed: true });
+    if (!list.some((s) => s.key === key)) list.push({ key, value, label: OWN_LABEL[key] ?? key, reason: OWN_LABEL[key] ? "Set by you" : "From strength check", changed: true });
   }
   return list;
 }
 
 function renderSettings() {
   const settings = effectiveSettings();
+  const value = (key) => settings.find((s) => s.key === key)?.value;
+  $("hole-comp").value = Number(value("xy_hole_compensation") ?? 0);
+  $("polyholes").checked = ["1", "true"].includes(String(value("hole_to_polyhole")));
   $("settings-block").hidden = !settings.length;
   $("settings").replaceChildren(
     ...settings.map((s) =>
@@ -642,7 +647,7 @@ function recolor() {
   if (shows("problems") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
   const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
-  const regions = shows("strength") || shows("design") || viewStep() === "orient";
+  const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
     const r = state.faceRegions[f];
@@ -1445,7 +1450,9 @@ function showSelectedGhosts(highlight = null) {
 
 /** Design changes are suggested as soon as their step is shown (Expert: always on the page), once per orientation. */
 function suggestDesignIfShown() {
-  if (!activeOption() || !state.check || !(shows("design") || steps.level === "expert") || $("design-block").hidden) return;
+  if (!activeOption() || !state.check) return;
+  const wanted = shows("fits") || ((shows("design") || steps.level === "expert") && !$("design-block").hidden);
+  if (!wanted) return;
   if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
 }
 
@@ -1478,6 +1485,24 @@ async function suggestDesign() {
   });
 }
 
+// Tolerances & tuning: the slicer's hole settings go into the 3MF like any other change.
+$("hole-comp").onchange = () => {
+  remember("hole compensation");
+  state.overrides.xy_hole_compensation = String(Math.max(0, Number($("hole-comp").value) || 0));
+  renderSettings();
+};
+$("polyholes").onchange = () => {
+  remember("polyholes");
+  state.overrides.hole_to_polyhole = $("polyholes").checked ? "1" : "0";
+  renderSettings();
+};
+$("open-fit-test").onclick = () => {
+  $("my-presets").open = true;
+  $("new-material").click();
+  steps.reveal($("calibration"));
+  $("calibration").querySelector("[data-calibration=fit]").scrollIntoView({ block: "center" });
+};
+
 // ---------- feature confirm ("is this a hole?") ----------
 const shown = (f) => f.type === "hole" || f.full_circle; // partial bosses are rounded edges: not worth a line
 const FEATURE_NAME = { hole: "hole", boss: "round post" };
@@ -1506,10 +1531,20 @@ function renderFeatures(features) {
              el("button", { textContent: "Yes", title: `It is a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, f.type) }),
              el("button", { textContent: `Not a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, "none") })]
           : [el("button", { className: "link quiet", textContent: `Not a ${FEATURE_NAME[f.type]}?`, onclick: () => tagFeature(f.region, "none") })];
-      return el("li", { className: [f.tag === "none" ? "rejected" : "", unsure(f) ? "ask" : ""].join(" ") }, name, ...answer,
-        f.tag !== "none" && f.full_circle ? fitControls(f) : "");
+      return el("li", { className: [f.tag === "none" ? "rejected" : "", unsure(f) ? "ask" : ""].join(" ") }, name, ...answer);
     }),
   );
+  renderFits(list.filter((f) => f.tag !== "none" && f.full_circle));
+}
+
+/** Tolerances & tuning: each round hole or post with what goes in it. */
+function renderFits(list) {
+  $("fits-summary").textContent = list.length ? "Click a name to see it on the part." : "No round holes or posts found.";
+  $("fits").replaceChildren(...list.map((f) => {
+    const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
+    return el("li", {}, el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
+      fitControls(f));
+  }));
 }
 
 const FIT_LABEL = { press: "pressed in", snug: "snug", sliding: "sliding / turning", loose: "loose" };
@@ -1526,6 +1561,7 @@ function fitControls(f) {
     busy("Working out the size…", async () => {
       const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
       state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
+      if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
       await suggestDesign();
     }) });
   return el("div", { className: "fit row" }, el("span", { className: "hint", textContent: hole ? "What goes in: Ø" : "Goes into: Ø" }), size, "mm,", kind, go,
