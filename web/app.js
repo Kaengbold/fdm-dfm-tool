@@ -109,6 +109,8 @@ const state = {
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
+  versions: [], // models to switch between and compare: {label, source, step, results: {time, grams, problems, safety}}
+  version: 0,
 };
 
 // Which step can open: everything after the part needs one, everything after "What you have" a finished check.
@@ -222,15 +224,17 @@ function showProgress(fraction) {
 
 // ---------- flow ----------
 /** Entry point for user files: STEP goes through OpenCascade first; STL and 3MF straight to the engine. */
-async function openFile(name, bytes) {
+/** ``as``: "new" starts over (a new part), "version" adds it as a version to compare (see versions). */
+async function openFile(name, bytes, as = "new") {
   $("body-pick").hidden = true;
-  if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes);
+  if (as === "version") addVersion(name.replace(/\.(stl|3mf|step|stp)$/i, ""));
+  if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes, null, null, as);
   const bodies = await busy("Reading STEP file (first time downloads ~8 MB)…", () => readStep(bytes));
   if (!bodies.length) return setStatus("No solid bodies found in this STEP file.", true);
   const pick = async (i) => {
     // Kept so design edits can be written back into the original CAD solid (stepwrite.js).
     const step = { name, bytes, volume: bodies[i].volume, edits: [] };
-    await loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds, step);
+    await loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds, step, as);
   };
   if (bodies.length > 1) {
     showBodyPicker(bodies.map((b) => ({ name: b.name, volume_mm3: b.volume })), 0, pick);
@@ -247,14 +251,23 @@ function showBodyPicker(bodies, active, pick) {
   $("body-pick").hidden = false;
 }
 
-/** ``step``: the STEP file this part came from (and the edits applied so far), or null. */
-async function loadFile(name, bytes, faceIds = null, step = null) {
+/** ``step``: the STEP file this part came from (and the edits applied so far), or null. ``as``: "new"
+ * starts the version list over; otherwise the model is the current version (see versions). */
+async function loadFile(name, bytes, faceIds = null, step = null, as = "new") {
   await busy("Reading the part…", async () => {
     await engineReady;
     const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: 0, scale: 1 }; // to restore the part after a cancel
+    if (as === "new" || !state.versions.length) {
+      state.versions = [{ label: "Original" }];
+      state.version = 0;
+      undoStack.length = 0;
+      renderUndo();
+    }
+    Object.assign(state.versions[state.version], { source: state.source, step });
+    renderVersions();
     if (info.bodies.length) {
       showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => {
         const next = await call("select_body", { index: i });
@@ -496,6 +509,7 @@ function renderCheck() {
   if (!state.check) return;
   const { findings, stats } = state.check;
   $("stats").textContent = `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament.`;
+  noteVersion({ time: stats.print_time_min, grams: stats.filament_g, problems: new Set(findings.filter((f) => f.impact !== "info").map((f) => f.rule)).size, safety: null });
   $("findings").replaceChildren(
     ...(findings.length ? renderImpactGroups(findings) : [el("li", { className: "ok", textContent: "Should print as designed in this orientation." })]),
   );
@@ -713,6 +727,7 @@ function target() {
 }
 
 function addLoad(load) {
+  remember(load.kind === "fixed" ? "where it is held" : "a load");
   // One entry per face (or spot) and case: it can be loaded differently in each case, and "held" is shared.
   const same = (l) => where(l) === where(load) && (l.kind === "fixed" || load.kind === "fixed" || l.case === load.case);
   state.loads = state.loads.filter((l) => !same(l)).concat(load);
@@ -733,6 +748,7 @@ function faceMarks() {
 const MARK_LABEL = { clean: "Keep clean (no support marks)", bed: "On the bed", vertical: "Upright (accurate shape)" };
 
 function setMark(kind) {
+  remember("a marked face");
   const region = state.selectedRegion;
   state.marks = state.marks.filter((m) => m.region !== region && !(kind === "bed" && m.kind === "bed")).concat({ region, kind });
   state.selectedRegion = -1;
@@ -746,6 +762,7 @@ function renderMarks() {
     ...(state.marks ?? []).map((m, i) =>
       el("li", { className: m.kind }, el("span", { textContent: MARK_LABEL[m.kind] }),
         el("button", { textContent: "×", title: "Remove", onclick: () => {
+          remember("removing a marked face");
           state.marks.splice(i, 1);
           renderMarks();
           findOrientations(Boolean(state.strength)); // keep strength in the ranking if it was checked
@@ -878,6 +895,7 @@ function renderLoads() {
           textContent: "×",
           title: "Remove",
           onclick: () => {
+            remember("removing a load");
             state.loads.splice(i, 1);
             state.angleOpen = null;
             renderLoads();
@@ -1181,6 +1199,7 @@ function strengthViewControls(r) {
 
 function renderStrength() {
   const r = state.strength;
+  noteVersion({ safety: r.safety_factor });
   const sf = r.safety_factor;
   $("dynamics").hidden = false;
   $("strength-result").replaceChildren(
@@ -1241,6 +1260,7 @@ async function runOptimise() {
   return busy("Trying settings to find the lightest print that holds (up to a minute or two)…", async () => {
     const o = await call("optimise_strength", { up: activeOption().up, loads: state.loads, profile: profile(), zones: true });
     const use = el("button", { className: "primary", textContent: "Use these settings", onclick: async () => {
+      remember("the lightest settings");
       setZones([]);
       Object.assign(state.overrides, o.settings);
       renderSettings();
@@ -1254,6 +1274,7 @@ async function runOptimise() {
         el("p", { textContent: z.explanation }),
         el("p", { className: "hint", textContent: "The zones go into the 3MF as modifier volumes: the slicer prints them with more walls and infill (orange boxes)." }),
         el("button", { textContent: "Use the zones", onclick: async () => {
+          remember("the stronger zones");
           Object.assign(state.overrides, z.settings);
           renderSettings();
           if (o.orientation === "strongest") await applyOption({ up: z.up }, false); // clears zones: set them after
@@ -1312,6 +1333,7 @@ function setZones(zones) {
 /** Apply a suggestion; a new orientation is checked for strength again (``recheck: false``: the caller does). */
 async function applyOption(o, recheck = true) {
   if (o.settings) {
+    remember("slicer settings from the strength check");
     Object.assign(state.overrides, o.settings);
     renderSettings();
     $("run-strength").click();
@@ -1469,9 +1491,132 @@ async function applyEdits() {
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
-    await loadFile(name, stlBytes(soup), null, step);
-    setStatus(`${state.summary} — design changes applied. Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
+    remember("design changes");
+    const carry = carryLoads();
+    addVersion(chosen[0].title.replace(/ \(.*\)$/, "") + (chosen.length > 1 ? ` + ${chosen.length - 1} more` : ""));
+    await loadFile(name, stlBytes(soup), null, step, "version");
+    await restoreLoads(carry);
+    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
   });
+}
+
+// ---------- undo and model versions ----------
+// Every applied design change keeps the model before it as a version: switch back, compare, or undo.
+const undoStack = [];
+
+/** Call before a change: Undo (and Ctrl+Z) puts the loads, marks, settings and model version back. */
+function remember(label) {
+  undoStack.push({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks), overrides: { ...state.overrides } });
+  if (undoStack.length > 50) undoStack.shift();
+  renderUndo();
+}
+
+function renderUndo() {
+  const last = undoStack.at(-1);
+  $("undo").hidden = !last;
+  if (last) $("undo").title = `Undo ${last.label} (Ctrl+Z)`;
+}
+
+async function undo() {
+  const u = undoStack.pop();
+  renderUndo();
+  if (!u || busyCount) return;
+  const marksChanged = JSON.stringify(u.marks) !== JSON.stringify(state.marks);
+  if (u.version !== state.version) await showVersion(u.version, false);
+  Object.assign(state, { loads: u.loads, marks: u.marks, overrides: u.overrides });
+  if (state.loads.length) await ensureRegions();
+  renderLoads();
+  renderMarks();
+  renderSettings();
+  recolor();
+  if (marksChanged) await findOrientations(Boolean(state.strength));
+  setStatus(`Undone: ${u.label}.`);
+}
+$("undo").onclick = undo;
+addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest?.("input, textarea, select")) {
+    e.preventDefault();
+    undo();
+  }
+});
+
+/** A new version (the model about to be loaded) after the current ones. */
+function addVersion(label) {
+  state.versions.push({ label, results: {} });
+  state.version = state.versions.length - 1;
+}
+
+/** Results of the shown version, for the comparison table. */
+function noteVersion(results) {
+  const v = state.versions?.[state.version];
+  if (!v) return;
+  v.results = { ...v.results, ...results };
+  renderVersions();
+}
+
+const versionName = (v, i) => (i === 0 ? v.label : `${i + 1}: ${v.label}`);
+
+function renderVersions() {
+  const list = state.versions ?? [];
+  $("version-pick").hidden = list.length < 2;
+  $("version").replaceChildren(...list.map((v, i) => el("option", { value: i, textContent: versionName(v, i), selected: i === state.version })));
+  const fmt = (r) => [r?.time != null ? fmtTime(r.time) : "–", r?.grams != null ? `${Math.round(r.grams)} g` : "–",
+    r?.problems != null ? String(r.problems) : "–", r?.safety != null ? `×${r.safety.toFixed(1)}` : "–"];
+  $("versions").replaceChildren(
+    el("tr", {}, ...["Version", "Time", "Plastic", "Problems", "Strength", ""].map((t) => el("th", { textContent: t }))),
+    ...list.map((v, i) => el("tr", { className: i === state.version ? "current" : "" },
+      el("td", { className: "name", textContent: versionName(v, i), title: versionName(v, i) }), ...fmt(v.results).map((t) => el("td", { textContent: t })),
+      el("td", {}, i === state.version ? "shown" : el("button", { className: "small", textContent: "Show", onclick: () => showVersion(i) })))),
+  );
+}
+$("version").onchange = () => showVersion(Number($("version").value));
+$("compare-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (file) await openFile(file.name, new Uint8Array(await file.arrayBuffer()), "version");
+};
+
+/** Loads and held faces by where they are on the part, to put them back on an edited model. */
+function carryLoads() {
+  return state.loads.map((l) => ({ load: l, at: l.point ? null : state.regionInfo[l.region] }));
+}
+
+/** Put carried loads on the same faces of the new model: the face nearest the old one's middle that
+ * faces the same way (spots keep their point). Faces that are gone drop out. */
+async function restoreLoads(carry) {
+  if (!carry.length) return;
+  await ensureRegions();
+  const loads = [];
+  for (const { load, at } of carry) {
+    if (!at) {
+      loads.push(load);
+      continue;
+    }
+    let best = -1;
+    let bestD = Infinity;
+    state.regionInfo.forEach((r, i) => {
+      const facing = r.normal[0] * at.normal[0] + r.normal[1] * at.normal[1] + r.normal[2] * at.normal[2];
+      const d = Math.hypot(r.centroid[0] - at.centroid[0], r.centroid[1] - at.centroid[1], r.centroid[2] - at.centroid[2]);
+      if (facing > 0.9 && d < bestD) [best, bestD] = [i, d];
+    });
+    if (best >= 0) loads.push({ ...load, region: best });
+  }
+  state.loads = loads;
+  renderLoads();
+  recolor();
+}
+
+/** Show version ``i``: load its model again, with the loads carried over (``carry: false`` for undo,
+ * which restores its own). */
+async function showVersion(i, carry = true) {
+  const v = state.versions[i];
+  if (!v?.source || i === state.version) return renderVersions();
+  const loads = carry ? carryLoads() : [];
+  state.version = i;
+  await loadFile(v.source.name, v.source.bytes, v.source.faceIds, v.step, "version");
+  if (v.source.body) await busy("Switching part…", async () => partLoaded(await call("select_body", { index: v.source.body })));
+  await restoreLoads(loads);
+  setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
 }
 $("apply-edits").onclick = applyEdits;
 

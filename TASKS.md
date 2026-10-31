@@ -150,8 +150,8 @@ Bugs first (P1), then UI clean-up, then new features.
 
 ### Model versions and undo
 
-- [ ] **T-220 P1** Undo (button and Ctrl+Z), especially for design changes. · owner: —
-- [ ] **T-221 P1** Model versions: every applied design change saves a new version; a switcher next to the orientation label in the 3D view to flip between versions; compare strength and checks between them; also import a second model to compare. · owner: —
+- [x] **T-220 P1** Undo (button and Ctrl+Z), especially for design changes. · owner: Claude (`task/T-201-bugs`) — Undo button on the 3D view and Ctrl+Z (not while typing): puts back design changes (the model version), loads and held faces, marked faces and settings taken from the strength check; up to 50 steps. Redo not done.
+- [x] **T-221 P1** Model versions: every applied design change saves a new version; a switcher next to the orientation label in the 3D view to flip between versions; compare strength and checks between them; also import a second model to compare. · owner: Claude (`task/T-201-bugs`) — applying design changes keeps the model before it: a Model list on the 3D view switches versions; "Your versions" in Design changes compares time, plastic, problems and strength (once checked) and adds another model file to compare. Loads and held faces move to the same faces of the other version (nearest face facing the same way). Versions live in the page, not saved between visits.
 - [ ] **T-222 P2** Strength design suggestions: show where a change goes (e.g. the fillet) on the model and offer "test it": build the variant, run the strength check on it, show it as a new version. · owner: —
 
 ### Engine

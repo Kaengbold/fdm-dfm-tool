@@ -38,6 +38,10 @@
       <div id="legend" class="fea-legend" hidden></div>
       <div class="view-info">
       <p id="view-label" class="view-label" hidden></p>
+      <div class="view-tools">
+        <label id="version-pick" hidden>Model <select id="version" aria-label="Model version"></select></label>
+        <button type="button" id="undo" class="small" hidden title="Ctrl+Z">Undo</button>
+      </div>
       <ul id="view-key" class="view-key" aria-label="Colours on the part" hidden>
         <li><i style="background: var(--ok)"></i>Prints fine</li>
         <li><i style="background: var(--borderline)"></i>May droop</li>
@@ -334,6 +338,12 @@
               </div>
               <div class="actions">
                 <button id="apply-edits" class="primary" hidden>Apply selected changes</button>
+              </div>
+              <div class="sim-card versions">
+                <h3>Your versions</h3>
+                <p class="hint">Each time you apply changes, a new version is kept. Switch between them on the 3D view (or with Ctrl+Z) and compare.</p>
+                <table id="versions"></table>
+                <label class="file-button">Add another model to compare <input id="compare-file" type="file" accept=".stl,.3mf,.step,.stp" hidden /></label>
               </div>
             </div>
           </div>
