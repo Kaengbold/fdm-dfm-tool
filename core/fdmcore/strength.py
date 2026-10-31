@@ -15,7 +15,9 @@ The model: voxels with an anisotropic material whose weak axis is the build
 direction. Within a layer it is the same in every direction, except at the detailed level: there
 the sliced G-code gives the plastic in each spot and which way its lines run (``Printed``). How the slicer fills the part (``Shells``) is modelled by
 depth: walls on the sides (walls × line width), solid top and bottom layers on surfaces facing
-up and down (layers × layer height), and the much softer infill inside.
+up and down (layers × layer height), and the much softer infill inside. Cubes on the surface
+count with the share of them that is part (``VoxelGrid.fill``), so thin walls and ribs keep their
+real thickness instead of a whole cube or none.
 Results are indications — "fine / borderline / likely to break" and why.
 """
 
@@ -96,7 +98,7 @@ def printed_from(dep: dict, model: Model, inside: np.ndarray) -> Printed:
     dense = np.clip(dep["volume"][:, :2].sum(axis=1) / room, 0.0, 1.0)
     sparse = _smooth(model.elems, model.grid.solid.shape, dep["volume"][:, 2] / room, inside)
     rest = np.maximum(1 - dense, 1e-9)
-    scale = dense + rest * np.clip(sparse / rest, 0.0, 1.0) ** INFILL_EXPONENT
+    scale = (dense + rest * np.clip(sparse / rest, 0.0, 1.0) ** INFILL_EXPONENT) * _fill(model)  # of the room, then of the cube
     t = _tensor(dep["tensor"])
     w, v = np.linalg.eigh(t)  # ascending; lines are horizontal, so the smallest is ~0 (the build direction)
     lines = v[:, :, 2]
@@ -138,7 +140,7 @@ def prepare_cases(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxe
     fixed = [l for l in loads if l["kind"] == "fixed"]
     forces = [l for l in loads if l["kind"] != "fixed"]
     numbers = sorted({int(l.get("case", 1)) for l in forces}) or [1]
-    model = build_model(voxelize(mesh, target_voxels))
+    model = build_model(voxelize(mesh, target_voxels, partial=True))
     out = []
     for n in numbers:
         case = prepare(mesh, region, fixed + [l for l in forces if int(l.get("case", 1)) == n], model=model)
@@ -148,7 +150,7 @@ def prepare_cases(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxe
 
 
 def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000, model: Model | None = None) -> LoadCase:
-    model = model or build_model(voxelize(mesh, target_voxels))
+    model = model or build_model(voxelize(mesh, target_voxels, partial=True))
     grid = model.grid
     normals, _ = mesh.normals_and_areas()
     forces = np.zeros((model.n_nodes, 3))
@@ -322,39 +324,52 @@ def material_for(profile: Profile) -> Material:
 
 def solid_fraction(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
     """Fraction of each element that is solid shell (walls, top or bottom layers) for build
-    direction ``up``; ``up=None`` treats every surface as a wall (direction-free, for one shared solve)."""
+    direction ``up``; ``up=None`` treats every surface as a wall (direction-free, for one shared solve).
+    Shells from opposite sides add up: a plate thinner than a cube has its top and bottom layers in
+    the same cube."""
     h = model.grid.h
     pts = model.grid.centers(model.elems)
     wall = shells.walls * profile.line_width
+    span = h * np.maximum(_fill(model), 1e-3)  # depth range the plastic in each cube covers
 
-    def frac(dirs, shell):
+    def frac(dirs, shell):  # (len(dirs), E)
         if shell <= 0:
-            return np.zeros(len(pts))
+            return np.zeros((len(dirs), len(pts)))
         d = _depth_along(model.grid, pts, dirs, shell + h)
-        return np.clip((shell - (d - h / 2)) / h, 0.0, 1.0)  # voxel spans depths d ± h/2
+        return np.clip((shell - d) / span, 0.0, 1.0)  # the cube's plastic lies at depths d … d + span
+
+    def both_sides(f):  # directions i and i + n/2 are opposite
+        n = len(f) // 2
+        return np.minimum(f[:n] + f[n:], 1.0).max(axis=0)
 
     if up is None:
-        return frac(np.vstack([np.eye(3), -np.eye(3)]), wall)
+        return both_sides(frac(np.vstack([np.eye(3), -np.eye(3)]), wall))
     up = np.asarray(up, float) / np.linalg.norm(up)
     a = np.cross(up, [1.0, 0, 0] if abs(up[0]) < 0.9 else [0, 1.0, 0])
     a /= np.linalg.norm(a)
     b = np.cross(up, a)
     sideways = np.array([np.cos(t) * a + np.sin(t) * b for t in np.arange(8) * np.pi / 4])
     lh = profile.layer_height
-    return np.maximum.reduce([frac(sideways, wall), frac(up[None], shells.top * lh), frac(-up[None], shells.bottom * lh)])
+    top_bottom = np.minimum(frac(up[None], shells.top * lh)[0] + frac(-up[None], shells.bottom * lh)[0], 1.0)
+    return np.maximum(both_sides(frac(sideways, wall)), top_bottom)
 
 
 def element_scale(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
     """Effective stiffness/strength fraction per element: solid shells, sparse infill inside.
     At least ``MIN_SCALE``: a hollow part (0 % infill) would leave cubes without stiffness."""
     solid, infill = _zoned(model, up, shells, profile)
-    return np.maximum(solid + (1 - solid) * infill**INFILL_EXPONENT, MIN_SCALE)
+    return np.maximum((solid + (1 - solid) * infill**INFILL_EXPONENT) * _fill(model), MIN_SCALE)
 
 
 def material_volume(model: Model, up, shells: Shells, profile: Profile) -> float:
     """Plastic in the part (mm³) with these shells: what more walls or infill cost."""
     solid, infill = _zoned(model, up, shells, profile)
-    return float((solid + (1 - solid) * infill).sum() * model.grid.h**3)
+    return float(((solid + (1 - solid) * infill) * _fill(model)).sum() * model.grid.h**3)
+
+
+def _fill(model: Model) -> np.ndarray | float:
+    """Share of each element inside the part (1 where the grid has no partial voxels)."""
+    return 1.0 if model.grid.fill is None else model.grid.fill[tuple(model.elems.T)]
 
 
 def _zoned(model: Model, up, shells: Shells, profile: Profile) -> tuple[np.ndarray, np.ndarray]:
@@ -414,18 +429,26 @@ def find_zones(model: Model, fi: np.ndarray, ignore: np.ndarray, up, walls: int,
 
 
 def _depth_along(grid: VoxelGrid, pts: np.ndarray, dirs: np.ndarray, cap: float) -> np.ndarray:
-    """Distance (mm) from each point to the outside, the shortest along ``dirs``, up to ``cap``.
-    Steps of h/3 so an axis-aligned surface voxel comes out at exactly h/2."""
+    """How deep (mm) the cube at each centre point starts below the surface along each of ``dirs``
+    (len(dirs), len(pts)), up to ``cap``: the plastic passed on the way out, in steps of h/3 (three per cube when
+    axis-aligned). Partly filled cubes count with their fill, so a mostly empty cube kept for a thin
+    edge doesn't push the surface out and the walls into the cube behind it."""
     step = grid.h / 3
     shape = np.array(grid.solid.shape)
-    out = np.full(len(pts), cap)
-    for k in range(1, int(np.ceil(cap / step)) + 1):
-        for d in dirs:
+    fill = grid.solid.astype(float) if grid.fill is None else grid.fill
+    own = grid.index_of(pts)
+    out = np.full((len(dirs), len(pts)), cap)
+    for i, d in enumerate(dirs):
+        passed = np.zeros(len(pts))
+        going = np.ones(len(pts), dtype=bool)
+        for k in range(1, int(np.ceil(cap / step)) + 1):
             idx = grid.index_of(pts + d * k * step)
             ok = np.all((idx >= 0) & (idx < shape), axis=1)
-            empty = ~ok
-            empty[ok] = ~grid.solid[tuple(idx[ok].T)]
-            out = np.where(empty, np.minimum(out, (k - 0.5) * step), out)
+            f = np.zeros(len(pts))
+            f[ok] = fill[tuple(idx[ok].T)]
+            out[i] = np.where(going & (f == 0), passed, out[i])  # reached the outside
+            going &= f > 0
+            passed += np.where(going & np.any(idx != own, axis=1), f * step, 0.0)
     return out
 
 
@@ -455,7 +478,7 @@ def vibration(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), e
     c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
     scale = element_scale(case.model, up, shells, profile)
     solid, infill = _zoned(case.model, up, shells, profile)
-    kg = (solid + (1 - solid) * infill) * case.model.grid.h**3 * 1e-6 * profile.material["density_g_cm3"]  # mm³ · g/cm³ -> kg
+    kg = (solid + (1 - solid) * infill) * _fill(case.model) * case.model.grid.h**3 * 1e-6 * profile.material["density_g_cm3"]  # mm³ · g/cm³ -> kg
     nodes = (case.model.edof[:, 0::3] // 3).ravel()
     mass = np.bincount(nodes, np.repeat(kg / 8, 8), minlength=case.model.n_nodes)
     loaded = np.linalg.norm(case.forces, axis=1) > 0
