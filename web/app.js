@@ -1455,13 +1455,22 @@ const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", k
 /** Zones (orange) and the advanced design boxes (their own colours) in the 3D view. */
 function drawBoxes() {
   viewer.showZones([
-    ...(zonesShown() ? state.zones.map((z) => z.corners_print) : []),
-    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind] })) : []),
+    ...(zonesShown() ? state.zones.map((z) => ({ corners: z.corners_print, shape: z.shape })) : []),
+    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind], shape: v.shape })) : []),
   ]);
 }
 
 /** What the slicer and the strength check get: zones plus the advanced design boxes. */
-const printZones = () => [...state.zones, ...state.volumes.map(({ kind, lo, hi }) => ({ kind, lo, hi, walls: 0, infill: 0 }))];
+const printZones = () => [...state.zones, ...state.volumes.map(({ kind, lo, hi, shape }) => ({ kind, lo, hi, shape, walls: 0, infill: 0 }))];
+
+/** Box / cylinder / ball: round shapes fit round things (a boss, the wall round a hole). */
+function shapePicker(value, onchange) {
+  const pick = el("select", { className: "shape-pick", title: "Shape (round ones sit inside the box)" },
+    ...[["box", "Box"], ["cylinder", "Cylinder"], ["ball", "Ball"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+  pick.value = value ?? "box";
+  pick.onchange = () => onchange(pick.value);
+  return el("label", {}, "Shape ", pick);
+}
 
 // ---------- stronger in one area (zones the user picks) ----------
 const BIG_FACE_MM2 = 400; // a face this big gets a box around the clicked spot, not the whole face
@@ -1490,10 +1499,10 @@ async function addZone(hit) {
 }
 
 /** Resize a picked zone: its box is worked out again from the face or spot it was made for. */
-async function resizeZone(i, margin) {
+async function resizeZone(i, margin, shape = state.zones[i].shape) {
   const old = state.zones[i];
   const z = await busy("Resizing the area…", () => call("zone_at", { up: activeOption().up, profile: profile(), ...old.from, margin,
-    walls: old.walls, infill: old.infill }));
+    walls: old.walls, infill: old.infill, shape }));
   remember("the area's size");
   setZones(state.zones.map((q, k) => (k === i ? { ...old, ...z, margin } : q)));
 }
@@ -1512,7 +1521,8 @@ function renderZones() {
         el("label", {}, "Walls ", num(z.walls, base.walls, 20, 1, (e) => set("walls", Math.max(base.walls, Math.round(Number(e.target.value) || 0))))),
         el("label", {}, "Infill ", num(Math.round(z.infill * 100), Math.round(base.infill * 100), 100, 5,
           (e) => set("infill", Math.min(1, Math.max(base.infill, Number(e.target.value) / 100)))), " %"),
-        z.from ? el("label", {}, "Reaches ", num(z.margin, 0, 30, 1, (e) => resizeZone(i, Math.max(0, Number(e.target.value) || 0))), " mm past it") : ""),
+        z.from ? el("label", {}, "Reaches ", num(z.margin, 0, 30, 1, (e) => resizeZone(i, Math.max(0, Number(e.target.value) || 0))), " mm past it") : "",
+        shapePicker(z.shape, (shape) => (z.from ? resizeZone(i, z.margin, shape) : set("shape", shape)))),
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing an area");
         setZones(state.zones.filter((_, k) => k !== i));
@@ -1568,9 +1578,9 @@ async function pickVolume(hit) {
   }
 }
 
-async function resizeVolume(i, margin) {
+async function resizeVolume(i, margin, shape = state.volumes[i].shape ?? "box") {
   const old = state.volumes[i];
-  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin }));
+  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin, shape }));
   remember("the box's size");
   setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, margin } : q)));
 }
@@ -1588,7 +1598,7 @@ function setVolumes(volumes) {
       : el("label", {}, "Reaches ", num(v.margin, 0, 30, 1, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
-      el("div", { className: "row" }, size),
+      el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
       ...v.notes.map((n) => el("p", { className: "hint", textContent: n })),
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing a box");

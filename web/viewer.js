@@ -330,8 +330,12 @@ export class Viewer {
   showZones(zones) {
     this.zones?.clear();
     if (!this.zones) this.scene.add((this.zones = new THREE.Group()));
-    for (const z of zones) { // corner arrays (zones, orange) or {corners, color}
-      const [c, color] = Array.isArray(z) ? [z, css("--vertical")] : [z.corners, css(z.color)];
+    for (const z of zones) { // corner arrays (zones, orange) or {corners, color, shape}
+      const [c, color] = Array.isArray(z) ? [z, css("--vertical")] : [z.corners, css(z.color ?? "--vertical")];
+      if (z.shape && z.shape !== "box") {
+        this.roundZone(c, z.shape, color);
+        continue;
+      }
       const idx = [];
       for (let axis = 0; axis < 3; axis++) {
         for (const side of [0, 1]) {
@@ -347,6 +351,27 @@ export class Viewer {
       this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
       this.zones.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color })));
     }
+  }
+
+  /** A cylinder or ball inside the box given by its 8 corners (index 4·ix + 2·iy + iz): see-through,
+   *  with its rims (cylinder) or three rings (ball) drawn as lines. */
+  roundZone(c, shape, color) {
+    const v = (i) => new THREE.Vector3(...c[i]);
+    const center = v(0).add(v(7)).multiplyScalar(0.5);
+    const axes = [4, 2, 1].map((i) => v(i).sub(v(0)).multiplyScalar(0.5));
+    const at = (x, y, zz) => center.clone().addScaledVector(axes[0], x).addScaledVector(axes[1], y).addScaledVector(axes[2], zz);
+    const geometry = shape === "ball" ? new THREE.SphereGeometry(1, 24, 12) : new THREE.CylinderGeometry(1, 1, 2, 32).rotateX(Math.PI / 2);
+    const pos = geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setXYZ(i, ...at(pos.getX(i), pos.getY(i), pos.getZ(i)).toArray());
+    this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
+    const ring = (f) => {
+      const pts = Array.from({ length: 48 }, (_, k) => f((2 * Math.PI * k) / 48));
+      this.zones.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color })));
+    };
+    const rings = shape === "ball"
+      ? [(t) => at(Math.cos(t), Math.sin(t), 0), (t) => at(Math.cos(t), 0, Math.sin(t)), (t) => at(0, Math.cos(t), Math.sin(t))]
+      : [(t) => at(Math.cos(t), Math.sin(t), -1), (t) => at(Math.cos(t), Math.sin(t), 1)];
+    rings.forEach(ring);
   }
 
   /** Small sphere marking a point (e.g. where the part would break). */
