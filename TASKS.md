@@ -120,6 +120,61 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 
 - [x] **T-111 P2** Findings UI: an impact group "Will fail" can contain a TIP-severity card (e.g. small bed contact that a brim fixes), which reads as a contradiction. Show the severity the group implies, or move fixed-by-setting items to a "needs a setting" note. · owner: Claude — group renamed "Can fail"; the card's severity says how likely.
 
+## User feedback round 1 (2026-10-31, from using the site)
+
+Bugs first (P1), then UI clean-up, then new features.
+
+### Bugs
+
+- [ ] **T-200 P1** Design changes that overlap give a rough model with mesh errors (two fills meeting at a corner). Union the edit pieces cleanly, or skip a piece that overlaps another. · owner: —
+- [ ] **T-201 P1** GEOS error in the browser: `TopologyException: found non-noded intersection between LINESTRING (6.78023 19.9752, …) and LINESTRING (6.78023 19.9752, 6.78023 19.9752)` — a zero-length segment. Find which call (slicer / checks / design) and drop degenerate segments before GEOS sees them. · owner: —
+- [ ] **T-202 P1** Section cut of the strength result looks broken (smeared colours, jagged stairs). Show clean coloured cubes in the cut. · owner: —
+- [ ] **T-203 P1** Nozzle comparison: a bigger nozzle can show a longer print time — check the time estimate (likely a bug). · owner: —
+- [ ] **T-204 P1** Results stay on screen when switching steps (warp shape after the warp simulation, loads in the design view, the "Report copied — paste it into…" note after leaving Download). Each step shows only its own things. · owner: —
+- [ ] **T-205 P1** "Show me" on a strength design suggestion runs but nothing visible happens (no camera move, no window). · owner: —
+- [ ] **T-206 P1** "Download report" does not work. · owner: —
+- [ ] **T-207 P1** "Held here?" box: the dropdown overflows the panel; wording "Holds here?" is clearer. · owner: —
+
+### UI clean-up
+
+- [ ] **T-210 P1** Clearer separation: more space between blocks so it's obvious where one thing ends; replace the fold-out text links ("details") with boxes that open a sub-section. · owner: —
+- [ ] **T-211 P1** Time shown as minutes and seconds above 1 min (working badge, estimates). · owner: —
+- [ ] **T-212 P1** "Is this a hole?" only when the detection is unsure; clear holes are not asked. · owner: —
+- [ ] **T-213 P2** "Suggest design changes" button is pointless (suggestions come by default): remove it. · owner: —
+- [ ] **T-214 P2** "Make it stronger" suggestions grouped (settings / material / design / less load) in boxes that open and close. · owner: —
+- [ ] **T-215 P2** "The load stays on" checkbox: explain it (creep: a constant load needs ×3 instead of ×2) or rename it so it's self-explaining. · owner: —
+- [ ] **T-216 P2** "Show heat while printing" isn't clear: make it its own feature with a plain purpose — find spots printed onto a thin base under a big heat mass that can't cool fast enough; take the fan / cooling into account. · owner: —
+- [ ] **T-217 P2** Hovering a design-change toggle turns the model to show it and highlights it in colour. · owner: —
+- [ ] **T-218 P2** Copy-report text: "Copy this into your AI so it can help you design your part" instead of the ChatGPT/paste-back wording. · owner: —
+- [ ] **T-219 P2** "Find a better orientation for strength": show the result for the new best orientation at once (not the old one). · owner: —
+
+### Model versions and undo
+
+- [ ] **T-220 P1** Undo (button and Ctrl+Z), especially for design changes. · owner: —
+- [ ] **T-221 P1** Model versions: every applied design change saves a new version; a switcher next to the orientation label in the 3D view to flip between versions; compare strength and checks between them; also import a second model to compare. · owner: —
+- [ ] **T-222 P2** Strength design suggestions: show where a change goes (e.g. the fillet) on the model and offer "test it": build the variant, run the strength check on it, show it as a new version. · owner: —
+
+### Engine
+
+- [ ] **T-230 P1** Orientation ranking: bed contact area matters only for warping materials (ABS, ASA, PA…), not for PLA. Penalise risky first layers: small islands, thin walls, points or sharp tips touching the bed; prefer a simple first layer. · owner: —
+- [ ] **T-231 P2** Nozzle comparison with the built-in slicer: detect details lost with a bigger nozzle (walls thinner than the line, small holes / text / gaps that vanish). · owner: —
+- [ ] **T-232 P1** Too weak with every print setting → say so and suggest design changes, a lower load or another material. · owner: —
+- [ ] **T-233 P2** Slicer modifier regions in the UI: pick a region and give it its own settings (engine part exists from T-150 zones). · owner: —
+
+### Simulations
+
+- [ ] **T-240 P2** Before a long simulation: estimate its time for this model and ask; let the user pick how much of the PC to use (threads / grid) and show the time for that choice. · owner: —
+- [ ] **T-241 P2** Faster shaking and knock checks (coarser grid, fewer modes, reuse the strength model). · owner: —
+- [ ] **T-242 P3** Decide which extra simulations make sense as quick indicators: heat inside electronics boxes (fast), creep under a constant load, wear. Write down the yes/no with reasons, then build the yes ones. · owner: —
+- [ ] **T-243 P2** Advanced: new step "Optional simulations" holding the extra simulations and the G-code (detailed) level. · owner: —
+
+### New sections
+
+- [ ] **T-250 P2** Advanced: "Tolerances & tuning" step — hole compensation moves here; the user marks surfaces that need a fit and what goes in (peg, bearing, screw…), we suggest the gap from the printer's standard value, the warp simulation and their own calibration prints (T-170 test prints live here). · owner: —
+- [ ] **T-251 P2** Advanced: "Advanced design changes" step (simple chamfers / holes stay in Design): custom supports, extra faces, internal voids for extra walls, keep-clear volumes between picked points or faces, import other models and snap them into place (assemblies) — input for strength optimisation and AI design. · owner: —
+- [ ] **T-252 P2** Expert: same steps as Advanced, plus every value changeable: mesh / grid size, solver settings, detection thresholds (wall thickness…), all research-based defaults from `thresholds.yaml` — in a separate settings window split by section, nothing hidden. · owner: —
+- [ ] **T-253 P2** Downloadable report for people: images for each suggestion and the simulation results, readable on its own. · owner: —
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
