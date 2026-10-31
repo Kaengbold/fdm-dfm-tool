@@ -2,10 +2,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from shapely.geometry import box
 
-from fdmcore import api
+from fdmcore import api, strength
+from fdmcore.additions import extrude
 from fdmcore.fea import Material, build_model, element_stress, solve
-from fdmcore.mesh import load_stl
+from fdmcore.mesh import Mesh, load_stl
+from fdmcore.profile import Profile
 from fdmcore.regions import find_regions, region_info
 from fdmcore.voxel import VoxelGrid, voxelize
 
@@ -17,6 +20,33 @@ def test_voxel_volume_close_to_mesh():
     g = voxelize(m, 20_000)
     # Thin sections gain/lose a partial voxel layer, so ~10% is expected at this resolution.
     assert g.solid.sum() * g.h**3 == pytest.approx(m.volume(), rel=0.12)
+
+
+def test_partial_voxels_keep_volume_and_thin_walls():
+    m = load_stl((SAMPLES / "mushroom.stl").read_bytes())
+    g = voxelize(m, 20_000, partial=True)
+    assert g.fill.sum() * g.h**3 == pytest.approx(m.volume(), rel=0.01)
+    for t in (0.6, 1.0, 1.4, 2.2):  # plates thinner than a 2.5 mm cube: binary voxels make them all 2.5 mm
+        plate = Mesh(extrude(box(0, 0, 40, 30), 0, t))
+        assert voxelize(plate, h=2.5, partial=True).fill.sum() * 2.5**3 / 1200 == pytest.approx(t, rel=0.01)
+        wall = Mesh(extrude(box(0, 0, t, 30), 0, 40))  # across the rays: resolved to a third of a cube
+        assert voxelize(wall, h=2.5, partial=True).fill.sum() * 2.5**3 / 1200 == pytest.approx(t, abs=2.5 / 3)
+
+
+def test_thin_strip_strength_follows_its_thickness():
+    """Two strips thinner than one cube, pulled lengthwise: binary voxels can't tell them apart. With
+    partial cubes the 1 mm strip is all top and bottom layers (0.4 of a cube), the 2 mm strip 70 %
+    solid and 30 % infill (0.8 × (0.7 + 0.3 × 0.15^1.5) ≈ 0.57 of a cube): ~1.43× stiffer and stronger."""
+    out = []
+    for t in (1.0, 2.0):
+        m = Mesh(extrude(box(0, 0, 60, 10), 0, t))
+        n, _ = m.normals_and_areas()
+        region = np.where(n[:, 0] < -0.9, 1, np.where(n[:, 0] > 0.9, 2, 0))
+        loads = [{"region": 1, "kind": "fixed"}, {"region": 2, "kind": "force", "kg": 5, "direction": "pull"}]
+        case = strength.prepare(m, region, loads, model=build_model(voxelize(m, h=2.5, partial=True)))
+        out.append(strength.evaluate(case, [0, 0, 1], Profile.from_dict({"material": "pla"})))
+    assert out[0]["max_displacement_mm"] / out[1]["max_displacement_mm"] == pytest.approx(1.43, rel=0.1)
+    assert out[1]["safety_factor"] / out[0]["safety_factor"] == pytest.approx(1.43, rel=0.1)
 
 
 def test_cantilever_matches_beam_theory():
