@@ -97,7 +97,9 @@ def test_detailed_strength_close_to_simple_for_the_same_print():
     simple = api.strength([0, 0, 1], loads, walls=2, infill=0.2, top=0, bottom=0)["safety_factor"]
     detailed = api.strength([0, 0, 1], loads, detailed=True)
     assert detailed["detailed"]["missed_pct"] < 1
-    assert detailed["safety_factor"] == pytest.approx(simple, rel=0.35)
+    shared = 1 / max(detailed["fi_layers_max"], detailed["fi_material_max"])  # without "lines": only the detailed level has it
+    assert shared == pytest.approx(simple, rel=0.35)
+    assert detailed["safety_factor"] <= shared
 
 
 def test_lines_pulled_apart_sideways_are_weak():

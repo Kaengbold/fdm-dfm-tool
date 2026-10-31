@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .checks import orient, run_checks
+from .checks import orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh
@@ -579,6 +579,12 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     best["alternatives"] = [q for q in plans if q is not best]
     best["target"] = target
     best["explanation"] = _optimise_story(best, target, len(plans) > 1)
+    if not best["met"]:  # settings alone aren't enough: what else would do it
+        from .strength import Shells
+
+        sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
+        best["beyond"] = sorted(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target),
+                                key=lambda o: -(o["safety_factor"] or 0))
     if zones:
         with stage(0.9, 1.0):
             light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
@@ -718,7 +724,7 @@ def _optimise_story(best: dict, target: float, compared: bool) -> str:
             out += f" The other orientation needs {alt[0]['grams']:.0f} g for the same."
         return out
     return (f"Even {setting} only reach ×{best['safety_factor']:.1f} (you need ×{target:.0f}).{where} "
-            "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, or use a stronger material.")
+            "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, use a stronger material, or let it carry less.")
 
 
 WARP_VOXELS = 6000  # warping solves once per group of layers: a coarser grid than strength
@@ -1022,10 +1028,9 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
-    at the weak spot (from the last strength check), and other materials. Sorted strongest first."""
+    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest first."""
     from dataclasses import replace
 
-    from .features import concave_edges
     from .strength import cases_safety, material_volume, verdict
     from .strength import evaluate_cases as evaluate_strength
 
@@ -1067,6 +1072,26 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "Turns the part so the load runs along the layers instead of pulling them apart.",
             "may need more support or take longer", up=axes[best].tolist())
 
+    out += _beyond_settings(base, p, profile, loads)
+    out.sort(key=lambda o: -(o["safety_factor"] or 0))
+    return out
+
+
+def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:
+    """What helps besides slicer settings and orientation: a design change at the weak spot, another
+    material, or a lighter load (that still reaches ``need``, default the usual safety). Also the way
+    out when even the strongest settings aren't enough."""
+    from .features import concave_edges
+    from .strength import verdict
+
+    s = _require()
+    need = need or required_safety(p)
+    out = []
+
+    def add(change, kind, sf, why, cost="", **extra):
+        out.append({"change": change, "kind": kind, "safety_factor": None if sf is None else float(sf),
+                    "verdict": None if sf is None else verdict(sf, need), "why": why, "cost": cost, **extra})
+
     # Design: a chamfer at the inside corner next to the weak spot (see features._stress_chamfers).
     if s.weak_spot is not None:
         spot = np.asarray(s.weak_spot[0])
@@ -1098,7 +1123,16 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
         add(f"Print it in {m['name']}", "material", sf,
             f"{m['name']} is stronger{' and its layers bond better' if other.z_strength_factor > p.z_strength_factor else ''}.",
             "needs " + ", ".join(needs) if needs else "", material=mid)
-    out.sort(key=lambda o: -(o["safety_factor"] or 0))
+
+    # Less load: stresses grow in step with the load, so the safety does the opposite.
+    sf = base["safety_factor"]
+    forces = [float(l.get("kg", 1)) for l in loads if l.get("kind") == "force"]
+    if forces and np.isfinite(sf) and sf < need:
+        share = sf / need
+        kg = f"about {forces[0] * share:.1f} kg instead of {forces[0]:g} kg" if len(forces) == 1 else f"about {share:.0%} of every load you set"
+        add(f"Carry less: {kg}", "load", need,
+            "The part holds a smaller load with the same margin. Spread the weight over two parts, add a support, or hang less on it.",
+            "it carries less", load_share=share)
     return out
 
 
@@ -1420,15 +1454,17 @@ def _zone_box(mesh: Mesh, up, rotation: np.ndarray, zone: dict) -> np.ndarray:
 
 
 def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
-    """The same part with every nozzle: print time, filament and the nozzle-dependent problems."""
-    from .checks import NOZZLE_RULES
+    """The same part with every nozzle: print time, filament, the nozzle-dependent problems (``new``:
+    not there with the smallest nozzle) and the detail it can't trace (checks.lost_detail)."""
+    from .checks import NOZZLE_RULES, lost_detail
 
     s = _require()
     base = Profile.from_dict(profile)
     rotation, _ = print_rotation(s.mesh, up, base.printer["bed"])
     oriented = orient(s.mesh, rotation)
+    detail_layers = slice_mesh(oriented, 0.2, 80)  # one set of layers, so only the nozzle differs
     out = []
-    nozzles = list(presets()["nozzles"])
+    nozzles = sorted(presets()["nozzles"], key=float)
     for i, nozzle in enumerate(nozzles):
         p = Profile.from_dict({**(profile or {}), "nozzle": nozzle})
         with stage(i / len(nozzles), (i + 1) / len(nozzles)):
@@ -1441,11 +1477,16 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
             "issues": [{"rule": f["rule"], "title": f["title"], "detail": f["detail"]} for f in issues],
             "current": nozzle == base.nozzle,
             "walls": goal_plan(p)["walls"],
+            **lost_detail(detail_layers, float(nozzle)),
         })
+    first = {f["title"] for f in out[0]["issues"]}
+    for row in out:
+        for f in row["issues"]:
+            f["new"] = f["title"] not in first
     # Each nozzle with its own usual settings. Bigger nozzles' profiles print slower, and a wider line
     # holds more plastic per mm, so once the hotend melts as fast as it can the nozzle moves slower:
-    # on small parts a bigger nozzle often saves no time (OrcaSlicer's own profiles show the same:
-    # L-bracket 73 / 91 / 109 min with 0.4 / 0.6 / 0.8 mm).
+    # on small parts a bigger nozzle often saves little time (OrcaSlicer's own profiles: L-bracket
+    # 27 / 22 / 23 min with 0.4 / 0.6 / 0.8 mm on a P1S).
     for small, big in zip(out, out[1:]):
         if big["print_time_min"] >= 0.95 * small["print_time_min"]:
             big["note"] = (f"Not faster than {small['nozzle']} mm on this part: slicer profiles run bigger nozzles slower, "

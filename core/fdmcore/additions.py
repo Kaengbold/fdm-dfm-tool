@@ -20,6 +20,7 @@ from .slicer import parts, section, slice_mesh
 
 CEILING_NZ = -0.985  # down-facing faces within ~10° of flat
 OVERLAP = 0.2  # mm an added piece reaches into the part, so the union joins them
+SLAB_OVERLAP = 0.02  # mm each slab of a thickened wall reaches into the next (far below a layer)
 MAX_SACRIFICIAL_D = 25.0  # bigger openings aren't holes for screws or pins
 
 
@@ -297,6 +298,8 @@ def _slabs(stack, layers, region, verts, height) -> list[np.ndarray]:
             z0 = _end_height(verts, foot, layers[i0 - 1].z if i0 > 0 else 0.0, layers[i0].z, low=True)
         if i1 == last:
             z1 = _end_height(verts, foot, layers[i1].z, layers[i1 + 1].z if i1 + 1 < len(layers) else height, low=False)
+        else:
+            z1 += SLAB_OVERLAP  # slabs that only touch, with slightly different outlines, leave broken edges in the union
         # Corners a few µm apart (from the buffer and difference above) sit right on the part's own
         # wall faces and leave zero-area triangles in the union: drop them.
         for poly in parts(g.simplify(0.02), 0.01):

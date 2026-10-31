@@ -1285,7 +1285,7 @@ function renderStrength() {
     el("button", { className: "primary", textContent: "How can I make it stronger?", onclick: showStrengthOptions,
       title: "Shows every option: slicer settings, orientation, design changes and materials, each with what it costs" }),
     el("button", { textContent: "Find the best orientation including strength", onclick: rankWithStrength }),
-    el("ul", { id: "strength-options", className: "options" }),
+    el("div", { id: "strength-options", className: "option-groups" }),
   );
 }
 
@@ -1300,28 +1300,40 @@ async function rankWithStrength() {
 async function showStrengthOptions() {
   return busy("Trying alternatives (a few seconds)…", async () => {
     const opts = await call("strength_options", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() });
-    const KIND = { slicer: "Slicer setting", orientation: "Orientation", design: "Design change", material: "Material" };
-    const ACTION = { slicer: "Apply", orientation: "Use it", design: "Show me", material: "Use it" };
-    const now = state.strength?.safety_factor;
-    $("strength-options").replaceChildren(
-      ...opts.map((o) =>
-        el("li", { className: `option ${o.kind}` },
-          el("div", { className: "option-head" },
-            el("small", { textContent: KIND[o.kind] }),
-            el("strong", { textContent: o.change }),
-            el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
-              : `×${o.safety_factor.toFixed(1)}${now ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
-          el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
-          el("div", { className: "row" },
-            el("button", { textContent: ACTION[o.kind], onclick: () => applyOption(o) }),
-            o.kind === "design" && /chamfer/i.test(o.change) ? el("button", { textContent: "Test it", onclick: testStressChamfer,
-              title: "Adds the chamfer as a new version of your model and checks the strength again" }) : ""))),
-      opts.some((o) => o.kind === "material") ? ""
-        : el("li", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` }),
-    );
+    const noMaterial = opts.some((o) => o.kind === "material") ? ""
+      : el("p", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` });
+    $("strength-options").replaceChildren(...optionGroups(opts, state.strength?.safety_factor), noMaterial);
     setStatus(state.summary);
     return opts;
   });
+}
+
+const OPTION_GROUP = { slicer: "Slicer settings", orientation: "Orientation", design: "Design changes", material: "Material", load: "Less load" };
+const OPTION_ACTION = { slicer: "Apply", orientation: "Use it", design: "Show me", material: "Use it" };
+
+/** Ways to make it stronger in one fold-out box per kind; the box with the strongest option starts open. */
+function optionGroups(opts, now) {
+  const kinds = [...new Set(opts.map((o) => o.kind))];
+  return kinds.map((kind, i) => {
+    const mine = opts.filter((o) => o.kind === kind);
+    const top = mine.find((o) => o.safety_factor != null)?.safety_factor;
+    return el("details", { className: "more-block option-group", open: i === 0 },
+      el("summary", {}, OPTION_GROUP[kind], el("small", { textContent: top != null ? `up to ×${top.toFixed(1)}` : `${mine.length} idea${mine.length > 1 ? "s" : ""}` })),
+      el("ul", { className: "options strength-options" }, ...mine.map((o) => optionCard(o, now))));
+  });
+}
+
+function optionCard(o, now) {
+  return el("li", { className: `option ${o.kind}` },
+    el("div", { className: "option-head" },
+      el("strong", { textContent: o.change }),
+      el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
+        : `×${o.safety_factor.toFixed(1)}${now && o.kind !== "load" ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
+    el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
+    OPTION_ACTION[o.kind] || o.kind === "design" ? el("div", { className: "row" },
+      OPTION_ACTION[o.kind] ? el("button", { textContent: OPTION_ACTION[o.kind], onclick: () => applyOption(o) }) : "",
+      o.kind === "design" && /chamfer/i.test(o.change) ? el("button", { textContent: "Test it", onclick: testStressChamfer,
+        title: "Adds the chamfer as a new version of your model and checks the strength again" }) : "") : "");
 }
 
 async function runOptimise() {
@@ -1361,6 +1373,12 @@ async function runOptimise() {
         el("p", { textContent: o.explanation }),
         o.steps.length ? el("p", { className: "hint", textContent: `Added step by step, cheapest first: ${o.steps.map((s) => s.change).join(" → ")}` }) : "",
         use),
+      o.beyond?.length
+        ? el("div", { className: "option-groups beyond" },
+          el("strong", { textContent: `What else gets it to ×${o.target}` }),
+          el("p", { className: "hint", textContent: "Worked out with the strongest settings above." }),
+          ...optionGroups(o.beyond, o.safety_factor))
+        : "",
       zoned,
     );
     setStatus(state.summary);
@@ -1851,7 +1869,8 @@ const aiActions = {
   optimise_strength: async () => {
     if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
     const o = await runOptimise();
-    return { met: o.met, target: o.target, safety_factor: round(o.safety_factor), grams: o.grams, orientation: o.orientation, settings: o.settings, explanation: o.explanation };
+    return { met: o.met, target: o.target, safety_factor: round(o.safety_factor), grams: o.grams, orientation: o.orientation, settings: o.settings, explanation: o.explanation,
+      ...(o.beyond ? { beyond: o.beyond.map((b) => ({ change: b.change, kind: b.kind, safety_factor: round(b.safety_factor), why: b.why })) } : {}) };
   },
   strength_options: async () => {
     if (!state.strength) throw new Error("Run check_strength first");
@@ -2147,6 +2166,18 @@ function syncMultiMaterial() {
   $("mm-row").title = { none: "This printer has no multi-material option", builtin: "Built in on this printer", optional: "AMS / MMU add-on" }[mm];
 }
 
+/** A nozzle's problems: the ones a smaller nozzle doesn't have first, then how much detail it can't trace. */
+function nozzleProblems(r) {
+  const titles = (fresh) => [...new Set(r.issues.filter((i) => i.new === fresh).map((i) => i.title))];
+  const out = [
+    ...titles(true).map((t) => el("div", { className: "new-issue", textContent: `${t} (only with bigger nozzles)` })),
+    ...titles(false).map((t) => el("div", { textContent: t })),
+  ];
+  if (r.lost_mm3 >= 0.5) out.push(el("div", { className: "note", textContent: `≈${r.lost_mm3.toFixed(0)} mm³ too thin to print at all (most at ${r.lost_at_mm} mm)` }));
+  if (r.rough_mm3 >= 0.5) out.push(el("div", { className: "note", textContent: `≈${r.rough_mm3.toFixed(0)} mm³ of fine detail prints rough` }));
+  return out.length ? out : ["none"];
+}
+
 async function compareNozzles() {
   await busy("Comparing nozzle sizes…", async () => {
     const rows = await call("compare_nozzles", { up: activeOption().up, profile: profile() });
@@ -2159,7 +2190,7 @@ async function compareNozzles() {
           el("td", { textContent: `${r.nozzle} mm` }),
           el("td", {}, `≈${fmtTime(r.print_time_min)} with ${r.walls} walls`,
             ...(r.note ? [el("div", { className: "note", textContent: r.note })] : [])),
-          el("td", { textContent: r.issues.length ? [...new Set(r.issues.map((i) => i.title))].join("; ") : "none" }),
+          el("td", {}, ...nozzleProblems(r)),
           el("td", {}, r.current ? "current" : el("button", {
             textContent: "Use",
             onclick: () => {

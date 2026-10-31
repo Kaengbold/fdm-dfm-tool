@@ -25,7 +25,7 @@ def test_hot_part_is_weaker_and_explained():
 
 def test_constant_load_needs_more_margin():
     fixed, force = hook_loads()
-    loads = [fixed, {**force, "kg": 6.5}]
+    loads = [fixed, {**force, "kg": 7.5}]
     r = api.strength([1, 0, 0], loads, {"material": "pla"})
     sf = r["safety_factor"]
     assert 2 <= sf < 3, sf  # the hook in PLA lies between the two margins

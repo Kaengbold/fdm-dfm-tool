@@ -435,6 +435,7 @@ def main():
             run.act(lambda: page.click("#run-optimise"), 900_000)
             text = page.locator("#optimise-result").inner_text()
             assert "g of plastic" in text or "aren't enough" in text, text
+            assert "aren't enough" not in text or "What else gets it to" in text, text
             zones = page.get_by_role("button", name="Use the zones")
             if zones.count():
                 run.act(lambda: zones.click(), 300_000)
@@ -642,6 +643,9 @@ def main():
             page.evaluate("() => fdm.steps.go('strength')")
             run.act(lambda: page.click("#run-strength"), 300_000)
             run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            groups = page.locator("#strength-options summary").all_inner_texts()
+            assert any(g.startswith("Design changes") for g in groups), groups
+            page.locator("#strength-options summary", has_text="Design changes").evaluate("s => s.parentElement.open = true")
             run.act(lambda: page.get_by_role("button", name="Test it").first.click(), 600_000)
             status = page.locator("#status").inner_text()
             assert "With the chamfer" in status and page.evaluate("() => fdm.state.versions.length") == 2, status
