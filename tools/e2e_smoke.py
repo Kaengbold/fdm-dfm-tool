@@ -541,6 +541,45 @@ def main():
             return text.splitlines()[0] + " | " + text.splitlines()[1][:120]
         run.step("warping simulation", warping)
 
+        def all_settings():
+            page.check("input[name=level][value=expert]")
+            page.click("#show-expert")
+            try:
+                page.wait_for_selector("#expert[open] .expert-values", state="attached")  # sections start folded
+                sections = page.locator("#expert-sections > details").count()
+                page.fill("#expert-filter", "vanish_below")
+                shown = [d for d in page.locator("#expert-sections > details").all() if d.is_visible()]
+                assert len(shown) == 1, f"filter shows {len(shown)} sections"
+                field = shown[0].locator("input:visible").first
+                field.fill("0.5")
+                field.press("Tab")
+                page.wait_for_function("() => JSON.parse(localStorage.getItem('fdm-expert') ?? '{}')['thresholds.features.vanish_below_nozzle'] === 0.5")
+                assert "changed" in page.locator("#expert-sections .name.changed").first.get_attribute("class")
+                run.act(lambda: page.click("#expert-close"), 300_000)  # checks again with the new value
+                page.click("#show-expert")
+                page.wait_for_selector("#expert[open] .expert-values", state="attached")
+                page.click("#expert-reset")
+                page.wait_for_function("() => !localStorage.getItem('fdm-expert')")
+            finally:
+                page.evaluate("() => document.getElementById('expert').open && document.getElementById('expert').close()")
+            return f"{sections} sections; changed a limit, checked again, reset"
+        run.step("all settings (Expert)", all_settings)
+        def box_heat():
+            page.evaluate("() => fdm.steps.go('sims')")
+            page.fill("#heat-w", "6")
+            page.select_option("#heat-cooling", "closed")
+            run.act(lambda: page.click("#run-box-heat"))
+            text = page.locator("#box-heat-result").inner_text()
+            assert "°C" in text and "above the room" in text, text
+            use = page.locator("#box-heat-result button")
+            if use.count():
+                run.act(lambda: use.click(), 300_000)
+                assert "Inside the electronics box" in page.locator("#use-temp option:checked").inner_text()
+                page.select_option("#use-temp", "")  # back to room temperature for the next steps
+                run.act(lambda: page.dispatch_event("#use-temp", "change"), 300_000)
+            return text[:160]
+        run.step("heat inside an electronics box", box_heat)
+
         def report_with_pictures():
             with page.expect_download(timeout=180_000) as dl:
                 run.act(lambda: page.click("#dl-report"))

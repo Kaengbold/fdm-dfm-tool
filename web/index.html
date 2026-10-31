@@ -28,6 +28,7 @@
         <label title="Everything, step by step: detailed strength, shaking and knocks, design changes"><input type="radio" name="level" value="advanced" /> Advanced</label>
         <label title="Every tool on one long page"><input type="radio" name="level" value="expert" /> Expert</label>
       </div>
+      <button type="button" id="show-expert" class="ghost small" data-min="expert" title="Every number the checks use, with its source">All settings</button>
       <button type="button" id="show-guide" class="ghost small">Guide</button>
     </header>
 
@@ -314,6 +315,22 @@
               <p id="dynamics-need" class="hint">Set where it is held and a load in <b>Will it hold?</b> first.</p>
               <p id="dynamics-result" class="dynamics-result"></p>
             </div>
+            <div id="box-heat" class="sim-card">
+              <h3>Heat inside an electronics box</h3>
+              <p class="hint">If this part is a closed box around electronics, everything they use turns into heat that has to get out
+                through the walls. Quick estimate from the box's outside surface.</p>
+              <div class="row">
+                <label>Electronics use <input id="heat-w" type="number" value="3" min="0" step="0.5" /> W</label>
+                <label>Room <input id="heat-room" type="number" value="25" step="1" /> °C</label>
+                <select id="heat-cooling" aria-label="How the box is cooled">
+                  <option value="closed">Closed box</option>
+                  <option value="fan">A fan blows through it</option>
+                </select>
+              </div>
+              <p class="hint">A Raspberry Pi 4 uses about 3–6 W, an ESP32 or Arduino under 1 W. Vents help: the result lies between the two choices.</p>
+              <button id="run-box-heat">Work it out</button>
+              <div id="box-heat-result"></div>
+            </div>
             <div class="sim-card">
               <h3>Detailed check from your sliced print</h3>
               <p class="hint">The most exact strength and cooling check. Download the 3MF in this orientation, slice it, save the G-code and load it here.
@@ -508,6 +525,18 @@
         <button type="button" id="long-no" class="ghost">Not now</button>
         <button type="button" id="long-yes" class="primary">Run it</button>
       </div>
+    </dialog>
+    <dialog id="expert" class="expert">
+      <div class="expert-head">
+        <h2>All settings</h2>
+        <button type="button" id="expert-close" class="ghost">Close</button>
+      </div>
+      <p class="hint">Every number the checks use: grid sizes for the simulations and every detection limit, each with where it comes
+        from. Changed values are marked and stay in this browser; the checks run again with them. Defaults come from research
+        (the bracketed names point to <code>research/</code>).</p>
+      <div class="row"><input id="expert-filter" type="search" placeholder="Filter, e.g. bridge, warp, hole" aria-label="Filter settings" />
+        <button type="button" id="expert-reset">Reset all</button></div>
+      <div id="expert-sections"></div>
     </dialog>
     <dialog id="guide" class="guide">
       <h2>How much do you want to see?</h2>

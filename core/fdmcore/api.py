@@ -25,7 +25,7 @@ from .formats import read_bodies, unit_hint
 from .mesh import Mesh
 from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z
 from .placement import print_rotation
-from .profile import Profile, load_data, presets
+from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
 from .recommend import goal_plan, recommend_settings
@@ -68,6 +68,96 @@ def custom_presets(printers: dict | None = None, materials: dict | None = None) 
 
     set_custom_presets(printers, materials)
     return presets()
+
+
+# Analysis grids (Expert settings): more cubes are more exact and slower (about linear in the browser).
+ANALYSIS = {
+    "strength_voxels": (12_000, 2_000, 200_000, "Cubes in the strength grid (Will it hold?, shaking, the optimiser). Seconds in the browser at 12 000."),
+    "fine_voxels": (40_000, 5_000, 400_000, "Cubes for \"Check accuracy with a finer grid\": about 1.5× finer than the normal grid."),
+    "warp_voxels": (6_000, 1_000, 100_000, "Cubes in the warping simulation: it solves once per group of layers, so a coarser grid."),
+}
+_analysis: dict[str, float] = {}
+
+
+def _grid(key: str) -> int:
+    return int(_analysis.get(key, ANALYSIS[key][0]))
+
+
+def expert_settings() -> dict:
+    """Every number the checks use, for the Expert settings window: the analysis grids and all of
+    thresholds.yaml, grouped by section, each with its default, the value in use and the note from the
+    file (what it does and its source). Nothing hidden."""
+    from .profile import _expert, _read_data
+
+    analysis = {"name": "analysis", "title": "Analysis grids", "about": "How finely the part is cut into cubes for the simulations.",
+                "values": [{"path": f"analysis.{k}", "default": d, "value": _grid(k), "min": lo, "max": hi, "note": note}
+                           for k, (d, lo, hi, note) in ANALYSIS.items()]}
+    notes, about = _yaml_notes(DATA_DIR / "thresholds.yaml")
+    over = _expert.get("thresholds", {})
+    sections = {}
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, [*path, str(k)])
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, [*path, str(i)])
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            key = ".".join(path)
+            note = next((notes[".".join(path[:n])] for n in range(len(path), 0, -1) if ".".join(path[:n]) in notes), "")
+            sections.setdefault(path[0], []).append({"path": f"thresholds.{key}", "default": node, "value": over.get(key, node), "note": note})
+
+    walk(_read_data("thresholds"), [])
+    out = [analysis] + [{"name": k, "title": k.replace("_", " ").capitalize(), "about": about.get(k, ""), "values": v} for k, v in sections.items()]
+    return {"sections": out}
+
+
+def _yaml_notes(path) -> tuple[dict[str, str], dict[str, str]]:
+    """Comments of a YAML file: the one after each ``key: value`` (by dotted path) and the full-line
+    comments inside each top-level section (its description)."""
+    import re
+
+    notes, about, stack = {}, {}, []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        indent = len(line) - len(line.lstrip())
+        text = line.strip()
+        if text.startswith("#"):
+            if stack:
+                about[stack[0][1]] = (about.get(stack[0][1], "") + " " + text.lstrip("# ")).strip()
+            continue
+        m = re.match(r"([\w-]+):\s*([^#]*?)\s*(?:#\s*(.*))?$", text)
+        if not m:
+            continue
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, m.group(1)))
+        if m.group(3):
+            notes[".".join(k for _, k in stack)] = m.group(3)
+    return notes, about
+
+
+def set_expert(values: dict[str, float]) -> dict:
+    """Apply the Expert settings window: ``{"thresholds.features.vanish_below_nozzle": 0.6,
+    "analysis.strength_voxels": 20000}``; values not given go back to their defaults."""
+    from .profile import set_expert as set_data
+
+    grids, data = {}, {}
+    for path, value in (values or {}).items():
+        group, _, rest = path.partition(".")
+        if group == "analysis":
+            if rest not in ANALYSIS:
+                raise KeyError(f"Unknown setting {path}")
+            lo, hi = ANALYSIS[rest][1:3]
+            grids[rest] = min(max(float(value), lo), hi)
+        else:
+            data.setdefault(group, {})[rest] = float(value)
+    set_data(data)
+    _analysis.clear()
+    _analysis.update(grids)
+    if _session is not None:
+        _session.solved = None  # results depend on these
+    return expert_settings()
 
 
 CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge")
@@ -852,7 +942,6 @@ def _optimise_story(best: dict, target: float, compared: bool) -> str:
             "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, use a stronger material, or let it carry less.")
 
 
-WARP_VOXELS = 6000  # warping solves once per group of layers: a coarser grid than strength
 WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, like the warping check's length ratio
 _warp_reference: dict = {}
 
@@ -867,7 +956,7 @@ def warping(up, profile: dict | None = None) -> dict:
     s = _require()
     p = Profile.from_dict(profile)
     sh = _shells(p)
-    r = warp.simulate(s.mesh, up, p, sh, WARP_VOXELS)
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"))
     model = r["model"]
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
     if key not in _warp_reference:
@@ -946,16 +1035,15 @@ def regions() -> dict:
     return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
 
 
-STRENGTH_VOXELS = 12_000  # analysis grid: seconds in the browser
-FINE_VOXELS = 40_000  # "check accuracy": a ~1.5× finer grid (3× the cubes)
 
 
-def _load_case(loads: list[dict], voxels: int = STRENGTH_VOXELS):
+def _load_case(loads: list[dict], voxels: int | None = None):
     """Prepared load cases (list, see strength.prepare_cases), cached per load set and grid size."""
     from .regions import find_regions
     from .strength import prepare_cases
 
     s = _require()
+    voxels = voxels or _grid("strength_voxels")
     key = json.dumps([loads, voxels], sort_keys=True)
     if s.load_case is None or s.load_case[0] != key:
         if s.regions is None:
@@ -1072,7 +1160,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
 
     s = _require()
     p = Profile.from_dict(profile)
-    cases = _load_case(loads, FINE_VOXELS if fine else STRENGTH_VOXELS)
+    cases = _load_case(loads, _grid("fine_voxels") if fine else None)
     sh = _shells(p, walls, infill, top, bottom, zones)
     model = cases[0].model
     printed = None
@@ -1359,6 +1447,64 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
     for r in out:
         del r["_fuss"]
     return out
+
+
+# Heat inside a closed box: everything the electronics use ends up as heat that has to leave through
+# the walls. Overall heat transfer of an enclosure wall to still room air, both sides: about 4.6 W/m²K
+# (Elliott Electric's sealed-enclosure chart: 7.1 W/ft² gives a 16.7 °C rise; Firgelli: 3–6 W/m²K in
+# still air); with a fan blowing through, 20 W/m²K (Firgelli: 20–40 forced). Printed plastic conducts
+# about 0.2 W/m·K (PLA 0.13 … PETG 0.2): a 2 mm wall adds only ~7 %.
+BOX_HEAT_U = {"closed": 4.6, "fan": 20.0}
+PLASTIC_K = 0.2
+
+
+def _outer_area_mm2(mesh: Mesh) -> float:
+    """Outside surface of the part as a prism around its outline (hull × height + top and bottom),
+    along whichever axis fits tightest: exact for boxes and cylinders, and it ignores the inside walls."""
+    import shapely
+
+    pts = mesh.triangles.reshape(-1, 3)
+    best = np.inf
+    for axis in range(3):
+        a, b = [i for i in range(3) if i != axis]
+        hull = shapely.MultiPoint(pts[:, [a, b]]).convex_hull
+        height = float(np.ptp(pts[:, axis]))
+        best = min(best, hull.length * height + 2 * hull.area)
+    return float(best)
+
+
+def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", profile: dict | None = None) -> dict:
+    """Air temperature inside the part used as a box for electronics that use ``power_w`` watts, with
+    the room at ``ambient_c``: the heat leaves through the outside surface (``BOX_HEAT_U`` for a
+    closed box or one with a fan) and the printed wall. Compared with where the plastic goes soft.
+    Vents help too, but how much depends on their size: between the two."""
+    from .service import heat_limit
+
+    if cooling not in BOX_HEAT_U:
+        raise ValueError(f"cooling must be one of {', '.join(BOX_HEAT_U)}")
+    s = _require()
+    p = Profile.from_dict(profile)
+    area = _outer_area_mm2(s.mesh)
+    wall_m = goal_plan(p)["walls"] * p.line_width / 1000
+    u = 1 / (1 / BOX_HEAT_U[cooling] + wall_m / PLASTIC_K)
+    rise = float(power_w) / (u * area * 1e-6)
+    inside = float(ambient_c) + rise
+    # Same limits as "Where is it used?": soft past heat_limit, creeping from the softening point.
+    limit = heat_limit(p)
+    soft = min(float(p.material["softening_c"]), limit - 10)
+    verdict = "too hot" if inside >= limit else "warm" if inside >= soft else "fine"
+    name = p.material["name"]
+    how = {"closed": "closed", "fan": "with a fan blowing through"}[cooling]
+    text = (f"{power_w:g} W inside this box ({how}, {area / 100:.0f} cm² outside) warm the air inside about {rise:.0f} °C above the room: "
+            f"about {inside:.0f} °C at {ambient_c:g} °C room. ")
+    text += {"fine": f"{name} stays below where it starts to soften ({soft:.0f} °C).",
+             "warm": f"{name} starts to soften from about {soft:.0f} °C: screw bosses and clips may slowly give way. Add vents or a fan, or print it in PETG or ASA.",
+             "too hot": f"{name} goes soft at about {limit:.0f} °C: the box will sag and clips loosen. Add a fan or vents, or print it in ASA, ABS or PC."}[verdict]
+    if inside >= 70:  # commercial-grade chips are rated 0–70 °C (industrial 85 °C), whatever the box is printed in
+        text += " That's too hot for the electronics too: this needs a fan or a much bigger box."
+    return {"power_w": float(power_w), "ambient_c": float(ambient_c), "cooling": cooling, "area_cm2": round(area / 100, 1),
+            "rise_c": round(rise, 1), "inside_c": round(inside, 1), "softening_c": soft, "heat_limit_c": limit,
+            "verdict": verdict, "explanation": text}
 
 
 def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
@@ -1698,6 +1844,9 @@ METHODS = {
     "report": report,
     "regions": regions,
     "optimise_strength": optimise_strength,
+    "expert_settings": expert_settings,
+    "set_expert": set_expert,
+    "box_heat": box_heat,
     "zone_at": zone_at,
     "volume_at": volume_at,
     "tag_feature": tag_feature,

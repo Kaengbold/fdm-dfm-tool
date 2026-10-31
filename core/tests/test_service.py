@@ -41,3 +41,19 @@ def test_heat_finding():
     assert rules({"material": "pla", "use_temp_c": 50})["too_hot_in_use"] == "warn"
     assert rules({"material": "pla", "use_temp_c": 70})["too_hot_in_use"] == "problem"
     assert "too_hot_in_use" not in rules({"material": "asa", "use_temp_c": 70})
+
+
+def test_box_heat():
+    """An 80 × 60 × 40 mm box: 208 cm² outside; a few watts in a closed PLA box get it warm, a fan
+    or a material that takes more heat fixes it."""
+    from test_hold import box
+
+    api.load(box(80, 60, 40), "box")
+    closed = api.box_heat(2, 25, "closed", {"material": "pla"})
+    assert closed["area_cm2"] == pytest.approx(208)
+    assert 15 < closed["rise_c"] < 30 and closed["verdict"] == "warm"
+    assert api.box_heat(2, 25, "fan", {"material": "pla"})["verdict"] == "fine"
+    assert api.box_heat(5, 25, "closed", {"material": "pla"})["verdict"] == "too hot"
+    assert api.box_heat(5, 25, "closed", {"material": "asa"})["verdict"] == "fine"
+    with pytest.raises(ValueError):
+        api.box_heat(1, 25, "vents")
