@@ -42,3 +42,16 @@ def test_dynamics_api():
     assert 20 < calm["frequency_hz"] < 2000 and heavy["frequency_hz"] < calm["frequency_hz"]
     assert dropped["impact_factor"] > 5 and dropped["impact_safety"] < dropped["static_safety"] / 5
     assert "Hz" in calm["explanation"] and "drops 50 mm" in dropped["explanation"]
+
+
+def test_dynamics_runs_only_what_is_asked_and_prints_like_strength():
+    """Knocks alone skip the swing solve, shaking alone the static one; the knock check uses the
+    same walls / infill as "Will it hold?" and its solve (cached, so it costs nothing the second time)."""
+    api.load(box(120, 12, 12), "bar")
+    loads = [{"region": region_facing([-1, 0, 0]), "kind": "fixed"}, {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 1, "direction": "down"}]
+    knock = api.dynamics([0, 0, 1], loads, {}, drop_mm=20, shake=False, infill=1.0)
+    assert knock["frequency_hz"] is None and "vertex_disp" not in knock and "Hz" not in knock["explanation"]
+    assert knock["static_safety"] == pytest.approx(api.strength([0, 0, 1], loads, {}, infill=1.0)["safety_factor"])
+    assert knock["static_safety"] > api.dynamics([0, 0, 1], loads, {}, drop_mm=20, shake=False)["static_safety"]
+    swing = api.dynamics([0, 0, 1], loads, {})
+    assert swing["static_safety"] is None and swing["frequency_hz"] > 0 and "drops" not in swing["explanation"]

@@ -1069,12 +1069,13 @@ $("run-dynamics").onclick = async () => {
   if (!(await askLong("Shaking and knocks", "dynamics"))) return;
   return busy("Working out how it swings and how hard a drop hits…", async () => {
     const r = await timed("dynamics", () => call("dynamics", {
-      up: activeOption().up, loads: state.loads, profile: profile(),
+      up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), zones: state.zones,
+      shake: $("dyn-shake").checked,
       mounted_kg: $("dyn-shake").checked ? Number($("dyn-kg").value) || 0 : 0,
       drop_mm: $("dyn-drop").checked ? Number($("dyn-mm").value) || 0 : 0,
     }));
-    state.swing = r;
-    state.showSwing = true;
+    state.swing = r.vertex_disp ? r : null; // only the shaking check has a swing to show
+    state.showSwing = Boolean(state.swing);
     const show = el("input", { type: "checkbox", checked: true });
     show.onchange = () => {
       state.showSwing = show.checked;
@@ -1083,7 +1084,7 @@ $("run-dynamics").onclick = async () => {
     };
     $("dynamics-result").replaceChildren(
       el("span", { textContent: r.explanation.replace(" Shown: how it swings (exaggerated).", "") }),
-      el("label", { className: "toggle" }, show, " Show how it swings on the part"),
+      state.swing ? el("label", { className: "toggle" }, show, " Show how it swings on the part") : "",
     );
     recolor();
     setStatus(state.summary);
