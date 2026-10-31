@@ -13,6 +13,7 @@ then reloads the result. ``pieces`` says how many triangles each closed piece ha
 from __future__ import annotations
 
 import numpy as np
+from shapely.geometry import LineString
 
 from .checks import orient
 from .mesh import Mesh
@@ -369,7 +370,8 @@ SHARP_MITRE = 0.5  # cos of half the turn: corners turning more than 120° break
 
 def _ring_chamfer(c: np.ndarray, section: np.ndarray, size: float) -> list[np.ndarray]:
     """Closed pieces cutting the chamfer along one outline loop ``c`` (material on the left). None
-    when the sweep would fold (a short edge after a big turn): then this loop keeps its plain edge."""
+    when a piece would fold (a short edge after a big turn) or run into itself (a spot narrower than
+    the cutter, which reaches in from both sides): then this loop keeps its plain edge."""
     n = len(c)
     d = np.roll(c, -1, axis=0) - c
     d /= np.linalg.norm(d, axis=1, keepdims=True)  # edge k runs from c[k] to c[k + 1]
@@ -391,9 +393,14 @@ def _ring_chamfer(c: np.ndarray, section: np.ndarray, size: float) -> list[np.nd
     def forward(rings, dirs):  # every section point moves on along its edge: the piece doesn't fold
         return all(np.all((b - a)[:, :2] @ e > 1e-6) for a, b, e in zip(rings, rings[1:], dirs))
 
+    def apart(rings, closed):  # the cutter's inner and outer edges don't cross themselves
+        loop = rings + rings[:1] if closed else rings
+        return all(LineString([r[i, :2] for r in loop]).is_simple for i in (0, 2))
+
     if not sharp:
         rings = [r for k in range(n) for r in corner(k)]
-        return [_sweep(rings, closed=True)] if forward(rings + rings[:1], [d[i // 2] for i in range(2 * n)]) else []
+        ok = forward(rings + rings[:1], [d[i // 2] for i in range(2 * n)]) and apart(rings, closed=True)
+        return [_sweep(rings, closed=True)] if ok else []
     pieces = []
     for a, b in zip(sharp, sharp[1:] + sharp[:1]):
         ks = [(a + i) % n for i in range((b - a) % n or n)]  # edges a … b-1, from sharp corner a to sharp corner b
@@ -401,7 +408,7 @@ def _ring_chamfer(c: np.ndarray, section: np.ndarray, size: float) -> list[np.nd
         start = c[a] - d[a] * ((size + 0.3) if convex[a] else -OFF_CORNER)
         end = c[b] + d[ks[-1]] * ((size + 0.3) if convex[b] else -OFF_CORNER)
         rings = [at(start, out[a])] + [r for k in ks[1:] for r in corner(k)] + [at(end, out[ks[-1]])]
-        if not forward(rings, [d[a]] + [d[k] for k in ks[1:] for _ in range(2)]):
+        if not (forward(rings, [d[a]] + [d[k] for k in ks[1:] for _ in range(2)]) and apart(rings, closed=False)):
             return []
         pieces.append(_sweep(rings, closed=False))
         if not convex[b]:  # inside corner: fill the gap between the two square ends
