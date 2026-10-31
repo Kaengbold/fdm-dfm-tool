@@ -456,6 +456,35 @@ def main():
             return text.splitlines()[1][:160] + note
         run.step("find the lightest settings that hold", optimise)
 
+        def picked_zone():
+            page.evaluate("() => fdm.steps.go('settings')")
+            page.click("#zone-pick")
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f += Math.max(1, Math.floor(n / 50))) { const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); if (el && el.tagName === 'CANVAS' && v.pick({clientX: x, clientY: y}) >= 0) return [x, y]; } return [0, 0]; }"
+            )
+            run.act(lambda: page.mouse.click(x, y))
+            item = page.locator("#zone-list li").first
+            item.locator("input").nth(1).fill("80")
+            item.locator("input").nth(1).press("Tab")  # change fires when the field is left
+            assert page.evaluate("() => fdm.state.zones.length === 1 && fdm.state.zones[0].infill === 0.8"), "zone infill not set"
+            assert page.evaluate("() => fdm.viewer.zones?.children.length ?? 0") >= 2, "zone not shown"
+            with page.expect_download() as dl:
+                run.act(lambda: page.click("#dl-3mf"), 300_000)
+            import zipfile
+
+            conf = zipfile.ZipFile(dl.value.path()).read("Metadata/model_settings.config").decode()
+            assert "modifier_part" in conf and 'value="80%"' in conf, "picked zone not in the 3MF"
+            label = item.locator("strong").inner_text()
+            page.click("#zone-card h3")  # Ctrl+Z isn't undo while typing in a field
+            page.keyboard.press("Control+z")  # back to the default infill
+            page.wait_for_function("() => fdm.state.zones[0]?.infill !== 0.8")
+            page.locator("#zone-list li").first.get_by_role("button", name="Remove").click()
+            assert page.evaluate("() => fdm.state.zones.length") == 0
+            return f"{label}; 80 % infill in the 3MF, undo and remove work"
+        run.step("stronger area picked on the part", picked_zone)
+
         def rank_with_strength():
             run.act(lambda: page.get_by_role("button", name="Find the best orientation including strength").click(), 600_000)
             text = page.locator("#strength-result").inner_text()

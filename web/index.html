@@ -399,6 +399,17 @@
               </details>
               <button type="button" id="edit-shells" class="link" data-min="basic">Change walls, layers, infill</button>
             </div>
+            <div class="sim-card" id="zone-card" data-min="advanced">
+              <h3>Stronger in one area</h3>
+              <p class="hint">More walls and infill only where it's needed: around a screw hole, a hinge, a clip. The rest stays light.
+                The area goes into the 3MF as a modifier (orange box) and counts in the strength check. Let it reach well past
+                the spot that carries the load: where a stiff area ends, the stress gathers.</p>
+              <div class="row">
+                <button id="zone-pick">Pick a face on the part</button>
+                <span id="zone-hint" class="hint" hidden>Click the face or spot that needs it…</span>
+              </div>
+              <ul id="zone-list" class="zone-list"></ul>
+            </div>
           </div>
         </section>
 
