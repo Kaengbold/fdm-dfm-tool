@@ -535,6 +535,21 @@ def main():
                 page.evaluate("() => document.getElementById('expert').open && document.getElementById('expert').close()")
             return f"{sections} sections; changed a limit, checked again, reset"
         run.step("all settings (Expert)", all_settings)
+        def box_heat():
+            page.evaluate("() => fdm.steps.go('sims')")
+            page.fill("#heat-w", "6")
+            page.select_option("#heat-cooling", "closed")
+            run.act(lambda: page.click("#run-box-heat"))
+            text = page.locator("#box-heat-result").inner_text()
+            assert "°C" in text and "above the room" in text, text
+            use = page.locator("#box-heat-result button")
+            if use.count():
+                run.act(lambda: use.click(), 300_000)
+                assert "Inside the electronics box" in page.locator("#use-temp option:checked").inner_text()
+                page.select_option("#use-temp", "")  # back to room temperature for the next steps
+                run.act(lambda: page.dispatch_event("#use-temp", "change"), 300_000)
+            return text[:160]
+        run.step("heat inside an electronics box", box_heat)
 
         def report_with_pictures():
             with page.expect_download(timeout=180_000) as dl:

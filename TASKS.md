@@ -1,7 +1,7 @@
 # Task checklist
 
 Rules: see [AGENTS.md](AGENTS.md). Claim a task by filling in `owner` (name + branch) before
-starting. Status: `[ ]` open · `[~]` in progress / partly done · `[x]` done.
+starting. Status: `[ ]` open · `[~]` in progress / partly done · `[x]` done · `[-]` dropped.
 Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to have.
 
 ## Verification (do these first — they decide what's real)
@@ -86,9 +86,23 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [x] **T-064 P2** Local mode: real slicing with the installed OrcaSlicer (MCP `slice_with_orcaslicer`). · owner: Claude (`task/T-001-slicer-check`) — `slicer_cli.py` matches our presets to OrcaSlicer's system profiles (lists and `compatible_printers_condition`) and returns its print time, filament and layers next to our estimate. Prusa printers: OrcaSlicer's CLI refuses its own Prusa profile pairs (-17), reported as such.
 - [x] **T-065 P2** Our print-time estimate is 2–3× too low against OrcaSlicer (L-bracket: 21 min vs 43–73 min). Calibrate `_estimate` with `slice_with_orcaslicer` on the samples. · owner: Claude (`task/T-001-slicer-check`) — estimate now counts solid skins, minimum layer time and start-up; constants fitted with `tools/time_fit.py`: within ×1.07 typical (×1.17 worst) of the P1S/K1C mean. The two printers' own OrcaSlicer times still differ 2–3×, so per-printer speeds are the next step.
 - [x] **T-066 P2** Paste-back: answer from any AI chat applied by the tool (PLAN "copy context … paste back a JSON answer"). · owner: Claude (`task/T-001-slicer-check`) — the copied report ends with an answer format (orientation index, settings, design-change ids, not-features); "Paste an AI answer" applies it with the Ask-AI actions.
-- [ ] **T-061 P2** Local "subscription bridge": in local mode, run the user's official CLI (`claude -p`, `codex exec`, `gemini -p`) headless with our MCP server attached — uses their subscription through the official client. Check each vendor's terms first. · owner: —
-- [ ] **T-062 P3** Streaming answers in the Ask-AI panel. · owner: —
-- [ ] **T-063 P2** Test the Ask-AI panel with real keys (Anthropic + Gemini), fix tool-schema issues. · owner: —
+- [-] **T-061 P2** Local "subscription bridge": run the user's official CLI headless from the app. — dropped 2026-10-31: the user runs their agent themselves and it drives the tool (agent toolkit below).
+- [-] **T-062 P3** Streaming answers in the Ask-AI panel. — dropped 2026-10-31 with the panel.
+- [-] **T-063 P2** Test the Ask-AI panel with real keys. — dropped 2026-10-31 with the panel.
+
+### Agent toolkit (Phase 11, PLAN section 6)
+
+The app has no AI built in. An agent the user already runs (Claude Code, Codex, Claude Desktop) drives the
+tool through the MCP server or the command line and gets reports, charts and pictures back as files.
+
+- [ ] **T-260 P2** Remove the built-in AI: the Ask-AI panel, own-key settings and paste-back (`web/assistant.js`, `gemini.js`, `openai.js`, the `?ai=1` code, their e2e steps and docs). Keep "Copy for your AI chat" as a plain report. · owner: —
+- [ ] **T-261 P2** Every API call as an MCP tool: the MCP server covers `api.METHODS` (zones, box heat, nozzle comparison, Expert settings, warping, …) instead of a hand-picked list; one test that fails when a new API method has no tool. · owner: —
+- [ ] **T-262 P2** Pictures without a browser: the engine renders PNG images of the part (numpy software renderer, no new dependency): on the bed, problem close-ups, overhang map, stress colours with load arrows, warp shape, before / after a design change. MCP `render_image` returns the file path (and the image). · owner: —
+- [ ] **T-263 P2** Charts as SVG from the engine: safety factor per orientation, print time / weight per nozzle and setting, warping per corner, settings sweeps. Same colours as the app. · owner: —
+- [ ] **T-264 P2** Reports for agents: the human report (T-253) built by the engine as one HTML file and as Markdown (pictures from T-262, charts from T-263), written to a path the agent chooses. · owner: —
+- [ ] **T-265 P2** Command line `fdmdfm` for agents and scripts without MCP: `check`, `orient`, `strength`, `report`, `render`, `export`, JSON out; one part per call or a saved project file. · owner: —
+- [ ] **T-266 P2** Project files shared with the web app: the agent saves part + orientation + loads + zones + design changes + settings; the web app opens it (and saves the same format), so the user sees in 3D what the agent did. · owner: —
+- [ ] **T-267 P2** Agent guide: a Claude Code skill and an `AGENTS.md` snippet for Codex with the usual flow, units, what the numbers mean and how to explain them in plain language; setup steps in README. · owner: —
 
 ## Infrastructure & UX
 
@@ -105,7 +119,7 @@ Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to
 - [~] **T-170 P2** (Phase 10) Calibration prints: tolerances / fits, overhang angle, bridges, support gap (layer strength and warping exist); presets shipped for printers that prove consistent. · owner: Claude (`task/T-170-calibration`) — three more test prints in My materials: fit gauge (6 mm peg, holes 6.0–6.5 mm) → snug / sliding gaps (`fit_gap_mm`, used by "What goes in it?"), overhang fan 40–70° → `max_overhang_deg`, bridges 10–50 mm → `max_bridge_mm`. Links to free community test prints (tolerance, stringing/bridging, Teaching Tech guide). Left: support Z-gap test, real prints to fill in shipped values.
 - [x] **T-172 P1** Overhang check was more lenient than the material's angle. · owner: Claude (`task/T-172-overhang`) — two causes: each layer could reach half a line width past the angle (now 0.05 mm for slicing noise), and a strip along an edge narrower than the anchor margin counted as a short bridge "held all the way round" (now only pieces against the layer below on every side). PLA (55°) is now flagged from ~62° instead of not at all up to 75° on a leaning block; OrcaSlicer's default support threshold is 60°. Samples unchanged; regression test. Left: calibrate with the overhang test print (T-170).
 - [x] **T-171 P3** (Phase 10) Material advisor from environment and load case. · owner: Claude (`task/T-171-material-advisor`) — "Which material suits it?": every material rated good / with care / not suitable with reasons: heat where it's used (`heat_limit_c`), sunlight (`uv_resistance`, approximate), flexible or not, what the printer can print (enclosure, hardened nozzle), and with loads set the safety factor; the easiest good one first. Strength's other-material options now include the heat too (they ignored it). API, MCP, web. Left: price, chemicals / food contact, datasheet values (G-3).
-- [ ] **T-180 P3** (Phase 11) Redo the AI integration (hidden for now, ``?ai=1``). · owner: —
+- [-] **T-180 P3** (Phase 11) Redo the AI integration. — replaced 2026-10-31 by the agent toolkit (T-260 … T-267).
 - [~] **T-181 P2** Research more CAD tricks and simulation ideas to suggest. · owner: Claude — round 1 `research/gemini_cad_tricks.md`; round 2 `research/cad_tricks_round2.md`: wall around a screw hole added (`screw_wall_thin`), stress-concentration paper found. Left: snap fits, living hinges, ribs instead of solid blocks (each needs detection code).
 - [~] **T-141 P1** (Phase 7) UI overhaul: simpler layout, fewer controls at once, clear next step. · owner: Claude (`task/T-141-ui-redo`) — workbench layout from mockup A2 (step list, 3D view, one step's panel), Simple / Basic / Advanced step flows (`web/steps.js`), Expert = every pane on one page for now, working badge says what it updates, Atkinson Hyperlegible self-hosted. Left: user feedback round. (Sentence-case titles, readable values and the Expert page came in T-142 round 2.)
 
@@ -166,7 +180,7 @@ Bugs first (P1), then UI clean-up, then new features.
 
 - [x] **T-240 P2** Before a long simulation: estimate its time for this model and ask; let the user pick how much of the PC to use (threads / grid) and show the time for that choice. · owner: Claude (`task/T-220-versions`) — buttons show "about 48 s"; above 30 s a question first with the estimate ("Run it" / "Not now"). Estimates: one strength check takes about the same time on any part (the grid has ~12.5k cubes), measured on this computer and remembered; the others are multiples measured on the samples (fine grid 3.5×, warping 2.4×, shaking 3.5×, optimiser 4.5×), and the real time once run on this part. The choice offered is the work done (optimiser with or without stronger zones): the browser engine always runs on one core, so the PC stays usable; there is no thread count to pick. Native (MCP) runs keep the half-the-cores cap.
 - [x] **T-241 P2** Faster shaking and knock checks (coarser grid, fewer modes, reuse the strength model). · owner: Claude (`task/T-241-faster-dynamics`) — about 2× faster (bar 4.6 → 2.3 s, mushroom 6.7 → 3.1 s natively, same Hz and safety): looser eigen-solver tolerances (inner 1e-3, frequency 0.1 %), only the ticked checks run, and the knock check reuses the last static solve (`api._evaluate`, also used by the stronger options and the material advisor). Fixed on the way: shaking / knocks used the goal's default walls and infill, not the ones set by hand or the zones. Coarser grid not needed.
-- [ ] **T-242 P3** Decide which extra simulations make sense as quick indicators: heat inside electronics boxes (fast), creep under a constant load, wear. Write down the yes/no with reasons, then build the yes ones. · owner: —
+- [x] **T-242 P3** Decide which extra simulations make sense as quick indicators: heat inside electronics boxes (fast), creep under a constant load, wear. Write down the yes/no with reasons, then build the yes ones. · owner: Claude (`task/T-242-extra-sims`) — decisions with sources in `research/extra_simulations.md`: electronics box heat yes (built: `api.box_heat`, ΔT = P / (U·A), U 4.6 W/m²K closed / 20 with a fan plus the printed wall, outside area as a prism; card in Optional simulations, verdict against the softening point and heat limit, one click hands the inside temperature to "Where is it used?"); creep no (×3 for constant loads already, no creep data per material); wear no (depends on the mating part, unreliable numbers).
 - [x] **T-243 P2** Advanced: new step "Optional simulations" holding the extra simulations and the G-code (detailed) level. · owner: Claude (`task/T-220-versions`) — new Advanced step "Optional simulations" (after Will it hold?): warping, shaking and knocks (uses the held face and load from Will it hold?, says so until they are set), and the detailed check from a G-code. Their results show on the part only in this step.
 
 ### New sections

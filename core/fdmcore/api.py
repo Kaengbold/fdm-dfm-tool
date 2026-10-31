@@ -1324,6 +1324,64 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
     return out
 
 
+# Heat inside a closed box: everything the electronics use ends up as heat that has to leave through
+# the walls. Overall heat transfer of an enclosure wall to still room air, both sides: about 4.6 W/m²K
+# (Elliott Electric's sealed-enclosure chart: 7.1 W/ft² gives a 16.7 °C rise; Firgelli: 3–6 W/m²K in
+# still air); with a fan blowing through, 20 W/m²K (Firgelli: 20–40 forced). Printed plastic conducts
+# about 0.2 W/m·K (PLA 0.13 … PETG 0.2): a 2 mm wall adds only ~7 %.
+BOX_HEAT_U = {"closed": 4.6, "fan": 20.0}
+PLASTIC_K = 0.2
+
+
+def _outer_area_mm2(mesh: Mesh) -> float:
+    """Outside surface of the part as a prism around its outline (hull × height + top and bottom),
+    along whichever axis fits tightest: exact for boxes and cylinders, and it ignores the inside walls."""
+    import shapely
+
+    pts = mesh.triangles.reshape(-1, 3)
+    best = np.inf
+    for axis in range(3):
+        a, b = [i for i in range(3) if i != axis]
+        hull = shapely.MultiPoint(pts[:, [a, b]]).convex_hull
+        height = float(np.ptp(pts[:, axis]))
+        best = min(best, hull.length * height + 2 * hull.area)
+    return float(best)
+
+
+def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", profile: dict | None = None) -> dict:
+    """Air temperature inside the part used as a box for electronics that use ``power_w`` watts, with
+    the room at ``ambient_c``: the heat leaves through the outside surface (``BOX_HEAT_U`` for a
+    closed box or one with a fan) and the printed wall. Compared with where the plastic goes soft.
+    Vents help too, but how much depends on their size: between the two."""
+    from .service import heat_limit
+
+    if cooling not in BOX_HEAT_U:
+        raise ValueError(f"cooling must be one of {', '.join(BOX_HEAT_U)}")
+    s = _require()
+    p = Profile.from_dict(profile)
+    area = _outer_area_mm2(s.mesh)
+    wall_m = goal_plan(p)["walls"] * p.line_width / 1000
+    u = 1 / (1 / BOX_HEAT_U[cooling] + wall_m / PLASTIC_K)
+    rise = float(power_w) / (u * area * 1e-6)
+    inside = float(ambient_c) + rise
+    # Same limits as "Where is it used?": soft past heat_limit, creeping from the softening point.
+    limit = heat_limit(p)
+    soft = min(float(p.material["softening_c"]), limit - 10)
+    verdict = "too hot" if inside >= limit else "warm" if inside >= soft else "fine"
+    name = p.material["name"]
+    how = {"closed": "closed", "fan": "with a fan blowing through"}[cooling]
+    text = (f"{power_w:g} W inside this box ({how}, {area / 100:.0f} cm² outside) warm the air inside about {rise:.0f} °C above the room: "
+            f"about {inside:.0f} °C at {ambient_c:g} °C room. ")
+    text += {"fine": f"{name} stays below where it starts to soften ({soft:.0f} °C).",
+             "warm": f"{name} starts to soften from about {soft:.0f} °C: screw bosses and clips may slowly give way. Add vents or a fan, or print it in PETG or ASA.",
+             "too hot": f"{name} goes soft at about {limit:.0f} °C: the box will sag and clips loosen. Add a fan or vents, or print it in ASA, ABS or PC."}[verdict]
+    if inside >= 70:  # commercial-grade chips are rated 0–70 °C (industrial 85 °C), whatever the box is printed in
+        text += " That's too hot for the electronics too: this needs a fan or a much bigger box."
+    return {"power_w": float(power_w), "ambient_c": float(ambient_c), "cooling": cooling, "area_cm2": round(area / 100, 1),
+            "rise_c": round(rise, 1), "inside_c": round(inside, 1), "softening_c": soft, "heat_limit_c": limit,
+            "verdict": verdict, "explanation": text}
+
+
 def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     """Detected features (holes, bosses) and suggested geometry edits for this orientation.
     Each edit has a ``mesh`` (float32 triangles, part coordinates) made of closed ``pieces`` (triangle
@@ -1654,6 +1712,7 @@ METHODS = {
     "optimise_strength": optimise_strength,
     "expert_settings": expert_settings,
     "set_expert": set_expert,
+    "box_heat": box_heat,
     "zone_at": zone_at,
     "tag_feature": tag_feature,
     "strength": strength,
