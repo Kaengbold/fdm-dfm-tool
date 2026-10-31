@@ -297,7 +297,9 @@ def _slabs(stack, layers, region, verts, height) -> list[np.ndarray]:
             z0 = _end_height(verts, foot, layers[i0 - 1].z if i0 > 0 else 0.0, layers[i0].z, low=True)
         if i1 == last:
             z1 = _end_height(verts, foot, layers[i1].z, layers[i1 + 1].z if i1 + 1 < len(layers) else height, low=False)
-        for poly in parts(g, 0.01):
+        # Corners a few µm apart (from the buffer and difference above) sit right on the part's own
+        # wall faces and leave zero-area triangles in the union: drop them.
+        for poly in parts(g.simplify(0.02), 0.01):
             prism = extrude(poly, z0, z1)
             if prism is not None:
                 out.append(prism)

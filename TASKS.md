@@ -126,7 +126,7 @@ Bugs first (P1), then UI clean-up, then new features.
 
 ### Bugs
 
-- [ ] **T-200 P1** Design changes that overlap give a rough model with mesh errors (two fills meeting at a corner). Union the edit pieces cleanly, or skip a piece that overlaps another. · owner: —
+- [x] **T-200 P1** Design changes that overlap give a rough model with mesh errors (two fills meeting at a corner). Union the edit pieces cleanly, or skip a piece that overlaps another. · owner: Claude (`task/T-200-edit-overlap`) — cause: cutters touched the part's own corner edges and end faces exactly (and per-edge wedges met at every corner of a curve), leaving zero-thickness fins and crumbs. Bottom chamfer is now one mitred sweep per outline loop with sections 0.01 mm off the corners; corner roundings one fan piece each, a hair past tangent; teardrops a hair past the hole; thicker-wall outlines simplified. All edits together on 19 samples/corpus parts × PLA/ABS: 38/38 clean (was 13/38). Loops too detailed for the sweep keep a plain edge (cable clip: slicer elephant-foot compensation instead).
 - [ ] **T-201 P1** GEOS error in the browser: `TopologyException: found non-noded intersection between LINESTRING (6.78023 19.9752, …) and LINESTRING (6.78023 19.9752, 6.78023 19.9752)` — a zero-length segment. Find which call (slicer / checks / design) and drop degenerate segments before GEOS sees them. · owner: —
 - [ ] **T-202 P1** Section cut of the strength result looks broken (smeared colours, jagged stairs). Show clean coloured cubes in the cut. · owner: —
 - [ ] **T-203 P1** Nozzle comparison: a bigger nozzle can show a longer print time — check the time estimate (likely a bug). · owner: —
