@@ -156,6 +156,11 @@ def main():
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         # Expert level and no start guide, so every step finds its controls (the guide has its own step).
         page.add_init_script("localStorage.setItem('fdm-guided', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
+        # Long simulations ask first; the test says "Run it" unless a step wants to see the question.
+        page.add_init_script("""addEventListener('DOMContentLoaded', () => new MutationObserver(() => {
+            const d = document.getElementById('long-run');
+            if (d?.open && !window.keepAsking) d.querySelector('#long-yes').click();
+        }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] }));""")
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
@@ -353,6 +358,7 @@ def main():
         run.step("shaking: natural frequency and swing view", shaking)
 
         def fea_view():
+            page.evaluate("() => fdm.steps.go('strength')")  # the stress colours show in Will it hold?
             assert page.locator("#legend").is_visible(), "no legend"
             colours = page.evaluate("() => fdm.viewer.field.mesh.geometry.getAttribute('color').count")
             page.locator(".fea-view select").first.select_option("vm")
@@ -485,6 +491,18 @@ def main():
             assert pictures >= 3 and "Will it hold?" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
             return f"{len(html) // 1024} kB, {pictures} pictures"
         run.step("report with pictures", report_with_pictures)
+
+        def asks_before_long_runs():
+            page.evaluate("() => { window.keepAsking = true; fdm.state.runTimes = { warping: 75 }; }")
+            page.click("#run-warp")
+            page.wait_for_selector("#long-run[open]")
+            title = page.locator("#long-title").inner_text()
+            assert "1 min 15 s" in title, title
+            page.click("#long-no")
+            assert not page.locator("#long-run[open]").count(), "dialog stayed open"
+            page.evaluate("() => { window.keepAsking = false; fdm.state.runTimes = {}; }")
+            return title
+        run.step("asks before a long simulation", asks_before_long_runs)
 
         def marked_faces():
             run.act(lambda: page.click("[data-sample=mushroom]"))

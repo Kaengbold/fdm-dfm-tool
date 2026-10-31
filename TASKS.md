@@ -164,10 +164,10 @@ Bugs first (P1), then UI clean-up, then new features.
 
 ### Simulations
 
-- [ ] **T-240 P2** Before a long simulation: estimate its time for this model and ask; let the user pick how much of the PC to use (threads / grid) and show the time for that choice. · owner: —
+- [x] **T-240 P2** Before a long simulation: estimate its time for this model and ask; let the user pick how much of the PC to use (threads / grid) and show the time for that choice. · owner: Claude (`task/T-220-versions`) — buttons show "about 48 s"; above 30 s a question first with the estimate ("Run it" / "Not now"). Estimates: one strength check takes about the same time on any part (the grid has ~12.5k cubes), measured on this computer and remembered; the others are multiples measured on the samples (fine grid 3.5×, warping 2.4×, shaking 3.5×, optimiser 4.5×), and the real time once run on this part. The choice offered is the work done (optimiser with or without stronger zones): the browser engine always runs on one core, so the PC stays usable; there is no thread count to pick. Native (MCP) runs keep the half-the-cores cap.
 - [ ] **T-241 P2** Faster shaking and knock checks (coarser grid, fewer modes, reuse the strength model). · owner: —
 - [ ] **T-242 P3** Decide which extra simulations make sense as quick indicators: heat inside electronics boxes (fast), creep under a constant load, wear. Write down the yes/no with reasons, then build the yes ones. · owner: —
-- [ ] **T-243 P2** Advanced: new step "Optional simulations" holding the extra simulations and the G-code (detailed) level. · owner: —
+- [x] **T-243 P2** Advanced: new step "Optional simulations" holding the extra simulations and the G-code (detailed) level. · owner: Claude (`task/T-220-versions`) — new Advanced step "Optional simulations" (after Will it hold?): warping, shaking and knocks (uses the held face and load from Will it hold?, says so until they are set), and the detailed check from a G-code. Their results show on the part only in this step.
 
 ### New sections
 

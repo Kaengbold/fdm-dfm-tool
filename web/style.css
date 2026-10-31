@@ -372,9 +372,16 @@ summary::marker { color: var(--accent); }
 .fea-view { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .fea-view label { display: flex; gap: 6px; align-items: center; }
 .fea-view input[type=range] { flex: 1; }
-.dynamics { display: flex; flex-direction: column; gap: 9px; padding-top: 12px; border-top: 1px solid var(--line); }
-.dynamics > button { align-self: flex-start; }
+.dynamics-result { align-self: stretch; }
+
 .dynamics-result:empty { display: none; }
+.eta { font-weight: 400; color: var(--muted); }
+.eta:empty { display: none; }
+.long-run { max-width: 460px; }
+.long-run p { margin: 8px 0; }
+.long-choices { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.long-choices:empty { display: none; }
+.long-choices label { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r); cursor: pointer; font-size: 14px; }
 .dynamics-result { padding: 10px 12px; background: var(--soft); border-radius: var(--r); font-size: 14px; }
 
 /* ---------- design changes ---------- */

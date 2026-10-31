@@ -225,12 +225,6 @@
               <p id="cooling-summary"></p>
               <label class="toggle"><input id="show-temp" type="checkbox" /> Show the heat on the part (red = still soft when the next layer goes on)</label>
             </div>
-            <div class="sim-card" data-min="advanced">
-              <h3>Warping: will the corners lift?</h3>
-              <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
-              <button id="run-warp">Simulate warping</button>
-              <div id="warp-result"></div>
-            </div>
           </div>
         </section>
 
@@ -290,29 +284,47 @@
                 <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
               </div>
             </details>
-            <details class="more-block shells" id="detailed" data-min="advanced">
-              <summary>Detailed check from your sliced print <span id="gcode-summary"></span></summary>
-              <p class="hint">The most exact check. Download the 3MF in this orientation, slice it, save the G-code and load it here.
-                The check then uses the walls, infill and line directions your printer will really print.</p>
-              <div class="row">
-                <label>G-code <input id="gcode-file" type="file" accept=".gcode,.gco,.g,.3mf" /></label>
-                <label class="toggle"><input id="use-gcode" type="checkbox" disabled /> Use it for the strength check</label>
-              </div>
-            </details>
             <div class="actions">
               <button id="run-strength" class="primary" disabled>Check strength</button>
               <button id="run-optimise" disabled data-min="basic" title="Tries walls, top/bottom layers and infill, and finds the lightest print that holds your load with a safety margin">Find the lightest settings that hold</button>
             </div>
             <div id="optimise-result"></div>
             <div id="strength-result"></div>
-            <div id="dynamics" class="dynamics" data-min="advanced" hidden>
-              <h3>Extra checks <small>optional</small></h3>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="sims">
+          <h2>Optional simulations</h2>
+          <p class="lead">Extra checks that take longer. None is needed: run the ones that matter for your part.</p>
+          <div id="blk-sims">
+            <div class="sim-card">
+              <h3>Warping: will the corners lift?</h3>
+              <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
+              <button id="run-warp">Simulate warping <small class="eta" data-eta="warping"></small></button>
+              <div id="warp-result"></div>
+            </div>
+            <div id="dynamics" class="sim-card">
+              <h3>Shaking and knocks</h3>
+              <p class="hint">Uses where it is held and the load from <b>Will it hold?</b>: does it start to swing when something mounted on it shakes, and does it survive the load dropping onto it?</p>
               <label class="toggle"><input id="dyn-shake" type="checkbox" /> Shaking: something is mounted on it</label>
               <label class="field sub" id="dyn-shake-row" hidden>Weight mounted on the loaded face <span><input id="dyn-kg" type="number" value="0.5" min="0" step="0.1" /> kg</span></label>
               <label class="toggle"><input id="dyn-drop" type="checkbox" /> Knocks: the load can drop onto it</label>
               <label class="field sub" id="dyn-drop-row" hidden>Drop height <span><input id="dyn-mm" type="number" value="50" min="0" step="10" /> mm</span></label>
-              <button id="run-dynamics" disabled>Run the extra checks</button>
+              <button id="run-dynamics" disabled>Run these checks <small class="eta" data-eta="dynamics"></small></button>
+              <p id="dynamics-need" class="hint">Set where it is held and a load in <b>Will it hold?</b> first.</p>
               <p id="dynamics-result" class="dynamics-result"></p>
+            </div>
+            <div class="sim-card">
+              <h3>Detailed check from your sliced print</h3>
+              <p class="hint">The most exact strength and cooling check. Download the 3MF in this orientation, slice it, save the G-code and load it here.
+                The checks then use the walls, infill, line directions and layer times your printer will really print.</p>
+              <details class="more-block" id="detailed">
+                <summary>Load a G-code <span id="gcode-summary"></span></summary>
+                <div class="row">
+                  <label>G-code <input id="gcode-file" type="file" accept=".gcode,.gco,.g,.3mf" /></label>
+                  <label class="toggle"><input id="use-gcode" type="checkbox" disabled /> Use it for the strength check</label>
+                </div>
+              </details>
             </div>
           </div>
         </section>
@@ -425,12 +437,22 @@
       </footer>
     </section>
 
+    <dialog id="long-run" class="guide long-run">
+      <h2 id="long-title">This takes a while</h2>
+      <p id="long-text"></p>
+      <div id="long-choices" class="long-choices"></div>
+      <p class="hint">It runs in the background on one processor core, so your computer stays usable: keep working or watch a video meanwhile. Cancel stops it any time.</p>
+      <div class="foot-buttons">
+        <button type="button" id="long-no" class="ghost">Not now</button>
+        <button type="button" id="long-yes" class="primary">Run it</button>
+      </div>
+    </dialog>
     <dialog id="guide" class="guide">
       <h2>How much do you want to see?</h2>
       <p class="hint">You can switch any time at the top.</p>
       <button data-guide="settings"><b>Simple</b><span>Pick your printer and material. Get the problems, settings and a file to print.</span></button>
       <button data-guide="strength"><b>Basic</b><span>Every choice, step by step: orientation, problems, strength, settings.</span></button>
-      <button data-guide="steps"><b>Advanced</b><span>Also detailed strength views, shaking and knocks, design changes and the G-code check.</span></button>
+      <button data-guide="steps"><b>Advanced</b><span>Also detailed strength views, optional simulations (warping, shaking and knocks, your G-code) and design changes.</span></button>
       <button data-guide="expert"><b>Expert</b><span>Every tool on one long page.</span></button>
     </dialog>
     <script type="module" src="app.js"></script>
