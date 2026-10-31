@@ -7,6 +7,7 @@ import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
 import { Steps } from "./steps.js";
+import { reportHtml } from "./report.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -505,6 +506,11 @@ function renderCheck() {
 
 /** One line on top of Simple's result: can it fail, and what the settings already handle. */
 function renderVerdict() {
+  const v = verdict();
+  $("verdict").replaceChildren(el("div", { className: `summary-box ${v.kind}` }, el("strong", { textContent: v.head }), el("span", { textContent: v.text })));
+}
+
+function verdict() {
   const { findings } = state.check;
   const rules = (pred) => new Set(findings.filter(pred).map((f) => f.rule)).size;
   const fails = rules((f) => f.impact === "fails" && f.severity !== "info");
@@ -514,10 +520,7 @@ function renderVerdict() {
     : others ? ["ok", `Prints, with ${others === 1 ? "one thing" : `${others} things`} to know`]
     : ["ok", "Prints as designed"];
   const p = profile();
-  $("verdict").replaceChildren(el("div", { className: `summary-box ${kind}` },
-    el("strong", { textContent: head }),
-    el("span", { textContent: `${state.active === 0 ? "Turned the best way" : `Turned as you picked: ${activeOption()?.label}`}. ${settings} slicer settings for ${state.presets.materials[p.material]?.name ?? p.material} on your ${state.presets.printers[p.printer]?.name ?? p.printer}.` }),
-  ));
+  return { kind, head, text: `${state.active === 0 ? "Turned the best way" : `Turned as you picked: ${activeOption()?.label}`}. ${settings} slicer settings for ${state.presets.materials[p.material]?.name ?? p.material} on your ${state.presets.printers[p.printer]?.name ?? p.printer}.` };
 }
 $("show-temp").onchange = () => {
   if ($("show-temp").checked) state.showHeat = false;
@@ -583,7 +586,10 @@ const viewStep = () => steps.current;
 
 /** Does the 3D view show the things of ``block`` (strength, problems, design) now? Blocks move
  * between steps per level (Simple shows the load under "What you have"), so ask the page. */
+let pictureOf = null; // while the report takes pictures: draw only this block's things
+
 function shows(block) {
+  if (pictureOf) return block === pictureOf;
   const at = viewStep();
   return at == null || $(`blk-${block}`)?.closest(".pane")?.dataset.pane === at;
 }
@@ -1972,6 +1978,72 @@ $("dl-3mf").onclick = async () => {
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
   });
 };
+
+// ---------- the report for people: one HTML file with pictures ----------
+/** Take a picture with only ``block``'s things drawn (problems, strength, design), then put the view back. */
+function pictureWith(block, fn) {
+  pictureOf = block;
+  try {
+    recolor();
+    return fn();
+  } finally {
+    pictureOf = null;
+  }
+}
+
+$("dl-report").onclick = () =>
+  busy("Making the report with pictures…", async () => {
+    const p = profile();
+    const o = activeOption();
+    const { findings, stats } = state.check;
+    const keep = { showHeat: state.showHeat, showWarp: state.showWarp, showSwing: state.showSwing };
+    const report = {
+      title: `Print check: ${state.name}`,
+      date: new Date().toLocaleDateString(),
+      setup: `${state.presets.printers[p.printer]?.name ?? p.printer} · ${state.presets.materials[p.material]?.name ?? p.material} · ${p.nozzle} mm nozzle`,
+      verdict: verdict(),
+      orientation: { label: state.active === 0 ? "Best orientation" : o.label, reasons: o.reasons },
+      stats: `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament (rough estimate).`,
+      settings: effectiveSettings().map((s) => ({ label: s.label, value: settingText(s.key, s.value), reason: s.reason })),
+    };
+    try {
+      Object.assign(state, { showWarp: false, showSwing: false });
+      report.overview = pictureWith("problems", () => viewer.snapshot());
+      // One card per kind of problem, with a picture of the first place it happens.
+      const byRule = new Map();
+      findings.forEach((f, i) => byRule.set(f.rule, [...(byRule.get(f.rule) ?? []), i]));
+      report.problems = [...byRule.values()].map((idx) => {
+        const f = findings[idx[0]];
+        const picture = f.bbox ? pictureWith("problems", () => (viewer.showFindings(findings, idx[0], false), viewer.snapshot(f.bbox))) : null;
+        return { title: f.title, severity: SEVERITY_LABEL[f.severity], picture, details: idx.map((i) => findings[i].detail), why: f.why,
+          fixes: f.fixes.map((fx) => ({ kind: DOMAIN_LABEL[fx.domain], text: fx.text })) };
+      });
+      const s = state.strength;
+      if (s) {
+        state.showHeat = true;
+        report.strength = { kind: s.verdict === "fine" ? "ok" : s.verdict === "borderline" ? "warn" : "bad",
+          head: `${s.verdict[0].toUpperCase() + s.verdict.slice(1)}: safety ×${s.safety_factor.toFixed(1)}`,
+          lines: [s.explanation ?? MODE_TEXT[s.mode] ?? "", `${s.material}, ${s.walls} walls, ${Math.round(s.infill * 100)} % infill · bends about ${s.max_displacement_mm.toFixed(1)} mm`,
+            ...state.loads.map(loadText)],
+          picture: pictureWith("strength", () => viewer.snapshot()),
+          note: `Colours: blue = little stress, red = close to breaking (${FIELD[view.field].title}). Rough estimate: aim for ×2 or more.` };
+      }
+      const w = state.warp;
+      if (w) {
+        state.showWarp = true;
+        report.warp = { kind: w.verdict === "fine" ? "ok" : w.verdict === "might lift" ? "warn" : "bad",
+          head: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift",
+          lines: [w.explanation], picture: pictureWith("problems", () => viewer.snapshot()), note: "Shape exaggerated; red dots lift first." };
+      }
+      const chosen = state.edits.filter((e) => e.selected);
+      if (chosen.length) report.design = { items: chosen, picture: pictureWith("design", () => viewer.snapshot()) };
+    } finally {
+      Object.assign(state, keep);
+      recolor();
+    }
+    download(new TextEncoder().encode(reportHtml(report)), `${baseName()}_report.html`, "text/html");
+    setStatus("Report downloaded: open it in your browser, or print it to PDF.");
+  });
 
 $("dl-stl").onclick = () => download(stlBytes(state.placed), `${baseName()}_oriented.stl`, "model/stl");
 $("dl-stl-model").onclick = () => download(stlBytes(state.triangles), `${baseName()}.stl`, "model/stl");

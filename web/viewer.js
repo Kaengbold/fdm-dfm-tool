@@ -363,8 +363,9 @@ export class Viewer {
     this.framed = true;
   }
 
-  /** Boxes for findings; when a finding is selected, it gets a filled highlight, pin, and camera moves. */
-  showFindings(findings, selected = -1) {
+  /** Boxes for findings; when a finding is selected, it gets a filled highlight, pin, and camera moves
+   * (``focus: false``: stays, for pictures that place the camera themselves). */
+  showFindings(findings, selected = -1, focus = true) {
     this.markers.clear();
     findings.forEach((f, i) => {
       if (!f.bbox) return;
@@ -404,9 +405,43 @@ export class Viewer {
         this.markers.add(pin);
       }
     });
-    if (selected >= 0 && findings[selected]?.bbox) {
+    if (focus && selected >= 0 && findings[selected]?.bbox) {
       this.focusFinding(findings[selected]);
     }
+  }
+
+  /** A picture of the view as a JPEG data URL, ``width`` px wide: the whole part, or close to ``bbox``
+   * (print frame) seen from the current direction. The camera goes back to where the user had it. */
+  snapshot(bbox = null, width = 720) {
+    const pos = this.camera.position.clone();
+    const target = this.controls.target.clone();
+    const dir = pos.clone().sub(target).normalize();
+    if (dir.lengthSq() < 0.01) dir.set(1.2, -1.6, 1.1).normalize();
+    let center, dist;
+    if (bbox) {
+      const [[x0, y0, z0], [x1, y1, z1]] = bbox;
+      center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      dist = Math.max(Math.hypot(x1 - x0, y1 - y0, z1 - z0) * 2.4, 45);
+    } else {
+      const geometry = (this.field?.mesh ?? this.part).geometry;
+      if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+      const sphere = geometry.boundingSphere;
+      center = sphere.center.clone();
+      dist = sphere.radius * 3.2;
+    }
+    this.controls.target.copy(center);
+    this.camera.position.copy(center).addScaledVector(dir, dist);
+    this.camera.lookAt(center);
+    this.renderer.render(this.scene, this.camera);
+    const src = this.renderer.domElement;
+    const out = document.createElement("canvas");
+    out.width = width;
+    out.height = Math.round((width * src.height) / src.width);
+    out.getContext("2d").drawImage(src, 0, 0, out.width, out.height);
+    this.camera.position.copy(pos);
+    this.controls.target.copy(target);
+    this.controls.update();
+    return out.toDataURL("image/jpeg", 0.85);
   }
 
   /** Move the camera to ``f.bbox`` (print frame). ``from``: look from this direction (default:

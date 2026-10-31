@@ -455,6 +455,17 @@ def main():
             return text.splitlines()[0] + " | " + text.splitlines()[1][:120]
         run.step("warping simulation", warping)
 
+        def report_with_pictures():
+            with page.expect_download(timeout=180_000) as dl:
+                run.act(lambda: page.click("#dl-report"))
+            out = OUT / "report.html"
+            dl.value.save_as(out)
+            html = out.read_text(encoding="utf-8")
+            pictures = html.count('<img src="data:image/jpeg')
+            assert pictures >= 3 and "Will it hold?" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
+            return f"{len(html) // 1024} kB, {pictures} pictures"
+        run.step("report with pictures", report_with_pictures)
+
         def marked_faces():
             run.act(lambda: page.click("[data-sample=mushroom]"))
             before = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")
