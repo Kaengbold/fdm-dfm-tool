@@ -104,7 +104,7 @@ def test_api_orientations_payload():
     "name, expected_up",
     [
         ("enclosure", [[0, 0, 1]]),  # open side up
-        ("phone_stand", [[0, 1, 0], [0, -1, 0]]),  # lying on the big extruded side
+        ("phone_stand", [[0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]),  # on its base, or the profile flat (both print without supports)
         ("cable_clip", [[0, 0, 1], [0, 0, -1]]),  # flat on its side
         ("mushroom", [[0, 0, -1]]),
         ("hook", [[1, 0, 0], [-1, 0, 0]]),
@@ -177,3 +177,37 @@ def test_pulled_mushroom_prints_on_its_side_for_strength():
     weaker = [o for o in opts if abs(o["up"][2]) > 0.9]
     assert weaker and any("holds" in r and "more" in r for r in weaker[0]["reasons"])
     assert any(abs(o["up"][2]) < 0.1 for o in opts)  # the strongest direction is always offered
+
+
+def test_first_layer_spots_and_strips():
+    from shapely.geometry import box
+
+    from fdmcore.profile import Profile
+    from fdmcore.refine import first_layer_stats
+
+    p = Profile.from_dict({"material": "pla"})
+    plate_and_tips = box(0, 0, 40, 40).union(box(50, 0, 53, 3)).union(box(50, 10, 52, 12))
+    assert first_layer_stats(plate_and_tips, p) == {"small_spots": 2, "thin_share": pytest.approx(0.0, abs=0.01)}
+    ring = box(0, 0, 40, 40).difference(box(1, 1, 39, 39))  # a thin-walled box standing open side down
+    assert first_layer_stats(ring, p)["thin_share"] > 0.9
+
+
+def test_standing_on_small_feet_is_explained():
+    from shapely.geometry import box
+
+    from fdmcore.additions import extrude
+
+    legs = [extrude(box(x, y, x + 3, y + 3), 0, 10) for x in (0, 37) for y in (0, 37)]
+    api.load(to_binary_stl(Mesh(np.concatenate([extrude(box(0, 0, 40, 40), 10, 13), *legs]))), "table")
+    r = api.orientations({"material": "pla"})
+    assert any("4 small spots on the bed" in t for t in r["as_loaded"]["reasons"])
+    assert r["orientations"][0]["up"] == pytest.approx([0, 0, -1])  # top down: one solid patch on the bed
+
+
+def test_big_footprint_only_counts_for_warping_materials():
+    """L-bracket: ABS wants its big base on the bed; PLA doesn't need the footprint and prints it on its
+    side (lower, no supports either way)."""
+    api.load(sample("l_bracket"), "l_bracket")
+    pick = lambda material: api.orientations({"printer": "bambu_p1s", "material": material})["orientations"][0]["up"]
+    assert pick("abs") == pytest.approx([0, 0, 1])
+    assert abs(pick("pla")[1]) == pytest.approx(1)
