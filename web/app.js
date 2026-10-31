@@ -501,6 +501,7 @@ function renderCheck() {
   );
   renderSettings();
   renderVerdict();
+  renderCooling();
   recolor();
 }
 
@@ -522,6 +523,25 @@ function verdict() {
   const p = profile();
   return { kind, head, text: `${state.active === 0 ? "Turned the best way" : `Turned as you picked: ${activeOption()?.label}`}. ${settings} slicer settings for ${state.presets.materials[p.material]?.name ?? p.material} on your ${state.presets.printers[p.printer]?.name ?? p.printer}.` };
 }
+const ABOVE_BED_MM = 3; // a little above thresholds.yaml cooling.above_bed_mm (2 mm): the bed warmth fades out
+
+/** The cooling check in one sentence: the hottest spot against the material's softening point. */
+function renderCooling() {
+  const h = state.check.stats.layer_heat;
+  const mat = state.presets.materials[profile().material];
+  if (!h?.temp_c.length) return $("cooling-summary").replaceChildren();
+  // Like the check: the first few mm are kept warm by the bed on purpose, not by the print.
+  let at = -1;
+  h.temp_c.forEach((t, i) => h.z[i] > ABOVE_BED_MM && (at < 0 || t > h.temp_c[at]) && (at = i));
+  if (at < 0) return $("cooling-summary").replaceChildren();
+  const finding = state.check.findings.find((f) => f.rule === "small_layers_cooling");
+  const fan = mat?.fan_pct != null ? ` With the part fan at ${mat.fan_pct} %${state.check.stats.heat_from_gcode ? ", layer times from your G-code" : ""}.` : "";
+  $("cooling-summary").replaceChildren(finding
+    ? el("span", {}, el("b", { textContent: "Some layers stay too warm. " }), finding.detail, ".")
+    : el("span", {}, el("b", { textContent: "Every layer cools in time. " }),
+      `Warmest about ${Math.round(h.temp_c[at])} °C at ${h.z[at].toFixed(0)} mm (${mat?.name ?? "it"} softens from about ${Math.round(h.softening_c)} °C; a bit above is normal right under the nozzle).${fan}`));
+}
+
 $("show-temp").onchange = () => {
   if ($("show-temp").checked) state.showHeat = false;
   recolor();
@@ -1180,9 +1200,17 @@ function renderStrength() {
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
     el("button", { className: "primary", textContent: "How can I make it stronger?", onclick: showStrengthOptions,
       title: "Shows every option: slicer settings, orientation, design changes and materials, each with what it costs" }),
-    el("button", { textContent: "Re-rank orientations including strength", onclick: () => findOrientations(true) }),
+    el("button", { textContent: "Find the best orientation including strength", onclick: rankWithStrength }),
     el("ul", { id: "strength-options", className: "options" }),
   );
+}
+
+/** Re-rank with the loads, then show the strength of the new best orientation (not the old result). */
+async function rankWithStrength() {
+  const before = activeOption()?.label;
+  await findOrientations(true);
+  await runStrength();
+  setStatus(`${activeOption().label === before ? "Still the best" : "New best orientation"} with your load: safety ×${state.strength.safety_factor.toFixed(1)}.`);
 }
 
 async function showStrengthOptions() {
@@ -1217,7 +1245,7 @@ async function runOptimise() {
       Object.assign(state.overrides, o.settings);
       renderSettings();
       if (o.orientation === "strongest") await applyOption({ up: o.up });
-      else runStrength();
+      else await runStrength();
     } });
     const z = o.zoned;
     const zoned = z?.met && z.zones?.length
@@ -1228,7 +1256,7 @@ async function runOptimise() {
         el("button", { textContent: "Use the zones", onclick: async () => {
           Object.assign(state.overrides, z.settings);
           renderSettings();
-          if (o.orientation === "strongest") await applyOption({ up: z.up }); // clears zones: set them after
+          if (o.orientation === "strongest") await applyOption({ up: z.up }, false); // clears zones: set them after
           setZones(z.zones);
           runStrength();
         } }))
@@ -1281,7 +1309,8 @@ function setZones(zones) {
   $("zones-for").hidden = !zones.length;
 }
 
-async function applyOption(o) {
+/** Apply a suggestion; a new orientation is checked for strength again (``recheck: false``: the caller does). */
+async function applyOption(o, recheck = true) {
   if (o.settings) {
     Object.assign(state.overrides, o.settings);
     renderSettings();
@@ -1292,6 +1321,7 @@ async function applyOption(o) {
     state.options.unshift(option);
     renderOptions();
     await selectOption(0);
+    if (recheck && readyForStrength()) await runStrength();
   } else if (o.material) {
     $("material").value = o.material;
     $("material").dispatchEvent(new Event("change"));

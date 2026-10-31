@@ -437,6 +437,13 @@ def main():
             return text.splitlines()[1][:160] + note
         run.step("find the lightest settings that hold", optimise)
 
+        def rank_with_strength():
+            run.act(lambda: page.get_by_role("button", name="Find the best orientation including strength").click(), 600_000)
+            text = page.locator("#strength-result").inner_text()
+            assert "safety" in text.lower(), "no strength result for the new best orientation"
+            return page.locator("#status").inner_text()
+        run.step("best orientation with strength shows its result", rank_with_strength)
+
         def heat_map():
             n = page.evaluate("() => [fdm.state.check.face_temp.length, fdm.viewer.part.geometry.getAttribute('position').count / 3]")
             assert n[0] == n[1], n

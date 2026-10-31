@@ -213,9 +213,18 @@
               <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
               <table id="nozzle-table"></table>
             </details>
-            <div class="extra" data-min="advanced">
-              <label class="toggle" title="Rough estimate of heat build-up: small pins and tips get the next layer before they have cooled"><input id="show-temp" type="checkbox" /> Show heat while printing (red = still soft when the next layer goes on)</label>
-              <button id="run-warp" title="Simulates the print layer by layer: upper layers shrink onto the warm bottom and pull the corners off the bed">Simulate warping</button>
+            <div class="sim-card" data-min="advanced">
+              <h3>Cooling: does each layer cool in time?</h3>
+              <p class="hint">Finds spots that can't lose their heat fast enough: a thin tip or pin, or a small area printed on top of a
+                big block of hot plastic. If the layer below is still soft when the next one goes on, it droops, blobs or bends.
+                Counts the part fan and the slicer slowing down small layers.</p>
+              <p id="cooling-summary"></p>
+              <label class="toggle"><input id="show-temp" type="checkbox" /> Show the heat on the part (red = still soft when the next layer goes on)</label>
+            </div>
+            <div class="sim-card" data-min="advanced">
+              <h3>Warping: will the corners lift?</h3>
+              <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
+              <button id="run-warp">Simulate warping</button>
               <div id="warp-result"></div>
             </div>
           </div>
