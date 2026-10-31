@@ -471,6 +471,9 @@ def main():
             item.locator("input").nth(1).press("Tab")  # change fires when the field is left
             assert page.evaluate("() => fdm.state.zones.length === 1 && fdm.state.zones[0].infill === 0.8"), "zone infill not set"
             assert page.evaluate("() => fdm.viewer.zones?.children.length ?? 0") >= 2, "zone not shown"
+            run.act(lambda: page.locator("#zone-list li").first.locator("select.shape-pick").select_option("cylinder"))
+            page.wait_for_function("() => fdm.state.zones[0]?.shape === 'cylinder' && fdm.state.zones[0].infill === 0.8")
+            assert page.evaluate("() => fdm.viewer.zones?.children.length ?? 0") >= 3, "round zone not drawn"
             with page.expect_download() as dl:
                 run.act(lambda: page.click("#dl-3mf"), 300_000)
             import zipfile
@@ -479,11 +482,13 @@ def main():
             assert "modifier_part" in conf and 'value="80%"' in conf, "picked zone not in the 3MF"
             label = item.locator("strong").inner_text()
             page.click("#zone-card h3")  # Ctrl+Z isn't undo while typing in a field
+            page.keyboard.press("Control+z")  # back to a box
+            page.wait_for_function("() => fdm.state.zones[0]?.shape !== 'cylinder'")
             page.keyboard.press("Control+z")  # back to the default infill
             page.wait_for_function("() => fdm.state.zones[0]?.infill !== 0.8")
             page.locator("#zone-list li").first.get_by_role("button", name="Remove").click()
             assert page.evaluate("() => fdm.state.zones.length") == 0
-            return f"{label}; 80 % infill in the 3MF, undo and remove work"
+            return f"{label}; cylinder, 80 % infill in the 3MF, undo and remove work"
         run.step("stronger area picked on the part", picked_zone)
 
         def advanced_boxes():
@@ -507,7 +512,7 @@ def main():
 
             conf = zipfile.ZipFile(dl.value.path()).read("Metadata/model_settings.config").decode()
             assert "support_enforcer" in conf and "support_blocker" in conf, "boxes not in the 3MF"
-            page.click("#vol-card")  # Ctrl+Z isn't undo while in a field
+            page.click("#vol-kind-hint")  # Ctrl+Z isn't undo while in a field
             page.keyboard.press("Control+z")
             page.wait_for_function("() => fdm.state.volumes.length === 1")
             page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()

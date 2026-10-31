@@ -58,13 +58,30 @@ class Zone:
     """A box printed with more walls and infill than the rest (never fewer): a slicer modifier volume.
     Corners in the build frame (``rotation_to_z(up) @ part``), so it stands upright on the bed.
     ``void``: a hidden gap instead (a negative volume inside the part): empty, and the slicer prints
-    walls all round it, so the plastic next to it is solid."""
+    walls all round it, so the plastic next to it is solid. ``shape``: "box", "cylinder" (upright, in
+    the box) or "ball" (in the box): round zones fit round things like a boss or a hole's wall."""
 
     lo: tuple[float, float, float]
     hi: tuple[float, float, float]
     walls: int
     infill: float
     void: bool = False
+    shape: str = "box"
+
+    def gap(self, q: np.ndarray) -> np.ndarray:
+        """How far (mm) each build-frame point is outside the zone (0 inside). Round shapes use the
+        distance scaled by the shortest half-size: exact for circles and spheres, close for ellipses."""
+        lo, hi = np.asarray(self.lo), np.asarray(self.hi)
+        if self.shape == "box":
+            return np.linalg.norm(np.maximum(np.maximum(lo - q, q - hi), 0.0), axis=1)
+        c, r = (lo + hi) / 2, np.maximum((hi - lo) / 2, 1e-9)
+        if self.shape == "ball":
+            return np.maximum(np.linalg.norm((q - c) / r, axis=1) - 1, 0) * r.min()
+        side = np.maximum(np.linalg.norm((q[:, :2] - c[:2]) / r[:2], axis=1) - 1, 0) * r[:2].min()
+        return np.hypot(side, np.maximum(np.maximum(lo[2] - q[:, 2], q[:, 2] - hi[2]), 0.0))
+
+
+ZONE_SHAPES = ("box", "cylinder", "ball")
 
 
 @dataclass(frozen=True)
@@ -394,14 +411,14 @@ def _zoned(model: Model, up, shells: Shells, profile: Profile) -> tuple[np.ndarr
         for z in shells.zones:
             if z.void:
                 continue
-            inside = np.all((q >= z.lo) & (q <= z.hi), axis=1)
+            inside = z.gap(q) == 0
             out[inside] = solid(max(z.walls, shells.walls))[inside]  # a zone only ever adds strength
             infill[inside] = max(z.infill, shells.infill)
         wall = shells.walls * profile.line_width
         for z in shells.zones:  # gaps last: their walls are printed whatever the zone says
             if not z.void:
                 continue
-            gap = np.linalg.norm(np.maximum(np.maximum(np.asarray(z.lo) - q, q - np.asarray(z.hi)), 0.0), axis=1)
+            gap = z.gap(q)
             ring = gap <= wall + model.grid.h / 2  # the cube reaches into the gap's walls
             out[ring] = 1.0
             out[gap == 0] = infill[gap == 0] = 0.0
