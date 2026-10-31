@@ -46,6 +46,12 @@ for (const file of files) {
   t = performance.now();
   const lost = call("compare_nozzles", { up: orientations[0].up, profile: {} }).map((r) => r.lost_mm3);
   const nozzles = secs(t);
+  t = performance.now();
+  const tri = new Float32Array(info.triangles.buffer ?? info.triangles, info.triangles.byteOffset ?? 0, 9);
+  const c = [0, 1, 2].map((i) => (tri[i] + tri[i + 3] + tri[i + 6]) / 3); // a spot on the surface
+  let gap;
+  try { gap = call("volume_at", { up: orientations[0].up, kind: "void", point: c, profile: {} }).notes.length; } catch (e) { gap = String(e.message).trim().split(String.fromCharCode(10)).at(-1); }
+  const boxes = secs(t);
   console.log(`ok ${name}: ${info.faces} faces, ${orientations.length} orientations, findings ${counts.join("/")}, ${edits.length} edits, ` +
-    `lost detail ${lost.join("/")} mm³ | load ${load} s, orient ${orient} s, check ${check} s each, design ${design} s, nozzles ${nozzles} s`);
+    `lost detail ${lost.join("/")} mm³, gap notes ${gap} | load ${load} s, orient ${orient} s, check ${check} s each, design ${design} s, nozzles ${nozzles} s, box ${boxes} s`);
 }

@@ -108,6 +108,7 @@ const state = {
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
+  volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
@@ -350,6 +351,7 @@ async function selectOption(i) {
   state.showSwing = false;
   renderGcode();
   setZones([]); // zones belong to one orientation
+  setVolumes([]);
   state.warp = null;
   state.showWarp = false;
   $("warp-result").replaceChildren();
@@ -643,7 +645,7 @@ function recolor() {
   if (!option) return;
   viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : []);
-  viewer.showZones(zonesShown() ? state.zones.map((z) => z.corners_print) : []);
+  drawBoxes();
   showMarkers();
   if (strengthView()) return;
   if (shows("problems") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
@@ -710,6 +712,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   if (!hit) return;
   await ensureRegions();
   if (state.zonePick) return addZone(hit);
+  if (state.volPick) return pickVolume(hit);
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
@@ -1040,7 +1043,7 @@ async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
   return busy(fine ? `Simulating again with a finer grid (about ${fmtSeconds(estimate("fine"))})…` : "Simulating the load…", async () => {
-    const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: state.zones }));
+    const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: printZones() }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
       r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
@@ -1072,7 +1075,7 @@ $("run-dynamics").onclick = async () => {
   if (!(await askLong("Shaking and knocks", "dynamics"))) return;
   return busy("Working out how it swings and how hard a drop hits…", async () => {
     const r = await timed("dynamics", () => call("dynamics", {
-      up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), zones: state.zones,
+      up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), zones: printZones(),
       shake: $("dyn-shake").checked,
       mounted_kg: $("dyn-shake").checked ? Number($("dyn-kg").value) || 0 : 0,
       drop_mm: $("dyn-drop").checked ? Number($("dyn-mm").value) || 0 : 0,
@@ -1440,12 +1443,25 @@ for (const id of ["use-temp", "constant-load"]) {
 /** Strengthening zones (slicer modifier volumes) from the optimiser; shown as boxes and put in the 3MF. */
 function setZones(zones) {
   state.zones = zones;
-  viewer.showZones(zonesShown() ? zones.map((z) => z.corners_print) : []);
-  $("zones-for").hidden = !zones.length;
+  drawBoxes();
+  $("zones-for").hidden = !printZones().some((z) => z.kind !== "keep_clear");
   renderZones();
 }
 
 const zonesShown = () => shows("strength") || shows("settings") || shows("download");
+const volumesShown = () => zonesShown() || shows("extra");
+const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", keep_clear: "--clean" };
+
+/** Zones (orange) and the advanced design boxes (their own colours) in the 3D view. */
+function drawBoxes() {
+  viewer.showZones([
+    ...(zonesShown() ? state.zones.map((z) => z.corners_print) : []),
+    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind] })) : []),
+  ]);
+}
+
+/** What the slicer and the strength check get: zones plus the advanced design boxes. */
+const printZones = () => [...state.zones, ...state.volumes.map(({ kind, lo, hi }) => ({ kind, lo, hi, walls: 0, infill: 0 }))];
 
 // ---------- stronger in one area (zones the user picks) ----------
 const BIG_FACE_MM2 = 400; // a face this big gets a box around the clicked spot, not the whole face
@@ -1501,6 +1517,85 @@ function renderZones() {
         remember("removing an area");
         setZones(state.zones.filter((_, k) => k !== i));
       } }));
+  }));
+}
+
+// ---------- advanced design changes (boxes placed on the part) ----------
+const VOLUME_HINT = {
+  support: "The slicer prints supports inside the box, even with its automatic supports off. For an overhang it misses or a spot you want held.",
+  blocker: "No supports inside the box: keeps marks off a surface that should stay clean. Overhangs in it print in the air.",
+  void: "A thin hidden gap inside the part. The slicer prints walls all round it, so the plastic around it comes out solid: a stronger spot without more infill everywhere. Click a spot for a pin hole up through the part, or two spots for a slot.",
+  keep_clear: "Space that has to stay empty: a screw head, a cable, a part that moves. Only for you (not in the 3MF): it tells you if the part reaches into it.",
+};
+const VOLUME_NAME = { support: "Support here", blocker: "No support here", void: "Hidden gap", keep_clear: "Keep clear" };
+
+$("vol-kind").onchange = () => ($("vol-kind-hint").textContent = VOLUME_HINT[$("vol-kind").value]);
+$("vol-kind").onchange();
+for (const [id, clicks] of [["vol-pick", 1], ["vol-pick2", 2]]) {
+  $(id).onclick = async () => {
+    if (!activeOption()) return;
+    await ensureRegions();
+    state.volPick = { kind: $("vol-kind").value, clicks, points: [] };
+    $("vol-hint").hidden = false;
+    $("vol-hint").textContent = clicks === 2 ? "Click the first spot…" : "Click a face or spot on the part…";
+  };
+}
+
+/** One click: a box around the face (small faces) or the spot; two clicks: a box between the spots. */
+async function pickVolume(hit) {
+  const pick = state.volPick;
+  pick.points.push(hit.point);
+  if (pick.points.length < pick.clicks) {
+    $("vol-hint").textContent = "Now click the second spot…";
+    return;
+  }
+  state.volPick = null;
+  $("vol-hint").hidden = true;
+  const region = state.faceRegions[hit.face];
+  const info = state.regionInfo[region];
+  let from, what;
+  if (pick.clicks === 2) [from, what] = [{ point: pick.points[0], point2: pick.points[1] }, "between two spots"];
+  else if (pick.kind === "void") [from, what] = [{ point: hit.point }, "pin hole at the spot"];
+  else if (info.area_mm2 > BIG_FACE_MM2) [from, what] = [{ point: hit.point }, "the clicked spot"];
+  else [from, what] = [{ region }, info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`];
+  try {
+    const v = await busy("Placing the box…", () => call("volume_at", { up: activeOption().up, kind: pick.kind, profile: profile(), ...from }));
+    remember("an advanced design change");
+    setVolumes([...state.volumes, { ...v, from, what, margin: v.kind === "void" && !from.region && !from.point2 ? 0.3 : 3 }]);
+    setStatus(`${VOLUME_NAME[v.kind]} added. ${v.notes[0] ?? ""}`);
+  } catch (err) {
+    setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
+  }
+}
+
+async function resizeVolume(i, margin) {
+  const old = state.volumes[i];
+  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin }));
+  remember("the box's size");
+  setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, margin } : q)));
+}
+
+/** Advanced design boxes: shown in the 3D view, listed with their notes, sent with the zones. */
+function setVolumes(volumes) {
+  state.volumes = volumes;
+  drawBoxes();
+  $("zones-for").hidden = !printZones().some((z) => z.kind !== "keep_clear");
+  $("vol-list").replaceChildren(...volumes.map((v, i) => {
+    const pin = v.kind === "void" && !v.from.region && !v.from.point2;
+    const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
+    const size = pin
+      ? el("label", {}, "Width ", num(+(v.margin * 2).toFixed(1), 0.2, 4, 0.1, (e) => resizeVolume(i, Math.max(0.1, Number(e.target.value) / 2 || 0.3))), " mm")
+      : el("label", {}, "Reaches ", num(v.margin, 0, 30, 1, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
+    const li = el("li", {},
+      el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
+      el("div", { className: "row" }, size),
+      ...v.notes.map((n) => el("p", { className: "hint", textContent: n })),
+      el("button", { className: "link", textContent: "Remove", onclick: () => {
+        remember("removing a box");
+        setVolumes(state.volumes.filter((_, k) => k !== i));
+      } }));
+    li.dataset.kind = v.kind;
+    return li;
   }));
 }
 
@@ -1725,7 +1820,7 @@ const undoStack = [];
 /** Call before a change: Undo (and Ctrl+Z) puts the loads, marks, settings and model version back. */
 function remember(label) {
   undoStack.push({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks), overrides: { ...state.overrides },
-    zones: structuredClone(state.zones) });
+    zones: structuredClone(state.zones), volumes: structuredClone(state.volumes) });
   if (undoStack.length > 50) undoStack.shift();
   renderUndo();
 }
@@ -1748,6 +1843,7 @@ async function undo() {
   renderMarks();
   renderSettings();
   setZones(u.zones ?? []);
+  setVolumes(u.volumes ?? []);
   recolor();
   if (marksChanged) await findOrientations(Boolean(state.strength));
   setStatus(`Undone: ${u.label}.`);
@@ -2468,7 +2564,7 @@ function download(bytes, filename, type) {
 $("dl-3mf").onclick = async () => {
   await busy("Exporting 3MF for OrcaSlicer / Bambu Studio…", async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: state.zones, slicer: $("dl-slicer").value });
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
   });

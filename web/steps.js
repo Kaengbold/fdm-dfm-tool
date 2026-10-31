@@ -4,10 +4,10 @@
 
 export const STEP_NAMES = {
   part: "Your part", have: "What you have", orient: "On the bed", problems: "Problems", strength: "Will it hold?",
-  sims: "Optional simulations", fits: "Tolerances & tuning", design: "Design changes", settings: "Slicer settings", download: "Download", result: "Result",
+  sims: "Optional simulations", fits: "Tolerances & tuning", design: "Design changes", extra: "Advanced design changes", settings: "Slicer settings", download: "Download", result: "Result",
 };
 
-const ALL = ["part", "have", "orient", "problems", "strength", "sims", "fits", "design", "settings", "download"];
+const ALL = ["part", "have", "orient", "problems", "strength", "sims", "fits", "design", "extra", "settings", "download"];
 export const LEVEL_STEPS = {
   simple: ["part", "have", "result"],
   basic: ["part", "have", "orient", "problems", "strength", "settings", "download"],
@@ -27,6 +27,7 @@ const AFFECTS = {
   have: ["orient", "problems", "strength", "settings", "result"],
   orient: ["problems", "strength", "settings"],
   design: ["problems", "strength", "settings"],
+  extra: ["strength", "download"],
 };
 
 const CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';

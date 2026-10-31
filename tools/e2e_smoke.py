@@ -486,6 +486,35 @@ def main():
             return f"{label}; 80 % infill in the 3MF, undo and remove work"
         run.step("stronger area picked on the part", picked_zone)
 
+        def advanced_boxes():
+            page.evaluate("() => fdm.steps.go('extra')")
+            spot = (
+                "() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f += Math.max(1, Math.floor(n / 50))) { const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); if (el && el.tagName === 'CANVAS' && v.pick({clientX: x, clientY: y}) >= 0) return [x, y]; } return [0, 0]; }"
+            )
+            x, y = page.evaluate(spot)
+            for kind in ("support", "blocker"):
+                page.select_option("#vol-kind", kind)
+                page.click("#vol-pick")
+                run.act(lambda: page.mouse.click(x, y))
+            assert page.evaluate("() => fdm.state.volumes.map((v) => v.kind).join()") == "support,blocker", "boxes not placed"
+            assert page.locator("#vol-list li .hint").count() >= 2, "no notes on the boxes"
+            assert page.evaluate("() => fdm.viewer.zones?.children.length ?? 0") >= 4, "boxes not shown"
+            with page.expect_download() as dl:
+                run.act(lambda: page.click("#dl-3mf"), 300_000)
+            import zipfile
+
+            conf = zipfile.ZipFile(dl.value.path()).read("Metadata/model_settings.config").decode()
+            assert "support_enforcer" in conf and "support_blocker" in conf, "boxes not in the 3MF"
+            page.click("#vol-card")  # Ctrl+Z isn't undo while in a field
+            page.keyboard.press("Control+z")
+            page.wait_for_function("() => fdm.state.volumes.length === 1")
+            page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
+            assert page.evaluate("() => fdm.state.volumes.length") == 0
+            return "support and no-support boxes in the 3MF; undo and remove work"
+        run.step("advanced design changes: support boxes", advanced_boxes)
+
         def rank_with_strength():
             run.act(lambda: page.get_by_role("button", name="Find the best orientation including strength").click(), 600_000)
             text = page.locator("#strength-result").inner_text()

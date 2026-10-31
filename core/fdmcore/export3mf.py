@@ -61,20 +61,28 @@ def prusa_settings(settings: dict[str, str]) -> dict[str, str]:
         out["ironing"] = "1"
         out["ironing_type"] = settings["ironing_type"]  # same values: top | topmost | solid
     if out.get("support_material") == "1":
-        out["support_material_auto"] = "1"
+        out["support_material_auto"] = "0" if settings.get("support_type", "").endswith("(manual)") else "1"
     if out.get("brim_type") == "brim_ears":  # PrusaSlicer has no mouse ears
         out["brim_type"] = "outer_only"
     return out
 
 
 LAYOUTS = ("orca", "prusa")
+# Extra volumes in the part: OrcaSlicer / Bambu Studio part subtype, PrusaSlicer volume_type, label.
+VOLUME_TYPES = {
+    "stronger": ("modifier_part", "ParameterModifier", "zone"),
+    "support": ("support_enforcer", "SupportEnforcer", "support here"),
+    "blocker": ("support_blocker", "SupportBlocker", "no support here"),
+    "void": ("negative_part", "NegativeVolume", "hidden gap"),
+}
 
 
 def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None = None, bed_center=(128.0, 128.0),
-               modifiers: list[tuple[np.ndarray, dict[str, str]]] = (), layout: str = "orca") -> bytes:
+               modifiers: list[tuple] = (), layout: str = "orca") -> bytes:
     """``mesh`` must already be oriented (lowest point at z = 0, centred on x/y = 0). ``modifiers``:
-    (triangles in the same frame, settings) per modifier volume; ``layout`` "orca" (also Bambu
-    Studio) or "prusa", see the module docstring."""
+    (triangles in the same frame, settings[, kind]) per volume, kind one of VOLUME_TYPES (default
+    "stronger": a settings modifier); ``layout`` "orca" (also Bambu Studio) or "prusa", see the
+    module docstring."""
     if modifiers:
         if layout not in LAYOUTS:
             raise ValueError(f"layout must be one of {LAYOUTS}")
@@ -172,14 +180,15 @@ def _zip(model: str, model_settings: str | None, prusa_model: str | None) -> byt
 
 def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str) -> bytes:
     shift = np.array([bed_center[0], bed_center[1], 0.0])
-    pieces = [_weld(mesh.triangles)] + [_weld(t) for t, _ in modifiers]
+    pieces = [_weld(mesh.triangles)] + [_weld(m[0]) for m in modifiers]
+    types = [VOLUME_TYPES[m[2] if len(m) > 2 else "stronger"] for m in modifiers]
     if layout == "orca":  # part and modifiers as component objects 2, 3, ...; parts listed in model_settings.config
         objects, parts = [], []
         for i, (v, f) in enumerate(pieces):
-            oid, label = i + 2, name if i == 0 else f"zone {i}"
+            oid, label = i + 2, name if i == 0 else f"{types[i - 1][2]} {i}"
             objects.append(f"  <object id=\"{oid}\" name={quoteattr(label)} type=\"model\">{_mesh_xml(v + shift, f)}</object>")
             conf = {} if i == 0 else modifiers[i - 1][1]
-            sub = "normal_part" if i == 0 else "modifier_part"
+            sub = "normal_part" if i == 0 else types[i - 1][0]
             parts.append(f"  <part id=\"{oid}\" subtype=\"{sub}\">\n    <metadata key=\"name\" value={quoteattr(label)}/>\n{_meta(conf)}\n  </part>")
         comps = "".join(f'<component objectid="{i + 2}"/>' for i in range(len(pieces)))
         model = (MODEL_HEAD + "\n".join(objects)
@@ -202,8 +211,10 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
         if i == 0:
             body = f"    <metadata type=\"volume\" key=\"name\" value={quoteattr(name)}/>\n    <metadata type=\"volume\" key=\"volume_type\" value=\"ModelPart\"/>"
         else:
-            body = (f"    <metadata type=\"volume\" key=\"name\" value=\"zone {i}\"/>\n    <metadata type=\"volume\" key=\"volume_type\" value=\"ParameterModifier\"/>\n"
-                    f"    <metadata type=\"volume\" key=\"modifier\" value=\"1\"/>\n{_meta(prusa_settings(modifiers[i - 1][1]), 'volume')}")
+            sub, vtype, label = types[i - 1]
+            body = (f"    <metadata type=\"volume\" key=\"name\" value=\"{label} {i}\"/>\n    <metadata type=\"volume\" key=\"volume_type\" value=\"{vtype}\"/>"
+                    + (f"\n    <metadata type=\"volume\" key=\"modifier\" value=\"1\"/>\n{_meta(prusa_settings(modifiers[i - 1][1]), 'volume')}"
+                       if sub == "modifier_part" else ""))
         vols.append(f"  <volume firstid=\"{bounds[i]}\" lastid=\"{bounds[i + 1] - 1}\">\n{body}\n  </volume>")
     config = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\" instances_count=\"1\">\n"
               f"  <metadata type=\"object\" key=\"name\" value={quoteattr(name)}/>\n{_meta(prusa_settings(settings), 'object')}\n"
