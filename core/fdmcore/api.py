@@ -28,7 +28,7 @@ from .placement import print_rotation
 from .profile import Profile, load_data, presets
 from . import progress
 from .progress import stage
-from .recommend import recommend_settings
+from .recommend import goal_plan, recommend_settings
 from .service import required_safety
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
@@ -794,7 +794,6 @@ def _shells(p: Profile, walls: int | None = None, infill: float | None = None, t
             zones: list[dict] | None = None):
     """How the part will be printed; anything not given comes from the goal's usual settings.
     ``zones``: stronger zones (lo, hi, walls, infill, as optimise_strength returns them)."""
-    from .recommend import goal_plan
     from .strength import Shells, Zone
 
     plan = goal_plan(p)
@@ -1398,7 +1397,17 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
             "filament_g": r["stats"]["filament_g"],
             "issues": [{"rule": f["rule"], "title": f["title"], "detail": f["detail"]} for f in issues],
             "current": nozzle == base.nozzle,
+            "walls": goal_plan(p)["walls"],
         })
+    # Each nozzle with its own usual settings. Bigger nozzles' profiles print slower, and a wider line
+    # holds more plastic per mm, so once the hotend melts as fast as it can the nozzle moves slower:
+    # on small parts a bigger nozzle often saves no time (OrcaSlicer's own profiles show the same:
+    # L-bracket 73 / 91 / 109 min with 0.4 / 0.6 / 0.8 mm).
+    for small, big in zip(out, out[1:]):
+        if big["print_time_min"] >= 0.95 * small["print_time_min"]:
+            big["note"] = (f"Not faster than {small['nozzle']} mm on this part: slicer profiles run bigger nozzles slower, "
+                           f"and your hotend melts only about {base.material['max_flow_mm3s']:g} mm³/s of {base.material['name']}, "
+                           "so wide lines can't move fast. Bigger nozzles save time on big, chunky parts")
     return out
 
 

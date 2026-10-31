@@ -907,8 +907,10 @@ def _runs(idx: list[int]) -> list[list[int]]:
 # ---------------------------------------------------------------- time, cooling, setup
 
 
-# Print-time model, fitted to OrcaSlicer's own estimates for the samples (P1S and K1C system
-# profiles, see tools/time_fit.py). Real moves rarely reach nominal speed.
+# Print-time model, fitted to OrcaSlicer's own estimates for the samples (P1S system profiles with
+# generic PLA, see tools/time_fit.py: typical ×1.08, worst ×1.21; also right for 0.6 / 0.8 mm nozzles
+# within ×0.8–1.2). Real moves rarely reach nominal speed. The K1C's OrcaSlicer times are ~3× shorter
+# with near-identical settings, not understood yet.
 TIME_EFFICIENCY = 0.2
 LAYER_OVERHEAD_S = 7.0  # layer change, travel, retractions, slow first moves
 START_MIN = 3.0  # heating, homing, bed levelling, purge line

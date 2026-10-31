@@ -1734,7 +1734,8 @@ async function compareNozzles() {
           "tr",
           { className: r.current ? "current" : "" },
           el("td", { textContent: `${r.nozzle} mm` }),
-          el("td", { textContent: `≈${fmtTime(r.print_time_min)}` }),
+          el("td", {}, `≈${fmtTime(r.print_time_min)} with ${r.walls} walls`,
+            ...(r.note ? [el("div", { className: "note", textContent: r.note })] : [])),
           el("td", { textContent: r.issues.length ? [...new Set(r.issues.map((i) => i.title))].join("; ") : "none" }),
           el("td", {}, r.current ? "current" : el("button", {
             textContent: "Use",
