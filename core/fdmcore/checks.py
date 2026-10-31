@@ -148,7 +148,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _weak_findings(layers, tracker, profile, T)
     stats = _estimate(layers, profile)
     heat = _layer_heat(layers, profile, sliced)
-    findings += _cooling_findings(layers, heat, profile, T)
+    findings += _cooling_findings(layers, heat, profile, T, sliced)
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
     findings += _relief_findings(mesh, profile, T)
@@ -962,29 +962,40 @@ def _skin_area(layers: list[Layer], zs: np.ndarray, i: int, top: float, bottom: 
     return exposed
 
 
-def _layer_heat(layers: list[Layer], profile: Profile, sliced: dict | None = None) -> np.ndarray:
+def _layer_heat(layers: list[Layer], profile: Profile, sliced: dict | None = None, **kw) -> np.ndarray:
     """Temperature just below the top of each layer while printing (see heat.py)."""
     zs = np.array([l.z for l in layers])
     areas = np.array([l.geom.area for l in layers])
     perimeters = np.array([l.geom.length for l in layers])
-    return layer_heat(zs, areas, perimeters, profile, sliced)
+    return layer_heat(zs, areas, perimeters, profile, sliced, **kw)
 
 
-def _cooling_findings(layers, heat: np.ndarray, profile: Profile, T: dict) -> list[dict]:
+def _cooling_findings(layers, heat: np.ndarray, profile: Profile, T: dict, sliced: dict | None = None) -> list[dict]:
     """Layers still soft when more is printed on top (heat build-up): small tips and pins droop or blob."""
     soft = profile.material["softening_c"]
     C = T["cooling"]
+    hot = lambda temps: [(layer, temp) for layer, temp in zip(layers, temps) if layer.z > C["above_bed_mm"] and temp >= soft + C["soft_margin_c"]]
+    if not hot(heat):
+        return []
+    # The slicer slows small layers to the minimum layer time, but not below the filament's minimum print
+    # speed: a thin pin gets far less time than promised. Find the highest minimum speed that cools them
+    # (estimated level only: with a G-code the real layer times are known already).
+    fix = None
+    if sliced is None:
+        own = profile.material["min_layer_time_s"]
+        tries = [(v, own) for v in C["try_min_speeds"]] + [(C["try_min_speeds"][-1], t) for t in C["try_layer_times_s"] if t > own]
+        fix = next(((v, t) for v, t in tries if not hot(_layer_heat(layers, profile, min_speed=v, min_layer_time=t))), 0)
     out, run = [], []
     for layer, temp in zip(layers, heat):
         if layer.z > C["above_bed_mm"] and temp >= soft + C["soft_margin_c"]:
             run.append((layer, temp))
             continue
-        out += _cooling_run(run, profile, C)
+        out += _cooling_run(run, profile, C, fix)
         run = []
-    return out + _cooling_run(run, profile, C)
+    return out + _cooling_run(run, profile, C, fix)
 
 
-def _cooling_run(run, profile: Profile, C: dict) -> list[dict]:
+def _cooling_run(run, profile: Profile, C: dict, fix: tuple | int | None = None) -> list[dict]:
     if not run or run[-1][0].z - run[0][0].z < C["min_run_mm"]:
         return []
     layers = [l for l, _ in run]
@@ -993,10 +1004,19 @@ def _cooling_run(run, profile: Profile, C: dict) -> list[dict]:
     b = np.array([l.geom.bounds for l in layers])
     bbox = [[b[:, 0].min(), b[:, 1].min(), layers[0].z], [b[:, 2].max(), b[:, 3].max(), layers[-1].z]]
     sev = "warn" if hottest >= soft + C["hot_margin_c"] else "info"
-    return [_finding("small_layers_cooling", sev,
-                     f"At {layers[0].z:.0f}–{layers[-1].z:.0f} mm the plastic is still about {hottest:.0f} °C when the next layers go on "
-                     f"({profile.material['name']} softens from about {soft:.0f} °C) — thin parts here can droop, blob or bend",
-                     bbox=bbox, temp_c=hottest, softening_c=soft)]
+    detail = (f"At {layers[0].z:.0f}–{layers[-1].z:.0f} mm the plastic is still about {hottest:.0f} °C when the next layers go on "
+              f"({profile.material['name']} softens from about {soft:.0f} °C) — thin parts here can droop, blob or bend")
+    extra = {}
+    if fix:
+        speed, layer_time = fix
+        longer = layer_time > profile.material["min_layer_time_s"]
+        detail += (f". In the filament's cooling settings set the minimum print speed to {speed:g} mm/s"
+                   + (f" and the layer time to {layer_time:g} s" if longer else "")
+                   + f" (OrcaSlicer: Min print speed{', Layer time' if longer else ''}), so the slicer slows these layers enough to cool")
+        extra.update(min_speed_mm_s=speed, min_layer_time_s=layer_time)
+    elif fix == 0:
+        detail += ". Slowing down alone won't cool them: print two copies at once so each layer takes longer"
+    return [_finding("small_layers_cooling", sev, detail, bbox=bbox, temp_c=hottest, softening_c=soft, **extra)]
 
 
 

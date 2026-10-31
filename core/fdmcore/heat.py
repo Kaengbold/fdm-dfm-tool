@@ -32,13 +32,16 @@ SUBSTEPS = 3
 MIN_SPEED = 10.0  # mm/s: slicers slow small layers down to the minimum layer time, but not below this
 
 
-def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profile: Profile, sliced: dict | None = None) -> np.ndarray:
+def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profile: Profile, sliced: dict | None = None,
+               min_speed: float = MIN_SPEED, min_layer_time: float | None = None) -> np.ndarray:
     """Temperature (°C) of each sampled layer once ``DEPTH_MM`` more plastic has been printed on top:
     above the softening point, the top of the part is still soft and can't hold its shape.
 
     ``zs``: sampled layer heights (mm); ``areas`` (mm²) and ``perimeters`` (mm) of their cross-sections.
     ``sliced`` (detailed level, gcode.layer_times): the real time between layers and the plastic in
-    each, instead of estimates from the goal's settings."""
+    each, instead of estimates from the goal's settings. ``min_speed``: the filament's minimum print speed
+    (OrcaSlicer ``slow_down_min_speed``), the floor of the slicer's slow-down for small layers;
+    ``min_layer_time`` (s) overrides the material's (``slow_down_layer_time``)."""
     mat = profile.material
     plan = goal_plan(profile)
     lh = plan["layer_height"] if sliced is None else float(np.median(sliced["layer_height"]))
@@ -52,7 +55,7 @@ def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profil
     if sliced is None:
         wall = np.minimum(perimeters[src] * plan["walls"] * profile.line_width, areas[src])
         fill = np.where(areas[src] > 0, (wall + (areas[src] - wall) * plan["infill"] / 100) / np.maximum(areas[src], 1e-9), 1.0)
-        t = layer_seconds(areas[src], perimeters[src], profile) * (dz / lh)
+        t = layer_seconds(areas[src], perimeters[src], profile, min_speed, min_layer_time) * (dz / lh)
     else:
         mid = sliced["z"] - sliced["layer_height"] / 2
         per_mm = np.interp(centers, mid, sliced["seconds"] / sliced["layer_height"])
@@ -87,7 +90,8 @@ def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profil
     return out
 
 
-def layer_seconds(area: np.ndarray, perimeter: np.ndarray, profile: Profile) -> np.ndarray:
+def layer_seconds(area: np.ndarray, perimeter: np.ndarray, profile: Profile, min_speed: float = MIN_SPEED,
+                  min_layer_time: float | None = None) -> np.ndarray:
     """Time the nozzle spends on one layer: the extrusion path at printing speed, slowed to the
     material's minimum layer time — but a tiny layer can't be slowed below MIN_SPEED, so a thin pin
     gets far less time to cool than the minimum layer time promises."""
@@ -96,7 +100,8 @@ def layer_seconds(area: np.ndarray, perimeter: np.ndarray, profile: Profile) -> 
     wall = np.minimum(perimeter * plan["walls"] * lw, area)
     path = perimeter * plan["walls"] + (area - wall) * plan["infill"] / 100 / lw
     fast = path / profile.speeds["outer_wall"]
-    return np.maximum(fast, np.minimum(profile.material["min_layer_time_s"], path / MIN_SPEED))
+    target = profile.material["min_layer_time_s"] if min_layer_time is None else min_layer_time
+    return np.maximum(fast, np.minimum(target, path / min_speed))
 
 
 def _step(temp, cap, cond, side, exposed, top_air, g_noz, g_bed, dt, t_amb, t_bed, t_noz) -> np.ndarray:
