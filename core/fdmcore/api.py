@@ -611,6 +611,36 @@ def _zone_info(z, mesh: Mesh, up, bed) -> dict:
             "corners_print": [_to_print_frame(mesh, rot, c) for c in corners]}
 
 
+ZONE_MARGIN_MM = 3.0  # a zone reaches this far past the picked face, so the slicer's walls there are inside it
+
+
+def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARGIN_MM, walls: int | None = None,
+            infill: float | None = None, profile: dict | None = None) -> dict:
+    """A zone the user picks: an upright box around a face (``region``) or a spot (``point``, part
+    coordinates), ``margin`` mm bigger on every side, printed with more walls and infill (default
+    two more walls and 40 %). Same form as the optimiser's zones, so strength and export take it."""
+    from .regions import find_regions
+    from .strength import Zone
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    if region is not None:
+        if s.regions is None:
+            s.regions = find_regions(s.mesh)
+        pts = s.mesh.triangles[np.asarray(s.regions) == int(region)].reshape(-1, 3)
+        if not len(pts):
+            raise ValueError(f"Unknown face {region}")
+    elif point is not None:
+        pts = np.asarray([point], float)
+    else:
+        raise ValueError("Give a face (region) or a point")
+    built = pts @ rotation_to_z(up).T
+    plan = goal_plan(p)
+    z = Zone(tuple((built.min(axis=0) - margin).tolist()), tuple((built.max(axis=0) + margin).tolist()),
+             int(walls if walls is not None else plan["walls"] + 2), float(infill if infill is not None else max(0.4, plan["infill"] / 100)))
+    return _zone_info(z, s.mesh, up, p.printer["bed"])
+
+
 def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     z = zoned["zones"][0]
     head = (f"Stronger only where it's needed: {len(zoned['zones'])} zone{'s' if len(zoned['zones']) > 1 else ''} with "
@@ -1511,6 +1541,7 @@ METHODS = {
     "report": report,
     "regions": regions,
     "optimise_strength": optimise_strength,
+    "zone_at": zone_at,
     "tag_feature": tag_feature,
     "strength": strength,
     "strength_options": strength_options,

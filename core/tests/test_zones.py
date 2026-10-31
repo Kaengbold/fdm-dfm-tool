@@ -7,6 +7,7 @@ import pytest
 from fdmcore import api
 from fdmcore.strength import Shells, Zone, element_scale, find_zones
 from fdmcore.profile import Profile
+from fdmcore.recommend import goal_plan
 
 from test_hold import box, region_facing
 
@@ -47,6 +48,24 @@ def test_zoned_optimiser_is_not_heavier():
     assert z["met"] and z["zones"] and z["grams"] <= r["grams"] + 0.1
     assert "zone" in z["explanation"]
     assert len(z["zones"][0]["corners_print"]) == 8
+
+
+def test_picked_zone_wraps_the_face_and_counts():
+    """A zone the user picks around the clamped end: a box just past that face, stronger there."""
+    loads = cantilever()
+    z = api.zone_at([0, 0, 1], region=loads[0]["region"], margin=3, infill=1.0)
+    assert z["lo"][0] == pytest.approx(-3, abs=0.01) and z["hi"][0] == pytest.approx(3, abs=0.01)
+    assert z["lo"][2] == pytest.approx(-3, abs=0.01) and z["hi"][2] == pytest.approx(15, abs=0.01)
+    assert z["walls"] == goal_plan(Profile.from_dict({}))["walls"] + 2 and z["infill"] == 1.0
+    spot = api.zone_at([0, 0, 1], point=[60, 6, 12], margin=5)
+    assert spot["hi"][0] - spot["lo"][0] == pytest.approx(10) and len(spot["corners_print"]) == 8
+    # Reaching well past the clamp it carries the bending there (a thin slice would only move the weak spot to its edge).
+    wide = api.zone_at([0, 0, 1], region=loads[0]["region"], margin=30, infill=1.0)
+    plain = api.strength([0, 0, 1], loads, walls=2, infill=0.1)["safety_factor"]
+    zoned = api.strength([0, 0, 1], loads, walls=2, infill=0.1, zones=[wide])["safety_factor"]
+    assert zoned > 1.1 * plain
+    with pytest.raises(ValueError):
+        api.zone_at([0, 0, 1])
 
 
 def test_export_layouts():

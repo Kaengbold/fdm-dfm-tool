@@ -641,7 +641,7 @@ function recolor() {
   if (!option) return;
   viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : []);
-  viewer.showZones(shows("strength") || shows("download") ? state.zones.map((z) => z.corners_print) : []);
+  viewer.showZones(zonesShown() ? state.zones.map((z) => z.corners_print) : []);
   showMarkers();
   if (strengthView()) return;
   if (shows("problems") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
@@ -707,6 +707,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   const hit = viewer.pickHit(e);
   if (!hit) return;
   await ensureRegions();
+  if (state.zonePick) return addZone(hit);
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
@@ -1416,8 +1417,68 @@ for (const id of ["use-temp", "constant-load"]) {
 /** Strengthening zones (slicer modifier volumes) from the optimiser; shown as boxes and put in the 3MF. */
 function setZones(zones) {
   state.zones = zones;
-  viewer.showZones(shows("strength") || shows("download") ? zones.map((z) => z.corners_print) : []);
+  viewer.showZones(zonesShown() ? zones.map((z) => z.corners_print) : []);
   $("zones-for").hidden = !zones.length;
+  renderZones();
+}
+
+const zonesShown = () => shows("strength") || shows("settings") || shows("download");
+
+// ---------- stronger in one area (zones the user picks) ----------
+const BIG_FACE_MM2 = 400; // a face this big gets a box around the clicked spot, not the whole face
+const SPOT_ZONE_MM = 8;
+
+$("zone-pick").onclick = async () => {
+  if (!activeOption()) return;
+  await ensureRegions();
+  state.zonePick = true;
+  $("zone-hint").hidden = false;
+  setStatus("Click the face or spot that needs to be stronger.");
+};
+
+/** A zone around the clicked face (small faces: holes, bosses) or around the clicked spot (big faces). */
+async function addZone(hit) {
+  state.zonePick = false;
+  $("zone-hint").hidden = true;
+  const region = state.faceRegions[hit.face];
+  const info = state.regionInfo[region];
+  const from = info.area_mm2 > BIG_FACE_MM2 ? { point: hit.point } : { region };
+  const margin = from.point ? SPOT_ZONE_MM : 3;
+  const z = await busy("Making the area…", () => call("zone_at", { up: activeOption().up, profile: profile(), ...from, margin }));
+  remember("a stronger area");
+  setZones([...state.zones, { ...z, from, margin, what: info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : from.point ? "the clicked spot" : `${info.kind} face` }]);
+  setStatus("Stronger area added (orange box). Set its walls and infill below.");
+}
+
+/** Resize a picked zone: its box is worked out again from the face or spot it was made for. */
+async function resizeZone(i, margin) {
+  const old = state.zones[i];
+  const z = await busy("Resizing the area…", () => call("zone_at", { up: activeOption().up, profile: profile(), ...old.from, margin,
+    walls: old.walls, infill: old.infill }));
+  remember("the area's size");
+  setZones(state.zones.map((q, k) => (k === i ? { ...old, ...z, margin } : q)));
+}
+
+function renderZones() {
+  $("zone-list").replaceChildren(...state.zones.map((z, i) => {
+    const set = (key, value) => {
+      remember("the area's settings");
+      setZones(state.zones.map((q, k) => (k === i ? { ...q, [key]: value } : q)));
+    };
+    const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
+    const base = currentShells(); // an area is never weaker than the rest (the strength check counts it that way)
+    return el("li", {},
+      el("strong", { textContent: z.from ? `Around ${z.what}` : "From the lightest-settings search" }),
+      el("div", { className: "row" },
+        el("label", {}, "Walls ", num(z.walls, base.walls, 20, 1, (e) => set("walls", Math.max(base.walls, Math.round(Number(e.target.value) || 0))))),
+        el("label", {}, "Infill ", num(Math.round(z.infill * 100), Math.round(base.infill * 100), 100, 5,
+          (e) => set("infill", Math.min(1, Math.max(base.infill, Number(e.target.value) / 100)))), " %"),
+        z.from ? el("label", {}, "Reaches ", num(z.margin, 0, 30, 1, (e) => resizeZone(i, Math.max(0, Number(e.target.value) || 0))), " mm past it") : ""),
+      el("button", { className: "link", textContent: "Remove", onclick: () => {
+        remember("removing an area");
+        setZones(state.zones.filter((_, k) => k !== i));
+      } }));
+  }));
 }
 
 /** Apply a suggestion; a new orientation is checked for strength again (``recheck: false``: the caller does). */
@@ -1640,7 +1701,8 @@ const undoStack = [];
 
 /** Call before a change: Undo (and Ctrl+Z) puts the loads, marks, settings and model version back. */
 function remember(label) {
-  undoStack.push({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks), overrides: { ...state.overrides } });
+  undoStack.push({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks), overrides: { ...state.overrides },
+    zones: structuredClone(state.zones) });
   if (undoStack.length > 50) undoStack.shift();
   renderUndo();
 }
@@ -1662,6 +1724,7 @@ async function undo() {
   renderLoads();
   renderMarks();
   renderSettings();
+  setZones(u.zones ?? []);
   recolor();
   if (marksChanged) await findOrientations(Boolean(state.strength));
   setStatus(`Undone: ${u.label}.`);
