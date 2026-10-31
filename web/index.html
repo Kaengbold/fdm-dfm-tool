@@ -234,14 +234,14 @@
               </div>
               <label class="toggle" data-min="advanced"><input id="at-spot" type="checkbox" /> Only around the tapped spot (Ø6 mm): an edge, a corner or part of a big face</label>
               <div class="pick-step">
-                <b>Held here?</b>
+                <b>Holds here?</b>
                 <div class="row">
                   <select id="hold" aria-label="How it is held">
-                    <option value="clamped">clamped or glued (can't move at all)</option>
-                    <option value="resting">resting on something (only pushes back, can lift off)</option>
-                    <option value="screw">a screw or bolt through this hole</option>
+                    <option value="clamped">clamped or glued (can't move)</option>
+                    <option value="resting">resting on something (can lift off)</option>
+                    <option value="screw">a screw or bolt in this hole</option>
                   </select>
-                  <button id="as-fixed" class="mark-held">Held here</button>
+                  <button id="as-fixed" class="mark-held">Holds here</button>
                 </div>
               </div>
               <div class="pick-step">
@@ -265,7 +265,8 @@
             </div>
             <ul id="marks" class="marks"></ul>
             <ul id="loads" class="loads"></ul>
-            <label class="toggle" title="Plastic slowly stretches under a load that never goes away (creep): it needs a bigger margin"><input id="constant-load" type="checkbox" /> The load stays on (hangs there for good)</label>
+            <label class="toggle"><input id="constant-load" type="checkbox" /> The load is on all the time (e.g. a shelf that always carries its weight)</label>
+            <p class="hint sub">Plastic slowly stretches and sags under a load that never goes away (creep), so the check then asks for ×3 safety instead of ×2.</p>
             <details class="more-block shells" data-min="basic">
               <summary>How it's printed: <span id="shells-summary"></span></summary>
               <p class="hint">Most strength comes from the solid outside: <b>walls</b> around the sides and solid <b>layers</b> on top and bottom. Inside is a light <b>infill</b> grid. These go into the 3MF too.</p>
@@ -309,8 +310,10 @@
             <p id="design-off" class="note">Design changes are off while "What can you change?" is <b>Just print it</b>.
               <button type="button" id="design-on" class="link">Show design changes</button></p>
             <div id="design-block" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Look at the preview before applying, and check fits after thickening walls.">
-              <p class="hint" id="features-summary">Let the tool suggest shape changes for this orientation.</p>
+              <h3>Holes and posts</h3>
+              <p class="hint" id="features-summary">Looking for shape changes for this orientation…</p>
               <ul id="features" class="features"></ul>
+              <h3>Suggested changes <small class="hint">tick the ones you want</small></h3>
               <ol id="edits" class="edits"></ol>
               <div id="edit-params" class="edit-params" hidden>
                 <label>Round bed corners <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
@@ -321,7 +324,6 @@
                 <label>Chamfer at the weak spot <input id="param-stress_chamfer_mm" data-param="stress_chamfer_mm" type="number" step="0.5" /> mm</label>
               </div>
               <div class="actions">
-                <button id="suggest-design">Suggest design changes</button>
                 <button id="apply-edits" class="primary" hidden>Apply selected changes</button>
               </div>
             </div>
@@ -349,11 +351,12 @@
               <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio</option><option value="prusa">PrusaSlicer</option></select></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
             <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>
+            <button id="dl-report" title="One page to read or print: the part on the bed, a picture of every problem, the strength and warping results and the settings">Download the report (with pictures)</button>
             <div class="more-downloads" data-min="basic">
               <button id="dl-stl">STL, turned for printing</button>
               <button id="dl-stl-model">STL as modelled (with design changes)</button>
               <button id="dl-step" hidden>STEP: your CAD file with the design changes</button>
-              <button id="copy-report">Copy report (to share it)</button>
+              <button id="copy-report" title="A text summary of the part, its problems and the settings, for an AI chat or a forum post">Copy for your AI chat</button>
             </div>
             <details id="paste-block" class="more-block paste" data-min="advanced" hidden>
               <summary>Paste an AI answer</summary>

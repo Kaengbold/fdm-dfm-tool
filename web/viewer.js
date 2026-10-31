@@ -200,14 +200,18 @@ export class Viewer {
     if (shade) this.field.mesh.geometry.computeVertexNormals();
   }
 
-  /** Cut through the result: hide everything beyond a plane across ``axis`` ("x"/"y"/"z" on the bed)
-   * at ``t`` (0–1 of the part's extent) and show the analysis cubes on the cut, coloured by value.
-   * ``t`` null removes the cut. ``elements``: {centers (part coords), values, size_mm}. */
+  /** Cut through the result across ``axis`` ("x"/"y"/"z" on the bed) at ``t`` (0–1 of the part's
+   * extent); ``t`` null removes the cut. With per-cube ``values`` the part up to the cut is shown as
+   * the analysis cubes themselves, solid and coloured, so the cut face reads as clean blocks (a
+   * clipped surface shows its hollow inside instead). Without values (displacement: only known on
+   * the surface) the surface is clipped. ``elements``: {centers (part coords), values|null, size_mm}. */
   setSection(axis, t, elements, max) {
     this.section?.removeFromParent();
+    this.section?.geometry.dispose();
     this.section = null;
     if (!this.field) return;
     const material = this.field.mesh.material;
+    this.field.mesh.visible = true;
     if (t == null) {
       material.clippingPlanes = [];
       material.needsUpdate = true;
@@ -216,16 +220,20 @@ export class Viewer {
     const k = { x: 0, y: 1, z: 2 }[axis];
     const box = new THREE.Box3().setFromBufferAttribute(this.field.mesh.geometry.getAttribute("position"));
     const at = box.min.getComponent(k) + t * (box.max.getComponent(k) - box.min.getComponent(k));
-    const normal = new THREE.Vector3().setComponent(k, -1);
-    material.clippingPlanes = [new THREE.Plane(normal, at)];
-    material.needsUpdate = true;
+    if (!elements.values) {
+      material.clippingPlanes = [new THREE.Plane(new THREE.Vector3().setComponent(k, -1), at)];
+      material.needsUpdate = true;
+      return;
+    }
+    this.field.mesh.visible = false;
     const h = elements.size_mm;
     const shown = [];
     for (let i = 0; i < elements.values.length; i++) {
       const p = this.toShown([elements.centers[3 * i], elements.centers[3 * i + 1], elements.centers[3 * i + 2]]);
-      if (Math.abs(p[k] - at) <= h / 2) shown.push([p, elements.values[i]]);
+      if (p[k] <= at) shown.push([p, elements.values[i]]);
     }
-    const cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(h, h, h), new THREE.MeshBasicMaterial(), shown.length);
+    // Shaded (not flat) so neighbouring cubes and the cut face stay readable as blocks.
+    const cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(h, h, h), new THREE.MeshStandardMaterial({ roughness: 0.85 }), shown.length);
     const m = new THREE.Matrix4();
     const c = new THREE.Color();
     shown.forEach(([p, v], i) => {
@@ -355,8 +363,9 @@ export class Viewer {
     this.framed = true;
   }
 
-  /** Boxes for findings; when a finding is selected, it gets a filled highlight, pin, and camera moves. */
-  showFindings(findings, selected = -1) {
+  /** Boxes for findings; when a finding is selected, it gets a filled highlight, pin, and camera moves
+   * (``focus: false``: stays, for pictures that place the camera themselves). */
+  showFindings(findings, selected = -1, focus = true) {
     this.markers.clear();
     findings.forEach((f, i) => {
       if (!f.bbox) return;
@@ -396,12 +405,48 @@ export class Viewer {
         this.markers.add(pin);
       }
     });
-    if (selected >= 0 && findings[selected]?.bbox) {
+    if (focus && selected >= 0 && findings[selected]?.bbox) {
       this.focusFinding(findings[selected]);
     }
   }
 
-  focusFinding(f) {
+  /** A picture of the view as a JPEG data URL, ``width`` px wide: the whole part, or close to ``bbox``
+   * (print frame) seen from the current direction. The camera goes back to where the user had it. */
+  snapshot(bbox = null, width = 720) {
+    const pos = this.camera.position.clone();
+    const target = this.controls.target.clone();
+    const dir = pos.clone().sub(target).normalize();
+    if (dir.lengthSq() < 0.01) dir.set(1.2, -1.6, 1.1).normalize();
+    let center, dist;
+    if (bbox) {
+      const [[x0, y0, z0], [x1, y1, z1]] = bbox;
+      center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      dist = Math.max(Math.hypot(x1 - x0, y1 - y0, z1 - z0) * 2.4, 45);
+    } else {
+      const geometry = (this.field?.mesh ?? this.part).geometry;
+      if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+      const sphere = geometry.boundingSphere;
+      center = sphere.center.clone();
+      dist = sphere.radius * 3.2;
+    }
+    this.controls.target.copy(center);
+    this.camera.position.copy(center).addScaledVector(dir, dist);
+    this.camera.lookAt(center);
+    this.renderer.render(this.scene, this.camera);
+    const src = this.renderer.domElement;
+    const out = document.createElement("canvas");
+    out.width = width;
+    out.height = Math.round((width * src.height) / src.width);
+    out.getContext("2d").drawImage(src, 0, 0, out.width, out.height);
+    this.camera.position.copy(pos);
+    this.controls.target.copy(target);
+    this.controls.update();
+    return out.toDataURL("image/jpeg", 0.85);
+  }
+
+  /** Move the camera to ``f.bbox`` (print frame). ``from``: look from this direction (default:
+   * keep the current one). */
+  focusFinding(f, from = null) {
     if (!f?.bbox) return;
     const [[x0, y0, z0], [x1, y1, z1]] = f.bbox;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
@@ -409,7 +454,7 @@ export class Viewer {
 
     const startTarget = this.controls.target.clone();
     const startPos = this.camera.position.clone();
-    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    const dir = from ? from.clone().normalize() : this.camera.position.clone().sub(this.controls.target).normalize();
     if (dir.lengthSq() < 0.01) dir.set(1.2, -1.6, 1.1).normalize();
     const endTarget = center;
     const endPos = center.clone().add(dir.multiplyScalar(Math.max(span * 2.4, 45)));
@@ -437,20 +482,37 @@ export class Viewer {
     this.markers.clear();
   }
 
-  /** Translucent preview of design edits (part coordinates): red what is cut away, green what is added. */
-  showGhosts(edits) {
+  /** Translucent preview of design edits (part coordinates): red what is cut away, green what is added.
+   * ``highlight``: one edit drawn bright and in front of the part (pointed at in the list). */
+  showGhosts(edits, highlight = null) {
     this.ghosts?.clear();
     if (!this.ghosts) this.scene.add((this.ghosts = new THREE.Group()));
+    const dim = highlight ? 0.25 : 1;
     const material = {
-      cut: new THREE.MeshBasicMaterial({ color: css("--support"), transparent: true, opacity: 0.45, depthWrite: false }),
-      add: new THREE.MeshBasicMaterial({ color: css("--clean"), transparent: true, opacity: 0.55, depthWrite: false }),
+      cut: new THREE.MeshBasicMaterial({ color: css("--support"), transparent: true, opacity: 0.45 * dim, depthWrite: false }),
+      add: new THREE.MeshBasicMaterial({ color: css("--clean"), transparent: true, opacity: 0.55 * dim, depthWrite: false }),
+      now: new THREE.MeshBasicMaterial({ color: css("--now"), transparent: true, opacity: 0.85, depthWrite: false, depthTest: false }),
     };
-    for (const e of edits) {
+    for (const e of highlight && !edits.includes(highlight) ? [...edits, highlight] : edits) {
       const { out } = placeTriangles(e.mesh, this.placement.rotation, this.placement.shift);
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(out, 3));
-      this.ghosts.add(new THREE.Mesh(g, material[e.op]));
+      const mesh = new THREE.Mesh(g, material[e === highlight ? "now" : e.op]);
+      if (e === highlight) mesh.renderOrder = 10;
+      this.ghosts.add(mesh);
     }
+  }
+
+  /** Turn the camera to look at a design edit from outside the part, so the part doesn't hide it. */
+  focusEdit(edit) {
+    const { out } = placeTriangles(edit.mesh, this.placement.rotation, this.placement.shift);
+    const box = new THREE.Box3().setFromArray(out);
+    const center = box.getCenter(new THREE.Vector3());
+    box.expandByScalar(this.part.geometry.boundingSphere.radius * 0.35); // some of the part around it, to see where it is
+    const from = center.clone().sub(this.part.geometry.boundingSphere.center);
+    from.z = Math.max(from.z, 0) + from.length() * 0.6; // a little from above
+    if (from.lengthSq() < 1e-6) from.set(1.2, -1.6, 1.1);
+    this.focusFinding({ bbox: [box.min.toArray(), box.max.toArray()] }, from);
   }
 }
 

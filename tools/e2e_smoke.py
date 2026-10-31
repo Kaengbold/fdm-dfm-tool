@@ -219,13 +219,11 @@ def main():
         def design():
             run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             run.act(lambda: page.click("[data-sample=l_bracket]"))
-            run.act(lambda: page.click("#suggest-design"))
             edits = page.locator("#edits label").all_inner_texts()
             assert any("Ø8.0" in e for e in edits), f"expected teardrop for the Ø8 hole, got {edits}"
             run.act(lambda: page.fill("#param-teardrop_angle_deg", "30") or page.dispatch_event("#param-teardrop_angle_deg", "change"))
             assert any("30° point" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop angle input had no effect"
             run.act(lambda: page.click("#apply-edits"))
-            run.act(lambda: page.click("#suggest-design"))
             again = page.locator("#edits label").all_inner_texts()
             state = page.evaluate("() => ({active: fdm.state.active, up: fdm.state.options[fdm.state.active].up, name: fdm.state.name})")
             assert not any("Ø8.0" in e for e in again), f"teardrop still suggested after applying it: {again} state={state}"
@@ -234,13 +232,13 @@ def main():
 
         def added_material():
             run.act(lambda: page.click("[data-sample=test_block]"))
-            run.act(lambda: page.click("#suggest-design"))
             edits = page.locator("#edits label").all_inner_texts()
             assert sum("Thicken" in e for e in edits) == 2, f"expected two thin walls to thicken, got {edits}"
             ops = page.evaluate("() => fdm.state.edits.map((e) => e.op)")
+            page.evaluate("() => fdm.steps.go('design')")  # previews show while Design changes is in view
+            page.wait_for_timeout(800)
             assert "add" in ops and len(page.evaluate("() => fdm.viewer.ghosts.children.map((c) => c.material.color.getHexString())")) == len(ops)
             run.act(lambda: page.click("#apply-edits"))
-            run.act(lambda: page.click("#suggest-design"))
             again = page.locator("#edits label").all_inner_texts()
             assert not any("Thicken" in e for e in again), f"walls still thin after thickening: {again}"
             return f"{edits} -> {again or 'nothing'} | findings: {findings(page)}"
@@ -248,7 +246,6 @@ def main():
 
         def feature_confirm():
             run.act(lambda: page.click("[data-sample=l_bracket]"))
-            run.act(lambda: page.click("#suggest-design"))
             row = page.locator("#features li", has_text="Ø8.0 mm hole")
             assert row.count() == 1, page.locator("#features").inner_text()
             run.act(lambda: row.get_by_role("button", name="Not a hole").click())
@@ -350,6 +347,8 @@ def main():
             page.locator(".fea-view select").nth(1).select_option("z")
             cubes = page.evaluate("() => fdm.viewer.section?.count ?? 0")
             assert cubes > 0, "section shows no cubes"
+            assert not page.evaluate("() => fdm.viewer.field.mesh.visible"), "cut shows the hollow surface, not solid cubes"
+            page.screenshot(path=OUT / "section-cut.png")
             page.locator(".fea-view select").nth(1).select_option("")
             run.act(lambda: page.get_by_text("Check accuracy with a finer grid").click(), 600_000)
             note = page.locator(".fea-view").inner_text()
@@ -456,6 +455,17 @@ def main():
             return text.splitlines()[0] + " | " + text.splitlines()[1][:120]
         run.step("warping simulation", warping)
 
+        def report_with_pictures():
+            with page.expect_download(timeout=180_000) as dl:
+                run.act(lambda: page.click("#dl-report"))
+            out = OUT / "report.html"
+            dl.value.save_as(out)
+            html = out.read_text(encoding="utf-8")
+            pictures = html.count('<img src="data:image/jpeg')
+            assert pictures >= 3 and "Will it hold?" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
+            return f"{len(html) // 1024} kB, {pictures} pictures"
+        run.step("report with pictures", report_with_pictures)
+
         def marked_faces():
             run.act(lambda: page.click("[data-sample=mushroom]"))
             before = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")
@@ -488,7 +498,7 @@ def main():
             run.act(lambda: page.click("[data-sample=hook]"))
             page.context.grant_permissions(["clipboard-read", "clipboard-write"])
             page.click("#copy-report")
-            page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Report copied')")
+            page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Copied')")
             report = page.evaluate("() => navigator.clipboard.readText()")
             assert "## For the AI assistant: how to answer" in report and "- 1: " in report, report[-600:]
             page.evaluate("() => { document.getElementById('paste-block').hidden = false; }")  # AI features are off by default (?ai=1)
@@ -525,7 +535,6 @@ def main():
                 run.act(lambda: page.locator("#options > li").nth(1).click())
             if not page.locator("input[name=mode][value=both]").is_checked():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
-            run.act(lambda: page.click("#suggest-design"))
             boxes = page.locator("#edits label")
             for i in range(boxes.count()):  # keep only the teardrop
                 if "Teardrop" not in boxes.nth(i).inner_text():

@@ -32,9 +32,11 @@ const AFFECTS = {
 const CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 export class Steps {
-  /** ``ready(step)``: true, or a short reason why the step can't be opened yet. */
-  constructor({ ready }) {
+  /** ``ready(step)``: true, or a short reason why the step can't be opened yet. ``changed(step)``:
+   * called when another step is shown, so the 3D view can show that step's things only. */
+  constructor({ ready, changed = () => {} }) {
     this.ready = ready;
+    this.changed = changed;
     this.level = "simple";
     this.current = "part";
     this.busy = new Map(); // step -> number of running jobs that will update it
@@ -55,6 +57,8 @@ export class Steps {
       if (inView !== this.current) {
         this.current = inView;
         this.renderList();
+        this.shown = `${this.level}|${this.current}`;
+        this.changed(this.current);
       }
     }, { passive: true });
     document.getElementById("step-back").onclick = () => this.go(this.neighbour(-1));
@@ -98,7 +102,9 @@ export class Steps {
       this.panes[step].scrollIntoView({ behavior: "smooth", block: "start" });
       clearTimeout(this.jumpTimer);
       this.jumpTimer = setTimeout(() => (this.jumping = false), 700);
-      return this.renderList();
+      this.renderList();
+      this.shown = `${this.level}|${this.current}`;
+      return this.changed(this.current);
     }
     this.render();
     this.scroller.scrollTop = 0;
@@ -141,6 +147,10 @@ export class Steps {
     }
 
     this.renderList();
+    if (this.shown !== `${this.level}|${this.current}`) {
+      this.shown = `${this.level}|${this.current}`;
+      this.changed(this.current);
+    }
 
     const back = document.getElementById("step-back");
     const next = document.getElementById("step-next");
