@@ -313,6 +313,10 @@ summary::marker { color: var(--accent); }
 .places .place:hover { color: var(--accent); }
 .view-all { margin-left: 6px; font-size: 12px; padding: 1px 6px; }
 .extra { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.sim-card { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--panel); }
+.sim-card h3 { margin: 0; }
+#cooling-summary { font-size: 14px; }
+#cooling-summary b { font-weight: 700; }
 #nozzle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 #nozzle-table td, #nozzle-table th { border-bottom: 1px solid var(--line); padding: 5px 3px; text-align: left; vertical-align: top; }
 #nozzle-table tr.current { background: var(--accent-soft); }
