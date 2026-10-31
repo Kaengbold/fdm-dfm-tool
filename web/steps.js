@@ -4,10 +4,10 @@
 
 export const STEP_NAMES = {
   part: "Your part", have: "What you have", orient: "On the bed", problems: "Problems", strength: "Will it hold?",
-  design: "Design changes", settings: "Slicer settings", download: "Download", result: "Result",
+  sims: "Optional simulations", fits: "Tolerances & tuning", design: "Design changes", settings: "Slicer settings", download: "Download", result: "Result",
 };
 
-const ALL = ["part", "have", "orient", "problems", "strength", "design", "settings", "download"];
+const ALL = ["part", "have", "orient", "problems", "strength", "sims", "fits", "design", "settings", "download"];
 export const LEVEL_STEPS = {
   simple: ["part", "have", "result"],
   basic: ["part", "have", "orient", "problems", "strength", "settings", "download"],
@@ -32,9 +32,11 @@ const AFFECTS = {
 const CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 export class Steps {
-  /** ``ready(step)``: true, or a short reason why the step can't be opened yet. */
-  constructor({ ready }) {
+  /** ``ready(step)``: true, or a short reason why the step can't be opened yet. ``changed(step)``:
+   * called when another step is shown, so the 3D view can show that step's things only. */
+  constructor({ ready, changed = () => {} }) {
     this.ready = ready;
+    this.changed = changed;
     this.level = "simple";
     this.current = "part";
     this.busy = new Map(); // step -> number of running jobs that will update it
@@ -49,13 +51,28 @@ export class Steps {
     // Expert is one long page: the step list becomes its table of contents and follows the scrolling.
     this.scroller = document.querySelector(".panes");
     this.scroller.addEventListener("scroll", () => {
-      if (this.level !== "expert" || this.jumping) return;
+      if (this.level !== "expert" || this.pinned) return;
       const top = this.scroller.getBoundingClientRect().top + 80;
       const inView = this.steps.filter((s) => !this.panes[s].hidden && this.panes[s].getBoundingClientRect().top <= top).pop() ?? this.steps[0];
       if (inView !== this.current) {
         this.current = inView;
         this.renderList();
+        this.shown = `${this.level}|${this.current}`;
+        this.changed(this.current);
       }
+    }, { passive: true });
+    // Working in a section (a click, a field) makes it the current one, wherever it sits on the screen;
+    // scrolling by hand lets the position decide again.
+    const pin = (e) => {
+      const pane = e.target.closest?.(".pane")?.dataset.pane;
+      if (this.level !== "expert" || !pane) return;
+      this.pinned = true;
+      if (pane !== this.current) this.jumpTo(pane);
+    };
+    this.scroller.addEventListener("pointerdown", pin);
+    this.scroller.addEventListener("focusin", pin);
+    for (const ev of ["wheel", "touchmove", "keydown"]) this.scroller.addEventListener(ev, (e) => {
+      if (ev !== "keydown" || ["PageDown", "PageUp", "ArrowDown", "ArrowUp", "Home", "End", " "].includes(e.key)) this.pinned = false;
     }, { passive: true });
     document.getElementById("step-back").onclick = () => this.go(this.neighbour(-1));
     document.getElementById("step-next").onclick = () => this.go(this.neighbour(1));
@@ -93,15 +110,21 @@ export class Steps {
     if (!step || this.ready(step) !== true) return;
     this.current = step;
     if (this.level === "expert") {
-      // Jump, and don't let the scroll listener re-pick the step on the way there.
-      this.jumping = true;
+      // Jump, and keep this step current until the user scrolls by hand (the last steps can't reach the top).
+      this.pinned = true;
       this.panes[step].scrollIntoView({ behavior: "smooth", block: "start" });
-      clearTimeout(this.jumpTimer);
-      this.jumpTimer = setTimeout(() => (this.jumping = false), 700);
-      return this.renderList();
+      return this.jumpTo(step);
     }
     this.render();
     this.scroller.scrollTop = 0;
+  }
+
+  /** Expert: make ``step`` the current one without scrolling. */
+  jumpTo(step) {
+    this.current = step;
+    this.renderList();
+    this.shown = `${this.level}|${this.current}`;
+    this.changed(this.current);
   }
 
   /** Open the step that holds ``node`` (and any closed <details> around it), e.g. after a face was tapped. */
@@ -141,6 +164,10 @@ export class Steps {
     }
 
     this.renderList();
+    if (this.shown !== `${this.level}|${this.current}`) {
+      this.shown = `${this.level}|${this.current}`;
+      this.changed(this.current);
+    }
 
     const back = document.getElementById("step-back");
     const next = document.getElementById("step-next");

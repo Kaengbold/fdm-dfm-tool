@@ -156,6 +156,11 @@ def main():
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         # Expert level and no start guide, so every step finds its controls (the guide has its own step).
         page.add_init_script("localStorage.setItem('fdm-guided', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
+        # Long simulations ask first; the test says "Run it" unless a step wants to see the question.
+        page.add_init_script("""addEventListener('DOMContentLoaded', () => new MutationObserver(() => {
+            const d = document.getElementById('long-run');
+            if (d?.open && !window.keepAsking) d.querySelector('#long-yes').click();
+        }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] }));""")
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
@@ -219,28 +224,39 @@ def main():
         def design():
             run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             run.act(lambda: page.click("[data-sample=l_bracket]"))
-            run.act(lambda: page.click("#suggest-design"))
             edits = page.locator("#edits label").all_inner_texts()
             assert any("Ø8.0" in e for e in edits), f"expected teardrop for the Ø8 hole, got {edits}"
             run.act(lambda: page.fill("#param-teardrop_angle_deg", "30") or page.dispatch_event("#param-teardrop_angle_deg", "change"))
             assert any("30° point" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop angle input had no effect"
             run.act(lambda: page.click("#apply-edits"))
-            run.act(lambda: page.click("#suggest-design"))
             again = page.locator("#edits label").all_inner_texts()
             state = page.evaluate("() => ({active: fdm.state.active, up: fdm.state.options[fdm.state.active].up, name: fdm.state.name})")
             assert not any("Ø8.0" in e for e in again), f"teardrop still suggested after applying it: {again} state={state}"
             return f"applied {edits} -> now suggests {again or 'nothing'}"
         run.step("design edits apply + re-check", design)
 
+        def versions_and_undo():
+            versions = page.evaluate("() => fdm.state.versions.map((v) => v.label)")
+            assert len(versions) == 2 and page.locator("#version-pick").is_visible(), versions
+            table = page.locator("#versions").inner_text()
+            run.act(lambda: page.keyboard.press("Control+z"), 300_000)
+            back = page.evaluate("() => ({ version: fdm.state.version, name: fdm.state.name })")
+            assert back["version"] == 0, back
+            assert any("Ø8.0" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop not suggested again on the original"
+            run.act(lambda: page.select_option("#version", "1"), 300_000)
+            assert page.evaluate("() => fdm.state.version") == 1
+            return f"{versions} | {table.splitlines()[1:3]} | undo -> {back['name']}"
+        run.step("model versions + Ctrl+Z", versions_and_undo)
+
         def added_material():
             run.act(lambda: page.click("[data-sample=test_block]"))
-            run.act(lambda: page.click("#suggest-design"))
             edits = page.locator("#edits label").all_inner_texts()
             assert sum("Thicken" in e for e in edits) == 2, f"expected two thin walls to thicken, got {edits}"
             ops = page.evaluate("() => fdm.state.edits.map((e) => e.op)")
+            page.evaluate("() => fdm.steps.go('design')")  # previews show while Design changes is in view
+            page.wait_for_timeout(800)
             assert "add" in ops and len(page.evaluate("() => fdm.viewer.ghosts.children.map((c) => c.material.color.getHexString())")) == len(ops)
             run.act(lambda: page.click("#apply-edits"))
-            run.act(lambda: page.click("#suggest-design"))
             again = page.locator("#edits label").all_inner_texts()
             assert not any("Thicken" in e for e in again), f"walls still thin after thickening: {again}"
             return f"{edits} -> {again or 'nothing'} | findings: {findings(page)}"
@@ -248,7 +264,6 @@ def main():
 
         def feature_confirm():
             run.act(lambda: page.click("[data-sample=l_bracket]"))
-            run.act(lambda: page.click("#suggest-design"))
             row = page.locator("#features li", has_text="Ø8.0 mm hole")
             assert row.count() == 1, page.locator("#features").inner_text()
             run.act(lambda: row.get_by_role("button", name="Not a hole").click())
@@ -261,11 +276,11 @@ def main():
         run.step("feature confirm - not a hole", feature_confirm)
 
         def fit_a_hole():
-            row = page.locator("#features li", has_text="Ø8.0 mm hole")
+            row = page.locator("#fits li", has_text="Ø8.0 mm hole")
             row.locator(".fit input").fill("8")
             row.locator(".fit select").select_option("sliding")
             run.act(lambda: row.get_by_role("button", name="Size it").click())
-            note = page.locator("#features li", has_text="Ø8.0 mm hole").locator(".fit p").inner_text()
+            note = page.locator("#fits li", has_text="Ø8.0 mm hole").locator(".fit p").inner_text()
             edits = page.locator("#edits label").all_inner_texts()
             assert any("sliding fit" in e for e in edits), edits
             return note[:110]
@@ -343,6 +358,7 @@ def main():
         run.step("shaking: natural frequency and swing view", shaking)
 
         def fea_view():
+            page.evaluate("() => fdm.steps.go('strength')")  # the stress colours show in Will it hold?
             assert page.locator("#legend").is_visible(), "no legend"
             colours = page.evaluate("() => fdm.viewer.field.mesh.geometry.getAttribute('color').count")
             page.locator(".fea-view select").first.select_option("vm")
@@ -350,6 +366,8 @@ def main():
             page.locator(".fea-view select").nth(1).select_option("z")
             cubes = page.evaluate("() => fdm.viewer.section?.count ?? 0")
             assert cubes > 0, "section shows no cubes"
+            assert not page.evaluate("() => fdm.viewer.field.mesh.visible"), "cut shows the hollow surface, not solid cubes"
+            page.screenshot(path=OUT / "section-cut.png")
             page.locator(".fea-view select").nth(1).select_option("")
             run.act(lambda: page.get_by_text("Check accuracy with a finer grid").click(), 600_000)
             note = page.locator(".fea-view").inner_text()
@@ -438,6 +456,14 @@ def main():
             return text.splitlines()[1][:160] + note
         run.step("find the lightest settings that hold", optimise)
 
+        def rank_with_strength():
+            run.act(lambda: page.get_by_role("button", name="Find the best orientation including strength").click(), 600_000)
+            text = page.locator("#strength-result").inner_text()
+            assert "safety" in text.lower(), "no strength result for the new best orientation"
+            return page.locator("#status").inner_text()
+        run.step("best orientation with strength shows its result", rank_with_strength)
+
+
         def heat_map():
             n = page.evaluate("() => [fdm.state.check.face_temp.length, fdm.viewer.part.geometry.getAttribute('position').count / 3]")
             assert n[0] == n[1], n
@@ -455,6 +481,29 @@ def main():
             assert page.locator("#legend").is_hidden()
             return text.splitlines()[0] + " | " + text.splitlines()[1][:120]
         run.step("warping simulation", warping)
+
+        def report_with_pictures():
+            with page.expect_download(timeout=180_000) as dl:
+                run.act(lambda: page.click("#dl-report"))
+            out = OUT / "report.html"
+            dl.value.save_as(out)
+            html = out.read_text(encoding="utf-8")
+            pictures = html.count('<img src="data:image/jpeg')
+            assert pictures >= 3 and "Will it hold?" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
+            return f"{len(html) // 1024} kB, {pictures} pictures"
+        run.step("report with pictures", report_with_pictures)
+
+        def asks_before_long_runs():
+            page.evaluate("() => { window.keepAsking = true; fdm.state.runTimes = { warping: 75 }; }")
+            page.click("#run-warp")
+            page.wait_for_selector("#long-run[open]")
+            title = page.locator("#long-title").inner_text()
+            assert "1 min 15 s" in title, title
+            page.click("#long-no")
+            assert not page.locator("#long-run[open]").count(), "dialog stayed open"
+            page.evaluate("() => { window.keepAsking = false; fdm.state.runTimes = {}; }")
+            return title
+        run.step("asks before a long simulation", asks_before_long_runs)
 
         def marked_faces():
             run.act(lambda: page.click("[data-sample=mushroom]"))
@@ -488,7 +537,7 @@ def main():
             run.act(lambda: page.click("[data-sample=hook]"))
             page.context.grant_permissions(["clipboard-read", "clipboard-write"])
             page.click("#copy-report")
-            page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Report copied')")
+            page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Copied')")
             report = page.evaluate("() => navigator.clipboard.readText()")
             assert "## For the AI assistant: how to answer" in report and "- 1: " in report, report[-600:]
             page.evaluate("() => { document.getElementById('paste-block').hidden = false; }")  # AI features are off by default (?ai=1)
@@ -525,7 +574,6 @@ def main():
                 run.act(lambda: page.locator("#options > li").nth(1).click())
             if not page.locator("input[name=mode][value=both]").is_checked():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
-            run.act(lambda: page.click("#suggest-design"))
             boxes = page.locator("#edits label")
             for i in range(boxes.count()):  # keep only the teardrop
                 if "Teardrop" not in boxes.nth(i).inner_text():
@@ -548,6 +596,28 @@ def main():
             assert not any("Sideways hole prints oval" in f for f in seen), f"teardrop missing in the written STEP: {seen}"
             return f"{out.stat().st_size // 1024} kB STEP, {text.count('ADVANCED_FACE')} faces; reloaded: {page.locator('#status').inner_text()}"
         run.step("STEP in, design change, STEP out", step_round_trip)
+
+        def test_design_change():
+            # Mushroom held by its cap and pulled on the stem: the weak spot is the inside corner at the stem.
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            run.act(lambda: page.get_by_role("button", name="Test it").first.click(), 600_000)
+            status = page.locator("#status").inner_text()
+            assert "With the chamfer" in status and page.evaluate("() => fdm.state.versions.length") == 2, status
+            return status
+        run.step("strength suggestion: test a design change", test_design_change)
 
         def my_presets():
             page.click("#my-presets > summary")

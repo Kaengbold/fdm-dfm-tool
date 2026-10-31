@@ -58,7 +58,7 @@ def test_rounded_bed_corners_for_warping_or_big_footprints():
     assert not any(e["rule"] == "sharp_bed_corners" for e in api.design([0, 0, 1], {"material": "pla"})["edits"])
     assert sum(e["rule"] == "sharp_bed_corners" for e in design("l_bracket", [0, 0, 1], material="pla")["edits"]) == 4
     edits = [e for e in design("l_bracket", [0, 0, 1], material="abs")["edits"] if e["rule"] == "sharp_bed_corners"]
-    assert len(edits) == 4 and all(len(e["pieces"]) == 8 for e in edits)
+    assert len(edits) == 4 and all(len(e["pieces"]) == 1 for e in edits)  # one fan-shaped cutter per corner
 
 
 def test_bottom_chamfer_and_fillet_at_the_weak_spot():
@@ -166,3 +166,33 @@ def test_rejected_hole_gets_no_edit_and_no_findings():
     assert any(e["id"].startswith("teardrop") for e in api.design([0, 0, 1])["edits"])
     with pytest.raises(ValueError):
         api.tag_feature(sideways["region"], "rib")
+
+
+def _clean(tris: np.ndarray) -> tuple[int, int]:
+    """(edges not shared by exactly two triangles, zero-area triangles) once the result is saved as a
+    float STL and its corners are matched by position, the way a slicer reads it."""
+    t = tris.astype("<f4")
+    _, ids = np.unique(t.reshape(-1, 3), axis=0, return_inverse=True)
+    ids = ids.reshape(-1, 3)
+    edges = np.sort(np.concatenate([ids[:, [0, 1]], ids[:, [1, 2]], ids[:, [2, 0]]]), axis=1)
+    _, counts = np.unique(edges, axis=0, return_counts=True)
+    t = t.astype(float)
+    area = np.linalg.norm(np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]), axis=1) / 2
+    return int((counts != 2).sum()), int((area < 1e-6).sum())
+
+
+@pytest.mark.parametrize("name, material", [("l_bracket", "abs"), ("test_block", "abs"), ("hook", "pla"),
+                                            ("detail_plate", "pla"), ("dumbbell", "pla"), ("phone_stand", "abs")])
+def test_all_edits_together_give_a_clean_mesh(name, material):
+    """Every suggested change applied at once (cuts and fills meeting at corners): the result must
+    reach the slicer without mesh errors. Cutters used to touch the part's own corner edges exactly,
+    leaving zero-thickness fins and loose crumbs."""
+    pytest.importorskip("manifold3d")
+    from fdmcore.booleans import apply_edits
+
+    api.load((SAMPLES / f"{name}.stl").read_bytes(), name)
+    prof = {"material": material}
+    up = api.orientations(prof)["orientations"][0]["up"]
+    edits = api.design(up, prof)["edits"]
+    assert len(edits) >= 4
+    assert _clean(apply_edits(api._require().mesh, edits).triangles) == (0, 0)

@@ -106,7 +106,8 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
 # Adjustable edit sizes: default, min, max (the UI shows these as inputs).
 CORNER_ROUND_SHARE = 0.3  # low-warp materials: round corners once the footprint is this share of the warp length
 CORNER_ARC_STEPS = 8
-MAX_FOOT_PIECES = 600
+OFF_CORNER = 0.01  # mm cutters keep from the part's corner edges
+MAX_FOOT_POINTS = 600  # outline points; more and the slicer's elephant foot compensation is the better tool
 CHAMFER_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot (in analysis voxels) seeds the chamfer
 MAX_FILLET_PIECES = 400
 
@@ -261,15 +262,18 @@ def _to_part(mesh: Mesh, r: np.ndarray):
 def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.ndarray:
     """Kite-shaped prism (centre, two tangent points, apex) along the hole axis. The roof
     lines are ``angle_deg`` from vertical: they touch the circle at r·(sin θ up ± cos θ side)
-    and meet at r / sin θ above the centre."""
+    and meet at r / sin θ above the centre. The tangent points sit a hair outside the circle and the
+    prism a hair past both ends of the hole: touching the hole's own corners and end faces exactly
+    leaves zero-thickness fins in the result."""
     axis, c, r = np.asarray(f["axis"]), np.asarray(f["center"]), f["radius"]
     u = up - (up @ axis) * axis
     u /= np.linalg.norm(u)
     s = np.cross(axis, u)
     th = np.radians(angle_deg)
-    up_k, side_k = r * np.sin(th), r * np.cos(th)
+    rt = r + OFF_CORNER
+    up_k, side_k = rt * np.sin(th), rt * np.cos(th)
     profile = [c - 0.5 * r * u, c + side_k * s + up_k * u, c + r / np.sin(th) * u, c - side_k * s + up_k * u]
-    return _prism(profile, axis * f["length"] / 2)
+    return _prism(profile, axis * (f["length"] / 2 + 5 * OFF_CORNER))
 
 
 def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0) -> list[dict]:
@@ -302,7 +306,8 @@ def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0) -> lis
         r = min(size, 0.4 * edge * np.tan(half_angle))
         reach = r / np.tan(half_angle)  # corner to where the arc meets each edge
         bis = (e1 + e2) / np.linalg.norm(e1 + e2)
-        centre = p + bis * r / np.sin(half_angle)
+        # A hair deeper than tangent: an arc that just touches the walls leaves zero-thickness fins there.
+        centre = p + bis * (r / np.sin(half_angle) + 3 * OFF_CORNER)
         s1, s2 = p + e1 * reach - centre, p + e2 * reach - centre
         a1, a2 = np.arctan2(s1[1], s1[0]), np.arctan2(s2[1], s2[0])
         sweep = (a2 - a1 + np.pi) % (2 * np.pi) - np.pi
@@ -310,19 +315,25 @@ def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0) -> lis
         tip = p - bis * 0.5  # a little past the corner, so the cut leaves no skin
         mid = np.array([0, 0, top / 2 - 0.25])
         half = np.array([0, 0, top / 2 + 0.25])
-        pieces = [_prism([np.array([*q, 0]) + mid for q in (tip, arc[k], arc[k + 1])], half) for k in range(CORNER_ARC_STEPS)]
+        piece = _fan_prism([tip, *arc], mid[2] - half[2], mid[2] + half[2])  # one piece: no faces shared between pieces
         out.append(_edit(
             f"chamfer-{i}", "sharp_bed_corners", f"Round sharp corner {i + 1} (r {r:.1f} mm)",
             "A rounded corner shrinks more evenly and is much less likely to lift off the bed (warping starts at sharp corners).",
-            [to_part(t) for t in pieces], param="chamfer_mm"))
+            [to_part(piece)], param="chamfer_mm"))
     return out
 
 
 def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
     """A small 45° chamfer along every bottom edge (outline and holes): the first layers are squashed
     and bulge out (elephant foot); the chamfer takes that material away, so edges stay straight and
-    holes at the bed keep their size. One wedge per outline edge, longer at outside corners only
-    (at inside corners a longer wedge would notch the wall next to it)."""
+    holes at the bed keep their size.
+
+    Each outline loop is cut by ONE closed piece: the chamfer's cross-section swept along the loop,
+    mitred at the corners. The sections sit just before and after each corner, never on it: a
+    section through the part's own corner edge lets the two meshes touch edge on edge, and the
+    boolean leaves zero-thickness fins and crumbs there (mesh errors in the slicer). Sharp corners
+    break the sweep: there the pieces end square, reaching past outside corners and joined by a
+    filler piece at inside corners."""
     from shapely.geometry.polygon import orient as orient_poly
 
     from .slicer import parts
@@ -330,32 +341,21 @@ def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
     first = slice_mesh(oriented, profile.layer_height, max_layers=2)[0].geom
     if first.is_empty:
         return []
-    pieces = []
+    # Cross-section (outward offset, height): the 45° line from (-size, 0) to (0, size), extended past both ends.
+    section = np.array([[-(size + 0.3), -0.3], [0.3, size + 0.3], [0.3, -0.3]])
+    pieces, points = [], 0
     for poly in parts(first):
         poly = orient_poly(poly.simplify(0.05), 1.0)  # exterior CCW, holes CW: material on the left
         for ring in [poly.exterior, *poly.interiors]:
             c = np.asarray(ring.coords)[:-1, :2]
-            n = len(c)
-            for k in range(n):
-                a, b = c[k], c[(k + 1) % n]
-                d = b - a
-                length = np.linalg.norm(d)
-                if length < 1e-3:
-                    continue
-                d = d / length
-                out = np.array([d[1], -d[0]])  # right of the edge = outside
-                convex = [_cross2(c[k] - c[k - 1], d) > 0, _cross2(d, c[(k + 2) % n] - b) > 0]
-                ext = [size + 0.3 if cv else 0.0 for cv in convex]
-                p0, p1 = a - d * ext[0], b + d * ext[1]
-                mid = (p0 + p1) / 2
-                half = np.array([*(p1 - p0) / 2, 0.0])
-                # Cross-section (outward, up): the 45° line from (-size, 0) to (0, size), extended past both ends.
-                prof = [np.array([*(mid - out * (size + 0.3)), -0.3]),
-                        np.array([*(mid + out * 0.3), size + 0.3]),
-                        np.array([*(mid + out * 0.3), -0.3])]
-                pieces.append(_prism(prof, half))
-                if len(pieces) > MAX_FOOT_PIECES:
-                    return []  # a very detailed footprint: leave it to the slicer's elephant foot compensation
+            c = c[np.linalg.norm(c - np.roll(c, 1, axis=0), axis=1) > 1e-3]
+            if len(c) < 3:
+                continue
+            ring_pieces = _ring_chamfer(c, section, size)
+            points += len(c)
+            if points > MAX_FOOT_POINTS:
+                return []  # a very detailed footprint: leave it to the slicer's elephant foot compensation
+            pieces += ring_pieces
     if not pieces:
         return []
     return [_edit("foot-chamfer", "elephant_foot", f"{size:.1f} mm chamfer along the bottom edge",
@@ -364,8 +364,78 @@ def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
                   [to_part(t) for t in pieces], param="foot_chamfer_mm")]
 
 
-def _cross2(u, v) -> float:
-    return float(u[0] * v[1] - u[1] * v[0])
+SHARP_MITRE = 0.5  # cos of half the turn: corners turning more than 120° break the sweep
+
+
+def _ring_chamfer(c: np.ndarray, section: np.ndarray, size: float) -> list[np.ndarray]:
+    """Closed pieces cutting the chamfer along one outline loop ``c`` (material on the left). None
+    when the sweep would fold (a short edge after a big turn): then this loop keeps its plain edge."""
+    n = len(c)
+    d = np.roll(c, -1, axis=0) - c
+    d /= np.linalg.norm(d, axis=1, keepdims=True)  # edge k runs from c[k] to c[k + 1]
+    out = np.stack([d[:, 1], -d[:, 0]], axis=1)  # right of the edge = outside
+    d_in, o_in = np.roll(d, 1, axis=0), np.roll(out, 1, axis=0)  # the edge arriving at each vertex
+    mitre = o_in + out
+    mitre /= np.maximum(np.linalg.norm(mitre, axis=1, keepdims=True), 1e-12)
+    cos_half = np.einsum("ij,ij->i", mitre, out)
+    convex = d_in[:, 0] * d[:, 1] - d_in[:, 1] * d[:, 0] > 0
+    sharp = np.flatnonzero(cos_half < SHARP_MITRE).tolist()
+
+    def at(p, o):  # the cross-section at point p, offsets along o
+        return np.array([[*(p + o * s), z] for s, z in section])
+
+    def corner(k):  # mitred sections just before and after corner k, each on its own edge's offset lines
+        o = mitre[k] / cos_half[k]
+        return [at(c[k] - d_in[k] * OFF_CORNER, o), at(c[k] + d[k] * OFF_CORNER, o)]
+
+    def forward(rings, dirs):  # every section point moves on along its edge: the piece doesn't fold
+        return all(np.all((b - a)[:, :2] @ e > 1e-6) for a, b, e in zip(rings, rings[1:], dirs))
+
+    if not sharp:
+        rings = [r for k in range(n) for r in corner(k)]
+        return [_sweep(rings, closed=True)] if forward(rings + rings[:1], [d[i // 2] for i in range(2 * n)]) else []
+    pieces = []
+    for a, b in zip(sharp, sharp[1:] + sharp[:1]):
+        ks = [(a + i) % n for i in range((b - a) % n or n)]  # edges a … b-1, from sharp corner a to sharp corner b
+        # Square ends: past outside corners (so the chamfer runs out cleanly), short of inside ones.
+        start = c[a] - d[a] * ((size + 0.3) if convex[a] else -OFF_CORNER)
+        end = c[b] + d[ks[-1]] * ((size + 0.3) if convex[b] else -OFF_CORNER)
+        rings = [at(start, out[a])] + [r for k in ks[1:] for r in corner(k)] + [at(end, out[ks[-1]])]
+        if not forward(rings, [d[a]] + [d[k] for k in ks[1:] for _ in range(2)]):
+            return []
+        pieces.append(_sweep(rings, closed=False))
+        if not convex[b]:  # inside corner: fill the gap between the two square ends
+            back, ahead = at(c[b] - d[ks[-1]] * 0.05, out[ks[-1]]), at(c[b] + d[b] * 0.05, out[b])
+            pieces.append(_sweep([back, ahead], closed=False))
+    return pieces
+
+
+def _fan_prism(pts: list[np.ndarray], z0: float, z1: float) -> np.ndarray:
+    """Closed prism from z0 to z1 over a polygon that every point sees from its first one (a fan)."""
+    lo = [np.array([*q, z0]) for q in pts]
+    hi = [np.array([*q, z1]) for q in pts]
+    n = len(pts)
+    tris = [t for i in range(1, n - 1) for t in ([lo[0], lo[i + 1], lo[i]], [hi[0], hi[i], hi[i + 1]])]
+    for i in range(n):
+        j = (i + 1) % n
+        tris += [[lo[i], lo[j], hi[j]], [lo[i], hi[j], hi[i]]]
+    t = np.array(tris)
+    return t[:, ::-1] if Mesh(t).volume() < 0 else t
+
+
+def _sweep(rings: list[np.ndarray], closed: bool) -> np.ndarray:
+    """Closed mesh through matching cross-sections (each (m, 3), convex), capped unless ``closed``."""
+    m = len(rings[0])
+    tris = []
+    for a, b in zip(rings, rings[1:] + rings[:1] if closed else rings[1:]):
+        for i in range(m):
+            j = (i + 1) % m
+            tris += [[a[i], a[j], b[j]], [a[i], b[j], b[i]]]
+    if not closed:
+        for i in range(1, m - 1):
+            tris += [[rings[0][0], rings[0][i + 1], rings[0][i]], [rings[-1][0], rings[-1][i], rings[-1][i + 1]]]
+    t = np.array(tris)
+    return t[:, ::-1] if Mesh(t).volume() < 0 else t
 
 
 def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:

@@ -39,9 +39,9 @@ def test_teardrop_boxes_make_a_45_degree_roof():
 def test_analyse_finds_the_bracket_hole_and_report_html_escapes():
     stl = (ROOT / "web" / "samples" / "l_bracket.stl").read_bytes()
     result = bridge.analyse(stl, "bambu_p1s", "pla")
-    assert result["up"] == [0.0, 0.0, 1.0]
-    assert len(result["teardrops"]) == 1
-    hole = result["teardrops"][0]
-    assert abs(hole["axis"][2]) < 0.01 and hole["radius"] > 0
+    assert result["up"] in ([0.0, 0.0, 1.0], [0.0, -1.0, 0.0], [0.0, 1.0, 0.0])  # on its base, or on its side (PLA: no footprint bonus)
+    assert len(result["teardrops"]) == (1 if result["up"][2] else 2)  # on its side, the base's hole lies sideways too
+    for hole in result["teardrops"]:
+        assert abs(np.dot(hole["axis"], result["up"])) < 0.01 and hole["radius"] > 0  # lying sideways in the print
     page = bridge.report_html("# Title\n- **bold** <x>\n| a | b |\n|---|---|", result["up"])
     assert "<h1>Title</h1>" in page and "<li><b>bold</b> &lt;x&gt;</li>" in page and "a · b" in page
