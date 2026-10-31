@@ -1092,6 +1092,26 @@ $("run-dynamics").onclick = async () => {
   }, ["sims"]);
 };
 
+// ---------- heat inside an electronics box ----------
+const HEAT_CLASS = { fine: "fine", warm: "borderline", "too hot": "likely-to-break" };
+$("run-box-heat").onclick = () =>
+  busy("Working out the heat inside…", async () => {
+    const r = await call("box_heat", { power_w: Number($("heat-w").value) || 0, ambient_c: Number($("heat-room").value) || 25,
+      cooling: $("heat-cooling").value, profile: profile() });
+    const t = Math.round(r.inside_c);
+    // The walls sit at about the inside temperature: let the other checks use it as "where it's used".
+    const use = el("button", { textContent: `Check the part at ${t} °C`, onclick: async () => {
+      let opt = [...$("use-temp").options].find((o) => o.value === String(t));
+      if (!opt) $("use-temp").append((opt = el("option", { value: String(t), textContent: `Inside the electronics box (${t} °C)` })));
+      $("use-temp").value = opt.value;
+      await $("use-temp").onchange();
+      setStatus(`The checks now use ${t} °C, the air inside the box.`);
+    } });
+    $("box-heat-result").replaceChildren(
+      el("div", { className: `verdict ${HEAT_CLASS[r.verdict]}` }, el("p", { textContent: r.explanation }), r.inside_c > 30 ? use : ""));
+    setStatus(state.summary);
+  }, ["sims"]);
+
 // ---------- strength: FEA result view ----------
 const f32 = (b) => new Float32Array(b.slice().buffer);
 const dispLength = (r) => {
