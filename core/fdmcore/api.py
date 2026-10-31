@@ -40,6 +40,7 @@ class Session:
     name: str
     regions: np.ndarray | None = None  # region id per triangle, computed on demand
     load_case: tuple | None = None  # (loads json, prepared LoadCase) cache
+    solved: tuple | None = None  # (key, result): the last static strength solve, reused by the next check
     bodies: list = field(default_factory=list)  # (name, Mesh) per body in the file
     body: int = 0  # which body is loaded
     tags: dict = field(default_factory=dict)  # region id -> what the user says the feature is (features.TAGS)
@@ -611,6 +612,36 @@ def _zone_info(z, mesh: Mesh, up, bed) -> dict:
             "corners_print": [_to_print_frame(mesh, rot, c) for c in corners]}
 
 
+ZONE_MARGIN_MM = 3.0  # a zone reaches this far past the picked face, so the slicer's walls there are inside it
+
+
+def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARGIN_MM, walls: int | None = None,
+            infill: float | None = None, profile: dict | None = None) -> dict:
+    """A zone the user picks: an upright box around a face (``region``) or a spot (``point``, part
+    coordinates), ``margin`` mm bigger on every side, printed with more walls and infill (default
+    two more walls and 40 %). Same form as the optimiser's zones, so strength and export take it."""
+    from .regions import find_regions
+    from .strength import Zone
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    if region is not None:
+        if s.regions is None:
+            s.regions = find_regions(s.mesh)
+        pts = s.mesh.triangles[np.asarray(s.regions) == int(region)].reshape(-1, 3)
+        if not len(pts):
+            raise ValueError(f"Unknown face {region}")
+    elif point is not None:
+        pts = np.asarray([point], float)
+    else:
+        raise ValueError("Give a face (region) or a point")
+    built = pts @ rotation_to_z(up).T
+    plan = goal_plan(p)
+    z = Zone(tuple((built.min(axis=0) - margin).tolist()), tuple((built.max(axis=0) + margin).tolist()),
+             int(walls if walls is not None else plan["walls"] + 2), float(infill if infill is not None else max(0.4, plan["infill"] / 100)))
+    return _zone_info(z, s.mesh, up, p.printer["bed"])
+
+
 def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     z = zoned["zones"][0]
     head = (f"Stronger only where it's needed: {len(zoned['zones'])} zone{'s' if len(zoned['zones']) > 1 else ''} with "
@@ -809,6 +840,22 @@ def _load_case(loads: list[dict], voxels: int = STRENGTH_VOXELS):
     return s.load_case[1]
 
 
+def _evaluate(cases, up, p: Profile, sh) -> dict:
+    """``strength.evaluate_cases`` for the cached load cases, remembered once: "Will it hold?", the
+    knock check, the stronger options and the material advisor solve the same thing one after another."""
+    from .strength import evaluate_cases
+
+    s = _require()
+    ours = s.load_case is not None and s.load_case[1] is cases
+    key = (s.load_case[0] if ours else None, tuple(np.round(np.asarray(up, float), 9)), p, sh)
+    if ours and s.solved is not None and s.solved[0] == key:
+        return dict(s.solved[1])
+    r = evaluate_cases(cases, up, p, sh)
+    if ours:
+        s.solved = (key, r)
+    return dict(r)
+
+
 def _shells(p: Profile, walls: int | None = None, infill: float | None = None, top: int | None = None, bottom: int | None = None,
             zones: list[dict] | None = None):
     """How the part will be printed; anything not given comes from the goal's usual settings.
@@ -910,7 +957,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
         if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
             raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
         printed, missed = _printed(model)
-    r = evaluate_cases(cases, up, p, sh, printed)
+    r = evaluate_cases(cases, up, p, sh, printed) if printed is not None else _evaluate(cases, up, p, sh)
     r["fine"] = bool(fine)
     if printed is not None:
         r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
@@ -951,44 +998,50 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     return r
 
 
-def dynamics(up, loads: list[dict], profile: dict | None = None, drop_mm: float = 0.0, mounted_kg: float = 0.0) -> dict:
+def dynamics(up, loads: list[dict], profile: dict | None = None, drop_mm: float = 0.0, mounted_kg: float = 0.0, shake: bool = True,
+             walls: int | None = None, infill: float | None = None, top: int | None = None, bottom: int | None = None,
+             zones: list[dict] | None = None) -> dict:
     """Simplified dynamics: the lowest natural frequency as held (shakes along at that rate: a motor,
-    fan or printer running near it makes it resonate) and its swing shape for the FEA view; and the
-    load falling ``drop_mm`` onto the part (or the part being knocked): the impact factor and the
-    safety factor that leaves. ``mounted_kg``: something fixed on the loaded face that swings with it."""
-    from .strength import evaluate_cases, impact_factor, sample_nodes, vibration
-    from .strength import refine
+    fan or printer running near it makes it resonate) and its swing shape for the FEA view (``shake``);
+    and the load falling ``drop_mm`` onto the part (or the part being knocked): the impact factor and
+    the safety factor that leaves. ``mounted_kg``: something fixed on the loaded face that swings with
+    it. Printed like the strength check (``walls`` … ``zones``), whose static solve it reuses."""
+    from .strength import impact_factor, refine, sample_nodes, vibration
 
     s = _require()
     p = Profile.from_dict(profile)
     cases = _load_case(loads)
-    sh = _shells(p)
-    hz, shape = vibration(cases[0], up, p, sh, mounted_kg)
-    r = evaluate_cases(cases, up, p, sh)
+    sh = _shells(p, walls, infill, top, bottom, zones)
     model = cases[0].model
-    worst = cases[[c.number for c in cases].index(r["case"])]
-    loaded = np.linalg.norm(worst.forces, axis=1) > 0
-    sag = float(np.abs(np.einsum("ij,ij->i", r["u"][loaded], worst.forces[loaded] / np.linalg.norm(worst.forces[loaded], axis=1, keepdims=True))).mean())
-    factor = impact_factor(drop_mm, sag)
-    fine = refine(s.mesh.triangles, model.grid.h)
-    disp = sample_nodes(model, shape, fine.reshape(-1, 3))
-    out = {"frequency_hz": round(hz, 1), "sag_mm": round(sag, 3), "impact_factor": round(factor, 2),
-           "static_safety": r["safety_factor"], "impact_safety": r["safety_factor"] / factor if np.isfinite(r["safety_factor"]) else None,
-           "field_triangles": fine.astype(np.float32).tobytes(), "vertex_disp": disp.astype(np.float32).tobytes(),
-           "vertex_value": np.linalg.norm(disp, axis=1).astype(np.float32).tobytes(), "drop_mm": drop_mm}
+    out = {"drop_mm": drop_mm, "frequency_hz": None, "sag_mm": None, "impact_factor": None, "static_safety": None, "impact_safety": None}
+    if shake:
+        hz, shape = vibration(cases[0], up, p, sh, mounted_kg)
+        fine = refine(s.mesh.triangles, model.grid.h)
+        disp = sample_nodes(model, shape, fine.reshape(-1, 3))
+        out.update(frequency_hz=round(hz, 1), field_triangles=fine.astype(np.float32).tobytes(), vertex_disp=disp.astype(np.float32).tobytes(),
+                   vertex_value=np.linalg.norm(disp, axis=1).astype(np.float32).tobytes())
+    if drop_mm > 0:
+        r = _evaluate(cases, up, p, sh)
+        worst = cases[[c.number for c in cases].index(r["case"])]
+        loaded = np.linalg.norm(worst.forces, axis=1) > 0
+        sag = float(np.abs(np.einsum("ij,ij->i", r["u"][loaded], worst.forces[loaded] / np.linalg.norm(worst.forces[loaded], axis=1, keepdims=True))).mean())
+        factor = impact_factor(drop_mm, sag)
+        out.update(sag_mm=round(sag, 3), impact_factor=round(factor, 2), static_safety=r["safety_factor"],
+                   impact_safety=r["safety_factor"] / factor if np.isfinite(r["safety_factor"]) else None)
     out["explanation"] = _dynamics_story(out)
     return out
 
 
 def _dynamics_story(r: dict) -> str:
-    hz = r["frequency_hz"]
-    where = ("very low: it sways visibly and anything shaking nearby can rock it" if hz < 20 else
-             "in the range of motors, fans and printers (20–200 Hz): if something near it runs at that rate it can resonate and rattle loose"
-             if hz < 200 else "high: everyday shaking won't make it resonate")
-    out = f"It swings fastest-free at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
+    hz, out = r["frequency_hz"], ""
+    if hz is not None:
+        where = ("very low: it sways visibly and anything shaking nearby can rock it" if hz < 20 else
+                 "in the range of motors, fans and printers (20–200 Hz): if something near it runs at that rate it can resonate and rattle loose"
+                 if hz < 200 else "high: everyday shaking won't make it resonate")
+        out = f"It swings fastest-free at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
     if r["drop_mm"] > 0 and r["impact_safety"] is not None:
         isf = r["impact_safety"]
-        out += (f" If the load drops {r['drop_mm']:.0f} mm onto it, it hits about {r['impact_factor']:.1f}× as hard as when held still"
+        out += (f"{' ' if out else ''}If the load drops {r['drop_mm']:.0f} mm onto it, it hits about {r['impact_factor']:.1f}× as hard as when held still"
                 f" (the part gives only {r['sag_mm']:.2f} mm), so the safety drops from ×{r['static_safety']:.1f} to ×{isf:.1f}"
                 + (": still fine." if isf >= 2 else ": it may break when that happens." if isf >= 1 else ": it will likely break."))
     return out
@@ -1010,7 +1063,7 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
     sh = _shells(p, walls, infill, top, bottom)
     model = case[0].model
     to_grams = abs(s.mesh.volume()) / (len(model.elems) * model.grid.h**3) / 1000 * p.material["density_g_cm3"]
-    base = evaluate_strength(case, up, p, sh)
+    base = _evaluate(case, up, p, sh)
     grams = material_volume(model, up, sh, p) * to_grams
     out = []
 
@@ -1136,7 +1189,7 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
     if up is not None and loads:
         from .strength import evaluate_cases
 
-        base = evaluate_cases(_load_case(loads), up, p, _shells(p))
+        base = _evaluate(_load_case(loads), up, p, _shells(p))
     need = required_safety(p)
     out = []
     for mid, m in presets()["materials"].items():
@@ -1570,6 +1623,7 @@ METHODS = {
     "regions": regions,
     "optimise_strength": optimise_strength,
     "box_heat": box_heat,
+    "zone_at": zone_at,
     "tag_feature": tag_feature,
     "strength": strength,
     "strength_options": strength_options,
