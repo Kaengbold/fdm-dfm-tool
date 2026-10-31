@@ -126,8 +126,9 @@ def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int 
     try:
         src = work / "part.3mf"
         src.write_bytes(model)
+        flat = {k: _flat_profile(Path(v), work) for k, v in profiles.items()}
         cmd = [str(orca), "--slice", "0", "--outputdir", str(work / "out"),
-               "--load-settings", f"{profiles['machine']};{profiles['process']}", "--load-filaments", str(profiles["filament"]), str(src)]
+               "--load-settings", f"{flat['machine']};{flat['process']}", "--load-filaments", str(flat["filament"]), str(src)]
         (work / "out").mkdir()
         run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         gcode = sorted((work / "out").glob("*.gcode"))
@@ -141,6 +142,20 @@ def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int 
         return {**parse_gcode(text), **({"gcode": text} if keep_gcode else {})}
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _flat_profile(path: Path, work: Path) -> Path:
+    """A copy of a system profile with its ``inherits`` chain merged in. OrcaSlicer's command line
+    does not follow ``inherits`` for profile files: every key the file doesn't set itself falls back
+    to the built-in default (e.g. a 2 mm³/s melt rate instead of the profile's 12 for a P1S's PLA)."""
+    resources = next((p for p in path.parents if p.name == "profiles"), None)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if resources is not None and data.get("name") in (index := _profiles(resources)):
+        data = dict(index[data["name"]]["data"])
+    data.pop("inherits", None)
+    out = work / f"{path.parent.name}-{path.name}"
+    out.write_text(json.dumps(data), encoding="utf-8")
+    return out
 
 
 def _minutes(text: str) -> float:

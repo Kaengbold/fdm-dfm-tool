@@ -121,9 +121,11 @@ materials:
   # transition for PLA (~60 °C, Grasso et al. 2018, Rapid Prototyping Journal, doi:10.1108/RPJ-04-2017-0055),
   # PETG, ABS, ASA and PC (typical datasheet values); for semi-crystalline PA-CF and soft TPU a conservative
   # heat-deflection value. Approximate: brand datasheets (research job G-3) should replace them.
-  # max_flow_mm3s: how fast the hotend can melt it, OrcaSlicer's generic filament profiles (Bambu, 2.x:
-  # filament_max_volumetric_speed), so print times follow what the slicer will do. Branded filament and
-  # high-flow hotends go faster; set your own under My materials (imports it from an Orca .json).
+  # max_flow_mm3s: how fast the hotend can melt it: OrcaSlicer 2.x's generic filament profiles for the
+  # P1S and the K1C (filament_max_volumetric_speed, inherits chain resolved; PLA 16 / 14, PETG 12 / 12,
+  # ABS 15 / 16, ASA 12 / 16, PC 16 / 10, TPU 3.2 / 3, PA-CF 8 / 8), averaged, so print times follow
+  # what the slicer will do. Branded filament and high-flow hotends go faster; set your own under
+  # My materials (imports it from an Orca .json).
   # uv_resistance: how it lasts in sunlight. ASA is made for outdoor use (it replaces ABS there); PLA and ABS
   # turn brittle / yellow; PETG, PC, nylon and TPU are in between. General polymer knowledge, approximate (G-3).
   pla:
@@ -134,7 +136,7 @@ materials:
     warp_risk: low           # low | medium | high
     abrasive: false
     hygroscopic: low         # low | medium | high
-    max_flow_mm3s: 12
+    max_flow_mm3s: 15
     # Interlayer (Z) strength as a fraction of in-plane strength, by enclosure type.
     z_strength_factor: {none: 0.55, passive: 0.55, heated: 0.55}
     tensile_xy_mpa: 50       # Prusament PLA TDS: 51 MPa printed flat (ISO 527-1)
@@ -217,7 +219,7 @@ materials:
     warp_risk: low
     abrasive: false
     hygroscopic: low
-    max_flow_mm3s: 12
+    max_flow_mm3s: 15
     z_strength_factor: {none: 0.6, passive: 0.6, heated: 0.6}  # verify: tougher than PLA, layer bond similar
     tensile_xy_mpa: 50
     modulus_xy_mpa: 2600
@@ -237,7 +239,7 @@ materials:
     warp_risk: high
     abrasive: false
     hygroscopic: low
-    max_flow_mm3s: 12
+    max_flow_mm3s: 14
     z_strength_factor: {none: 0.35, passive: 0.55, heated: 0.7}
     tensile_xy_mpa: 40       # Polymaker PolyLite ASA 38.6, Bambu 37, Prusament 42 MPa (TDS)
     modulus_xy_mpa: 2000     # Polymaker 2175, Prusament 1600–1700 MPa (TDS)
@@ -257,7 +259,7 @@ materials:
     warp_risk: high
     abrasive: false
     hygroscopic: medium
-    max_flow_mm3s: 16
+    max_flow_mm3s: 13
     z_strength_factor: {none: 0.3, passive: 0.5, heated: 0.7}
     tensile_xy_mpa: 60       # Bambu PC 62, Prusament PC Blend 63, Polymaker PolyMax PC 53 MPa (TDS)
     modulus_xy_mpa: 2300     # Polymaker PolyMax PC 2150–2440 MPa (TDS)
@@ -277,7 +279,7 @@ materials:
     warp_risk: low
     abrasive: false
     hygroscopic: medium
-    max_flow_mm3s: 3.2         # flexible filament jams when pushed fast
+    max_flow_mm3s: 3         # flexible filament jams when pushed fast
     z_strength_factor: {none: 0.85, passive: 0.85, heated: 0.85}  # layers bond very well
     tensile_xy_mpa: 30       # Polymaker PolyFlex TPU95 29 MPa, Bambu TPU 95A HF 22 MPa (TDS)
     modulus_xy_mpa: 60       # verify: data sheets give stress at 100 % stretch, not this; the strength check is not meant for TPU
