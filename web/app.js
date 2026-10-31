@@ -1359,24 +1359,29 @@ const FEATURE_NAME = { hole: "hole", boss: "round post" };
 
 function renderFeatures(features) {
   const list = features.filter(shown);
-  const ask = list.filter((f) => f.confidence === "low" && !f.tag).length;
+  // Only unsure ones are a question; a clear hole is just listed (with a quiet way out if it isn't one).
+  const unsure = (f) => f.confidence === "low" && !f.tag;
+  const ask = list.filter(unsure).length;
   $("features-summary").textContent = !list.length
     ? "No round holes or posts found."
-    : `Found ${list.length} round feature(s).${ask ? ` Please check the ${ask} marked "?" — click a name to see it on the part.` : " Click a name to see it on the part."}`;
+    : `Found ${list.length} round feature(s).${ask ? ` ${ask === 1 ? "One needs" : `${ask} need`} your answer.` : ""} Click a name to see it on the part.`;
   $("features").replaceChildren(
     ...list.map((f) => {
       const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
       const name = el("button", {
         className: "link",
-        textContent: `${f.confidence === "low" && !f.tag ? "? " : ""}Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`,
+        textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`,
         onclick: () => showFeature(f),
       });
       const answer = f.tag
         ? [el("span", { className: "hint", textContent: f.tag === "none" ? `ignored — not a ${FEATURE_NAME[f.type]}` : "confirmed" }),
            el("button", { textContent: "Undo", onclick: () => tagFeature(f.region, null) })]
-        : [el("button", { textContent: "Yes", title: `It is a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, f.type) }),
-           el("button", { textContent: `Not a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, "none") })];
-      return el("li", { className: [f.tag === "none" ? "rejected" : "", f.confidence === "low" && !f.tag ? "ask" : ""].join(" ") }, name, ...answer,
+        : unsure(f)
+          ? [el("span", { className: "question", textContent: `Is this a ${FEATURE_NAME[f.type]}? We're not sure.` }),
+             el("button", { textContent: "Yes", title: `It is a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, f.type) }),
+             el("button", { textContent: `Not a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, "none") })]
+          : [el("button", { className: "link quiet", textContent: `Not a ${FEATURE_NAME[f.type]}?`, onclick: () => tagFeature(f.region, "none") })];
+      return el("li", { className: [f.tag === "none" ? "rejected" : "", unsure(f) ? "ask" : ""].join(" ") }, name, ...answer,
         f.tag !== "none" && f.full_circle ? fitControls(f) : "");
     }),
   );

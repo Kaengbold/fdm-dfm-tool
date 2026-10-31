@@ -170,9 +170,9 @@ body:has(#legend:not([hidden])) .view-key { display: none; }
 /* ---------- panel ---------- */
 .panel { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); }
 .panes { flex: 1; overflow-y: auto; padding: 22px 24px 28px; }
-.pane { display: flex; flex-direction: column; gap: 14px; }
+.pane { display: flex; flex-direction: column; gap: 20px; }
 body[data-level="expert"] .pane + .pane { margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line); }
-.pane > div { display: flex; flex-direction: column; gap: 14px; }
+.pane > div { display: flex; flex-direction: column; gap: 18px; }
 .pane-foot { border-top: 1px solid var(--line); padding: 10px 24px 14px; display: flex; flex-direction: column; gap: 10px; }
 .foot-buttons { display: flex; gap: 10px; justify-content: space-between; }
 .foot-buttons .primary { margin-left: auto; }
@@ -237,14 +237,18 @@ body[data-level="simple"] .presets { grid-template-columns: minmax(0, 1fr) minma
 @keyframes pulse { from { box-shadow: 0 0 0 3px var(--now); } to { box-shadow: 0 0 0 0 transparent; } }
 .pulse { animation: pulse 0.5s ease-out; }
 
-/* Closed by default: the detail is there, the panel stays short. */
-.more-block > summary { cursor: pointer; font-weight: 700; color: var(--accent); padding: 2px 0; }
-summary::marker { color: var(--accent); }
+/* A box that opens to show a part of the tool (closed: one line, so the panel stays short). */
+.more-block { font-size: 14px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--panel); padding: 0 12px; }
+.more-block > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; margin: 0 -12px; padding: 11px 12px; font-weight: 700; color: var(--text); border-radius: var(--r); }
+.more-block > summary::-webkit-details-marker { display: none; }
+.more-block > summary::after { content: ""; margin-left: auto; flex: none; width: 7px; height: 7px; border: solid var(--accent); border-width: 0 2px 2px 0; transform: rotate(45deg) translate(-2px, -2px); transition: transform 0.15s; }
+.more-block[open] > summary::after { transform: rotate(-135deg) translate(-2px, -2px); }
+.more-block > summary:hover { background: var(--soft); }
+.more-block[open] { padding-bottom: 12px; }
+.more-block[open] > summary { margin-bottom: 8px; border-bottom: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0; }
 .more-block > summary small { font-weight: 400; color: var(--muted); }
-.more-block[open] > summary { margin-bottom: 10px; }
-.more-block { font-size: 14px; }
+summary::marker { color: var(--accent); }
 .more-block > .row { margin: 6px 0; }
-.load-optional[open] { padding: 12px; border: 1px solid var(--line); border-radius: var(--r); }
 
 .drop {
   display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center;
@@ -367,8 +371,11 @@ summary::marker { color: var(--accent); }
 .edits label { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; cursor: pointer; }
 .edits small { display: block; color: var(--muted); }
 .edit-params { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; }
-.features { list-style: none; padding: 0; margin: 0; font-size: 14px; }
-.features li { display: flex; align-items: center; gap: 6px; padding: 3px 0; flex-wrap: wrap; }
+.features { list-style: none; padding: 0; margin: 0; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+.features li { display: flex; align-items: center; gap: 6px 8px; padding: 8px 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--r); }
+.features li.ask { border-color: var(--borderline-ink); background: var(--warn-soft); }
+.features .question { flex-basis: 100%; font-weight: 700; }
+.features .fit { flex-basis: 100%; }
 .features li.ask .link { color: var(--borderline-ink); }
 .features li.rejected .link { text-decoration: line-through; color: var(--muted); }
 .features button { font-size: 13px; padding: 2px 8px; }
@@ -469,3 +476,6 @@ body[data-level="simple"] #settings-block > .lead { display: none; }
 button.primary:disabled { opacity: 1; background: var(--soft); border-color: var(--line); color: var(--muted); }
 #settings .changed { color: var(--accent); font-weight: 700; font-size: 12px; }
 .hint.sub { margin: -2px 0 4px 26px; }
+.features .link.quiet { margin-left: auto; font-weight: 400; font-size: 13px; color: var(--muted); }
+.features .fit input { width: 4.5em; }
+#design-block h3 small { font-weight: 400; }

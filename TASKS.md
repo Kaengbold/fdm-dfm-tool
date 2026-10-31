@@ -137,9 +137,9 @@ Bugs first (P1), then UI clean-up, then new features.
 
 ### UI clean-up
 
-- [ ] **T-210 P1** Clearer separation: more space between blocks so it's obvious where one thing ends; replace the fold-out text links ("details") with boxes that open a sub-section. · owner: —
+- [x] **T-210 P1** Clearer separation: more space between blocks so it's obvious where one thing ends; replace the fold-out text links ("details") with boxes that open a sub-section. · owner: Claude (`task/T-201-bugs`) — fold-outs are boxes with a header line and an arrow that open (border, hover); more space between blocks (20 px between, 18 px inside); the hole list is small cards; Design changes has headings for holes and suggested changes.
 - [x] **T-211 P1** Time shown as minutes and seconds above 1 min (working badge, estimates). · owner: Claude (`task/T-201-bugs`) — working badge: "45 s", "2 min 05 s", "1 h 03 min".
-- [ ] **T-212 P1** "Is this a hole?" only when the detection is unsure; clear holes are not asked. · owner: —
+- [x] **T-212 P1** "Is this a hole?" only when the detection is unsure; clear holes are not asked. · owner: Claude (`task/T-201-bugs`) — only holes the detection is unsure about are asked (yellow card: "Is this a hole? We're not sure."); clear ones are listed with a quiet "Not a hole?" link.
 - [x] **T-213 P2** "Suggest design changes" button is pointless (suggestions come by default): remove it. · owner: Claude (`task/T-201-bugs`) — button removed: suggestions come when Design changes opens (Expert: after each check).
 - [ ] **T-214 P2** "Make it stronger" suggestions grouped (settings / material / design / less load) in boxes that open and close. · owner: —
 - [x] **T-215 P2** "The load stays on" checkbox: explain it (creep: a constant load needs ×3 instead of ×2) or rename it so it's self-explaining. · owner: Claude (`task/T-201-bugs`) — renamed "The load is on all the time (e.g. a shelf …)" with a visible line: creep, so ×3 instead of ×2.
