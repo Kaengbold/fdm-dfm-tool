@@ -169,8 +169,9 @@ def test_rejected_hole_gets_no_edit_and_no_findings():
 
 
 def _clean(tris: np.ndarray) -> tuple[int, int]:
-    """(edges not shared by exactly two triangles, zero-area triangles) once the result is saved as a
-    float STL and its corners are matched by position, the way a slicer reads it."""
+    """(edges not shared by exactly two triangles, collapsed triangles) once the result is saved as a
+    float STL and its corners are matched by position, the way a slicer reads it. Collapsed: two
+    corners at the same spot, or no area at all (tiny but proper triangles are fine)."""
     t = tris.astype("<f4")
     _, ids = np.unique(t.reshape(-1, 3), axis=0, return_inverse=True)
     ids = ids.reshape(-1, 3)
@@ -178,7 +179,8 @@ def _clean(tris: np.ndarray) -> tuple[int, int]:
     _, counts = np.unique(edges, axis=0, return_counts=True)
     t = t.astype(float)
     area = np.linalg.norm(np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0]), axis=1) / 2
-    return int((counts != 2).sum()), int((area < 1e-6).sum())
+    same = (ids[:, 0] == ids[:, 1]) | (ids[:, 1] == ids[:, 2]) | (ids[:, 0] == ids[:, 2])
+    return int((counts != 2).sum()), int((same | (area < 1e-10)).sum())
 
 
 @pytest.mark.parametrize("name, material", [("l_bracket", "abs"), ("test_block", "abs"), ("hook", "pla"),
