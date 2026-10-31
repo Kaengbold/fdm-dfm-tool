@@ -47,10 +47,13 @@ def warp_limit(profile: Profile) -> float | None:
     return table.get(profile.enclosure)
 
 
-def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None) -> dict:
+def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None,
+             warm: tuple | None = None) -> dict:
     """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model, displacement
     after coming off the bed (n_nodes, 3, part frame), the bed's pull at each bed node while printing
-    (N, positive = the part pulls away from the bed) and the bed nodes."""
+    (N, positive = the part pulls away from the bed) and the bed nodes. ``warm`` (heights, °C): how warm
+    each height still is when more goes on top (the layer heat model with the G-code's real layer
+    times); plastic still warm then shrinks less while printing."""
     model = build_model(voxelize(mesh, target_voxels, h))
     up = np.asarray(up, float) / np.linalg.norm(up)
     grid = model.grid
@@ -66,6 +69,8 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     bed = height <= height.min() + 1e-6
     zc = grid.centers(model.elems) @ up
     shrink = shrink_while_printing(zc - zc.min() + grid.h / 2, profile)
+    if warm is not None:
+        shrink = np.minimum(shrink, shrink_below(np.interp(zc - zc.min() + grid.h / 2, *warm), profile))
     levels = np.unique(np.round((zc - zc.min()) / grid.h).astype(int))
     groups = np.array_split(levels, min(MAX_STEPS, len(levels)))
     elem_level = np.round((zc - zc.min()) / grid.h).astype(int)
@@ -116,6 +121,13 @@ def shrink_while_printing(height: np.ndarray, profile: Profile) -> np.ndarray:
     t_set, t_air = float(mat["softening_c"]), AMBIENT_C[profile.enclosure]
     t_here = t_air + (float(mat["bed_temp_c"]) - t_air) * np.exp(-height / BED_FADE_MM)
     return mat.get("shrinkage_pct", 0.3) / 100 * np.clip(t_set - t_here, 0, None) / max(t_set - ROOM_C, 1.0)
+
+
+def shrink_below(temp: np.ndarray, profile: Profile) -> np.ndarray:
+    """Linear shrinkage of plastic cooling from where it sets down to ``temp`` (°C)."""
+    mat = profile.material
+    t_set = float(mat["softening_c"])
+    return mat.get("shrinkage_pct", 0.3) / 100 * np.clip(t_set - np.asarray(temp), 0, None) / max(t_set - ROOM_C, 1.0)
 
 
 def curl(result: dict) -> float:

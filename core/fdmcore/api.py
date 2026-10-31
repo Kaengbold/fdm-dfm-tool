@@ -946,17 +946,20 @@ WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, l
 _warp_reference: dict = {}
 
 
-def warping(up, profile: dict | None = None) -> dict:
+def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
     longest bar that stays flat (1 = like that bar), where it lifts first, and the curled shape
-    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm)."""
+    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm).
+    ``detailed``: with the loaded G-code's real layer times (layers that come quickly are still warm
+    when the next go on and shrink less); ``from_gcode`` says whether it was used."""
     from . import warp
     from .strength import refine, sample_nodes
 
     s = _require()
     p = Profile.from_dict(profile)
     sh = _shells(p)
-    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"))
+    warm = _warm_layers(up, p) if detailed else None
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm)
     model = r["model"]
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
     if key not in _warp_reference:
@@ -983,9 +986,24 @@ def warping(up, profile: dict | None = None) -> dict:
     out = {"lift_ratio": ratio, "verdict": verdict, "curl_mm": round(curl, 3), "reference_mm": warp.warp_limit(p),
            "field_triangles": fine.astype(np.float32).tobytes(), "vertex_disp": disp.astype(np.float32).tobytes(),
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
-           "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"]}
+           "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
+           "from_gcode": warm is not None}
     out["explanation"] = _warp_story(out, p)
     return out
+
+
+def _warm_layers(up, p: Profile) -> tuple | None:
+    """(heights, °C) from the layer heat model with the loaded G-code's layer times, if it is for ``up``."""
+    from .checks import _layer_heat
+    from .gcode import layer_times
+    from .slicer import slice_mesh
+
+    s = _require()
+    if s.gcode is None or np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
+        return None
+    rotation = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    layers = slice_mesh(orient(s.mesh, rotation), p.layer_height)
+    return np.array([l.z for l in layers]), _layer_heat(layers, p, layer_times(s.gcode["toolpath"]))
 
 
 def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
@@ -1617,6 +1635,9 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         sliced = layer_times(s.gcode["toolpath"])
     result = run_checks(oriented, p, sliced=sliced)
     result["stats"]["heat_from_gcode"] = sliced is not None
+    spots = _spot_heat(rotation, p) if sliced is not None else None
+    if spots is not None:
+        result["findings"] += _spot_findings(spots, p, result["findings"])
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
     result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
     if not fit["fits"]:
@@ -1635,17 +1656,79 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         "stats": result["stats"],
         "settings": recommend_settings(p, result["findings"], result["stats"]) if mode != "design" else [],
         "z_strength_factor": result["z_strength_factor"],
-        "face_temp": _face_temp(oriented, result["stats"]["layer_heat"]),
+        "face_temp": _face_temp(oriented, result["stats"]["layer_heat"], spots),
     }
+
+
+def _gcode_to_oriented(rotation: np.ndarray):
+    """Printer coordinates of the loaded G-code -> the oriented part (``orient``: centred, on z = 0)."""
+    s = _require()
+    g = s.gcode
+    turned = s.mesh.triangles.reshape(-1, 3) @ rotation.T
+    lo, hi = turned.min(axis=0), turned.max(axis=0)
+    base = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
+    return lambda x: x @ g["q"].T + g["shift"] - base
+
+
+def _spot_heat(rotation: np.ndarray, p: Profile) -> dict:
+    from .gcode import spot_heat
+
+    return spot_heat(_require().gcode["toolpath"], _gcode_to_oriented(rotation), p)
+
+
+def _spot_findings(spots: dict, p: Profile, findings: list[dict]) -> list[dict]:
+    """Spots that get the next layer while still soft, line by line from the G-code: only when the
+    layer heat check (whole layers) didn't already say so for that height."""
+    C = load_data("thresholds")["cooling"]
+    soft = float(p.material["softening_c"])
+    hot = (spots["temp_c"] >= soft + C["soft_margin_c"]) & (spots["z"] > C["above_bed_mm"])
+    if not hot.any():
+        return []
+    zs = np.unique(spots["z"][hot])
+    if zs[-1] - zs[0] < C["min_run_mm"]:
+        return []
+    known = [f["bbox"] for f in findings if f["rule"] == "small_layers_cooling" and f.get("bbox")]
+    i = int(np.argmax(np.where(hot, spots["temp_c"], -np.inf)))
+    if any(b[0][2] - 0.5 <= spots["z"][i] <= b[1][2] + 0.5 for b in known):
+        return []
+    near = hot & (np.linalg.norm(spots["xy"] - spots["xy"][i], axis=1) <= 10)
+    xy, z = spots["xy"][near], spots["z"][near]
+    half = spots["cell_mm"] * 1.5
+    t, wait = float(spots["temp_c"][i]), float(spots["seconds"][i])
+    sev = "warn" if t >= soft + C["hot_margin_c"] else "info"
+    return [{"rule": "small_layers_cooling", "severity": sev, "bbox": [[*(xy.min(axis=0) - half).tolist(), float(z.min())], [*(xy.max(axis=0) + half).tolist(), float(z.max())]],
+             "metrics": {"temp_c": round(t, 1), "softening_c": soft, "seconds": round(wait, 1)},
+             "detail": f"Line by line from your G-code: a spot at {z.min():.0f}–{z.max():.0f} mm gets the next layer after only {wait:.0f} s and is "
+                       f"still about {t:.0f} °C ({p.material['name']} softens from about {soft:.0f} °C), so it can droop or blob. "
+                       f"A longer minimum layer time, or a second copy on the plate, gives it time to cool"}]
 
 
 HEAT_COLOUR_C = (10.0, 55.0)  # °C above softening: no colour … full red
 
 
-def _face_temp(oriented: Mesh, heat: dict) -> bytes:
-    """Heat build-up per triangle (uint8, 255 = far above softening while printing), for the viewer."""
+def _face_temp(oriented: Mesh, heat: dict, spots: dict | None = None) -> bytes:
+    """Heat build-up per triangle (uint8, 255 = far above softening while printing), for the viewer.
+    With ``spots`` (line by line from the G-code) each triangle takes the warmest spot within a cell of it
+    on its layer; triangles without one (the top, the first layer) keep the whole layer's."""
     z = oriented.triangles[..., 2].mean(axis=1)
-    over = np.interp(z, heat["z"], heat["temp_c"]) - heat["softening_c"]
+    temp = np.interp(z, heat["z"], heat["temp_c"])
+    if spots is not None and len(spots["z"]):
+        c = oriented.triangles.mean(axis=1)
+        zs = np.unique(spots["z"])
+        level = np.clip(np.searchsorted(zs, c[:, 2]), 0, len(zs) - 1)
+        cell = spots["cell_mm"]
+        key = lambda lv, xy: (lv * 100_003 + np.floor(xy[:, 0] / cell).astype(np.int64)) * 100_003 + np.floor(xy[:, 1] / cell).astype(np.int64)
+        sk = key(np.searchsorted(zs, spots["z"]), spots["xy"])
+        order = np.argsort(sk)
+        sk, st = sk[order], spots["temp_c"][order]
+        best = np.full(len(c), -np.inf)
+        for dx in (-cell, 0, cell):
+            for dy in (-cell, 0, cell):
+                k = key(level, c[:, :2] + [dx, dy])
+                j = np.clip(np.searchsorted(sk, k), 0, len(sk) - 1)
+                best = np.where(sk[j] == k, np.maximum(best, st[j]), best)
+        temp = np.where(np.isfinite(best), best, temp)
+    over = temp - heat["softening_c"]
     lo, hi = HEAT_COLOUR_C
     return (np.clip((over - lo) / (hi - lo), 0, 1) * 255).astype(np.uint8).tobytes()
 
