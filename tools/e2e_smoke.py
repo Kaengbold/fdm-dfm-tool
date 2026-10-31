@@ -230,6 +230,19 @@ def main():
             return f"applied {edits} -> now suggests {again or 'nothing'}"
         run.step("design edits apply + re-check", design)
 
+        def versions_and_undo():
+            versions = page.evaluate("() => fdm.state.versions.map((v) => v.label)")
+            assert len(versions) == 2 and page.locator("#version-pick").is_visible(), versions
+            table = page.locator("#versions").inner_text()
+            run.act(lambda: page.keyboard.press("Control+z"), 300_000)
+            back = page.evaluate("() => ({ version: fdm.state.version, name: fdm.state.name })")
+            assert back["version"] == 0, back
+            assert any("Ø8.0" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop not suggested again on the original"
+            run.act(lambda: page.select_option("#version", "1"), 300_000)
+            assert page.evaluate("() => fdm.state.version") == 1
+            return f"{versions} | {table.splitlines()[1:3]} | undo -> {back['name']}"
+        run.step("model versions + Ctrl+Z", versions_and_undo)
+
         def added_material():
             run.act(lambda: page.click("[data-sample=test_block]"))
             edits = page.locator("#edits label").all_inner_texts()
