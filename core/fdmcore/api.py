@@ -25,7 +25,7 @@ from .formats import read_bodies, unit_hint
 from .mesh import Mesh
 from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z
 from .placement import print_rotation
-from .profile import Profile, load_data, presets
+from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
 from .recommend import goal_plan, recommend_settings
@@ -67,6 +67,96 @@ def custom_presets(printers: dict | None = None, materials: dict | None = None) 
 
     set_custom_presets(printers, materials)
     return presets()
+
+
+# Analysis grids (Expert settings): more cubes are more exact and slower (about linear in the browser).
+ANALYSIS = {
+    "strength_voxels": (12_000, 2_000, 200_000, "Cubes in the strength grid (Will it hold?, shaking, the optimiser). Seconds in the browser at 12 000."),
+    "fine_voxels": (40_000, 5_000, 400_000, "Cubes for \"Check accuracy with a finer grid\": about 1.5× finer than the normal grid."),
+    "warp_voxels": (6_000, 1_000, 100_000, "Cubes in the warping simulation: it solves once per group of layers, so a coarser grid."),
+}
+_analysis: dict[str, float] = {}
+
+
+def _grid(key: str) -> int:
+    return int(_analysis.get(key, ANALYSIS[key][0]))
+
+
+def expert_settings() -> dict:
+    """Every number the checks use, for the Expert settings window: the analysis grids and all of
+    thresholds.yaml, grouped by section, each with its default, the value in use and the note from the
+    file (what it does and its source). Nothing hidden."""
+    from .profile import _expert, _read_data
+
+    analysis = {"name": "analysis", "title": "Analysis grids", "about": "How finely the part is cut into cubes for the simulations.",
+                "values": [{"path": f"analysis.{k}", "default": d, "value": _grid(k), "min": lo, "max": hi, "note": note}
+                           for k, (d, lo, hi, note) in ANALYSIS.items()]}
+    notes, about = _yaml_notes(DATA_DIR / "thresholds.yaml")
+    over = _expert.get("thresholds", {})
+    sections = {}
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, [*path, str(k)])
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, [*path, str(i)])
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            key = ".".join(path)
+            note = next((notes[".".join(path[:n])] for n in range(len(path), 0, -1) if ".".join(path[:n]) in notes), "")
+            sections.setdefault(path[0], []).append({"path": f"thresholds.{key}", "default": node, "value": over.get(key, node), "note": note})
+
+    walk(_read_data("thresholds"), [])
+    out = [analysis] + [{"name": k, "title": k.replace("_", " ").capitalize(), "about": about.get(k, ""), "values": v} for k, v in sections.items()]
+    return {"sections": out}
+
+
+def _yaml_notes(path) -> tuple[dict[str, str], dict[str, str]]:
+    """Comments of a YAML file: the one after each ``key: value`` (by dotted path) and the full-line
+    comments inside each top-level section (its description)."""
+    import re
+
+    notes, about, stack = {}, {}, []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        indent = len(line) - len(line.lstrip())
+        text = line.strip()
+        if text.startswith("#"):
+            if stack:
+                about[stack[0][1]] = (about.get(stack[0][1], "") + " " + text.lstrip("# ")).strip()
+            continue
+        m = re.match(r"([\w-]+):\s*([^#]*?)\s*(?:#\s*(.*))?$", text)
+        if not m:
+            continue
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, m.group(1)))
+        if m.group(3):
+            notes[".".join(k for _, k in stack)] = m.group(3)
+    return notes, about
+
+
+def set_expert(values: dict[str, float]) -> dict:
+    """Apply the Expert settings window: ``{"thresholds.features.vanish_below_nozzle": 0.6,
+    "analysis.strength_voxels": 20000}``; values not given go back to their defaults."""
+    from .profile import set_expert as set_data
+
+    grids, data = {}, {}
+    for path, value in (values or {}).items():
+        group, _, rest = path.partition(".")
+        if group == "analysis":
+            if rest not in ANALYSIS:
+                raise KeyError(f"Unknown setting {path}")
+            lo, hi = ANALYSIS[rest][1:3]
+            grids[rest] = min(max(float(value), lo), hi)
+        else:
+            data.setdefault(group, {})[rest] = float(value)
+    set_data(data)
+    _analysis.clear()
+    _analysis.update(grids)
+    if _session is not None:
+        _session.solved = None  # results depend on these
+    return expert_settings()
 
 
 CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge")
@@ -697,7 +787,6 @@ def _optimise_story(best: dict, target: float, compared: bool) -> str:
             "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, use a stronger material, or let it carry less.")
 
 
-WARP_VOXELS = 6000  # warping solves once per group of layers: a coarser grid than strength
 WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, like the warping check's length ratio
 _warp_reference: dict = {}
 
@@ -712,7 +801,7 @@ def warping(up, profile: dict | None = None) -> dict:
     s = _require()
     p = Profile.from_dict(profile)
     sh = _shells(p)
-    r = warp.simulate(s.mesh, up, p, sh, WARP_VOXELS)
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"))
     model = r["model"]
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
     if key not in _warp_reference:
@@ -791,16 +880,15 @@ def regions() -> dict:
     return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
 
 
-STRENGTH_VOXELS = 12_000  # analysis grid: seconds in the browser
-FINE_VOXELS = 40_000  # "check accuracy": a ~1.5× finer grid (3× the cubes)
 
 
-def _load_case(loads: list[dict], voxels: int = STRENGTH_VOXELS):
+def _load_case(loads: list[dict], voxels: int | None = None):
     """Prepared load cases (list, see strength.prepare_cases), cached per load set and grid size."""
     from .regions import find_regions
     from .strength import prepare_cases
 
     s = _require()
+    voxels = voxels or _grid("strength_voxels")
     key = json.dumps([loads, voxels], sort_keys=True)
     if s.load_case is None or s.load_case[0] != key:
         if s.regions is None:
@@ -900,7 +988,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
 
     s = _require()
     p = Profile.from_dict(profile)
-    cases = _load_case(loads, FINE_VOXELS if fine else STRENGTH_VOXELS)
+    cases = _load_case(loads, _grid("fine_voxels") if fine else None)
     sh = _shells(p, walls, infill, top, bottom, zones)
     model = cases[0].model
     printed = None
@@ -1511,6 +1599,8 @@ METHODS = {
     "report": report,
     "regions": regions,
     "optimise_strength": optimise_strength,
+    "expert_settings": expert_settings,
+    "set_expert": set_expert,
     "tag_feature": tag_feature,
     "strength": strength,
     "strength_options": strength_options,

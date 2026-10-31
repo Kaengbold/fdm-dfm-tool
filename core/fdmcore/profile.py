@@ -12,8 +12,50 @@ DATA = Path(__file__).parent / "data"
 
 
 @lru_cache(maxsize=None)
-def load_data(name: str) -> dict:
+def _read_data(name: str) -> dict:
     return yaml.safe_load((DATA / f"{name}.yaml").read_text(encoding="utf-8"))
+
+
+_expert: dict[str, dict] = {}  # file name -> {"a.b.c": value}: the Expert settings window's changes
+_expert_data: dict[str, dict] = {}
+
+
+def load_data(name: str) -> dict:
+    """A data file, with the user's Expert changes (``set_expert``) on top."""
+    over = _expert.get(name)
+    if not over:
+        return _read_data(name)
+    if name not in _expert_data:
+        import copy
+
+        data = copy.deepcopy(_read_data(name))
+        for path, value in over.items():
+            *head, last = path.split(".")
+            node = data
+            for key in head:
+                node = node[int(key)] if isinstance(node, list) else node[key]
+            node[int(last) if isinstance(node, list) else last] = value
+        _expert_data[name] = data
+    return _expert_data[name]
+
+
+def set_expert(changes: dict[str, dict[str, float]]) -> None:
+    """Replace the Expert changes: ``{"thresholds": {"features.vanish_below_nozzle": 0.6}}``. Unknown
+    paths raise KeyError, so a stale saved setting doesn't silently do nothing."""
+    for name, over in changes.items():
+        data = _read_data(name)
+        for path in over:
+            node = data
+            try:
+                for key in path.split("."):
+                    node = node[int(key)] if isinstance(node, list) else node[key]
+            except (KeyError, IndexError, ValueError, TypeError):
+                raise KeyError(f"Unknown setting {name}.{path}") from None
+            if not isinstance(node, (int, float)) or isinstance(node, bool):
+                raise KeyError(f"{name}: {path} is not a number")
+    _expert.clear()
+    _expert.update({k: dict(v) for k, v in changes.items() if v})
+    _expert_data.clear()
 
 
 _custom: dict = {"printers": {}, "materials": {}}  # the user's own presets (set_custom_presets)

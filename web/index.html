@@ -28,6 +28,7 @@
         <label title="Everything, step by step: detailed strength, shaking and knocks, design changes"><input type="radio" name="level" value="advanced" /> Advanced</label>
         <label title="Every tool on one long page"><input type="radio" name="level" value="expert" /> Expert</label>
       </div>
+      <button type="button" id="show-expert" class="ghost small" data-min="expert" title="Every number the checks use, with its source">All settings</button>
       <button type="button" id="show-guide" class="ghost small">Guide</button>
     </header>
 
@@ -473,6 +474,18 @@
         <button type="button" id="long-no" class="ghost">Not now</button>
         <button type="button" id="long-yes" class="primary">Run it</button>
       </div>
+    </dialog>
+    <dialog id="expert" class="expert">
+      <div class="expert-head">
+        <h2>All settings</h2>
+        <button type="button" id="expert-close" class="ghost">Close</button>
+      </div>
+      <p class="hint">Every number the checks use: grid sizes for the simulations and every detection limit, each with where it comes
+        from. Changed values are marked and stay in this browser; the checks run again with them. Defaults come from research
+        (the bracketed names point to <code>research/</code>).</p>
+      <div class="row"><input id="expert-filter" type="search" placeholder="Filter, e.g. bridge, warp, hole" aria-label="Filter settings" />
+        <button type="button" id="expert-reset">Reset all</button></div>
+      <div id="expert-sections"></div>
     </dialog>
     <dialog id="guide" class="guide">
       <h2>How much do you want to see?</h2>
