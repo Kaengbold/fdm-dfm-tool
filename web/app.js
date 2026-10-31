@@ -71,9 +71,11 @@ function cancelEngine() {
   startWorker();
   const src = state.source;
   const mine = loadMine();
-  if (src || Object.keys(mine.printers).length || Object.keys(mine.materials).length) {
+  const expert = loadExpert();
+  if (src || Object.keys(mine.printers).length || Object.keys(mine.materials).length || Object.keys(expert).length) {
     restoring = engineReady.then(async () => {
       await post("custom_presets", mine);
+      if (Object.keys(expert).length) await post("set_expert", { values: expert });
       if (!src) return;
       await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
       if (src.body) await post("select_body", { index: src.body });
@@ -2031,12 +2033,99 @@ $("ai-input").addEventListener("keydown", (e) => {
   }
 });
 
+// ---------- Expert: all settings ----------
+const loadExpert = () => JSON.parse(localStorage.getItem("fdm-expert") ?? "{}");
+let expertChanged = false;
+
+/** Send the saved Expert values; ones the engine no longer knows (an update renamed them) are dropped. */
+async function sendExpert() {
+  const values = loadExpert();
+  if (!Object.keys(values).length) return;
+  try {
+    await call("set_expert", { values });
+  } catch (err) {
+    localStorage.removeItem("fdm-expert");
+    await call("set_expert", { values: {} });
+    setStatus(`Your changed settings were reset: ${err.message}`, true);
+  }
+}
+
+$("show-expert").onclick = async () => {
+  renderExpert(await call("expert_settings"));
+  $("expert").showModal();
+};
+$("expert-close").onclick = () => $("expert").close();
+$("expert").onclose = async () => {
+  if (!expertChanged) return;
+  expertChanged = false;
+  if (!activeOption()) return;
+  await runCheck(); // detection limits changed: check again (strength runs again when asked)
+  setStatus("Checked again with your settings.");
+};
+$("expert-filter").oninput = () => filterExpert();
+$("expert-reset").onclick = async () => {
+  localStorage.removeItem("fdm-expert");
+  expertChanged = true;
+  renderExpert(await call("set_expert", { values: {} }));
+};
+
+function renderExpert(r) {
+  const saved = loadExpert();
+  const open = new Set([...$("expert-sections").querySelectorAll("details[open]")].map((d) => d.dataset.section));
+  $("expert-sections").replaceChildren(...r.sections.map((sec) => {
+    const rows = sec.values.flatMap((v) => {
+      const input = el("input", { type: "number", value: v.value, step: "any", ...(v.min != null ? { min: v.min, max: v.max } : {}) });
+      const name = el("span", { className: `name${v.path in saved ? " changed" : ""}`, textContent: v.path.split(".").slice(2).join(".") || v.path.split(".").at(-1) });
+      input.onchange = async () => {
+        const values = loadExpert();
+        const n = Number(input.value);
+        if (input.value === "" || n === v.default) delete values[v.path];
+        else values[v.path] = n;
+        try {
+          const r = await call("set_expert", { values });
+          localStorage.setItem("fdm-expert", JSON.stringify(values)); // before drawing: it marks the changed ones
+          expertChanged = true;
+          renderExpert(r);
+        } catch (err) {
+          setStatus(err.message, true);
+        }
+      };
+      const row = [name, input, el("span", { className: "note", textContent: `${v.note}${v.note ? " · " : ""}default ${v.default}` })];
+      for (const x of row) x.dataset.find = `${v.path} ${v.note}`.toLowerCase();
+      return row;
+    });
+    const box = el("details", { className: "more-block" },
+      el("summary", {}, sec.title, el("small", { textContent: `${sec.values.length} value${sec.values.length > 1 ? "s" : ""}` })),
+      sec.about ? el("p", { className: "hint", textContent: sec.about }) : "",
+      el("div", { className: "expert-values" }, ...rows));
+    box.dataset.section = sec.name;
+    box.open = open.has(sec.name);
+    return box;
+  }));
+  filterExpert();
+}
+
+function filterExpert() {
+  const q = $("expert-filter").value.trim().toLowerCase();
+  for (const box of $("expert-sections").children) {
+    let any = false;
+    for (const x of box.querySelectorAll(".expert-values > *")) {
+      const hit = !q || x.dataset.find.includes(q) || box.dataset.section.includes(q);
+      x.hidden = !hit;
+      any ||= hit;
+    }
+    box.hidden = !any;
+    if (q) box.open = any;
+  }
+}
+
 // ---------- presets ----------
 async function initPresets() {
   await engineReady;
   // The printer and material you have, remembered from your last visit: Simple is then one drop.
   const saved = JSON.parse(localStorage.getItem("fdm-setup") ?? "{}");
   await applyMine(loadMine(), { printer: "bambu_p1s", material: "pla", nozzle: "0.4", ...saved });
+  await sendExpert();
   setStatus(saved.printer
     ? `Ready. Set up for your ${state.presets.printers[$("printer").value].name} with ${state.presets.materials[$("material").value].name}: drop a part, or try a sample.`
     : "Ready — drop an STL, 3MF or STEP file, or try a sample.");
