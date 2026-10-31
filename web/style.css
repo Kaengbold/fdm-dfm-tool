@@ -315,7 +315,8 @@ summary::marker { color: var(--accent); }
 
 /* ---------- strength ---------- */
 .strength { gap: 12px; }
-.pick-step { display: flex; flex-direction: column; gap: 6px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r); font-size: 14px; margin-top: 8px; }
+.pick-step { display: flex; flex-direction: column; gap: 6px; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r); font-size: 14px; margin-top: 8px; min-width: 0; }
+.pick-step select { min-width: 0; max-width: 100%; flex: 1 1 100%; }
 #pick-panel { display: flex; flex-direction: column; gap: 6px; }
 .loads, .marks { list-style: none; padding: 0; margin: 0; font-size: 14px; display: flex; flex-direction: column; gap: 5px; }
 .loads li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: var(--r); padding: 5px 9px; }
@@ -467,3 +468,4 @@ body[data-level="simple"] #settings-block > .lead { display: none; }
 /* A disabled main button keeps readable text (it often says why: "Load a part first"). */
 button.primary:disabled { opacity: 1; background: var(--soft); border-color: var(--line); color: var(--muted); }
 #settings .changed { color: var(--accent); font-weight: 700; font-size: 12px; }
+.hint.sub { margin: -2px 0 4px 26px; }

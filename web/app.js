@@ -115,6 +115,12 @@ const steps = new Steps({
   ready: (step) => step === "part" ? true
     : !state.triangles ? "Load a part first"
     : step === "have" || state.check ? true : "Checking your part…",
+  changed: () => {
+    recolor();
+    suggestDesignIfShown();
+    // A note about the last action ("Report copied …") belongs to the step it was made in.
+    if (!busyCount && state.summary) setStatus(state.summary);
+  },
 });
 
 // Debug/test hook: lets automated browser tests and devtools inspect the app.
@@ -156,7 +162,7 @@ function showWorking(text) {
     const s = (performance.now() - start) / 1000;
     // Once the engine reports progress, extrapolate: rough, but says whether to wait or come back.
     const left = workFraction > 0.05 && workFraction < 1 ? Math.max(1, Math.round((s * (1 - workFraction)) / workFraction)) : null;
-    $("working-time").textContent = left ? `${Math.round(s)} s, about ${left} s left` : `${Math.round(s)} s`;
+    $("working-time").textContent = left ? `${fmtSeconds(s)}, about ${fmtSeconds(left)} left` : fmtSeconds(s);
   });
   tick();
   workingClock = setInterval(tick, 1000);
@@ -354,6 +360,7 @@ async function runCheck() {
     $("paste-block").hidden = !AI_ENABLED;
     setStatus(state.summary);
     steps.render();
+    suggestDesignIfShown();
   }, ["problems", "settings", "result"]);
 }
 
@@ -491,7 +498,6 @@ function renderCheck() {
   $("findings").replaceChildren(
     ...(findings.length ? renderImpactGroups(findings) : [el("li", { className: "ok", textContent: "Should print as designed in this orientation." })]),
   );
-  viewer.showFindings(findings);
   renderSettings();
   renderVerdict();
   recolor();
@@ -559,28 +565,69 @@ function settingText(key, value) {
   return /^[a-z_()]+$/.test(v) ? (v[0].toUpperCase() + v.slice(1)).replaceAll("_", " ") : v;
 }
 
+/** Durations a person reads at a glance: "45 s", "2 min 05 s", "1 h 03 min". */
+function fmtSeconds(s) {
+  s = Math.round(s);
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+  return `${Math.floor(s / 3600)} h ${String(Math.round((s % 3600) / 60)).padStart(2, "0")} min`;
+}
+
 function fmtTime(min) {
   return min < 60 ? `${Math.round(min)} min` : `${Math.floor(min / 60)} h ${Math.round(min % 60)} min`;
 }
 
 // ---------- strength: picking faces and loads ----------
+/** The step shown now (in Expert's long page: the one scrolled to). null = show everything. */
+const viewStep = () => steps.current;
+
+/** Does the 3D view show the things of ``block`` (strength, problems, design) now? Blocks move
+ * between steps per level (Simple shows the load under "What you have"), so ask the page. */
+function shows(block) {
+  const at = viewStep();
+  return at == null || $(`blk-${block}`)?.closest(".pane")?.dataset.pane === at;
+}
+
+/** Everything drawn on the part, for the step shown: loads and results in "Will it hold?", heat and
+ * warping in "Problems", edit previews in "Design changes" — each step shows its own things only. */
 function recolor() {
   const option = activeOption();
   if (!option) return;
-  viewer.showLoadSymbols(loadSymbols());
+  viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
+  viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : []);
+  viewer.showZones(shows("strength") || shows("download") ? state.zones.map((z) => z.corners_print) : []);
+  showMarkers();
   if (strengthView()) return;
-  if ($("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
+  if (shows("problems") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
   const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
+  const regions = shows("strength") || shows("design") || viewStep() === "orient";
   viewer.colorByClass(option.face_classes, (f) => {
-    if (!state.faceRegions) return null;
+    if (!state.faceRegions || !regions) return null;
     const r = state.faceRegions[f];
     if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
-  const spots = state.loads.filter((l) => l.point).map((l) => ({ point: l.point, radius: l.radius, color: REGION_COLORS[l.kind] }));
+  const spots = shows("strength") ? state.loads.filter((l) => l.point).map((l) => ({ point: l.point, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
   if (spot) spots.push({ point: state.pickedPoint, radius: SPOT_RADIUS, color: REGION_COLORS.selected });
   viewer.showSpots(spots);
+}
+
+/** Boxes and dots on the part: the weakest spot with a strength result, the first corners to lift
+ * with the warp shape, else the problem boxes (not over a design preview or the load setup). */
+function showMarkers() {
+  if (shows("strength") && state.showSwing && state.swing) return viewer.showFindings([]);
+  const r = state.strength;
+  if (shows("strength") && state.showHeat && r) {
+    viewer.showFindings([]);
+    return r.weak_marker ? viewer.markWeak(r.weak_marker.point, r.weak_marker.normal) : viewer.mark(r.critical_point_print);
+  }
+  if (shows("problems") && state.showWarp && state.warp) {
+    viewer.showFindings([]);
+    for (const p of state.warp.lift_points_print) viewer.mark(p);
+    return;
+  }
+  viewer.showFindings(viewStep() == null || ["orient", "problems", "result"].includes(viewStep()) ? state.check?.findings ?? [] : []);
 }
 
 /** Lock on held faces, arrow + weight on loads, for the 3D view. */
@@ -900,9 +947,6 @@ async function runStrength(fine = false) {
     state.showSwing = false;
     $("show-temp").checked = false;
     recolor();
-    viewer.showFindings([]);
-    if (r.weak_marker) viewer.markWeak(r.weak_marker.point, r.weak_marker.normal);
-    else viewer.mark(r.critical_point_print);
     renderStrength();
     setStatus(state.summary);
     return r;
@@ -957,11 +1001,11 @@ const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
-  if (state.showSwing && state.swing) return swingView();
+  if (shows("strength") && state.showSwing && state.swing) return swingView();
   stopSwing();
-  if (state.showWarp && state.warp) return warpView();
+  if (shows("problems") && state.showWarp && state.warp) return warpView();
   const r = state.strength;
-  if (!(state.showHeat && r)) {
+  if (!(shows("strength") && state.showHeat && r)) {
     viewer.hideField();
     $("legend").hidden = true;
     return false;
@@ -976,7 +1020,7 @@ function strengthView() {
   const radius = viewer.part.geometry.boundingSphere.radius;
   viewer.setDeformation(view.bend * (0.08 * radius) / Math.max(r.max_displacement_mm, 1e-9));
   const els = r.elements;
-  const cubes = f.elements ? f32(els[f.elements]) : new Float32Array(els.centers.length / 12); // displacement: inside not shown
+  const cubes = f.elements ? f32(els[f.elements]) : null; // displacement: only known on the surface
   viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: cubes, size_mm: els.size_mm }, max);
   renderLegend(f, max);
   return true;
@@ -1009,7 +1053,6 @@ function swingView() {
     viewer.fieldKey = key;
   }
   renderLegend(SWING_FIELD, 1);
-  viewer.showFindings([]);
   const amplitude = (0.08 * viewer.part.geometry.boundingSphere.radius) / max;
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (!swingFrame) {
@@ -1048,8 +1091,6 @@ function warpView() {
   }
   viewer.setDeformation((0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
   renderLegend(WARP_FIELD, Math.max(w.max_mm, 1e-9));
-  viewer.showFindings([]);
-  for (const p of w.lift_points_print) viewer.mark(p);
   return true;
 }
 
@@ -1063,7 +1104,6 @@ $("run-warp").onclick = () =>
     const show = el("input", { type: "checkbox", checked: true });
     show.onchange = () => {
       state.showWarp = show.checked;
-      if (!show.checked) viewer.showFindings(state.check?.findings ?? []);
       recolor();
     };
     $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
@@ -1231,7 +1271,7 @@ for (const id of ["use-temp", "constant-load"]) {
 /** Strengthening zones (slicer modifier volumes) from the optimiser; shown as boxes and put in the 3MF. */
 function setZones(zones) {
   state.zones = zones;
-  viewer.showZones(zones.map((z) => z.corners_print));
+  viewer.showZones(shows("strength") || shows("download") ? zones.map((z) => z.corners_print) : []);
   $("zones-for").hidden = !zones.length;
 }
 
@@ -1250,25 +1290,42 @@ async function applyOption(o) {
     $("material").value = o.material;
     $("material").dispatchEvent(new Event("change"));
   } else if (o.kind === "design") {
-    $("design-on").click();
-    await suggestDesign();
+    // Open Design changes (an Advanced step) with the change lit up on the part.
+    if (!steps.steps.includes("design")) setLevel("advanced");
+    if (mode() === "print") $("design-on").click();
+    steps.go("design");
+    const r = await suggestDesign();
+    const edit = state.edits.find((e) => e.rule === "stress_at_inside_corner");
+    if (edit) {
+      showSelectedGhosts(edit);
+      viewer.focusEdit(edit);
+      setStatus("The chamfer at the weak spot is lit up in yellow. Apply it, then check the strength again.");
+    } else if (r) setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
   }
 }
 
 // ---------- design changes ----------
 function clearEdits() {
   state.edits = [];
+  state.designFor = null;
   $("edits").replaceChildren();
   $("apply-edits").hidden = true;
   viewer.showGhosts([]);
 }
 
-function showSelectedGhosts() {
-  viewer.showGhosts(state.edits.filter((e) => e.selected));
+function showSelectedGhosts(highlight = null) {
+  viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : [], highlight);
   $("apply-edits").hidden = !state.edits.some((e) => e.selected);
 }
 
+/** Design changes are suggested as soon as their step is shown (Expert: always on the page), once per orientation. */
+function suggestDesignIfShown() {
+  if (!activeOption() || !state.check || !(shows("design") || steps.level === "expert") || $("design-block").hidden) return;
+  if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
+}
+
 async function suggestDesign() {
+  state.designFor = activeOption().up.join();
   return busy("Looking for design improvements…", async () => {
     const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams() });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
@@ -1284,7 +1341,9 @@ async function suggestDesign() {
               e.selected = box.checked;
               showSelectedGhosts();
             };
-            return el("li", {}, el("label", {}, box, el("span", {}, e.title, el("small", { textContent: e.description }))));
+            // Pointing at a change turns the part to it and lights it up.
+            return el("li", { onmouseenter: () => (showSelectedGhosts(e), viewer.focusEdit(e)), onmouseleave: () => showSelectedGhosts() },
+              el("label", {}, box, el("span", {}, e.title, el("small", { textContent: e.description }))));
           })
         : [el("li", { className: "hint", textContent: "Nothing to change for this orientation and material." })]),
     );
@@ -1293,7 +1352,6 @@ async function suggestDesign() {
     return r;
   });
 }
-$("suggest-design").onclick = suggestDesign;
 
 // ---------- feature confirm ("is this a hole?") ----------
 const shown = (f) => f.type === "hole" || f.full_circle; // partial bosses are rounded edges: not worth a line
@@ -1922,7 +1980,7 @@ $("dl-step").onclick = () =>
 $("copy-report").onclick = async () => {
   const md = await call("report", { up: activeOption().up, profile: profile(), mode: mode() });
   await navigator.clipboard.writeText(md + answerFormat());
-  setStatus("Report copied — paste it into ChatGPT, Claude or Gemini, then paste the reply under \"Paste an AI answer\".");
+  setStatus("Copied. Paste it into your AI chat so it can help you with the design of your part.");
 };
 
 // ---------- paste-back: an answer from any AI chat ----------

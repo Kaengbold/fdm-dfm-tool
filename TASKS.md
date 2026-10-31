@@ -128,24 +128,24 @@ Bugs first (P1), then UI clean-up, then new features.
 
 - [ ] **T-200 P1** Design changes that overlap give a rough model with mesh errors (two fills meeting at a corner). Union the edit pieces cleanly, or skip a piece that overlaps another. · owner: —
 - [ ] **T-201 P1** GEOS error in the browser: `TopologyException: found non-noded intersection between LINESTRING (6.78023 19.9752, …) and LINESTRING (6.78023 19.9752, 6.78023 19.9752)` — a zero-length segment. Find which call (slicer / checks / design) and drop degenerate segments before GEOS sees them. · owner: —
-- [ ] **T-202 P1** Section cut of the strength result looks broken (smeared colours, jagged stairs). Show clean coloured cubes in the cut. · owner: —
-- [ ] **T-203 P1** Nozzle comparison: a bigger nozzle can show a longer print time — check the time estimate (likely a bug). · owner: —
-- [ ] **T-204 P1** Results stay on screen when switching steps (warp shape after the warp simulation, loads in the design view, the "Report copied — paste it into…" note after leaving Download). Each step shows only its own things. · owner: —
-- [ ] **T-205 P1** "Show me" on a strength design suggestion runs but nothing visible happens (no camera move, no window). · owner: —
+- [x] **T-202 P1** Section cut of the strength result looks broken (smeared colours, jagged stairs). Show clean coloured cubes in the cut. · owner: Claude (`task/T-201-bugs`) — with a cut, the part up to the cut is drawn as the solid analysis cubes (shaded), not the clipped hollow surface; displacement keeps the clipped surface (no values inside).
+- [x] **T-203 P1** Nozzle comparison: a bigger nozzle can show a longer print time — check the time estimate (likely a bug). · owner: Claude (`task/T-203-nozzle-time`) — not a sum error: every nozzle got 3 walls and our PLA melt rate was too high. Walls and top/bottom keep the 0.4 mm plan's thickness with each nozzle's line width, per-nozzle speeds and OrcaSlicer's generic melt rates; within ×0.8–1.2 of OrcaSlicer at 0.4/0.6/0.8 mm. Bigger nozzles can really be slower on small parts (OrcaSlicer agrees); the table says why. (#11)
+- [x] **T-204 P1** Results stay on screen when switching steps (warp shape after the warp simulation, loads in the design view, the "Report copied — paste it into…" note after leaving Download). Each step shows only its own things. · owner: Claude (`task/T-201-bugs`) — the 3D view draws per step: loads, stress, swing in Will it hold?; heat and warp in Problems; edit previews in Design changes; problem boxes in On the bed / Problems / Result. Expert follows the section scrolled to. A note from the last action is replaced on a step change.
+- [x] **T-205 P1** "Show me" on a strength design suggestion runs but nothing visible happens (no camera move, no window). · owner: Claude (`task/T-201-bugs`) — opens Design changes (switches to Advanced if needed), suggests, lights up the chamfer at the weak spot in yellow and turns the view to it; says so when no chamfer fits.
 - [ ] **T-206 P1** "Download report" does not work. · owner: —
-- [ ] **T-207 P1** "Held here?" box: the dropdown overflows the panel; wording "Holds here?" is clearer. · owner: —
+- [x] **T-207 P1** "Held here?" box: the dropdown overflows the panel; wording "Holds here?" is clearer. · owner: Claude (`task/T-201-bugs`) — "Holds here?", shorter options, the dropdown gets its own line.
 
 ### UI clean-up
 
 - [ ] **T-210 P1** Clearer separation: more space between blocks so it's obvious where one thing ends; replace the fold-out text links ("details") with boxes that open a sub-section. · owner: —
-- [ ] **T-211 P1** Time shown as minutes and seconds above 1 min (working badge, estimates). · owner: —
+- [x] **T-211 P1** Time shown as minutes and seconds above 1 min (working badge, estimates). · owner: Claude (`task/T-201-bugs`) — working badge: "45 s", "2 min 05 s", "1 h 03 min".
 - [ ] **T-212 P1** "Is this a hole?" only when the detection is unsure; clear holes are not asked. · owner: —
-- [ ] **T-213 P2** "Suggest design changes" button is pointless (suggestions come by default): remove it. · owner: —
+- [x] **T-213 P2** "Suggest design changes" button is pointless (suggestions come by default): remove it. · owner: Claude (`task/T-201-bugs`) — button removed: suggestions come when Design changes opens (Expert: after each check).
 - [ ] **T-214 P2** "Make it stronger" suggestions grouped (settings / material / design / less load) in boxes that open and close. · owner: —
-- [ ] **T-215 P2** "The load stays on" checkbox: explain it (creep: a constant load needs ×3 instead of ×2) or rename it so it's self-explaining. · owner: —
+- [x] **T-215 P2** "The load stays on" checkbox: explain it (creep: a constant load needs ×3 instead of ×2) or rename it so it's self-explaining. · owner: Claude (`task/T-201-bugs`) — renamed "The load is on all the time (e.g. a shelf …)" with a visible line: creep, so ×3 instead of ×2.
 - [ ] **T-216 P2** "Show heat while printing" isn't clear: make it its own feature with a plain purpose — find spots printed onto a thin base under a big heat mass that can't cool fast enough; take the fan / cooling into account. · owner: —
-- [ ] **T-217 P2** Hovering a design-change toggle turns the model to show it and highlights it in colour. · owner: —
-- [ ] **T-218 P2** Copy-report text: "Copy this into your AI so it can help you design your part" instead of the ChatGPT/paste-back wording. · owner: —
+- [x] **T-217 P2** Hovering a design-change toggle turns the model to show it and highlights it in colour. · owner: Claude (`task/T-201-bugs`) — pointing at a change lights it up yellow in front of the part and turns the camera to look at it from outside.
+- [x] **T-218 P2** Copy-report text: "Copy this into your AI so it can help you design your part" instead of the ChatGPT/paste-back wording. · owner: Claude (`task/T-201-bugs`) — "Copy for your AI chat"; note: "Copied. Paste it into your AI chat so it can help you with the design of your part."
 - [ ] **T-219 P2** "Find a better orientation for strength": show the result for the new best orientation at once (not the old one). · owner: —
 
 ### Model versions and undo
@@ -160,6 +160,7 @@ Bugs first (P1), then UI clean-up, then new features.
 - [ ] **T-231 P2** Nozzle comparison with the built-in slicer: detect details lost with a bigger nozzle (walls thinner than the line, small holes / text / gaps that vanish). · owner: —
 - [ ] **T-232 P1** Too weak with every print setting → say so and suggest design changes, a lower load or another material. · owner: —
 - [ ] **T-233 P2** Slicer modifier regions in the UI: pick a region and give it its own settings (engine part exists from T-150 zones). · owner: —
+- [ ] **T-234 P2** Print time: OrcaSlicer gives the K1C ~3× shorter times than the P1S with near-identical settings (melt rate 14 vs 12 mm³/s, same speeds); find out why, then per-printer time constants. Our estimate is fitted to the P1S. · owner: —
 
 ### Simulations
 
