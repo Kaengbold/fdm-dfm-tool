@@ -8,14 +8,16 @@ Status: scoping · 2026-10-28
 A free, open-source "design for FDM" assistant for hobbyists. Drop in a part, get:
 the best print orientation, the right slicer settings, warnings about what will fail,
 and (if you can edit the design) concrete, previewable geometry fixes.
-It works by just opening a website. AI is an optional extra, never a requirement.
+It works by just opening a website. AI is never a requirement: the app has no AI built in.
+Instead, an AI agent the user already has (Claude Code, Codex, …) can drive the tool from its own
+chat and hand back reports, charts and pictures (see section 6).
 
 ## 2. Guiding principles
 
 1. **Zero install, zero account.** Open the URL, drop a file, get results. No server needed for the core.
 2. **Plain language.** No FEA jargon in the default UI. "This hook will probably snap along the layers" instead of "σ_zz = 23 MPa".
-3. **Code first, AI second.** Every check runs as deterministic code. AI reviews, explains, and proposes; the code validates.
-4. **Everything is an API.** Whatever the UI can do, a script or an AI agent can do too.
+3. **Code first, AI outside.** Every check runs as deterministic code. An outside agent may review, explain and propose; the code validates.
+4. **Everything is an API.** Whatever the UI can do, a script or an AI agent can do too, including making the same pictures and reports.
 5. **Rough but honest.** Simulations are indications, labelled as such.
 6. **Single part only.** No assemblies.
 
@@ -85,9 +87,8 @@ Key decisions:
 ### Should
 - [ ] Ghost preview of geometry fixes (teardrop/diamond holes, chamfer bed edges, add ribs, thicken walls) using manifold-3d; export modified STL/STEP
 - [ ] A/B compare of two orientations or settings
-- [ ] AI: bring-your-own API key (Anthropic/OpenAI called directly from the browser, key stays local)
-- [ ] AI: "copy context for chat" — export an analysis bundle to paste into any chat (works with any subscription, zero setup), paste back a JSON answer
-- [ ] Local mode with MCP server (Claude Code / Codex / Claude Desktop operate the tool with the user's own subscription)
+- [ ] Agent toolkit: Claude Code / Codex / Claude Desktop operate the tool with the user's own subscription (MCP server + command line), and get reports, charts and images back as files
+- [ ] "Copy for your AI chat": a plain-text report to paste into any chat (no paste-back)
 - [ ] Local mode: real slicing via OrcaSlicer CLI + Orca profile import
 
 ### Later
@@ -99,19 +100,35 @@ Key decisions:
 ### Out of scope
 - Assemblies, multi-material planning, accurate quantitative strength, warping/thermal simulation beyond layer-time heuristics.
 
-## 6. AI integration (optional layer)
+## 6. Working with AI agents (decided 2026-10-31)
 
-Never use consumer subscription logins inside the app (against Anthropic/OpenAI ToS). Allowed paths:
+The app itself has **no AI built in**: no API keys, no chat panel, no calls to an AI provider.
+The earlier Ask-AI panel (own key for Anthropic / Gemini / OpenAI) and the paste-back answers are
+removed. Instead, the tool is something an agent the user already runs can use:
 
-| Path | Setup for user | Notes |
+| Path | Setup for user | What the agent can do |
 |---|---|---|
-| Copy/paste context bundle | None | Works with any chat subscription |
-| BYOK API key in browser | Paste a key | Cheap model (Haiku-class) is enough for feature review |
-| MCP (local mode) | Install local mode, connect agent | User's own Claude Code/Codex subscription; full agent control |
+| MCP server (local) | `pip install` + one `claude mcp add` / Codex config line | Every API call the web app makes, plus files out: reports, charts, images, 3MF/STL/STEP |
+| Command line `fdmdfm` | `pip install` | Same as MCP for agents (or scripts) without MCP: `fdmdfm check part.stl --json`, `fdmdfm report part.stl -o report.html` |
+| Copy for your AI chat | None | A plain-text report pasted into any chat; the chat can't act on the tool |
 
-MCP / API tools: `load_part`, `list_features`, `tag_feature`, `set_mode`, `set_preset`, `set_load_case`,
-`run_orientation`, `run_strength`, `list_issues`, `propose_edit`, `evaluate_edit`, `export_3mf`.
-AI loop: agent proposes → engine re-runs checks/simulation → result returned → agent iterates.
+Why: agents like Claude Code and Codex are already good at planning, iterating and explaining, and run
+on the user's own subscription through the vendor's own client (no terms problems, no keys in the
+browser). Our job is to make the tool easy for them to operate and to give them good output to show.
+
+What the agent gets back (all produced by the engine, no browser needed):
+- **Reports**: the human report (T-253) as one HTML file and as Markdown, with pictures and charts.
+- **Images**: PNG pictures of the part: on the bed in the chosen orientation, overhang / problem
+  close-ups, stress colours with loads, warping shape, before / after design changes.
+- **Charts**: SVG charts: safety factor per orientation, print time and weight per nozzle or setting,
+  warping per corner, settings sweeps.
+- **Files**: 3MF with settings, modified STL / STEP, and a project file the web app opens, so the user
+  can see in 3D what the agent did (and the reverse).
+
+Agent loop: agent proposes → engine re-runs checks/simulation → result returned → agent iterates →
+agent writes the report and pictures for the user.
+A ready-made agent guide (Claude Code skill, `AGENTS.md` snippet for Codex) tells the agent the flow,
+the units and how to explain results in plain language.
 
 ## 7. Knowledge base format
 
@@ -175,7 +192,7 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | **8 — Optimised printing** | Parts that are strong where it matters and light elsewhere | Custom infill: different density per region, strengthening geometry (small holes that make the slicer add walls inside), slicer modifier volumes where the slicer supports them (OrcaSlicer/Bambu/Prusa 3MF modifiers) to strengthen some regions and lighten others; driven by the stress results. Plus the slicer features most users never find (OrcaSlicer/PrusaSlicer survey, kept up to date with new releases), suggested when the part needs them |
 | **9 — More simulation (advanced mode)** | Answers beyond "will it break" | Simplified dynamic (vibration / impact), heat (part in use, e.g. a hot car), creep under constant load, warping with visible deformation, internal (residual) stress from printing, cooling optimised from the heat simulation |
 | **10 — Calibration & materials** | Right numbers for your printer | Calibration prints with a form for the result: tolerances / fits, overhang angle, bridges, support gap, layer strength, warping (some exist). Ship presets for printers once they prove consistent between machines. Optional material advisor: from the environment (heat, outdoors, chemicals) and the load case, the best material you can print — not assuming everything maxed out at any price |
-| **11 — AI, redone** | Optional | The current Ask AI / paste-back panel is hidden (``?ai=1``); redesign and re-integrate later |
+| **11 — Agent toolkit** | Use the tool from Claude Code / Codex | Remove the built-in AI panel; every API call as MCP tool and command line; reports, PNG images and SVG charts from the engine; project files shared with the web app; agent guide (section 6) |
 
 ### Progress (2026-10-29)
 
@@ -185,7 +202,7 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | 1 — "Just print it" | ✅ done | Presets (16 printers, 8 materials), pseudo-slicer checks (~27 rules), STL/3MF/STEP input with multi-body pick and unit hints, settings, 3MF/STL export, report, progress + cancel |
 | 2 — Strength | ✅ done | Face regions, voxel FEA, anisotropic material, strength-aware orientation, load cases, loads on faces or spots |
 | 3 — Design fixes | ✅ done | Feature confirm ("is this a hole?"), teardrops, corner chamfers, 45° ledge fills, sacrificial layers, thicker walls; ghost preview (cut/add), adjustable sizes, STL and STEP output (OpenCascade write-back) |
-| 4 — AI & agents | ✅ done | MCP server (local mode) with real slicing via the installed OrcaSlicer, copy-report + paste-back answers (any chat subscription), Ask AI with Anthropic / Gemini / OpenAI keys. Open: real-key tests (T-063), streaming (T-062), CLI subscription bridge (T-061) |
+| 4 — AI & agents | ✅ done | MCP server (local mode) with real slicing via the installed OrcaSlicer, copy-report + paste-back answers (any chat subscription), Ask AI with Anthropic / Gemini / OpenAI keys. Replaced by the agent toolkit (Phase 11, 2026-10-31): the built-in AI goes, the MCP server grows |
 | 5 — Ecosystem | ⏳ | Done: your own printers/materials with calibration prints, offline use, GitHub Pages workflow, Fusion add-in (report + teardrops; untested inside Fusion). Open: first Pages deploy, real calibration prints, community rules |
 
 Research to do: more CAD tricks and optimisations to suggest (e.g. holes that force walls, rib and gusset patterns,
