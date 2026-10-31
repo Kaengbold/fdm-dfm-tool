@@ -123,6 +123,17 @@ main#viewer canvas { display: block; }
 #viewer canvas.hovering { cursor: pointer; }
 .view-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 17px; pointer-events: none; }
 .view-info { position: absolute; left: 12px; top: 12px; right: 160px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none; }
+.view-tools { display: flex; gap: 6px; align-items: center; pointer-events: auto; }
+.view-tools label { display: flex; gap: 6px; align-items: center; padding: 3px 4px 3px 10px; font-size: 13px; font-weight: 700; background: #fdfdfce6; border-radius: var(--r); }
+.view-tools select { max-width: 260px; font-size: 13px; padding: 2px 6px; }
+#versions { width: 100%; border-collapse: collapse; font-size: 13px; }
+#versions td, #versions th { text-align: left; padding: 5px 4px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+#versions { table-layout: fixed; }
+#versions th:first-child { width: 34%; }
+#versions th:last-child { width: 3.6em; }
+#versions td.name { overflow: hidden; text-overflow: ellipsis; }
+#versions tr.current { background: var(--accent-soft); }
+.file-button { cursor: pointer; color: var(--accent); font-weight: 700; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
 .view-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 10px; font-size: 14px; font-weight: 700; background: #fdfdfce6; border-radius: var(--r); }
 .view-key {
   margin: 0; padding: 5px 10px; list-style: none;
@@ -313,6 +324,10 @@ summary::marker { color: var(--accent); }
 .places .place:hover { color: var(--accent); }
 .view-all { margin-left: 6px; font-size: 12px; padding: 1px 6px; }
 .extra { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.sim-card { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--panel); }
+.sim-card h3 { margin: 0; }
+#cooling-summary { font-size: 14px; }
+#cooling-summary b { font-weight: 700; }
 #nozzle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 #nozzle-table td, #nozzle-table th { border-bottom: 1px solid var(--line); padding: 5px 3px; text-align: left; vertical-align: top; }
 #nozzle-table tr.current { background: var(--accent-soft); }
@@ -357,9 +372,16 @@ summary::marker { color: var(--accent); }
 .fea-view { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .fea-view label { display: flex; gap: 6px; align-items: center; }
 .fea-view input[type=range] { flex: 1; }
-.dynamics { display: flex; flex-direction: column; gap: 9px; padding-top: 12px; border-top: 1px solid var(--line); }
-.dynamics > button { align-self: flex-start; }
+.dynamics-result { align-self: stretch; }
+
 .dynamics-result:empty { display: none; }
+.eta { font-weight: 400; color: var(--muted); }
+.eta:empty { display: none; }
+.long-run { max-width: 460px; }
+.long-run p { margin: 8px 0; }
+.long-choices { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.long-choices:empty { display: none; }
+.long-choices label { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r); cursor: pointer; font-size: 14px; }
 .dynamics-result { padding: 10px 12px; background: var(--soft); border-radius: var(--r); font-size: 14px; }
 
 /* ---------- design changes ---------- */

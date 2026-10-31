@@ -109,6 +109,8 @@ const state = {
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
+  versions: [], // models to switch between and compare: {label, source, step, results: {time, grams, problems, safety}}
+  version: 0,
 };
 
 // Which step can open: everything after the part needs one, everything after "What you have" a finished check.
@@ -222,15 +224,17 @@ function showProgress(fraction) {
 
 // ---------- flow ----------
 /** Entry point for user files: STEP goes through OpenCascade first; STL and 3MF straight to the engine. */
-async function openFile(name, bytes) {
+/** ``as``: "new" starts over (a new part), "version" adds it as a version to compare (see versions). */
+async function openFile(name, bytes, as = "new") {
   $("body-pick").hidden = true;
-  if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes);
+  if (as === "version") addVersion(name.replace(/\.(stl|3mf|step|stp)$/i, ""));
+  if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes, null, null, as);
   const bodies = await busy("Reading STEP file (first time downloads ~8 MB)…", () => readStep(bytes));
   if (!bodies.length) return setStatus("No solid bodies found in this STEP file.", true);
   const pick = async (i) => {
     // Kept so design edits can be written back into the original CAD solid (stepwrite.js).
     const step = { name, bytes, volume: bodies[i].volume, edits: [] };
-    await loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds, step);
+    await loadFile(`${name.replace(/\.(step|stp)$/i, "")}${bodies.length > 1 ? `_${i + 1}` : ""}.stl`, stlBytes(bodies[i].soup), bodies[i].faceIds, step, as);
   };
   if (bodies.length > 1) {
     showBodyPicker(bodies.map((b) => ({ name: b.name, volume_mm3: b.volume })), 0, pick);
@@ -247,14 +251,23 @@ function showBodyPicker(bodies, active, pick) {
   $("body-pick").hidden = false;
 }
 
-/** ``step``: the STEP file this part came from (and the edits applied so far), or null. */
-async function loadFile(name, bytes, faceIds = null, step = null) {
+/** ``step``: the STEP file this part came from (and the edits applied so far), or null. ``as``: "new"
+ * starts the version list over; otherwise the model is the current version (see versions). */
+async function loadFile(name, bytes, faceIds = null, step = null, as = "new") {
   await busy("Reading the part…", async () => {
     await engineReady;
     const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: 0, scale: 1 }; // to restore the part after a cancel
+    if (as === "new" || !state.versions.length) {
+      state.versions = [{ label: "Original" }];
+      state.version = 0;
+      undoStack.length = 0;
+      renderUndo();
+    }
+    Object.assign(state.versions[state.version], { source: state.source, step });
+    renderVersions();
     if (info.bodies.length) {
       showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => {
         const next = await call("select_body", { index: i });
@@ -273,6 +286,8 @@ async function partLoaded(info) {
   state.triangles = new Float32Array(info.triangles.slice().buffer);
   Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {} });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
+  state.runTimes = {}; // how long each simulation took on this part
+  showEstimates();
   renderGcode();
   renderMarks();
   viewer.framed = false;
@@ -328,7 +343,6 @@ async function selectOption(i) {
   state.strength = null;
   state.showHeat = false;
   $("strength-result").replaceChildren();
-  $("dynamics").hidden = true;
   $("dynamics-result").textContent = "";
   state.swing = null;
   state.showSwing = false;
@@ -496,11 +510,13 @@ function renderCheck() {
   if (!state.check) return;
   const { findings, stats } = state.check;
   $("stats").textContent = `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament.`;
+  noteVersion({ time: stats.print_time_min, grams: stats.filament_g, problems: new Set(findings.filter((f) => f.impact !== "info").map((f) => f.rule)).size, safety: null });
   $("findings").replaceChildren(
     ...(findings.length ? renderImpactGroups(findings) : [el("li", { className: "ok", textContent: "Should print as designed in this orientation." })]),
   );
   renderSettings();
   renderVerdict();
+  renderCooling();
   recolor();
 }
 
@@ -522,23 +538,47 @@ function verdict() {
   const p = profile();
   return { kind, head, text: `${state.active === 0 ? "Turned the best way" : `Turned as you picked: ${activeOption()?.label}`}. ${settings} slicer settings for ${state.presets.materials[p.material]?.name ?? p.material} on your ${state.presets.printers[p.printer]?.name ?? p.printer}.` };
 }
+const ABOVE_BED_MM = 3; // a little above thresholds.yaml cooling.above_bed_mm (2 mm): the bed warmth fades out
+
+/** The cooling check in one sentence: the hottest spot against the material's softening point. */
+function renderCooling() {
+  const h = state.check.stats.layer_heat;
+  const mat = state.presets.materials[profile().material];
+  if (!h?.temp_c.length) return $("cooling-summary").replaceChildren();
+  // Like the check: the first few mm are kept warm by the bed on purpose, not by the print.
+  let at = -1;
+  h.temp_c.forEach((t, i) => h.z[i] > ABOVE_BED_MM && (at < 0 || t > h.temp_c[at]) && (at = i));
+  if (at < 0) return $("cooling-summary").replaceChildren();
+  const finding = state.check.findings.find((f) => f.rule === "small_layers_cooling");
+  const fan = mat?.fan_pct != null ? ` With the part fan at ${mat.fan_pct} %${state.check.stats.heat_from_gcode ? ", layer times from your G-code" : ""}.` : "";
+  $("cooling-summary").replaceChildren(finding
+    ? el("span", {}, el("b", { textContent: "Some layers stay too warm. " }), finding.detail, ".")
+    : el("span", {}, el("b", { textContent: "Every layer cools in time. " }),
+      `Warmest about ${Math.round(h.temp_c[at])} °C at ${h.z[at].toFixed(0)} mm (${mat?.name ?? "it"} softens from about ${Math.round(h.softening_c)} °C; a bit above is normal right under the nozzle).${fan}`));
+}
+
 $("show-temp").onchange = () => {
   if ($("show-temp").checked) state.showHeat = false;
   recolor();
 };
+
+const OWN_LABEL = { xy_hole_compensation: "Hole compensation", hole_to_polyhole: "Polyholes" };
 
 /** Recommended settings with the user's applied strength suggestions on top. */
 function effectiveSettings() {
   if (!state.check) return [];
   const list = state.check.settings.map((s) => (s.key in state.overrides ? { ...s, value: state.overrides[s.key], changed: true } : s));
   for (const [key, value] of Object.entries(state.overrides)) {
-    if (!list.some((s) => s.key === key)) list.push({ key, value, label: key, reason: "From strength check", changed: true });
+    if (!list.some((s) => s.key === key)) list.push({ key, value, label: OWN_LABEL[key] ?? key, reason: OWN_LABEL[key] ? "Set by you" : "From strength check", changed: true });
   }
   return list;
 }
 
 function renderSettings() {
   const settings = effectiveSettings();
+  const value = (key) => settings.find((s) => s.key === key)?.value;
+  $("hole-comp").value = Number(value("xy_hole_compensation") ?? 0);
+  $("polyholes").checked = ["1", "true"].includes(String(value("hole_to_polyhole")));
   $("settings-block").hidden = !settings.length;
   $("settings").replaceChildren(
     ...settings.map((s) =>
@@ -607,7 +647,7 @@ function recolor() {
   if (shows("problems") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
   const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
-  const regions = shows("strength") || shows("design") || viewStep() === "orient";
+  const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
     const r = state.faceRegions[f];
@@ -622,13 +662,13 @@ function recolor() {
 /** Boxes and dots on the part: the weakest spot with a strength result, the first corners to lift
  * with the warp shape, else the problem boxes (not over a design preview or the load setup). */
 function showMarkers() {
-  if (shows("strength") && state.showSwing && state.swing) return viewer.showFindings([]);
+  if (shows("sims") && state.showSwing && state.swing) return viewer.showFindings([]);
   const r = state.strength;
   if (shows("strength") && state.showHeat && r) {
     viewer.showFindings([]);
     return r.weak_marker ? viewer.markWeak(r.weak_marker.point, r.weak_marker.normal) : viewer.mark(r.critical_point_print);
   }
-  if (shows("problems") && state.showWarp && state.warp) {
+  if (shows("sims") && state.showWarp && state.warp) {
     viewer.showFindings([]);
     for (const p of state.warp.lift_points_print) viewer.mark(p);
     return;
@@ -693,6 +733,7 @@ function target() {
 }
 
 function addLoad(load) {
+  remember(load.kind === "fixed" ? "where it is held" : "a load");
   // One entry per face (or spot) and case: it can be loaded differently in each case, and "held" is shared.
   const same = (l) => where(l) === where(load) && (l.kind === "fixed" || load.kind === "fixed" || l.case === load.case);
   state.loads = state.loads.filter((l) => !same(l)).concat(load);
@@ -713,6 +754,7 @@ function faceMarks() {
 const MARK_LABEL = { clean: "Keep clean (no support marks)", bed: "On the bed", vertical: "Upright (accurate shape)" };
 
 function setMark(kind) {
+  remember("a marked face");
   const region = state.selectedRegion;
   state.marks = state.marks.filter((m) => m.region !== region && !(kind === "bed" && m.kind === "bed")).concat({ region, kind });
   state.selectedRegion = -1;
@@ -726,6 +768,7 @@ function renderMarks() {
     ...(state.marks ?? []).map((m, i) =>
       el("li", { className: m.kind }, el("span", { textContent: MARK_LABEL[m.kind] }),
         el("button", { textContent: "×", title: "Remove", onclick: () => {
+          remember("removing a marked face");
           state.marks.splice(i, 1);
           renderMarks();
           findOrientations(Boolean(state.strength)); // keep strength in the ranking if it was checked
@@ -858,6 +901,7 @@ function renderLoads() {
           textContent: "×",
           title: "Remove",
           onclick: () => {
+            remember("removing a load");
             state.loads.splice(i, 1);
             state.angleOpen = null;
             renderLoads();
@@ -871,6 +915,7 @@ function renderLoads() {
   $("run-strength").disabled = !readyForStrength();
   $("run-optimise").disabled = !readyForStrength();
   $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
+  $("dynamics-need").hidden = readyForStrength();
   $("pick-hint").hidden = state.loads.length > 1;
 }
 
@@ -936,10 +981,63 @@ $("gcode-file").onchange = async (e) => {
 };
 $("use-gcode").onchange = () => state.strength && runStrength();
 
+// ---------- how long a simulation takes, asked before the long ones ----------
+// The strength grid has about the same number of cubes for every part, so one strength check takes
+// about the same time on a given computer; the others are a steady multiple of it (measured on the
+// samples in the browser: fine grid 2.6–5.4×, warping 1.8–2.9×, shaking 2.5–5.2×, optimiser 3.6–5.1×).
+const RUN_RATIO = { strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3 };
+const ASK_ABOVE_S = 30;
+let strengthSeconds = Number(localStorage.getItem("fdm-strength-s")) || 8; // this computer, once measured
+
+/** Seconds ``kind`` will take: as measured on this part, else from this computer's strength time. */
+const estimate = (kind) => state.runTimes?.[kind] ?? RUN_RATIO[kind] * strengthSeconds;
+
+/** Run ``fn`` and remember how long ``kind`` took (on this part; strength also sets the computer's pace). */
+async function timed(kind, fn) {
+  const t0 = performance.now();
+  const r = await fn();
+  const s = (performance.now() - t0) / 1000;
+  state.runTimes = { ...state.runTimes, [kind]: s };
+  if (kind === "strength") localStorage.setItem("fdm-strength-s", String((strengthSeconds = s)));
+  showEstimates();
+  return r;
+}
+
+/** "about 20 s" after a button's text, kept up to date by showEstimates. */
+function etaTag(kind) {
+  const tag = el("small", { className: "eta", textContent: `about ${fmtSeconds(estimate(kind))}` });
+  tag.dataset.eta = kind;
+  return tag;
+}
+
+function showEstimates() {
+  for (const e of document.querySelectorAll(".eta")) e.textContent = `about ${fmtSeconds(estimate(e.dataset.eta))}`;
+}
+
+/** Ask before a long run. ``choices``: [{value, label, kind}] (e.g. faster or more thorough); resolves
+ * to the chosen value (or true), or null for "Not now". Short runs just go. */
+function askLong(what, kind, choices = null) {
+  const longest = Math.max(estimate(kind), ...(choices ?? []).map((c) => estimate(c.kind)));
+  if (longest < ASK_ABOVE_S) return Promise.resolve(choices ? choices[0].value : true);
+  const d = $("long-run");
+  $("long-title").textContent = `${what}: about ${fmtSeconds(estimate(kind))}`;
+  $("long-text").textContent = state.runTimes?.[kind] ? "As long as it took last time on this part." : "Estimated from how fast your computer ran the strength check.";
+  $("long-choices").replaceChildren(...(choices ?? []).map((c, i) =>
+    el("label", {}, el("input", { type: "radio", name: "long-choice", value: c.value, checked: i === 0 }), `${c.label} — about ${fmtSeconds(estimate(c.kind))}`)));
+  d.showModal();
+  return new Promise((resolve) => {
+    const done = (v) => (d.close(), resolve(v));
+    $("long-yes").onclick = () => done(choices ? document.querySelector("input[name=long-choice]:checked").value : true);
+    $("long-no").onclick = () => done(null);
+    d.oncancel = () => resolve(null);
+  });
+}
+
 async function runStrength(fine = false) {
   const before = state.strength;
-  return busy(fine ? "Simulating again with a finer grid (up to a minute)…" : "Simulating the load…", async () => {
-    const r = await call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: state.zones });
+  if (fine && !(await askLong("Finer grid", "fine"))) return;
+  return busy(fine ? `Simulating again with a finer grid (about ${fmtSeconds(estimate("fine"))})…` : "Simulating the load…", async () => {
+    const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: state.zones }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
       r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
@@ -967,13 +1065,14 @@ for (const [box, row] of [["dyn-shake", "dyn-shake-row"], ["dyn-drop", "dyn-drop
     $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
   };
 }
-$("run-dynamics").onclick = () =>
-  busy("Working out how it swings and how hard a drop hits…", async () => {
-    const r = await call("dynamics", {
+$("run-dynamics").onclick = async () => {
+  if (!(await askLong("Shaking and knocks", "dynamics"))) return;
+  return busy("Working out how it swings and how hard a drop hits…", async () => {
+    const r = await timed("dynamics", () => call("dynamics", {
       up: activeOption().up, loads: state.loads, profile: profile(),
       mounted_kg: $("dyn-shake").checked ? Number($("dyn-kg").value) || 0 : 0,
       drop_mm: $("dyn-drop").checked ? Number($("dyn-mm").value) || 0 : 0,
-    });
+    }));
     state.swing = r;
     state.showSwing = true;
     const show = el("input", { type: "checkbox", checked: true });
@@ -988,7 +1087,8 @@ $("run-dynamics").onclick = () =>
     );
     recolor();
     setStatus(state.summary);
-  }, ["strength"]);
+  }, ["sims"]);
+};
 
 // ---------- strength: FEA result view ----------
 const f32 = (b) => new Float32Array(b.slice().buffer);
@@ -1007,9 +1107,9 @@ const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
-  if (shows("strength") && state.showSwing && state.swing) return swingView();
+  if (shows("sims") && state.showSwing && state.swing) return swingView();
   stopSwing();
-  if (shows("problems") && state.showWarp && state.warp) return warpView();
+  if (shows("sims") && state.showWarp && state.warp) return warpView();
   const r = state.strength;
   if (!(shows("strength") && state.showHeat && r)) {
     viewer.hideField();
@@ -1100,9 +1200,10 @@ function warpView() {
   return true;
 }
 
-$("run-warp").onclick = () =>
-  busy("Simulating the print layer by layer (up to a minute)…", async () => {
-    const w = await call("warping", { up: activeOption().up, profile: profile() });
+$("run-warp").onclick = async () => {
+  if (!(await askLong("Warping simulation", "warping"))) return;
+  return busy(`Simulating the print layer by layer (about ${fmtSeconds(estimate("warping"))})…`, async () => {
+    const w = await timed("warping", () => call("warping", { up: activeOption().up, profile: profile() }));
     state.warp = w;
     state.showWarp = true;
     state.showHeat = false;
@@ -1120,6 +1221,7 @@ $("run-warp").onclick = () =>
     recolor();
     setStatus(state.summary);
   });
+};
 
 function strengthViewControls(r) {
   const heat = el("input", { type: "checkbox", checked: state.showHeat });
@@ -1155,14 +1257,15 @@ function strengthViewControls(r) {
     from("advanced", el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." })),
     from("advanced", el("p", { className: "hint", textContent: `Analysis: ${m.voxels.toLocaleString()} cubes of ${m.voxel_mm.toFixed(1)} mm · total load ${Math.round(m.load_n)} N · bends up to ${r.max_displacement_mm.toFixed(2)} mm${r.solver_converged ? "" : " · solver did not fully converge"}` })),
     r.accuracy ? el("p", { className: "hint", textContent: r.accuracy }) : "",
-    r.fine ? "" : from("advanced", el("button", { textContent: "Check accuracy with a finer grid (slower)", onclick: () => runStrength(true),
-      title: "Runs again with 3× more cubes. If the answer barely changes, you can trust it (the usual check in FEA software)." })));
+    r.fine ? "" : from("advanced", el("button", { onclick: () => runStrength(true),
+      title: "Runs again with 3× more cubes. If the answer barely changes, you can trust it (the usual check in FEA software)." },
+      "Check accuracy with a finer grid ", etaTag("fine"))));
 }
 
 function renderStrength() {
   const r = state.strength;
+  noteVersion({ safety: r.safety_factor });
   const sf = r.safety_factor;
-  $("dynamics").hidden = false;
   $("strength-result").replaceChildren(
     el(
       "div",
@@ -1180,9 +1283,17 @@ function renderStrength() {
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
     el("button", { className: "primary", textContent: "How can I make it stronger?", onclick: showStrengthOptions,
       title: "Shows every option: slicer settings, orientation, design changes and materials, each with what it costs" }),
-    el("button", { textContent: "Re-rank orientations including strength", onclick: () => findOrientations(true) }),
+    el("button", { textContent: "Find the best orientation including strength", onclick: rankWithStrength }),
     el("ul", { id: "strength-options", className: "options" }),
   );
+}
+
+/** Re-rank with the loads, then show the strength of the new best orientation (not the old result). */
+async function rankWithStrength() {
+  const before = activeOption()?.label;
+  await findOrientations(true);
+  await runStrength();
+  setStatus(`${activeOption().label === before ? "Still the best" : "New best orientation"} with your load: safety ×${state.strength.safety_factor.toFixed(1)}.`);
 }
 
 async function showStrengthOptions() {
@@ -1200,7 +1311,10 @@ async function showStrengthOptions() {
             el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
               : `×${o.safety_factor.toFixed(1)}${now ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
           el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
-          el("button", { textContent: ACTION[o.kind], onclick: () => applyOption(o) }))),
+          el("div", { className: "row" },
+            el("button", { textContent: ACTION[o.kind], onclick: () => applyOption(o) }),
+            o.kind === "design" && /chamfer/i.test(o.change) ? el("button", { textContent: "Test it", onclick: testStressChamfer,
+              title: "Adds the chamfer as a new version of your model and checks the strength again" }) : ""))),
       opts.some((o) => o.kind === "material") ? ""
         : el("li", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` }),
     );
@@ -1210,14 +1324,20 @@ async function showStrengthOptions() {
 }
 
 async function runOptimise() {
-  return busy("Trying settings to find the lightest print that holds (up to a minute or two)…", async () => {
-    const o = await call("optimise_strength", { up: activeOption().up, loads: state.loads, profile: profile(), zones: true });
+  const how = await askLong("Lightest settings that hold", "optimise", [
+    { value: "zones", kind: "optimise", label: "Also try stronger zones only where needed (saves the most plastic)" },
+    { value: "quick", kind: "optimise_quick", label: "Settings for the whole part only (faster)" }]);
+  if (!how) return;
+  const kind = how === "quick" ? "optimise_quick" : "optimise";
+  return busy(`Trying settings to find the lightest print that holds (about ${fmtSeconds(estimate(kind))})…`, async () => {
+    const o = await timed(kind, () => call("optimise_strength", { up: activeOption().up, loads: state.loads, profile: profile(), zones: how !== "quick" }));
     const use = el("button", { className: "primary", textContent: "Use these settings", onclick: async () => {
+      remember("the lightest settings");
       setZones([]);
       Object.assign(state.overrides, o.settings);
       renderSettings();
       if (o.orientation === "strongest") await applyOption({ up: o.up });
-      else runStrength();
+      else await runStrength();
     } });
     const z = o.zoned;
     const zoned = z?.met && z.zones?.length
@@ -1226,9 +1346,10 @@ async function runOptimise() {
         el("p", { textContent: z.explanation }),
         el("p", { className: "hint", textContent: "The zones go into the 3MF as modifier volumes: the slicer prints them with more walls and infill (orange boxes)." }),
         el("button", { textContent: "Use the zones", onclick: async () => {
+          remember("the stronger zones");
           Object.assign(state.overrides, z.settings);
           renderSettings();
-          if (o.orientation === "strongest") await applyOption({ up: z.up }); // clears zones: set them after
+          if (o.orientation === "strongest") await applyOption({ up: z.up }, false); // clears zones: set them after
           setZones(z.zones);
           runStrength();
         } }))
@@ -1281,8 +1402,10 @@ function setZones(zones) {
   $("zones-for").hidden = !zones.length;
 }
 
-async function applyOption(o) {
+/** Apply a suggestion; a new orientation is checked for strength again (``recheck: false``: the caller does). */
+async function applyOption(o, recheck = true) {
   if (o.settings) {
+    remember("slicer settings from the strength check");
     Object.assign(state.overrides, o.settings);
     renderSettings();
     $("run-strength").click();
@@ -1292,6 +1415,7 @@ async function applyOption(o) {
     state.options.unshift(option);
     renderOptions();
     await selectOption(0);
+    if (recheck && readyForStrength()) await runStrength();
   } else if (o.material) {
     $("material").value = o.material;
     $("material").dispatchEvent(new Event("change"));
@@ -1326,7 +1450,9 @@ function showSelectedGhosts(highlight = null) {
 
 /** Design changes are suggested as soon as their step is shown (Expert: always on the page), once per orientation. */
 function suggestDesignIfShown() {
-  if (!activeOption() || !state.check || !(shows("design") || steps.level === "expert") || $("design-block").hidden) return;
+  if (!activeOption() || !state.check) return;
+  const wanted = shows("fits") || ((shows("design") || steps.level === "expert") && !$("design-block").hidden);
+  if (!wanted) return;
   if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
 }
 
@@ -1359,6 +1485,24 @@ async function suggestDesign() {
   });
 }
 
+// Tolerances & tuning: the slicer's hole settings go into the 3MF like any other change.
+$("hole-comp").onchange = () => {
+  remember("hole compensation");
+  state.overrides.xy_hole_compensation = String(Math.max(0, Number($("hole-comp").value) || 0));
+  renderSettings();
+};
+$("polyholes").onchange = () => {
+  remember("polyholes");
+  state.overrides.hole_to_polyhole = $("polyholes").checked ? "1" : "0";
+  renderSettings();
+};
+$("open-fit-test").onclick = () => {
+  $("my-presets").open = true;
+  $("new-material").click();
+  steps.reveal($("calibration"));
+  $("calibration").querySelector("[data-calibration=fit]").scrollIntoView({ block: "center" });
+};
+
 // ---------- feature confirm ("is this a hole?") ----------
 const shown = (f) => f.type === "hole" || f.full_circle; // partial bosses are rounded edges: not worth a line
 const FEATURE_NAME = { hole: "hole", boss: "round post" };
@@ -1387,10 +1531,20 @@ function renderFeatures(features) {
              el("button", { textContent: "Yes", title: `It is a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, f.type) }),
              el("button", { textContent: `Not a ${FEATURE_NAME[f.type]}`, onclick: () => tagFeature(f.region, "none") })]
           : [el("button", { className: "link quiet", textContent: `Not a ${FEATURE_NAME[f.type]}?`, onclick: () => tagFeature(f.region, "none") })];
-      return el("li", { className: [f.tag === "none" ? "rejected" : "", unsure(f) ? "ask" : ""].join(" ") }, name, ...answer,
-        f.tag !== "none" && f.full_circle ? fitControls(f) : "");
+      return el("li", { className: [f.tag === "none" ? "rejected" : "", unsure(f) ? "ask" : ""].join(" ") }, name, ...answer);
     }),
   );
+  renderFits(list.filter((f) => f.tag !== "none" && f.full_circle));
+}
+
+/** Tolerances & tuning: each round hole or post with what goes in it. */
+function renderFits(list) {
+  $("fits-summary").textContent = list.length ? "Click a name to see it on the part." : "No round holes or posts found.";
+  $("fits").replaceChildren(...list.map((f) => {
+    const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
+    return el("li", {}, el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
+      fitControls(f));
+  }));
 }
 
 const FIT_LABEL = { press: "pressed in", snug: "snug", sliding: "sliding / turning", loose: "loose" };
@@ -1407,6 +1561,7 @@ function fitControls(f) {
     busy("Working out the size…", async () => {
       const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
       state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
+      if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
       await suggestDesign();
     }) });
   return el("div", { className: "fit row" }, el("span", { className: "hint", textContent: hole ? "What goes in: Ø" : "Goes into: Ø" }), size, "mm,", kind, go,
@@ -1433,17 +1588,153 @@ const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
-async function applyEdits() {
+/** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
+async function testStressChamfer() {
+  const before = state.strength?.safety_factor;
+  await suggestDesign();
+  const edit = state.edits.find((e) => e.rule === "stress_at_inside_corner");
+  if (!edit) return setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
+  await applyEdits([edit]);
+  if (!readyForStrength()) return setStatus("The chamfer is on a new version, but the loads didn't carry over: set them again to compare.");
+  await runStrength();
+  const after = state.strength.safety_factor;
+  setStatus(`With the chamfer: safety ×${after.toFixed(1)}${before ? ` (was ×${before.toFixed(1)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
+}
+
+/** Apply ``chosen`` (default: the ticked suggestions) as a new version of the model. */
+async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
   return busy("Applying design changes…", async () => {
-    const chosen = state.edits.filter((e) => e.selected);
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
-    await loadFile(name, stlBytes(soup), null, step);
-    setStatus(`${state.summary} — design changes applied. Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
+    remember("design changes");
+    const carry = carryLoads();
+    addVersion(chosen[0].title.replace(/ \(.*\)$/, "") + (chosen.length > 1 ? ` + ${chosen.length - 1} more` : ""));
+    await loadFile(name, stlBytes(soup), null, step, "version");
+    await restoreLoads(carry);
+    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
   });
 }
-$("apply-edits").onclick = applyEdits;
+
+// ---------- undo and model versions ----------
+// Every applied design change keeps the model before it as a version: switch back, compare, or undo.
+const undoStack = [];
+
+/** Call before a change: Undo (and Ctrl+Z) puts the loads, marks, settings and model version back. */
+function remember(label) {
+  undoStack.push({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks), overrides: { ...state.overrides } });
+  if (undoStack.length > 50) undoStack.shift();
+  renderUndo();
+}
+
+function renderUndo() {
+  const last = undoStack.at(-1);
+  $("undo").hidden = !last;
+  if (last) $("undo").title = `Undo ${last.label} (Ctrl+Z)`;
+}
+
+async function undo() {
+  const u = undoStack.pop();
+  renderUndo();
+  if (!u || busyCount) return;
+  const marksChanged = JSON.stringify(u.marks) !== JSON.stringify(state.marks);
+  if (u.version !== state.version) await showVersion(u.version, false);
+  Object.assign(state, { loads: u.loads, marks: u.marks, overrides: u.overrides });
+  if (state.loads.length) await ensureRegions();
+  renderLoads();
+  renderMarks();
+  renderSettings();
+  recolor();
+  if (marksChanged) await findOrientations(Boolean(state.strength));
+  setStatus(`Undone: ${u.label}.`);
+}
+$("undo").onclick = undo;
+addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest?.("input, textarea, select")) {
+    e.preventDefault();
+    undo();
+  }
+});
+
+/** A new version (the model about to be loaded) after the current ones. */
+function addVersion(label) {
+  state.versions.push({ label, results: {} });
+  state.version = state.versions.length - 1;
+}
+
+/** Results of the shown version, for the comparison table. */
+function noteVersion(results) {
+  const v = state.versions?.[state.version];
+  if (!v) return;
+  v.results = { ...v.results, ...results };
+  renderVersions();
+}
+
+const versionName = (v, i) => (i === 0 ? v.label : `${i + 1}: ${v.label}`);
+
+function renderVersions() {
+  const list = state.versions ?? [];
+  $("version-pick").hidden = list.length < 2;
+  $("version").replaceChildren(...list.map((v, i) => el("option", { value: i, textContent: versionName(v, i), selected: i === state.version })));
+  const fmt = (r) => [r?.time != null ? fmtTime(r.time) : "–", r?.grams != null ? `${Math.round(r.grams)} g` : "–",
+    r?.problems != null ? String(r.problems) : "–", r?.safety != null ? `×${r.safety.toFixed(1)}` : "–"];
+  $("versions").replaceChildren(
+    el("tr", {}, ...["Version", "Time", "Plastic", "Problems", "Strength", ""].map((t) => el("th", { textContent: t }))),
+    ...list.map((v, i) => el("tr", { className: i === state.version ? "current" : "" },
+      el("td", { className: "name", textContent: versionName(v, i), title: versionName(v, i) }), ...fmt(v.results).map((t) => el("td", { textContent: t })),
+      el("td", {}, i === state.version ? "shown" : el("button", { className: "small", textContent: "Show", onclick: () => showVersion(i) })))),
+  );
+}
+$("version").onchange = () => showVersion(Number($("version").value));
+$("compare-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (file) await openFile(file.name, new Uint8Array(await file.arrayBuffer()), "version");
+};
+
+/** Loads and held faces by where they are on the part, to put them back on an edited model. */
+function carryLoads() {
+  return state.loads.map((l) => ({ load: l, at: l.point ? null : state.regionInfo[l.region] }));
+}
+
+/** Put carried loads on the same faces of the new model: the face nearest the old one's middle that
+ * faces the same way (spots keep their point). Faces that are gone drop out. */
+async function restoreLoads(carry) {
+  if (!carry.length) return;
+  await ensureRegions();
+  const loads = [];
+  for (const { load, at } of carry) {
+    if (!at) {
+      loads.push(load);
+      continue;
+    }
+    let best = -1;
+    let bestD = Infinity;
+    state.regionInfo.forEach((r, i) => {
+      const facing = r.normal[0] * at.normal[0] + r.normal[1] * at.normal[1] + r.normal[2] * at.normal[2];
+      const d = Math.hypot(r.centroid[0] - at.centroid[0], r.centroid[1] - at.centroid[1], r.centroid[2] - at.centroid[2]);
+      if (facing > 0.9 && d < bestD) [best, bestD] = [i, d];
+    });
+    if (best >= 0) loads.push({ ...load, region: best });
+  }
+  state.loads = loads;
+  renderLoads();
+  recolor();
+}
+
+/** Show version ``i``: load its model again, with the loads carried over (``carry: false`` for undo,
+ * which restores its own). */
+async function showVersion(i, carry = true) {
+  const v = state.versions[i];
+  if (!v?.source || i === state.version) return renderVersions();
+  const loads = carry ? carryLoads() : [];
+  state.version = i;
+  await loadFile(v.source.name, v.source.bytes, v.source.faceIds, v.step, "version");
+  if (v.source.body) await busy("Switching part…", async () => partLoaded(await call("select_body", { index: v.source.body })));
+  await restoreLoads(loads);
+  setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
+}
+$("apply-edits").onclick = () => applyEdits();
 
 // ---------- AI assistant (bring your own key) ----------
 const round = (v, d = 2) => (Array.isArray(v) ? v.map((x) => round(x, d)) : typeof v === "number" ? Number(v.toFixed(d)) : v);
@@ -2033,7 +2324,7 @@ $("dl-report").onclick = () =>
         state.showWarp = true;
         report.warp = { kind: w.verdict === "fine" ? "ok" : w.verdict === "might lift" ? "warn" : "bad",
           head: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift",
-          lines: [w.explanation], picture: pictureWith("problems", () => viewer.snapshot()), note: "Shape exaggerated; red dots lift first." };
+          lines: [w.explanation], picture: pictureWith("sims", () => viewer.snapshot()), note: "Shape exaggerated; red dots lift first." };
       }
       const chosen = state.edits.filter((e) => e.selected);
       if (chosen.length) report.design = { items: chosen, picture: pictureWith("design", () => viewer.snapshot()) };
