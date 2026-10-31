@@ -579,6 +579,12 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     best["alternatives"] = [q for q in plans if q is not best]
     best["target"] = target
     best["explanation"] = _optimise_story(best, target, len(plans) > 1)
+    if not best["met"]:  # settings alone aren't enough: what else would do it
+        from .strength import Shells
+
+        sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
+        best["beyond"] = sorted(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target),
+                                key=lambda o: -(o["safety_factor"] or 0))
     if zones:
         with stage(0.9, 1.0):
             light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
@@ -688,7 +694,7 @@ def _optimise_story(best: dict, target: float, compared: bool) -> str:
             out += f" The other orientation needs {alt[0]['grams']:.0f} g for the same."
         return out
     return (f"Even {setting} only reach ×{best['safety_factor']:.1f} (you need ×{target:.0f}).{where} "
-            "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, or use a stronger material.")
+            "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, use a stronger material, or let it carry less.")
 
 
 WARP_VOXELS = 6000  # warping solves once per group of layers: a coarser grid than strength
@@ -992,10 +998,9 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
-    at the weak spot (from the last strength check), and other materials. Sorted strongest first."""
+    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest first."""
     from dataclasses import replace
 
-    from .features import concave_edges
     from .strength import cases_safety, material_volume, verdict
     from .strength import evaluate_cases as evaluate_strength
 
@@ -1037,6 +1042,26 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "Turns the part so the load runs along the layers instead of pulling them apart.",
             "may need more support or take longer", up=axes[best].tolist())
 
+    out += _beyond_settings(base, p, profile, loads)
+    out.sort(key=lambda o: -(o["safety_factor"] or 0))
+    return out
+
+
+def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:
+    """What helps besides slicer settings and orientation: a design change at the weak spot, another
+    material, or a lighter load (that still reaches ``need``, default the usual safety). Also the way
+    out when even the strongest settings aren't enough."""
+    from .features import concave_edges
+    from .strength import verdict
+
+    s = _require()
+    need = need or required_safety(p)
+    out = []
+
+    def add(change, kind, sf, why, cost="", **extra):
+        out.append({"change": change, "kind": kind, "safety_factor": None if sf is None else float(sf),
+                    "verdict": None if sf is None else verdict(sf, need), "why": why, "cost": cost, **extra})
+
     # Design: a chamfer at the inside corner next to the weak spot (see features._stress_chamfers).
     if s.weak_spot is not None:
         spot = np.asarray(s.weak_spot[0])
@@ -1068,7 +1093,16 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
         add(f"Print it in {m['name']}", "material", sf,
             f"{m['name']} is stronger{' and its layers bond better' if other.z_strength_factor > p.z_strength_factor else ''}.",
             "needs " + ", ".join(needs) if needs else "", material=mid)
-    out.sort(key=lambda o: -(o["safety_factor"] or 0))
+
+    # Less load: stresses grow in step with the load, so the safety does the opposite.
+    sf = base["safety_factor"]
+    forces = [float(l.get("kg", 1)) for l in loads if l.get("kind") == "force"]
+    if forces and np.isfinite(sf) and sf < need:
+        share = sf / need
+        kg = f"about {forces[0] * share:.1f} kg instead of {forces[0]:g} kg" if len(forces) == 1 else f"about {share:.0%} of every load you set"
+        add(f"Carry less: {kg}", "load", need,
+            "The part holds a smaller load with the same margin. Spread the weight over two parts, add a support, or hang less on it.",
+            "it carries less", load_share=share)
     return out
 
 
