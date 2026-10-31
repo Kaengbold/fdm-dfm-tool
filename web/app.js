@@ -674,7 +674,7 @@ function showMarkers() {
   }
   if (shows("sims") && state.showWarp && state.warp) {
     viewer.showFindings([]);
-    for (const p of state.warp.lift_points_print) viewer.mark(p);
+    if (state.warpShow !== "stress") for (const p of state.warp.lift_points_print) viewer.mark(p);
     return;
   }
   viewer.showFindings(viewStep() == null || ["orient", "problems", "result"].includes(viewStep()) ? state.check?.findings ?? [] : []);
@@ -1214,16 +1214,20 @@ function stopSwing() {
 
 // ---------- warping simulation ----------
 const WARP_FIELD = { title: "Curls by (mm)", note: "exaggerated shape, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+const RESIDUAL_FIELD = { title: "Stress left inside (MPa)", note: "after it cools, rough", fmt: (v) => v.toFixed(v < 10 ? 1 : 0) };
 
+/** The warping result in the 3D view: the curled shape, or the stress the shrinking leaves inside. */
 function warpView() {
   const w = state.warp;
-  const key = `warp|${w.curl_mm}|${activeOption().up}`;
+  const stress = state.warpShow === "stress";
+  const max = Math.max(stress ? w.stress_max : w.max_mm, 1e-9);
+  const key = `warp|${w.curl_mm}|${activeOption().up}|${stress}`;
   if (viewer.fieldKey !== key || !viewer.field) {
-    viewer.showField({ triangles: f32(w.field_triangles), values: f32(w.vertex_value), disp: f32(w.vertex_disp), max: Math.max(w.max_mm, 1e-9) });
+    viewer.showField({ triangles: f32(w.field_triangles), values: f32(stress ? w.stress_value : w.vertex_value), disp: f32(w.vertex_disp), max });
     viewer.fieldKey = key;
   }
-  viewer.setDeformation((0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
-  renderLegend(WARP_FIELD, Math.max(w.max_mm, 1e-9));
+  viewer.setDeformation(stress ? 0 : (0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
+  renderLegend(stress ? RESIDUAL_FIELD : WARP_FIELD, max);
   return true;
 }
 
@@ -1240,10 +1244,19 @@ $("run-warp").onclick = async () => {
       state.showWarp = show.checked;
       recolor();
     };
+    const what = el("select", { id: "warp-show" },
+      el("option", { value: "shape", textContent: "the curled shape (red dots = lifts first)" }),
+      el("option", { value: "stress", textContent: "the stress left inside after it cools" }));
+    what.value = state.warpShow ?? "shape";
+    what.onchange = () => {
+      state.warpShow = what.value;
+      state.showWarp = show.checked = true;
+      recolor();
+    };
     $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
       el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
       el("p", { textContent: w.explanation }),
-      el("label", { className: "toggle" }, show, "Show the curled shape (red dots = lifts first)"),
+      el("label", { className: "toggle" }, show, "Show ", what),
       el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)." })));
     recolor();
     setStatus(state.summary);

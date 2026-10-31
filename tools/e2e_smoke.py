@@ -536,6 +536,9 @@ def main():
             text = page.locator("#warp-result").inner_text()
             assert "bar" in text, text
             assert page.locator("#legend").is_visible() and "Curls" in page.locator("#legend").inner_text()
+            page.select_option("#warp-show", "stress")
+            assert "Stress left inside" in page.locator("#legend").inner_text()
+            page.select_option("#warp-show", "shape")
             page.locator("#warp-result input[type=checkbox]").uncheck()
             assert page.locator("#legend").is_hidden()
             return text.splitlines()[0] + " | " + text.splitlines()[1][:120]

@@ -949,9 +949,11 @@ _warp_reference: dict = {}
 def warping(up, profile: dict | None = None) -> dict:
     """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
     longest bar that stays flat (1 = like that bar), where it lifts first, and the curled shape
-    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm)."""
+    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm);
+    the stress left inside after it cools: ``stress_value`` (MPa per vertex), ``stress_max`` (MPa, 99th percentile
+    of the elements: single voxel corners spike) and ``stress_share`` (of what the layers hold)."""
     from . import warp
-    from .strength import refine, sample_nodes
+    from .strength import refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -984,6 +986,10 @@ def warping(up, profile: dict | None = None) -> dict:
            "field_triangles": fine.astype(np.float32).tobytes(), "vertex_disp": disp.astype(np.float32).tobytes(),
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
            "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"]}
+    vm = warp.residual_stress(r)
+    out["stress_value"] = surface_values(model, vm, fine).astype(np.float32).tobytes()
+    out["stress_max"] = round(float(np.percentile(vm, 99)), 2) if len(vm) else 0.0
+    out["stress_share"] = round(out["stress_max"] / r["material"].strength_z, 2)
     out["explanation"] = _warp_story(out, p)
     return out
 
@@ -1015,7 +1021,20 @@ def _warp_story(r: dict, p: Profile) -> str:
     }[r["verdict"]]
     fix = "" if r["verdict"] == "fine" else (" A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
                                               " or rounding the corners of the base help. Upper layers shrinking onto the warm bottom cause it.")
-    return head + fix + " The shape shown is exaggerated."
+    return head + fix + " The shape shown is exaggerated." + _stress_story(r)
+
+
+def _stress_story(r: dict) -> str:
+    """One sentence on the stress the shrinking leaves inside the part."""
+    share = r.get("stress_share")
+    if share is None:
+        return ""
+    if share < 0.25:
+        return f" Little stress stays inside once it cools (up to about {r['stress_max']:.0f} MPa)."
+    tail = ("it can crack along a layer later, or bend when it gets warm. Rounded inside corners, an enclosure or annealing lower it."
+            if share >= 0.5 else "fine for most parts, but heat (a hot car) can let it bend a little.")
+    return (f" Shrinking leaves up to about {r['stress_max']:.0f} MPa of stress inside, {share:.0%} of what the layers hold "
+            f"(rough, real plastic relaxes some of it): {tail}")
 
 
 def regions() -> dict:
