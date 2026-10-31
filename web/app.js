@@ -2103,6 +2103,18 @@ function syncMultiMaterial() {
   $("mm-row").title = { none: "This printer has no multi-material option", builtin: "Built in on this printer", optional: "AMS / MMU add-on" }[mm];
 }
 
+/** A nozzle's problems: the ones a smaller nozzle doesn't have first, then how much detail it can't trace. */
+function nozzleProblems(r) {
+  const titles = (fresh) => [...new Set(r.issues.filter((i) => i.new === fresh).map((i) => i.title))];
+  const out = [
+    ...titles(true).map((t) => el("div", { className: "new-issue", textContent: `${t} (only with bigger nozzles)` })),
+    ...titles(false).map((t) => el("div", { textContent: t })),
+  ];
+  if (r.lost_mm3 >= 0.5) out.push(el("div", { className: "note", textContent: `≈${r.lost_mm3.toFixed(0)} mm³ too thin to print at all (most at ${r.lost_at_mm} mm)` }));
+  if (r.rough_mm3 >= 0.5) out.push(el("div", { className: "note", textContent: `≈${r.rough_mm3.toFixed(0)} mm³ of fine detail prints rough` }));
+  return out.length ? out : ["none"];
+}
+
 async function compareNozzles() {
   await busy("Comparing nozzle sizes…", async () => {
     const rows = await call("compare_nozzles", { up: activeOption().up, profile: profile() });
@@ -2115,7 +2127,7 @@ async function compareNozzles() {
           el("td", { textContent: `${r.nozzle} mm` }),
           el("td", {}, `≈${fmtTime(r.print_time_min)} with ${r.walls} walls`,
             ...(r.note ? [el("div", { className: "note", textContent: r.note })] : [])),
-          el("td", { textContent: r.issues.length ? [...new Set(r.issues.map((i) => i.title))].join("; ") : "none" }),
+          el("td", {}, ...nozzleProblems(r)),
           el("td", {}, r.current ? "current" : el("button", {
             textContent: "Use",
             onclick: () => {

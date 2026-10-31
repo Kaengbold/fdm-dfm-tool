@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .checks import orient, run_checks
+from .checks import orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh
@@ -1424,15 +1424,17 @@ def _zone_box(mesh: Mesh, up, rotation: np.ndarray, zone: dict) -> np.ndarray:
 
 
 def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
-    """The same part with every nozzle: print time, filament and the nozzle-dependent problems."""
-    from .checks import NOZZLE_RULES
+    """The same part with every nozzle: print time, filament, the nozzle-dependent problems (``new``:
+    not there with the smallest nozzle) and the detail it can't trace (checks.lost_detail)."""
+    from .checks import NOZZLE_RULES, lost_detail
 
     s = _require()
     base = Profile.from_dict(profile)
     rotation, _ = print_rotation(s.mesh, up, base.printer["bed"])
     oriented = orient(s.mesh, rotation)
+    detail_layers = slice_mesh(oriented, 0.2, 80)  # one set of layers, so only the nozzle differs
     out = []
-    nozzles = list(presets()["nozzles"])
+    nozzles = sorted(presets()["nozzles"], key=float)
     for i, nozzle in enumerate(nozzles):
         p = Profile.from_dict({**(profile or {}), "nozzle": nozzle})
         with stage(i / len(nozzles), (i + 1) / len(nozzles)):
@@ -1445,11 +1447,16 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
             "issues": [{"rule": f["rule"], "title": f["title"], "detail": f["detail"]} for f in issues],
             "current": nozzle == base.nozzle,
             "walls": goal_plan(p)["walls"],
+            **lost_detail(detail_layers, float(nozzle)),
         })
+    first = {f["title"] for f in out[0]["issues"]}
+    for row in out:
+        for f in row["issues"]:
+            f["new"] = f["title"] not in first
     # Each nozzle with its own usual settings. Bigger nozzles' profiles print slower, and a wider line
     # holds more plastic per mm, so once the hotend melts as fast as it can the nozzle moves slower:
-    # on small parts a bigger nozzle often saves no time (OrcaSlicer's own profiles show the same:
-    # L-bracket 73 / 91 / 109 min with 0.4 / 0.6 / 0.8 mm).
+    # on small parts a bigger nozzle often saves little time (OrcaSlicer's own profiles: L-bracket
+    # 27 / 22 / 23 min with 0.4 / 0.6 / 0.8 mm on a P1S).
     for small, big in zip(out, out[1:]):
         if big["print_time_min"] >= 0.95 * small["print_time_min"]:
             big["note"] = (f"Not faster than {small['nozzle']} mm on this part: slicer profiles run bigger nozzles slower, "

@@ -43,5 +43,9 @@ for (const file of files) {
   t = performance.now();
   const { edits } = call("design", { up: orientations[0].up, profile: { material: "abs" } });
   const design = secs(t);
-  console.log(`ok ${name}: ${info.faces} faces, ${orientations.length} orientations, findings ${counts.join("/")}, ${edits.length} edits | load ${load} s, orient ${orient} s, check ${check} s each, design ${design} s`);
+  t = performance.now();
+  const lost = call("compare_nozzles", { up: orientations[0].up, profile: {} }).map((r) => r.lost_mm3);
+  const nozzles = secs(t);
+  console.log(`ok ${name}: ${info.faces} faces, ${orientations.length} orientations, findings ${counts.join("/")}, ${edits.length} edits, ` +
+    `lost detail ${lost.join("/")} mm³ | load ${load} s, orient ${orient} s, check ${check} s each, design ${design} s, nozzles ${nozzles} s`);
 }

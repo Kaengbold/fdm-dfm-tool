@@ -507,6 +507,28 @@ def _feature_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]
     return out
 
 
+def lost_detail(layers: list[Layer], nozzle: float) -> dict:
+    """How much of the part a nozzle can't trace (mm³): pieces narrower than the features thresholds
+    drop out of each layer's opening. ``lost``: won't print at all; ``rough``: prints rough or
+    incomplete; ``lost_at_mm``: the height that loses the most. Corner slivers (any outside corner
+    rounds a little) are left out: only pieces bigger than r² count."""
+    F = load_data("thresholds")["features"]
+    radii = {"lost": F["vanish_below_nozzle"] * nozzle / 2, "rough": F["rough_below_nozzle"] * nozzle / 2}
+    vol = dict.fromkeys(radii, 0.0)
+    worst = (0.0, None)
+    for layer in layers:
+        if layer.geom.is_empty:
+            continue
+        for key, r in radii.items():
+            gone = _safe_diff(layer.geom, _opening(layer.geom, r))
+            area = sum(q.area for q in parts(gone) if q.area >= r * r)
+            vol[key] += area * layer.dz
+            if key == "lost" and area > worst[0]:
+                worst = (area, layer.z)
+    return {"lost_mm3": round(vol["lost"], 1), "rough_mm3": round(max(vol["rough"] - vol["lost"], 0.0), 1),
+            "lost_at_mm": None if worst[1] is None else round(float(worst[1]), 1)}
+
+
 def _hole_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
     out = []
     H = T["holes"]

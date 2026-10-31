@@ -331,6 +331,7 @@ summary::marker { color: var(--accent); }
 #nozzle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 #nozzle-table td, #nozzle-table th { border-bottom: 1px solid var(--line); padding: 5px 3px; text-align: left; vertical-align: top; }
 #nozzle-table tr.current { background: var(--accent-soft); }
+#nozzle-table .new-issue { color: var(--warn); font-weight: 700; }
 
 /* ---------- strength ---------- */
 .strength { gap: 12px; }
