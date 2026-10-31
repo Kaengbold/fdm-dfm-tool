@@ -167,12 +167,18 @@ def test_optimiser_finds_the_lightest_settings_that_hold():
     o = api.optimise_strength([0, 0, 1], loads, prof)
     assert o["met"] and o["safety_factor"] >= 2.0 and o["target"] == 2.0
     assert o["settings"]["wall_loops"] == str(o["walls"])
-    assert "reach" in o["explanation"]
+    assert "reach" in o["explanation"] and "beyond" not in o
     check = api.strength(o["up"], loads, prof, o["walls"], o["infill"], o["top"], o["bottom"])
     assert check["safety_factor"] == pytest.approx(o["safety_factor"], rel=1e-6)
     heavy = [dict(l, kg=500) if l["kind"] == "force" else l for l in loads]
     o = api.optimise_strength([0, 0, 1], heavy, prof)
     assert not o["met"] and "can't make it strong enough" in o["explanation"]
+    # Too weak with every setting: say what else would do it, e.g. a load it does hold.
+    less = next(b for b in o["beyond"] if b["kind"] == "load")
+    assert less["safety_factor"] == o["target"] and "kg instead of 500 kg" in less["change"]
+    lighter = [dict(l, kg=500 * less["load_share"]) if l["kind"] == "force" else l for l in loads]
+    held = api.strength(o["up"], lighter, prof, o["walls"], o["infill"], o["top"], o["bottom"])
+    assert held["safety_factor"] == pytest.approx(o["target"], rel=1e-3)
 
 
 def test_fea_view_fields_cover_the_refined_surface():
