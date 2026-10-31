@@ -283,6 +283,18 @@ def test_compare_nozzles():
     assert rows["0.8"]["print_time_min"] < rows["0.2"]["print_time_min"]
     assert len(rows["0.8"]["issues"]) > len(rows["0.2"]["issues"])
     assert rows["0.4"]["current"]
+    assert not any(i["new"] for i in rows["0.2"]["issues"]) and any(i["new"] for i in rows["0.8"]["issues"])
+
+
+def test_bigger_nozzles_lose_thin_detail():
+    """The test block's thin fins print rough with a 0.2 mm nozzle and vanish with a 0.8; plain
+    outside corners (rounded a little by any nozzle) don't count as lost detail."""
+    api.load((SAMPLES / "test_block.stl").read_bytes(), "test_block")
+    rows = {r["nozzle"]: r for r in api.compare_nozzles([0, 0, 1])}
+    assert rows["0.2"]["lost_mm3"] == 0 < rows["0.2"]["rough_mm3"]
+    assert rows["0.8"]["lost_mm3"] > rows["0.4"]["lost_mm3"] > 0
+    api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")
+    assert all(r["lost_mm3"] == r["rough_mm3"] == 0 for r in api.compare_nozzles([0, 0, 1]))
 
 
 def test_nozzles_keep_the_wall_thickness():
