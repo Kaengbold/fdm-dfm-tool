@@ -463,6 +463,7 @@ def main():
             return page.locator("#status").inner_text()
         run.step("best orientation with strength shows its result", rank_with_strength)
 
+
         def heat_map():
             n = page.evaluate("() => [fdm.state.check.face_temp.length, fdm.viewer.part.geometry.getAttribute('position').count / 3]")
             assert n[0] == n[1], n
@@ -595,6 +596,28 @@ def main():
             assert not any("Sideways hole prints oval" in f for f in seen), f"teardrop missing in the written STEP: {seen}"
             return f"{out.stat().st_size // 1024} kB STEP, {text.count('ADVANCED_FACE')} faces; reloaded: {page.locator('#status').inner_text()}"
         run.step("STEP in, design change, STEP out", step_round_trip)
+
+        def test_design_change():
+            # Mushroom held by its cap and pulled on the stem: the weak spot is the inside corner at the stem.
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            run.act(lambda: page.get_by_role("button", name="Test it").first.click(), 600_000)
+            status = page.locator("#status").inner_text()
+            assert "With the chamfer" in status and page.evaluate("() => fdm.state.versions.length") == 2, status
+            return status
+        run.step("strength suggestion: test a design change", test_design_change)
 
         def my_presets():
             page.click("#my-presets > summary")

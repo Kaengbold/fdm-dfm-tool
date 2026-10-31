@@ -1306,7 +1306,10 @@ async function showStrengthOptions() {
             el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
               : `×${o.safety_factor.toFixed(1)}${now ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
           el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
-          el("button", { textContent: ACTION[o.kind], onclick: () => applyOption(o) }))),
+          el("div", { className: "row" },
+            el("button", { textContent: ACTION[o.kind], onclick: () => applyOption(o) }),
+            o.kind === "design" && /chamfer/i.test(o.change) ? el("button", { textContent: "Test it", onclick: testStressChamfer,
+              title: "Adds the chamfer as a new version of your model and checks the strength again" }) : ""))),
       opts.some((o) => o.kind === "material") ? ""
         : el("li", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` }),
     );
@@ -1549,9 +1552,22 @@ const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
-async function applyEdits() {
+/** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
+async function testStressChamfer() {
+  const before = state.strength?.safety_factor;
+  await suggestDesign();
+  const edit = state.edits.find((e) => e.rule === "stress_at_inside_corner");
+  if (!edit) return setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
+  await applyEdits([edit]);
+  if (!readyForStrength()) return setStatus("The chamfer is on a new version, but the loads didn't carry over: set them again to compare.");
+  await runStrength();
+  const after = state.strength.safety_factor;
+  setStatus(`With the chamfer: safety ×${after.toFixed(1)}${before ? ` (was ×${before.toFixed(1)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
+}
+
+/** Apply ``chosen`` (default: the ticked suggestions) as a new version of the model. */
+async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
   return busy("Applying design changes…", async () => {
-    const chosen = state.edits.filter((e) => e.selected);
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
@@ -1682,7 +1698,7 @@ async function showVersion(i, carry = true) {
   await restoreLoads(loads);
   setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
 }
-$("apply-edits").onclick = applyEdits;
+$("apply-edits").onclick = () => applyEdits();
 
 // ---------- AI assistant (bring your own key) ----------
 const round = (v, d = 2) => (Array.isArray(v) ? v.map((x) => round(x, d)) : typeof v === "number" ? Number(v.toFixed(d)) : v);
