@@ -22,13 +22,22 @@ PATTERN_REASON = {
     "lightning": "Uses the least plastic, only holds up the top surface. Not for parts that carry a load",
 }
 
+REF_LINE_MM, REF_LAYER_MM = 0.45, 0.2  # the 0.4 mm nozzle the plans above are written for
+
 
 def goal_plan(profile: Profile) -> dict:
-    """Walls, infill (%), pattern, layer height and top/bottom layers for the user's goal."""
+    """Walls, infill (%), pattern, layer height and top/bottom layers for the user's goal.
+    The plans are written for a 0.4 mm nozzle; other nozzles keep the same wall and top/bottom
+    thickness in mm with their own line width and layer height (three 0.45 mm walls → two 0.82 mm
+    ones), so the part is as strong and a nozzle comparison is fair."""
     plan = dict(GOAL_PLANS[profile.goal])
     lh = profile.layer_height * plan.pop("layer_factor")
     plan["layer_height"] = round(min(lh, 0.7 * float(profile.nozzle)) / 0.02) * 0.02
     plan["layer_height"] = round(plan["layer_height"], 2)
+    plan["walls"] = max(2, round(plan["walls"] * REF_LINE_MM / profile.line_width))
+    layers = REF_LAYER_MM / profile.layer_height
+    plan["top"] = max(3, round(plan["top"] * layers))
+    plan["bottom"] = max(2, round(plan["bottom"] * layers))
     return plan
 
 

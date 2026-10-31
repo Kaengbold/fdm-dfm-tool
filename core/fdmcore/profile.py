@@ -149,7 +149,8 @@ class Profile:
 
     @property
     def speeds(self) -> dict:
-        return presets()["speeds"][self.printer["speed"]]
+        factor = presets()["nozzles"][self.nozzle].get("speed", {})
+        return {k: v * factor.get(k, 1.0) for k, v in presets()["speeds"][self.printer["speed"]].items()}
 
     @property
     def z_strength_factor(self) -> float:

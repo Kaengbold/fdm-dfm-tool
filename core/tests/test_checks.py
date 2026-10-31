@@ -285,6 +285,19 @@ def test_compare_nozzles():
     assert rows["0.4"]["current"]
 
 
+def test_nozzles_keep_the_wall_thickness():
+    """A fair nozzle comparison: same shell thickness, each nozzle's own line width (3 × 0.45 ≈ 2 × 0.82)."""
+    from fdmcore.profile import Profile
+    from fdmcore.recommend import goal_plan
+
+    thick = {}
+    for nozzle in ("0.2", "0.4", "0.6", "0.8"):
+        p = Profile.from_dict({"nozzle": nozzle})
+        thick[nozzle] = goal_plan(p)["walls"] * p.line_width
+    assert goal_plan(Profile.from_dict({"nozzle": "0.8"}))["walls"] == 2
+    assert all(abs(t - thick["0.4"]) < 0.35 for t in thick.values()), thick
+
+
 def test_goal_changes_settings():
     api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
     walls = lambda goal: {s["key"]: s["value"] for s in api.check([1, 0, 0], {"goal": goal})["settings"]}["wall_loops"]  # noqa: E731

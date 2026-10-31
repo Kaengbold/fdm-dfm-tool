@@ -121,6 +121,9 @@ materials:
   # transition for PLA (~60 °C, Grasso et al. 2018, Rapid Prototyping Journal, doi:10.1108/RPJ-04-2017-0055),
   # PETG, ABS, ASA and PC (typical datasheet values); for semi-crystalline PA-CF and soft TPU a conservative
   # heat-deflection value. Approximate: brand datasheets (research job G-3) should replace them.
+  # max_flow_mm3s: how fast the hotend can melt it, OrcaSlicer's generic filament profiles (Bambu, 2.x:
+  # filament_max_volumetric_speed), so print times follow what the slicer will do. Branded filament and
+  # high-flow hotends go faster; set your own under My materials (imports it from an Orca .json).
   # uv_resistance: how it lasts in sunlight. ASA is made for outdoor use (it replaces ABS there); PLA and ABS
   # turn brittle / yellow; PETG, PC, nylon and TPU are in between. General polymer knowledge, approximate (G-3).
   pla:
@@ -131,7 +134,7 @@ materials:
     warp_risk: low           # low | medium | high
     abrasive: false
     hygroscopic: low         # low | medium | high
-    max_flow_mm3s: 20
+    max_flow_mm3s: 12
     # Interlayer (Z) strength as a fraction of in-plane strength, by enclosure type.
     z_strength_factor: {none: 0.55, passive: 0.55, heated: 0.55}
     tensile_xy_mpa: 50       # Prusament PLA TDS: 51 MPa printed flat (ISO 527-1)
@@ -152,7 +155,7 @@ materials:
     warp_risk: low
     abrasive: false
     hygroscopic: medium
-    max_flow_mm3s: 15
+    max_flow_mm3s: 12
     z_strength_factor: {none: 0.6, passive: 0.65, heated: 0.7}
     tensile_xy_mpa: 45       # Prusament PETG 43–48 MPa; Polymaker PolyLite 32 MPa (TDS)
     modulus_xy_mpa: 1600     # printed specimens: Prusament 1500–1600, Polymaker 1470 MPa (TDS)
@@ -172,7 +175,7 @@ materials:
     warp_risk: high
     abrasive: false
     hygroscopic: low
-    max_flow_mm3s: 18
+    max_flow_mm3s: 15
     z_strength_factor: {none: 0.3, passive: 0.5, heated: 0.65}
     tensile_xy_mpa: 38
     modulus_xy_mpa: 2100
@@ -192,7 +195,7 @@ materials:
     warp_risk: medium
     abrasive: true
     hygroscopic: high
-    max_flow_mm3s: 10
+    max_flow_mm3s: 8
     z_strength_factor: {none: 0.2, passive: 0.25, heated: 0.3}
     tensile_xy_mpa: 70
     modulus_xy_mpa: 4500
@@ -214,7 +217,7 @@ materials:
     warp_risk: low
     abrasive: false
     hygroscopic: low
-    max_flow_mm3s: 20
+    max_flow_mm3s: 12
     z_strength_factor: {none: 0.6, passive: 0.6, heated: 0.6}  # verify: tougher than PLA, layer bond similar
     tensile_xy_mpa: 50
     modulus_xy_mpa: 2600
@@ -234,7 +237,7 @@ materials:
     warp_risk: high
     abrasive: false
     hygroscopic: low
-    max_flow_mm3s: 18
+    max_flow_mm3s: 12
     z_strength_factor: {none: 0.35, passive: 0.55, heated: 0.7}
     tensile_xy_mpa: 40       # Polymaker PolyLite ASA 38.6, Bambu 37, Prusament 42 MPa (TDS)
     modulus_xy_mpa: 2000     # Polymaker 2175, Prusament 1600–1700 MPa (TDS)
@@ -254,7 +257,7 @@ materials:
     warp_risk: high
     abrasive: false
     hygroscopic: medium
-    max_flow_mm3s: 15
+    max_flow_mm3s: 16
     z_strength_factor: {none: 0.3, passive: 0.5, heated: 0.7}
     tensile_xy_mpa: 60       # Bambu PC 62, Prusament PC Blend 63, Polymaker PolyMax PC 53 MPa (TDS)
     modulus_xy_mpa: 2300     # Polymaker PolyMax PC 2150–2440 MPa (TDS)
@@ -274,7 +277,7 @@ materials:
     warp_risk: low
     abrasive: false
     hygroscopic: medium
-    max_flow_mm3s: 6         # flexible filament jams when pushed fast
+    max_flow_mm3s: 3.2         # flexible filament jams when pushed fast
     z_strength_factor: {none: 0.85, passive: 0.85, heated: 0.85}  # layers bond very well
     tensile_xy_mpa: 30       # Polymaker PolyFlex TPU95 29 MPa, Bambu TPU 95A HF 22 MPa (TDS)
     modulus_xy_mpa: 60       # verify: data sheets give stress at 100 % stretch, not this; the strength check is not meant for TPU
@@ -287,11 +290,13 @@ materials:
     heat_limit_c: 70      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
 
+# speed: share of the 0.4 mm speeds in each nozzle's own slicer profile (OrcaSlicer's Bambu "Standard"
+# process profiles, 2.x: outer wall 120 vs 200 mm/s, infill 100 vs 270 mm/s for 0.2, 0.6 and 0.8 mm).
 nozzles:
-  "0.2": {line_width: 0.22, layer_height: 0.1}
+  "0.2": {line_width: 0.22, layer_height: 0.1, speed: {outer_wall: 0.6, infill: 0.37}}
   "0.4": {line_width: 0.45, layer_height: 0.2}
-  "0.6": {line_width: 0.62, layer_height: 0.3}
-  "0.8": {line_width: 0.82, layer_height: 0.4}
+  "0.6": {line_width: 0.62, layer_height: 0.3, speed: {outer_wall: 0.6, infill: 0.37}}
+  "0.8": {line_width: 0.82, layer_height: 0.4, speed: {outer_wall: 0.6, infill: 0.37}}
 
 speeds:  # mm/s, typical defaults
   fast: {outer_wall: 200, infill: 270}
