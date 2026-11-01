@@ -5,6 +5,12 @@ Two passes over the triangle adjacency graph:
 2. small patches (strips of a tessellated cylinder, fillet, sphere) are merged
    with smooth small neighbours, so a hole wall becomes one region while large
    flat faces stay separate from the fillets around them.
+
+A flat side of an extruded outline is often just two triangles, as "small" as a
+fillet strip; without more care one click would select the whole wall around a
+rounded outline. So strips only join neighbours of about their own width that
+bend the same way (outward or inward): flat sides, round outside corners and
+round inside corners each become their own face.
 """
 
 from __future__ import annotations
@@ -33,9 +39,12 @@ def face_adjacency(faces: np.ndarray) -> np.ndarray:
     return np.stack([o[:-1][same], o[1:][same]], axis=1)
 
 
-def find_regions(mesh: Mesh, planar_deg: float = 0.5, smooth_deg: float = 20.0, small_faces: int = 4) -> np.ndarray:
-    """Region id per triangle."""
-    normals, _ = mesh.normals_and_areas()
+def find_regions(mesh: Mesh, planar_deg: float = 0.5, smooth_deg: float = 20.0, small_faces: int = 4,
+                 width_ratio: float = 3.0, wide_mm: float = 1.0) -> np.ndarray:
+    """Region id per triangle. Two smooth strips stay apart when one is more than ``width_ratio``
+    times wider and at least ``wide_mm`` wide (a flat side next to fillet strips; the floor keeps a
+    thin seam strip in a hole wall), or when one curves outward and the other inward."""
+    normals, areas = mesh.normals_and_areas()
     adj = face_adjacency(weld(mesh))
     cos = np.einsum("ij,ij->i", normals[adj[:, 0]], normals[adj[:, 1]])
     n = mesh.face_count
@@ -45,8 +54,39 @@ def find_regions(mesh: Mesh, planar_deg: float = 0.5, smooth_deg: float = 20.0, 
     size = np.bincount(patch)
     small = size[patch] <= small_faces
     smooth = (cos > np.cos(np.radians(smooth_deg))) & small[adj[:, 0]] & small[adj[:, 1]]
-    _, region = _components(np.vstack([planar, adj[smooth]]), n)
+
+    width = _patch_width(mesh, patch, areas)
+    pa, pb = patch[adj[:, 0]], patch[adj[:, 1]]
+    wa, wb = width[pa], width[pb]
+    same_width = (np.maximum(wa, wb) <= width_ratio * np.minimum(wa, wb)) | (np.maximum(wa, wb) < wide_mm)
+    bend = _bend(mesh, normals, adj, smooth & (pa != pb))
+    label = np.zeros(len(size))
+    np.add.at(label, pa, bend)
+    np.add.at(label, pb, bend)
+    same_bend = np.sign(label[pa]) == np.sign(label[pb])
+    _, region = _components(np.vstack([planar, adj[smooth & same_width & same_bend]]), n)
     return region
+
+
+def _patch_width(mesh: Mesh, patch: np.ndarray, areas: np.ndarray) -> np.ndarray:
+    """Rough width of each planar patch: its area over its longest triangle edge (a strip of two
+    triangles: area / diagonal, about its short side)."""
+    t = mesh.triangles
+    longest = np.linalg.norm(t - np.roll(t, 1, axis=1), axis=2).max(axis=1)
+    k = int(patch.max()) + 1
+    edge = np.zeros(k)
+    np.maximum.at(edge, patch, longest)
+    return np.bincount(patch, areas, minlength=k) / np.maximum(edge, 1e-12)
+
+
+def _bend(mesh: Mesh, normals: np.ndarray, adj: np.ndarray, use: np.ndarray) -> np.ndarray:
+    """+1 where the surface bends outward across a triangle pair (a round outside corner), -1
+    inward (a fillet in an inside corner, a hole wall), 0 for pairs not in ``use``. Going from one
+    triangle to the next, the normal turns towards the step on an outward bend."""
+    c = mesh.triangles.mean(axis=1)
+    a, b = adj[:, 0], adj[:, 1]
+    s = np.einsum("ij,ij->i", normals[b] - normals[a], c[b] - c[a])
+    return np.where(use, np.sign(s), 0.0)
 
 
 def region_info(mesh: Mesh, region: np.ndarray) -> list[dict]:
