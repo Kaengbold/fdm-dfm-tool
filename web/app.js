@@ -726,9 +726,12 @@ $("viewer").addEventListener("pointerup", async (e) => {
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
-  steps.reveal($("pick-panel"));
   state.showHeat = false;
   recolor();
+  // Looking around the part in another step must not pull the user to "Will it hold?": the face
+  // stays picked there for later, and the status line says where to use it.
+  if (shows("strength")) steps.reveal($("pick-panel"));
+  else setStatus(`Picked: ${$("pick-info").textContent}. To hold or load it, or keep it clean or on the bed, open "${STEP_NAMES.strength}".`);
 });
 
 const SPOT_RADIUS = 3; // mm, for loads "only around the clicked spot"
@@ -1269,8 +1272,8 @@ $("run-warp").onclick = async () => {
       recolor();
     };
     const what = el("select", { id: "warp-show" },
-      el("option", { value: "shape", textContent: "the curled shape (red dots = lifts first)" }),
-      el("option", { value: "stress", textContent: "the stress left inside after it cools" }));
+      el("option", { value: "shape", textContent: "Curled shape (red dots lift first)" }),
+      el("option", { value: "stress", textContent: "Stress left inside after cooling" }));
     what.value = state.warpShow ?? "shape";
     what.onchange = () => {
       state.warpShow = what.value;
@@ -1280,7 +1283,8 @@ $("run-warp").onclick = async () => {
     $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
       el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
       el("p", { textContent: w.explanation }),
-      el("label", { className: "toggle" }, show, "Show ", what),
+      el("label", { className: "toggle" }, show, "Show it on the part"),
+      what,
       el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)."
         + (w.from_gcode ? " Layer times from your G-code." : "") })));
     recolor();
