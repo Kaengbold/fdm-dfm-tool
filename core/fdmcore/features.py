@@ -614,9 +614,11 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
         near = [p for p in parts(layer.geom, 0.05) if p.distance(Point(s[:2])) <= within] if not layer.geom.is_empty else []
         return min(near, key=lambda p: p.distance(Point(s[:2]))) if near else None
 
-    # The narrowest section in the weak stretch is what gets thicker (a neck, not the wide ends it joins).
+    # The narrowest section in and next to the weak stretch is what gets thicker (a neck, not the wide ends
+    # it joins): the stretch can lie just inside the wide part, where a stem starts (as in _narrowest).
     wide = 2 * max(thickness, THICKEN_REACH_MM) + grow
-    stretch = [p for layer in layers if lo - 1e-9 <= layer.z <= hi + 1e-9 for p in [section(layer, wide)] if p is not None]
+    stretch = [p for layer in layers if lo - THICKEN_REACH_MM <= layer.z <= hi + THICKEN_REACH_MM
+               for p in [section(layer, wide)] if p is not None]
     narrow = min(stretch, key=lambda p: p.area) if stretch else None
     if narrow is not None:
         x0, y0, x1, y1 = narrow.bounds

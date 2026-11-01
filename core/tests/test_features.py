@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -325,3 +326,23 @@ def test_round_where_it_prints_chamfer_where_it_would_hang():
     # The round fills about as much as the chamfer would (just as wide, it would be about half).
     tris = lambda e: np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3).astype(float)  # noqa: E731
     assert Mesh(tris(cap_down)).volume() == pytest.approx(Mesh(tris(cap_up)).volume(), rel=0.35)
+
+
+def test_strength_of_a_variant_keeps_the_part():
+    """A design change checked in the background: the loads move to the variant's matching faces and the
+    user's part stays loaded."""
+    pytest.importorskip("manifold3d")
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
+    api.regions()
+    prof = {"material": "pla"}
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}]
+    before = api.strength([0, 1, 0], loads, prof)["safety_factor"]
+    part = api._require().mesh
+    edit = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
+    data = to_binary_stl(apply_edits(part, [edit]))
+    r = api.dispatch("strength_variant", json.dumps({"up": [0, 1, 0], "loads": loads, "profile": prof}), data)
+    assert api._require().mesh is part
+    assert r["safety_factor"] > before and 0 < r["added_g"] < 1
