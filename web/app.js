@@ -713,6 +713,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   await ensureRegions();
   if (state.zonePick) return addZone(hit);
   if (state.volPick) return pickVolume(hit);
+  if (state.snapPick) return pickSnap(hit);
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
@@ -1450,7 +1451,7 @@ function setZones(zones) {
 
 const zonesShown = () => shows("strength") || shows("settings") || shows("download");
 const volumesShown = () => zonesShown() || shows("extra");
-const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", keep_clear: "--clean" };
+const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", keep_clear: "--clean", add_solid: "--bed", cut_solid: "--force" };
 
 /** Zones (orange) and the advanced design boxes (their own colours) in the 3D view. */
 function drawBoxes() {
@@ -1525,9 +1526,12 @@ const VOLUME_HINT = {
   support: "The slicer prints supports inside the box, even with its automatic supports off. For an overhang it misses or a spot you want held.",
   blocker: "No supports inside the box: keeps marks off a surface that should stay clean. Overhangs in it print in the air.",
   void: "A thin hidden gap inside the part. The slicer prints walls all round it, so the plastic around it comes out solid: a stronger spot without more infill everywhere. Click a spot for a pin hole up through the part, or two spots for a slot.",
-  keep_clear: "Space that has to stay empty: a screw head, a cable, a part that moves. Only for you (not in the 3MF): it tells you if the part reaches into it.",
+  keep_clear: "Space that has to stay empty: a screw head, a cable, a part that moves. Only for you (not in the 3MF): it tells you if the part reaches into it, and design suggestions that would fill it are left unticked.",
+  add_solid: "A block of plastic added to the model: a foot, a pad, a rib, more meat round a hole. Place it, size it, then apply it as a new version of the model.",
+  cut_solid: "A block cut out of the model: a notch, a flat for a clamp, room for a nut. Place it, size it, then apply it as a new version of the model.",
 };
-const VOLUME_NAME = { support: "Support here", blocker: "No support here", void: "Hidden gap", keep_clear: "Keep clear" };
+const VOLUME_NAME = { support: "Support here", blocker: "No support here", void: "Hidden gap", keep_clear: "Keep clear", add_solid: "Add plastic", cut_solid: "Cut away" };
+const SOLID_KINDS = ["add_solid", "cut_solid"];
 
 $("vol-kind").onchange = () => ($("vol-kind-hint").textContent = VOLUME_HINT[$("vol-kind").value]);
 $("vol-kind").onchange();
@@ -1568,6 +1572,40 @@ async function pickVolume(hit) {
   }
 }
 
+/** An "add plastic" / "cut away" block becomes a new version of the model (like a design change). */
+async function applySolid(i) {
+  const v = state.volumes[i];
+  const [edit] = await busy("Building the block…", () => call("volume_solid", { up: activeOption().up, boxes: [v] }));
+  const rest = state.volumes.filter((_, k) => k !== i);
+  await applyEdits([{ ...edit, mesh: new Float32Array(edit.mesh.slice().buffer) }]);
+  setVolumes(rest);
+}
+
+// ---------- another model snapped onto the part ----------
+$("snap-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || !activeOption()) return;
+  await ensureRegions();
+  state.snapPick = { name: file.name.replace(/\.[^.]+$/, ""), bytes: new Uint8Array(await file.arrayBuffer()) };
+  $("snap-hint").hidden = false;
+  $("snap-hint").textContent = `Click the face where ${file.name} goes…`;
+};
+
+async function pickSnap(hit) {
+  const { name, bytes } = state.snapPick;
+  state.snapPick = null;
+  $("snap-hint").hidden = true;
+  const region = state.regionInfo[state.faceRegions[hit.face]];
+  try {
+    const edit = await busy(`Putting ${name} on…`, () =>
+      call("snap_model", { point: hit.point, normal: region.normal, spin_deg: Number($("snap-spin").value) || 0, name }, bytes));
+    await applyEdits([{ ...edit, mesh: new Float32Array(edit.mesh.slice().buffer) }]);
+  } catch (err) {
+    setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
+  }
+}
+
 async function resizeVolume(i, margin) {
   const old = state.volumes[i];
   const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin }));
@@ -1590,6 +1628,7 @@ function setVolumes(volumes) {
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
       el("div", { className: "row" }, size),
       ...v.notes.map((n) => el("p", { className: "hint", textContent: n })),
+      SOLID_KINDS.includes(v.kind) ? el("button", { textContent: "Apply to the model", onclick: () => applySolid(i) }) : "",
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing a box");
         setVolumes(state.volumes.filter((_, k) => k !== i));
@@ -1656,23 +1695,24 @@ function suggestDesignIfShown() {
 async function suggestDesign() {
   state.designFor = activeOption().up.join();
   return busy("Looking for design improvements…", async () => {
-    const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams() });
+    const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
+    const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
     $("edit-params").hidden = !r.edits.length;
     state.features = r.features;
     renderFeatures(r.features);
-    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer), selected: true }));
+    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer), selected: !e.clash }));
     $("edits").replaceChildren(
       ...(state.edits.length
         ? state.edits.map((e) => {
-            const box = el("input", { type: "checkbox", checked: true });
+            const box = el("input", { type: "checkbox", checked: e.selected });
             box.onchange = () => {
               e.selected = box.checked;
               showSelectedGhosts();
             };
             // Pointing at a change turns the part to it and lights it up.
             return el("li", { onmouseenter: () => (showSelectedGhosts(e), viewer.focusEdit(e)), onmouseleave: () => showSelectedGhosts() },
-              el("label", {}, box, el("span", {}, e.title, el("small", { textContent: e.description }))));
+              el("label", {}, box, el("span", {}, e.title, el("small", { textContent: e.clash ? `${e.clash} ${e.description}` : e.description }))));
           })
         : [el("li", { className: "hint", textContent: "Nothing to change for this orientation and material." })]),
     );
