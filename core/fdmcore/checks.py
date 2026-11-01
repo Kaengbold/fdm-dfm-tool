@@ -349,6 +349,24 @@ def _opening(g, r: float):
     return b.buffer(r * 1.05, quad_segs=QUAD)
 
 
+def _wide_parts(g, r: float):
+    """The pieces of ``g`` that a circle of radius ``r`` fits into, found without a buffer: shrinking a
+    piece by far more than it is thick (it vanishes) can make the older GEOS in Pyodide throw "depth
+    mismatch", which kills the engine (T-268: an L-shaped layer 2–6 mm thick, shrunk by 8 mm). The
+    pole of inaccessibility only measures distances, so it can't."""
+    from shapely.ops import polylabel
+
+    keep = []
+    for piece in shapely.get_parts(g):
+        x0, y0, x1, y1 = piece.bounds
+        if min(x1 - x0, y1 - y0) < 2 * r:
+            continue
+        tol = 0.05 * r
+        if piece.boundary.distance(polylabel(piece, tol)) >= r - tol:
+            keep.append(piece)
+    return MultiPolygon(keep) if len(keep) != 1 else keep[0]
+
+
 def _closing(g, r: float):
     """Morphological closing: fills gaps narrower than 2r."""
     b = g.buffer(r, quad_segs=QUAD)
@@ -1083,7 +1101,11 @@ def _thick_blocks(layers: list[Layer], profile: Profile, X: dict) -> list[dict]:
         x0, y0, x1, y1 = g.bounds
         if min(x1 - x0, y1 - y0) < 2 * r:
             continue
-        core = cached[1] if cached is not None and g.equals_exact(cached[0], 1e-4) else _opening(g, r)
+        if cached is not None and g.equals_exact(cached[0], 1e-4):
+            core = cached[1]
+        else:
+            wide = _wide_parts(g, r)
+            core = Polygon() if wide.is_empty else _opening(wide, r)
         cached = (g, core)
         if core.is_empty:
             continue

@@ -527,3 +527,20 @@ def test_small_or_deep_text_on_an_upright_face():
     small = found([wall, *letters(8, 10, 0.6)])  # 2 mm tall
     assert len(small) == 1 and "tall" in small[0]["detail"] and small[0]["metrics"]["pieces"] == 3
     assert not found([wall, *letters(6, 12, 0.6)])  # 6 mm tall: fine
+
+
+def test_thick_blocks_skip_pieces_too_thin_to_shrink():
+    """A layer 2–6 mm thick shrunk by 8 mm vanishes; the older GEOS in Pyodide threw "depth mismatch"
+    on exactly this buffer and killed the engine (T-268: L-bracket, teardrops, a block added). Such
+    pieces are now dropped before any buffer; thick pieces still count."""
+    from shapely.geometry import MultiPolygon, Polygon, box
+
+    from fdmcore.checks import _wide_parts
+
+    layer = MultiPolygon([
+        Polygon([(10.4777, 21.5), (10.4777, 16.5), (-23.5, 16.5), (-23.5, -3.6592), (-25.5, -3.6592), (-25.5, -9.3566),
+                 (-23.5, -9.3566), (-23.5, -18.5), (-25.5, -18.5), (-25.5, -21.5), (-31.5, -21.5), (-31.5, 21.5)]),
+        Polygon([(31.5, 21.5), (31.5, 16.5), (12.5223, 16.5), (12.5223, 21.5)])])
+    assert _wide_parts(layer, 8.0).is_empty
+    block = box(0, 0, 40, 40)
+    assert _wide_parts(MultiPolygon([block, box(50, 0, 90, 3)]), 8.0).equals(block)
