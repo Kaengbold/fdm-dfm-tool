@@ -47,6 +47,8 @@ class Session:
     weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
     gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
     fits: dict = field(default_factory=dict)  # region id -> {"partner_mm", "fit"}: what goes into a hole / onto a post
+    gaps: dict = field(default_factory=dict)  # (face, face) -> {"partner_mm", "fit", "warp_mm"}: slots and tabs (set_gap)
+    warp: dict | None = None  # the last warping simulation: up, model, displacement (part frame)
 
 
 _session: Session | None = None
@@ -1001,6 +1003,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     warm = _warm_layers(up, p) if detailed else None
     r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm)
     model = r["model"]
+    s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"]}  # set_fit / set_gap use it
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
     if key not in _warp_reference:
         _warp_reference[key] = warp.reference(p, model.grid.h, sh)
@@ -1598,7 +1601,7 @@ def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     p = Profile.from_dict(profile)
     return {
         "features": detect_features(s.mesh, s.regions, s.tags),
-        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits),
+        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits, gaps=s.gaps),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
@@ -1620,9 +1623,82 @@ def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "slidin
     if partner_mm is None:
         s.fits.pop(region, None)
         return {"region": region}
-    size, why = fit_size(feats[region], float(partner_mm), fit, up, Profile.from_dict(profile))
-    s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit}
-    return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why}
+    squeeze = _warp_squeeze_hole(feats[region], up)
+    size, why = fit_size(feats[region], float(partner_mm), fit, up, Profile.from_dict(profile), squeeze)
+    s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit, "warp_mm": squeeze}
+    return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why,
+            "warp_mm": round(squeeze, 3)}
+
+
+def set_gap(face_a: int, face_b: int, up, partner_mm: float | None = None, fit: str = "sliding", profile: dict | None = None) -> dict:
+    """A slot or tab between two flat faces the user picked: their distance and which it is (slot:
+    empty between them, tab: plastic between). With ``partner_mm`` (thickness of what goes in, or of
+    the slot the tab goes into) and ``fit``: the size to model and why; design() then offers moving both
+    faces as an edit. If a warping simulation ran for this orientation, how much the gap closes as the
+    part curls is added. ``partner_mm`` None only measures (and forgets a size given before)."""
+    from .features import flat_pair, gap_size
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    a, b = sorted((int(face_a), int(face_b)))
+    pair = flat_pair(s.mesh, s.regions, a, b)
+    out = {"faces": [a, b], "kind": pair["kind"], "distance_mm": round(pair["distance_mm"], 3)}
+    if partner_mm is None:
+        s.gaps.pop((a, b), None)
+        return out
+    closing = _warp_closing_pair(pair, a, b, up)
+    size, why = gap_size(pair, float(partner_mm), fit, up, Profile.from_dict(profile), closing)
+    s.gaps[(a, b)] = {"partner_mm": float(partner_mm), "fit": fit, "warp_mm": closing}
+    return {**out, "suggested_mm": round(size, 2), "explanation": why, "warp_mm": round(closing, 3)}
+
+
+def _warp_points(up):
+    """(model, displacement at points) from the last warping run, if it was for ``up``."""
+    s = _require()
+    w = s.warp
+    if w is None or np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
+        return None
+    from .strength import sample_nodes
+
+    return lambda pts: sample_nodes(w["model"], w["u"], np.asarray(pts, float))
+
+
+def _warp_closing_pair(pair: dict, a: int, b: int, up) -> float:
+    """How much a slot narrows (or a tab thickens) as the part curls, by the warping simulation (mm, ≥ 0)."""
+    at = _warp_points(up)
+    if at is None:
+        return 0.0
+    s = _require()
+    ua = at(s.mesh.triangles[s.regions == a].mean(axis=1)).mean(axis=0)
+    ub = at(s.mesh.triangles[s.regions == b].mean(axis=1)).mean(axis=0)
+    e = pair["centre_b"] - pair["centre_a"]
+    e = e / np.linalg.norm(e)
+    grow = float((ub - ua) @ e)  # how much the faces move apart
+    return max(-grow if pair["kind"] == "slot" else grow, 0.0)
+
+
+def _warp_squeeze_hole(feature: dict, up) -> float:
+    """How much a hole closes (or a post grows) across its narrowest way as the part curls (mm, ≥ 0):
+    the wall's movement toward the axis on opposite sides."""
+    at = _warp_points(up)
+    if at is None:
+        return 0.0
+    s = _require()
+    tris = s.mesh.triangles[s.regions == feature["region"]]
+    pts = tris.mean(axis=1)
+    axis = np.asarray(feature["axis"], float)
+    radial = pts - np.asarray(feature["center"], float)
+    radial -= np.outer(radial @ axis, axis)
+    radial /= np.maximum(np.linalg.norm(radial, axis=1, keepdims=True), 1e-9)
+    inward = -(at(pts) * radial).sum(axis=1)  # + = the wall moves toward the axis
+    # Diameter change per direction: both sides of the hole along it.
+    angle = np.arctan2(radial @ np.cross(axis, radial[0]), radial @ radial[0])
+    bins = np.round(angle / (np.pi / 8)).astype(int) % 8  # opposite sides share a bin
+    change = np.bincount(bins, inward, minlength=8) / np.maximum(np.bincount(bins, minlength=8), 1) * 2
+    squeeze = float(change.max())
+    return max(squeeze if feature["type"] == "hole" else -float(change.min()), 0.0)
 
 
 def tag_feature(region: int, tag: str | None) -> dict:
@@ -1998,6 +2074,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "warping": warping,
     "set_fit": set_fit,
+    "set_gap": set_gap,
     "material_advice": material_advice,
     "dynamics": dynamics,
     "select_body": select_body,

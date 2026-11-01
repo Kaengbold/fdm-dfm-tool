@@ -75,3 +75,44 @@ def test_calibration_prints():
         m = load_stl(api.calibration_part(kind)["stl"])
         lo, hi = m.bounds()
         assert np.allclose(hi - lo, size, atol=0.2) and m.volume() > 0, kind
+
+
+def slotted_block():
+    """A 30 × 20 × 10 mm block with a 4 mm wide slot across it (x 13–17, from the top down to 3 mm)."""
+    shape = box(0, 0, 30, 10).difference(box(13, 3, 17, 11))  # profile in x-z, 20 mm deep along y
+    t = extrude(shape, 0, 20)[..., [0, 2, 1]][:, [0, 2, 1]]  # (x, z, depth) -> (x, depth, z), flipped back outward
+    api.load(to_binary_stl(Mesh(t)), "slotted")
+    api.regions()
+    s = api._require()
+    normals, _ = s.mesh.normals_and_areas()
+    c = s.mesh.triangles.mean(axis=1)
+    face = lambda n, x: int(s.regions[np.flatnonzero((normals @ n > 0.99) & (np.abs(c[:, 0] - x) < 1e-3))[0]])
+    return face([1, 0, 0], 13.0), face([-1, 0, 0], 17.0), face([-1, 0, 0], 0.0), face([1, 0, 0], 30.0)
+
+
+def test_slot_and_tab_between_flat_faces():
+    a, b, left, right = slotted_block()
+    m = api.set_gap(a, b, [0, 0, 1])
+    assert m["kind"] == "slot" and m["distance_mm"] == pytest.approx(4.0)
+    r = api.set_gap(a, b, [0, 0, 1], 4.0, "sliding")
+    assert r["suggested_mm"] == pytest.approx(4.35) and "slot" in r["explanation"]
+    edit = next(e for e in api.design([0, 0, 1], {})["edits"] if e["id"] == f"gap-{min(a, b)}-{max(a, b)}")
+    assert edit["op"] == "cut"
+    pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
+    assert pts[:, 0].min() == pytest.approx(13 - 0.175, abs=0.01) and pts[:, 0].max() == pytest.approx(17 + 0.175, abs=0.01)
+    whole = api.set_gap(left, right, [0, 0, 1])
+    assert whole["kind"] == "tab" and whole["distance_mm"] == pytest.approx(30.0)
+    assert api.set_gap(left, right, [0, 0, 1], 31.0, "snug")["suggested_mm"] == pytest.approx(30.8)
+    api.set_gap(a, b, [0, 0, 1])  # measuring only forgets the size
+    assert not any(e["id"].startswith(f"gap-{min(a, b)}") for e in api.design([0, 0, 1], {})["edits"])
+    with pytest.raises(ValueError, match="parallel"):
+        api.set_gap(a, right, [0, 0, 1])  # both face +x
+
+
+def test_flat_gap_across_layers_and_warping_tightens():
+    a, b, _, _ = slotted_block()
+    lying = api.set_gap(a, b, [1, 0, 0], 4.0, "sliding")  # the slot's faces lie flat: across the layers
+    assert lying["suggested_mm"] == pytest.approx(4.45) and "across the layers" in lying["explanation"]
+    api.warping([0, 0, 1], {"material": "abs", "printer": "prusa_mk4s"})
+    r = api.set_gap(a, b, [0, 0, 1], 4.0, "sliding")
+    assert r["warp_mm"] >= 0 and r["suggested_mm"] == pytest.approx(4.35 + r["warp_mm"], abs=0.005)
