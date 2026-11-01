@@ -725,7 +725,14 @@ def main():
             run.act(lambda: page.get_by_role("button", name="Test it").first.click(), 600_000)
             status = page.locator("#status").inner_text()
             assert "With the chamfer" in status and page.evaluate("() => fdm.state.versions.length") == 2, status
-            return status
+            # The thicker weak spot on the same part: another version, strength checked again.
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            page.locator("#strength-options summary", has_text="Design changes").evaluate("s => s.parentElement.open = true")
+            thicker = page.locator("#strength-options li", has_text="thicker").get_by_role("button", name="Test it")
+            run.act(lambda: thicker.click(), 600_000)
+            status2 = page.locator("#status").inner_text()
+            assert "With the thicker weak spot" in status2 and page.evaluate("() => fdm.state.versions.length") == 3, status2
+            return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
         def my_presets():
