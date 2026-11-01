@@ -1691,7 +1691,7 @@ async function applyOption(o, recheck = true) {
     if (edit) {
       showSelectedGhosts(edit);
       viewer.focusEdit(edit);
-      setStatus("The chamfer at the weak spot is lit up in yellow. Apply it, then check the strength again.");
+      setStatus("The rounded corners at the weak spot are lit up in yellow. Apply them, then check the strength again.");
     } else if (r) setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
   }
 }
@@ -1908,8 +1908,8 @@ const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
-/** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
-const EDIT_NAME = { "stress-chamfer": "the chamfer", "thicken-weak": "the thicker weak spot" };
+/** The rounded corners (or the thicker weak spot) on a new version, checked again: the strength before and after side by side. */
+const EDIT_NAME = { "stress-chamfer": "the rounded corners", "thicken-weak": "the thicker weak spot" };
 
 /** "Test it" on a strength suggestion: apply that design edit as a new version and check the strength again. */
 async function testDesignEdit(id) {

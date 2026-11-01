@@ -309,3 +309,19 @@ def test_thicken_only_the_neck_of_a_flat_dog_bone():
     assert np.abs(t[head, 1]).max() < 20.01 and t[head, 2].max() < 6.01  # the wide ends stay as they are
     assert np.abs(t[neck, 1]).max() > 7 and t[neck, 2].max() > 7  # the neck is thicker
     assert check(to_binary_stl(out)) > 1.05 * before
+
+
+def test_round_where_it_prints_chamfer_where_it_would_hang():
+    """The weak corner where the mushroom's stem meets the cap: printed cap down, the corner opens upwards
+    and gets a round; printed cap up, a round under the cap would hang over, so it is a 45° chamfer."""
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
+    api.regions()
+    prof = {"material": "pla"}
+    api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}], prof)
+    cap_down = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
+    cap_up = next(e for e in api.design([0, 0, 1], prof)["edits"] if e["id"] == "stress-chamfer")
+    assert "round" in cap_down["title"] and "chamfer" not in cap_down["title"]
+    assert "chamfer" in cap_up["title"] and "round" not in cap_up["title"]
+    # The round fills about as much as the chamfer would (just as wide, it would be about half).
+    tris = lambda e: np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3).astype(float)  # noqa: E731
+    assert Mesh(tris(cap_down)).volume() == pytest.approx(Mesh(tris(cap_up)).volume(), rel=0.35)

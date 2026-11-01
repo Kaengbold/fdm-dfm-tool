@@ -757,7 +757,7 @@ def main():
             page.locator("#strength-options summary", has_text="Design changes").evaluate("s => s.parentElement.open = true")
             run.act(lambda: page.get_by_role("button", name="Test it").first.click(), 600_000)
             status = page.locator("#status").inner_text()
-            assert "With the chamfer" in status and page.evaluate("() => fdm.state.versions.length") == 2, status
+            assert "With the rounded corners" in status and page.evaluate("() => fdm.state.versions.length") == 2, status
             # The thicker weak spot on the same part: another version, strength checked again.
             run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
             page.locator("#strength-options summary", has_text="Design changes").evaluate("s => s.parentElement.open = true")
