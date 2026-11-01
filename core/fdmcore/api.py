@@ -47,6 +47,8 @@ class Session:
     weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
     gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
     fits: dict = field(default_factory=dict)  # region id -> {"partner_mm", "fit"}: what goes into a hole / onto a post
+    gaps: dict = field(default_factory=dict)  # (face, face) -> {"partner_mm", "fit", "warp_mm"}: slots and tabs (set_gap)
+    warp: dict | None = None  # the last warping simulation: up, model, displacement (part frame)
 
 
 _session: Session | None = None
@@ -698,7 +700,7 @@ def _zone_info(z, mesh: Mesh, up, bed) -> dict:
     r0 = rotation_to_z(up)
     rot = print_rotation(mesh, up, bed)[0]
     corners = np.array(list(product(*zip(z.lo, z.hi)))) @ r0  # build frame -> part
-    return {"lo": list(z.lo), "hi": list(z.hi), "walls": z.walls, "infill": z.infill,
+    return {"lo": list(z.lo), "hi": list(z.hi), "walls": z.walls, "infill": z.infill, "shape": z.shape,
             "corners_print": [_to_print_frame(mesh, rot, c) for c in corners]}
 
 
@@ -706,12 +708,17 @@ ZONE_MARGIN_MM = 3.0  # a zone reaches this far past the picked face, so the sli
 
 
 def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARGIN_MM, walls: int | None = None,
-            infill: float | None = None, profile: dict | None = None) -> dict:
+            infill: float | None = None, profile: dict | None = None, shape: str | None = None) -> dict:
     """A zone the user picks: an upright box around a face (``region``) or a spot (``point``, part
     coordinates), ``margin`` mm bigger on every side, printed with more walls and infill (default
-    two more walls and 40 %). Same form as the optimiser's zones, so strength and export take it."""
+    two more walls and 40 %). Same form as the optimiser's zones, so strength and export take it.
+    ``shape`` "box", "cylinder" or "ball" (strength.ZONE_SHAPES); default a cylinder around a round
+    hole or post that stands upright, else a box."""
     from .regions import find_regions
-    from .strength import Zone
+    from .strength import ZONE_SHAPES, Zone
+
+    if shape is not None and shape not in ZONE_SHAPES:
+        raise ValueError(f"shape must be one of {ZONE_SHAPES}")
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -727,8 +734,17 @@ def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARG
         raise ValueError("Give a face (region) or a point")
     built = pts @ rotation_to_z(up).T
     plan = goal_plan(p)
-    z = Zone(tuple((built.min(axis=0) - margin).tolist()), tuple((built.max(axis=0) + margin).tolist()),
-             int(walls if walls is not None else plan["walls"] + 2), float(infill if infill is not None else max(0.4, plan["infill"] / 100)))
+    if shape is None:
+        shape = "cylinder" if region is not None and _upright_round(int(region), up) else "box"
+    lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
+    if shape != "box":  # the round shape sits inside its box: grow the box so it still reaches past the face
+        grow = (hi - lo) * (np.sqrt(2) - 1) / 2 if shape == "ball" else np.r_[(hi - lo)[:2] * (np.sqrt(2) - 1) / 2, 0.0]
+        if region is not None and shape == "cylinder" and _upright_round(int(region), up):
+            grow[:2] = 0.0  # a circle around a round face already fits it
+        lo, hi = lo - grow, hi + grow
+    z = Zone(tuple(lo.tolist()), tuple(hi.tolist()),
+             int(walls if walls is not None else plan["walls"] + 2), float(infill if infill is not None else max(0.4, plan["infill"] / 100)),
+             shape=shape)
     return _zone_info(z, s.mesh, up, p.printer["bed"])
 
 
@@ -741,14 +757,15 @@ VOID_COVER_MM = 1.0  # plastic left above and below such a pin hole, so it doesn
 
 
 def volume_at(up, kind: str, region: int | None = None, point=None, point2=None, margin: float | None = None,
-              profile: dict | None = None) -> dict:
+              profile: dict | None = None, shape: str = "box") -> dict:
     """An advanced design box, upright in the build frame like a zone: around a face (``region``),
     a spot (``point``) or between two spots (``point`` and ``point2``, part coordinates), ``margin``
     mm bigger on every side. ``kind``: "support" / "blocker" (support enforcer / blocker in the 3MF),
     "void" (a hidden gap: a negative volume the slicer prints walls round; on one spot a thin pin
     hole up through the part that stays inside it), "keep_clear" (space that must stay empty; not
     exported), "add_solid" / "cut_solid" (a block of plastic added to or cut from the model itself: see
-    volume_solid). Returns the box, its corners on the bed and plain notes on what it does here."""
+    volume_solid). Returns the box, its corners on the bed and plain notes on what it does here. ``shape``:
+    "box", "cylinder" or "ball" inside that box (strength.ZONE_SHAPES)."""
     from .regions import find_regions
 
     if kind not in VOLUME_KINDS:
@@ -779,7 +796,11 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     lo[2], hi[2] = max(lo[2], zs.min()), (hi[2] if kind in DESIGN_ONLY else min(hi[2], zs.max()))
     if np.any(hi - lo <= 0):
         raise ValueError("That box is outside the part's height")
-    box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0}
+    from .strength import ZONE_SHAPES
+
+    if shape not in ZONE_SHAPES:
+        raise ValueError(f"shape must be one of {ZONE_SHAPES}")
+    box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0, "shape": shape}
     corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"])["corners_print"]
     return {**box, "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
 
@@ -868,7 +889,19 @@ def _box_zone(box: dict):
     """A zone or advanced design box (dict) as the strength model's Zone."""
     from .strength import Zone
 
-    return Zone(tuple(box["lo"]), tuple(box["hi"]), int(box.get("walls", 0)), float(box.get("infill", 0)), box.get("kind") == "void")
+    return Zone(tuple(box["lo"]), tuple(box["hi"]), int(box.get("walls", 0)), float(box.get("infill", 0)), box.get("kind") == "void",
+                box.get("shape", "box"))
+
+
+def _upright_round(region: int, up) -> bool:
+    """Is face ``region`` a round hole or post whose axis stands upright for this build direction?"""
+    from .features import accepted, detect_features
+
+    s = _require()
+    for f in accepted(detect_features(s.mesh, s.regions, s.tags)):
+        if f["region"] == region:
+            return abs(np.dot(f["axis"], np.asarray(up, float) / np.linalg.norm(up))) > 0.98
+    return False
 
 
 def _inside_test(mesh: Mesh, r0: np.ndarray):
@@ -908,22 +941,29 @@ def _solid_run(inside, at: np.ndarray, zmin: float, zmax: float) -> tuple[float,
     return lo, hi
 
 
+SHAPE_VOLUME = {"box": 1.0, "cylinder": np.pi / 4, "ball": np.pi / 6}  # share of the box it fills
+
+
 def _volume_notes(mesh: Mesh, r0: np.ndarray, inside, box: dict, p: Profile) -> list[str]:
     """What an advanced design box does on this part, in plain words."""
     lo, hi = np.asarray(box["lo"]), np.asarray(box["hi"])
-    kind = box["kind"]
+    kind, zone = box["kind"], _box_zone(box)
     if kind in ("void", "keep_clear"):
         n = np.clip(np.ceil((hi - lo) / (inside.h / 2)).astype(int) + 1, 2, 40)
         g = np.stack(np.meshgrid(*[np.linspace(lo[i], hi[i], n[i]) for i in range(3)], indexing="ij"), -1).reshape(-1, 3)
+        g = g[zone.gap(g) <= 1e-9]
         filled = inside(g)
         if kind == "keep_clear":
             if filled.mean() < 0.01:
                 return ["The part stays out of it."]
-            return [f"The part fills about {filled.mean():.0%} of this space ({filled.mean() * float(np.prod(hi - lo)) / 1000:.1f} cm³): "
+            volume = float(np.prod(hi - lo)) * SHAPE_VOLUME[zone.shape]
+            return [f"The part fills about {filled.mean():.0%} of this space ({filled.mean() * volume / 1000:.1f} cm³): "
                     "change the design to clear it."]
         notes = ["The slicer prints walls all round it, so the plastic next to it is solid: stronger there, a little heavier. "
                  "The strength check counts it (roughly)."]
-        if not filled[np.any(np.isclose(g, lo) | np.isclose(g, hi), axis=1)].all():
+        c, r = (lo + hi) / 2, (hi - lo) / 2
+        rim = _box_zone({**box, "lo": c - 0.9 * r, "hi": c + 0.9 * r}).gap(g) > 1e-9  # the outer tenth of the shape
+        if not filled[rim].all():
             notes.append("It reaches the outside of the part, so it shows as a hole in the surface. Keep it inside if it should stay hidden.")
         return notes
     if kind in SOLID_KINDS:
@@ -941,7 +981,7 @@ def _volume_notes(mesh: Mesh, r0: np.ndarray, inside, box: dict, p: Profile) -> 
         return [f"Cuts away about {filled * size / 1000:.1f} cm³ of the part. Apply it to make a new version of the model (Undo goes back)."]
     normals, areas = mesh.normals_and_areas()
     c = mesh.triangles.mean(axis=1) @ r0.T
-    inbox = np.all((c >= lo) & (c <= hi), axis=1)
+    inbox = zone.gap(c) <= 1e-9
     steep = (normals @ r0.T)[:, 2] < -np.cos(np.radians(p.material["max_overhang_deg"]))
     above_bed = c[:, 2] > (mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2].min() + 0.2
     hang = float(areas[inbox & steep & above_bed].sum())
@@ -1043,18 +1083,24 @@ WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, l
 _warp_reference: dict = {}
 
 
-def warping(up, profile: dict | None = None) -> dict:
+def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
     longest bar that stays flat (1 = like that bar), where it lifts first, and the curled shape
-    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm)."""
+    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm);
+    the stress left inside after it cools: ``stress_value`` (MPa per vertex), ``stress_max`` (MPa, 99th percentile
+    of the elements: single voxel corners spike) and ``stress_share`` (of what the layers hold).
+    ``detailed``: with the loaded G-code's real layer times (layers that come quickly are still warm
+    when the next go on and shrink less); ``from_gcode`` says whether it was used."""
     from . import warp
-    from .strength import refine, sample_nodes
+    from .strength import refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
     sh = _shells(p)
-    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"))
+    warm = _warm_layers(up, p) if detailed else None
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm)
     model = r["model"]
+    s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"]}  # set_fit / set_gap use it
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
     if key not in _warp_reference:
         _warp_reference[key] = warp.reference(p, model.grid.h, sh)
@@ -1080,9 +1126,28 @@ def warping(up, profile: dict | None = None) -> dict:
     out = {"lift_ratio": ratio, "verdict": verdict, "curl_mm": round(curl, 3), "reference_mm": warp.warp_limit(p),
            "field_triangles": fine.astype(np.float32).tobytes(), "vertex_disp": disp.astype(np.float32).tobytes(),
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
-           "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"]}
+           "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
+           "from_gcode": warm is not None}
+    vm = warp.residual_stress(r)
+    out["stress_value"] = surface_values(model, vm, fine).astype(np.float32).tobytes()
+    out["stress_max"] = round(float(np.percentile(vm, 99)), 2) if len(vm) else 0.0
+    out["stress_share"] = round(out["stress_max"] / r["material"].strength_z, 2)
     out["explanation"] = _warp_story(out, p)
     return out
+
+
+def _warm_layers(up, p: Profile) -> tuple | None:
+    """(heights, °C) from the layer heat model with the loaded G-code's layer times, if it is for ``up``."""
+    from .checks import _layer_heat
+    from .gcode import layer_times
+    from .slicer import slice_mesh
+
+    s = _require()
+    if s.gcode is None or np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
+        return None
+    rotation = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    layers = slice_mesh(orient(s.mesh, rotation), p.layer_height)
+    return np.array([l.z for l in layers]), _layer_heat(layers, p, layer_times(s.gcode["toolpath"]))
 
 
 def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
@@ -1112,7 +1177,20 @@ def _warp_story(r: dict, p: Profile) -> str:
     }[r["verdict"]]
     fix = "" if r["verdict"] == "fine" else (" A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
                                               " or rounding the corners of the base help. Upper layers shrinking onto the warm bottom cause it.")
-    return head + fix + " The shape shown is exaggerated."
+    return head + fix + " The shape shown is exaggerated." + _stress_story(r)
+
+
+def _stress_story(r: dict) -> str:
+    """One sentence on the stress the shrinking leaves inside the part."""
+    share = r.get("stress_share")
+    if share is None:
+        return ""
+    if share < 0.25:
+        return f" Little stress stays inside once it cools (up to about {r['stress_max']:.0f} MPa)."
+    tail = ("it can crack along a layer later, or bend when it gets warm. Rounded inside corners, an enclosure or annealing lower it."
+            if share >= 0.5 else "fine for most parts, but heat (a hot car) can let it bend a little.")
+    return (f" Shrinking leaves up to about {r['stress_max']:.0f} MPa of stress inside, {share:.0%} of what the layers hold "
+            f"(rough, real plastic relaxes some of it): {tail}")
 
 
 def regions() -> dict:
@@ -1433,10 +1511,12 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             add("Add a 45° chamfer at the weak spot (design change)", "design", None,
                 "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. On a test part "
                 "2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
-                "changes the shape a little")
-    if base["mode"] == "material":
+                "changes the shape a little", edit="stress-chamfer")
+    if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
-            "The plastic itself is the limit there: more cross-section is the direct fix.", "changes the shape")
+            ("The plastic itself is the limit there: more cross-section is the direct fix. " if base["mode"] == "material" else "")
+            + "Adds 1.5 mm of plastic all round the weak spot, tapering out either side (size under Design changes). "
+            "Test it to see how much it helps.", "changes the shape", edit="thicken-weak")
 
     # Other materials: stresses don't depend on stiffness here, only the strengths change.
     for mid, m in presets()["materials"].items():
@@ -1620,8 +1700,8 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     p = Profile.from_dict(profile)
     return {
         "features": detect_features(s.mesh, s.regions, s.tags),
-        "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits),
-                                   up, keep_clear),
+        "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
+                                                gaps=s.gaps), up, keep_clear),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
@@ -1643,9 +1723,82 @@ def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "slidin
     if partner_mm is None:
         s.fits.pop(region, None)
         return {"region": region}
-    size, why = fit_size(feats[region], float(partner_mm), fit, up, Profile.from_dict(profile))
-    s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit}
-    return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why}
+    squeeze = _warp_squeeze_hole(feats[region], up)
+    size, why = fit_size(feats[region], float(partner_mm), fit, up, Profile.from_dict(profile), squeeze)
+    s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit, "warp_mm": squeeze}
+    return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why,
+            "warp_mm": round(squeeze, 3)}
+
+
+def set_gap(face_a: int, face_b: int, up, partner_mm: float | None = None, fit: str = "sliding", profile: dict | None = None) -> dict:
+    """A slot or tab between two flat faces the user picked: their distance and which it is (slot:
+    empty between them, tab: plastic between). With ``partner_mm`` (thickness of what goes in, or of
+    the slot the tab goes into) and ``fit``: the size to model and why; design() then offers moving both
+    faces as an edit. If a warping simulation ran for this orientation, how much the gap closes as the
+    part curls is added. ``partner_mm`` None only measures (and forgets a size given before)."""
+    from .features import flat_pair, gap_size
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    a, b = sorted((int(face_a), int(face_b)))
+    pair = flat_pair(s.mesh, s.regions, a, b)
+    out = {"faces": [a, b], "kind": pair["kind"], "distance_mm": round(pair["distance_mm"], 3)}
+    if partner_mm is None:
+        s.gaps.pop((a, b), None)
+        return out
+    closing = _warp_closing_pair(pair, a, b, up)
+    size, why = gap_size(pair, float(partner_mm), fit, up, Profile.from_dict(profile), closing)
+    s.gaps[(a, b)] = {"partner_mm": float(partner_mm), "fit": fit, "warp_mm": closing}
+    return {**out, "suggested_mm": round(size, 2), "explanation": why, "warp_mm": round(closing, 3)}
+
+
+def _warp_points(up):
+    """(model, displacement at points) from the last warping run, if it was for ``up``."""
+    s = _require()
+    w = s.warp
+    if w is None or np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
+        return None
+    from .strength import sample_nodes
+
+    return lambda pts: sample_nodes(w["model"], w["u"], np.asarray(pts, float))
+
+
+def _warp_closing_pair(pair: dict, a: int, b: int, up) -> float:
+    """How much a slot narrows (or a tab thickens) as the part curls, by the warping simulation (mm, ≥ 0)."""
+    at = _warp_points(up)
+    if at is None:
+        return 0.0
+    s = _require()
+    ua = at(s.mesh.triangles[s.regions == a].mean(axis=1)).mean(axis=0)
+    ub = at(s.mesh.triangles[s.regions == b].mean(axis=1)).mean(axis=0)
+    e = pair["centre_b"] - pair["centre_a"]
+    e = e / np.linalg.norm(e)
+    grow = float((ub - ua) @ e)  # how much the faces move apart
+    return max(-grow if pair["kind"] == "slot" else grow, 0.0)
+
+
+def _warp_squeeze_hole(feature: dict, up) -> float:
+    """How much a hole closes (or a post grows) across its narrowest way as the part curls (mm, ≥ 0):
+    the wall's movement toward the axis on opposite sides."""
+    at = _warp_points(up)
+    if at is None:
+        return 0.0
+    s = _require()
+    tris = s.mesh.triangles[s.regions == feature["region"]]
+    pts = tris.mean(axis=1)
+    axis = np.asarray(feature["axis"], float)
+    radial = pts - np.asarray(feature["center"], float)
+    radial -= np.outer(radial @ axis, axis)
+    radial /= np.maximum(np.linalg.norm(radial, axis=1, keepdims=True), 1e-9)
+    inward = -(at(pts) * radial).sum(axis=1)  # + = the wall moves toward the axis
+    # Diameter change per direction: both sides of the hole along it.
+    angle = np.arctan2(radial @ np.cross(axis, radial[0]), radial @ radial[0])
+    bins = np.round(angle / (np.pi / 8)).astype(int) % 8  # opposite sides share a bin
+    change = np.bincount(bins, inward, minlength=8) / np.maximum(np.bincount(bins, minlength=8), 1) * 2
+    squeeze = float(change.max())
+    return max(squeeze if feature["type"] == "hole" else -float(change.min()), 0.0)
 
 
 def tag_feature(region: int, tag: str | None) -> dict:
@@ -1717,6 +1870,9 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         sliced = layer_times(s.gcode["toolpath"])
     result = run_checks(oriented, p, sliced=sliced)
     result["stats"]["heat_from_gcode"] = sliced is not None
+    spots = _spot_heat(rotation, p) if sliced is not None else None
+    if spots is not None:
+        result["findings"] += _spot_findings(spots, p, result["findings"])
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
     result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
     if not fit["fits"]:
@@ -1735,17 +1891,79 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         "stats": result["stats"],
         "settings": recommend_settings(p, result["findings"], result["stats"]) if mode != "design" else [],
         "z_strength_factor": result["z_strength_factor"],
-        "face_temp": _face_temp(oriented, result["stats"]["layer_heat"]),
+        "face_temp": _face_temp(oriented, result["stats"]["layer_heat"], spots),
     }
+
+
+def _gcode_to_oriented(rotation: np.ndarray):
+    """Printer coordinates of the loaded G-code -> the oriented part (``orient``: centred, on z = 0)."""
+    s = _require()
+    g = s.gcode
+    turned = s.mesh.triangles.reshape(-1, 3) @ rotation.T
+    lo, hi = turned.min(axis=0), turned.max(axis=0)
+    base = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
+    return lambda x: x @ g["q"].T + g["shift"] - base
+
+
+def _spot_heat(rotation: np.ndarray, p: Profile) -> dict:
+    from .gcode import spot_heat
+
+    return spot_heat(_require().gcode["toolpath"], _gcode_to_oriented(rotation), p)
+
+
+def _spot_findings(spots: dict, p: Profile, findings: list[dict]) -> list[dict]:
+    """Spots that get the next layer while still soft, line by line from the G-code: only when the
+    layer heat check (whole layers) didn't already say so for that height."""
+    C = load_data("thresholds")["cooling"]
+    soft = float(p.material["softening_c"])
+    hot = (spots["temp_c"] >= soft + C["soft_margin_c"]) & (spots["z"] > C["above_bed_mm"])
+    if not hot.any():
+        return []
+    zs = np.unique(spots["z"][hot])
+    if zs[-1] - zs[0] < C["min_run_mm"]:
+        return []
+    known = [f["bbox"] for f in findings if f["rule"] == "small_layers_cooling" and f.get("bbox")]
+    i = int(np.argmax(np.where(hot, spots["temp_c"], -np.inf)))
+    if any(b[0][2] - 0.5 <= spots["z"][i] <= b[1][2] + 0.5 for b in known):
+        return []
+    near = hot & (np.linalg.norm(spots["xy"] - spots["xy"][i], axis=1) <= 10)
+    xy, z = spots["xy"][near], spots["z"][near]
+    half = spots["cell_mm"] * 1.5
+    t, wait = float(spots["temp_c"][i]), float(spots["seconds"][i])
+    sev = "warn" if t >= soft + C["hot_margin_c"] else "info"
+    return [{"rule": "small_layers_cooling", "severity": sev, "bbox": [[*(xy.min(axis=0) - half).tolist(), float(z.min())], [*(xy.max(axis=0) + half).tolist(), float(z.max())]],
+             "metrics": {"temp_c": round(t, 1), "softening_c": soft, "seconds": round(wait, 1)},
+             "detail": f"Line by line from your G-code: a spot at {z.min():.0f}–{z.max():.0f} mm gets the next layer after only {wait:.0f} s and is "
+                       f"still about {t:.0f} °C ({p.material['name']} softens from about {soft:.0f} °C), so it can droop or blob. "
+                       f"A longer minimum layer time, or a second copy on the plate, gives it time to cool"}]
 
 
 HEAT_COLOUR_C = (10.0, 55.0)  # °C above softening: no colour … full red
 
 
-def _face_temp(oriented: Mesh, heat: dict) -> bytes:
-    """Heat build-up per triangle (uint8, 255 = far above softening while printing), for the viewer."""
+def _face_temp(oriented: Mesh, heat: dict, spots: dict | None = None) -> bytes:
+    """Heat build-up per triangle (uint8, 255 = far above softening while printing), for the viewer.
+    With ``spots`` (line by line from the G-code) each triangle takes the warmest spot within a cell of it
+    on its layer; triangles without one (the top, the first layer) keep the whole layer's."""
     z = oriented.triangles[..., 2].mean(axis=1)
-    over = np.interp(z, heat["z"], heat["temp_c"]) - heat["softening_c"]
+    temp = np.interp(z, heat["z"], heat["temp_c"])
+    if spots is not None and len(spots["z"]):
+        c = oriented.triangles.mean(axis=1)
+        zs = np.unique(spots["z"])
+        level = np.clip(np.searchsorted(zs, c[:, 2]), 0, len(zs) - 1)
+        cell = spots["cell_mm"]
+        key = lambda lv, xy: (lv * 100_003 + np.floor(xy[:, 0] / cell).astype(np.int64)) * 100_003 + np.floor(xy[:, 1] / cell).astype(np.int64)
+        sk = key(np.searchsorted(zs, spots["z"]), spots["xy"])
+        order = np.argsort(sk)
+        sk, st = sk[order], spots["temp_c"][order]
+        best = np.full(len(c), -np.inf)
+        for dx in (-cell, 0, cell):
+            for dy in (-cell, 0, cell):
+                k = key(level, c[:, :2] + [dx, dy])
+                j = np.clip(np.searchsorted(sk, k), 0, len(sk) - 1)
+                best = np.where(sk[j] == k, np.maximum(best, st[j]), best)
+        temp = np.where(np.isfinite(best), best, temp)
+    over = temp - heat["softening_c"]
     lo, hi = HEAT_COLOUR_C
     return (np.clip((over - lo) / (hi - lo), 0, 1) * 255).astype(np.uint8).tobytes()
 
@@ -1848,12 +2066,35 @@ def _zone_box(mesh: Mesh, up, rotation: np.ndarray, zone: dict) -> np.ndarray:
     zs = (mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2]
     lo, hi = np.array(zone["lo"], float), np.array(zone["hi"], float)
     lo[2], hi[2] = max(lo[2], zs.min()), min(hi[2], zs.max())
-    v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * (hi - lo) + lo
-    f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
-    part = v[np.array(f)] @ r0  # build frame -> part
+    part = (_unit_shape(zone.get("shape", "box")) * (hi - lo) / 2 + (lo + hi) / 2) @ r0  # build frame -> part
     turned = mesh.triangles.reshape(-1, 3) @ rotation.T
     lo_t, hi_t = turned.min(axis=0), turned.max(axis=0)
     return part @ rotation.T - [(lo_t[0] + hi_t[0]) / 2, (lo_t[1] + hi_t[1]) / 2, lo_t[2]]
+
+
+def _unit_shape(shape: str, n: int = 32) -> np.ndarray:
+    """Closed, outward-wound triangles of a shape filling the cube [-1, 1]³: box, upright cylinder or ball."""
+    if shape == "box":
+        v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * 2 - 1
+        f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
+        return v[np.array(f)]
+    a = np.linspace(0, 2 * np.pi, n + 1)
+    ring = np.stack([np.cos(a), np.sin(a)], axis=1)
+    if shape == "cylinder":
+        p0, p1 = ring[:-1], ring[1:]
+        lo = lambda p: np.c_[p, -np.ones(len(p))]
+        hi = lambda p: np.c_[p, np.ones(len(p))]
+        zero = np.zeros((n, 2))
+        return np.concatenate([np.stack([lo(p0), lo(p1), hi(p1)], 1), np.stack([lo(p0), hi(p1), hi(p0)], 1),
+                               np.stack([hi(zero), hi(p0), hi(p1)], 1), np.stack([lo(zero), lo(p1), lo(p0)], 1)])
+    rows = n // 2
+    lat = np.linspace(-np.pi / 2, np.pi / 2, rows + 1)
+    grid = np.stack([np.cos(lat)[:, None] * ring[None, :, 0], np.cos(lat)[:, None] * ring[None, :, 1],
+                     np.repeat(np.sin(lat)[:, None], n + 1, axis=1)], axis=-1)
+    a, b, c, d = grid[:-1, :-1], grid[:-1, 1:], grid[1:, 1:], grid[1:, :-1]
+    tris = np.concatenate([np.stack([a, b, c], 2).reshape(-1, 3, 3), np.stack([a, c, d], 2).reshape(-1, 3, 3)])
+    area = np.linalg.norm(np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]), axis=1)
+    return tris[area > 1e-12]  # the poles' collapsed triangles
 
 
 def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
@@ -1933,6 +2174,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "warping": warping,
     "set_fit": set_fit,
+    "set_gap": set_gap,
     "volume_solid": volume_solid,
     "snap_model": snap_model,
     "material_advice": material_advice,

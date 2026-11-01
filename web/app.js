@@ -110,6 +110,7 @@ const state = {
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
   volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
+  gaps: [], // slots and tabs between two flat faces (set_gap): {faces, kind, distance_mm, partner, fit, text}
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
   versions: [], // models to switch between and compare: {label, source, step, results: {time, grams, problems, safety}}
@@ -287,7 +288,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {} });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [] });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -674,7 +675,7 @@ function showMarkers() {
   }
   if (shows("sims") && state.showWarp && state.warp) {
     viewer.showFindings([]);
-    for (const p of state.warp.lift_points_print) viewer.mark(p);
+    if (state.warpShow !== "stress") for (const p of state.warp.lift_points_print) viewer.mark(p);
     return;
   }
   viewer.showFindings(viewStep() == null || ["orient", "problems", "result"].includes(viewStep()) ? state.check?.findings ?? [] : []);
@@ -713,6 +714,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   await ensureRegions();
   if (state.zonePick) return addZone(hit);
   if (state.volPick) return pickVolume(hit);
+  if (state.gapPick) return pickGapFace(hit);
   if (state.snapPick) return pickSnap(hit);
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
@@ -1215,23 +1217,27 @@ function stopSwing() {
 
 // ---------- warping simulation ----------
 const WARP_FIELD = { title: "Curls by (mm)", note: "exaggerated shape, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+const RESIDUAL_FIELD = { title: "Stress left inside (MPa)", note: "after it cools, rough", fmt: (v) => v.toFixed(v < 10 ? 1 : 0) };
 
+/** The warping result in the 3D view: the curled shape, or the stress the shrinking leaves inside. */
 function warpView() {
   const w = state.warp;
-  const key = `warp|${w.curl_mm}|${activeOption().up}`;
+  const stress = state.warpShow === "stress";
+  const max = Math.max(stress ? w.stress_max : w.max_mm, 1e-9);
+  const key = `warp|${w.curl_mm}|${activeOption().up}|${stress}`;
   if (viewer.fieldKey !== key || !viewer.field) {
-    viewer.showField({ triangles: f32(w.field_triangles), values: f32(w.vertex_value), disp: f32(w.vertex_disp), max: Math.max(w.max_mm, 1e-9) });
+    viewer.showField({ triangles: f32(w.field_triangles), values: f32(stress ? w.stress_value : w.vertex_value), disp: f32(w.vertex_disp), max });
     viewer.fieldKey = key;
   }
-  viewer.setDeformation((0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
-  renderLegend(WARP_FIELD, Math.max(w.max_mm, 1e-9));
+  viewer.setDeformation(stress ? 0 : (0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
+  renderLegend(stress ? RESIDUAL_FIELD : WARP_FIELD, max);
   return true;
 }
 
 $("run-warp").onclick = async () => {
   if (!(await askLong("Warping simulation", "warping"))) return;
   return busy(`Simulating the print layer by layer (about ${fmtSeconds(estimate("warping"))})…`, async () => {
-    const w = await timed("warping", () => call("warping", { up: activeOption().up, profile: profile() }));
+    const w = await timed("warping", () => call("warping", { up: activeOption().up, profile: profile(), detailed: useGcode() }));
     state.warp = w;
     state.showWarp = true;
     state.showHeat = false;
@@ -1241,11 +1247,21 @@ $("run-warp").onclick = async () => {
       state.showWarp = show.checked;
       recolor();
     };
+    const what = el("select", { id: "warp-show" },
+      el("option", { value: "shape", textContent: "the curled shape (red dots = lifts first)" }),
+      el("option", { value: "stress", textContent: "the stress left inside after it cools" }));
+    what.value = state.warpShow ?? "shape";
+    what.onchange = () => {
+      state.warpShow = what.value;
+      state.showWarp = show.checked = true;
+      recolor();
+    };
     $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
       el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
       el("p", { textContent: w.explanation }),
-      el("label", { className: "toggle" }, show, "Show the curled shape (red dots = lifts first)"),
-      el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)." })));
+      el("label", { className: "toggle" }, show, "Show ", what),
+      el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)."
+        + (w.from_gcode ? " Layer times from your G-code." : "") })));
     recolor();
     setStatus(state.summary);
   });
@@ -1359,8 +1375,8 @@ function optionCard(o, now) {
     el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
     OPTION_ACTION[o.kind] || o.kind === "design" ? el("div", { className: "row" },
       OPTION_ACTION[o.kind] ? el("button", { textContent: OPTION_ACTION[o.kind], onclick: () => applyOption(o) }) : "",
-      o.kind === "design" && /chamfer/i.test(o.change) ? el("button", { textContent: "Test it", onclick: testStressChamfer,
-        title: "Adds the chamfer as a new version of your model and checks the strength again" }) : "") : "");
+      o.edit ? el("button", { textContent: "Test it", onclick: () => testDesignEdit(o.edit),
+        title: "Adds the change as a new version of your model and checks the strength again" }) : "") : "");
 }
 
 async function runOptimise() {
@@ -1456,13 +1472,22 @@ const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", k
 /** Zones (orange) and the advanced design boxes (their own colours) in the 3D view. */
 function drawBoxes() {
   viewer.showZones([
-    ...(zonesShown() ? state.zones.map((z) => z.corners_print) : []),
-    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind] })) : []),
+    ...(zonesShown() ? state.zones.map((z) => ({ corners: z.corners_print, shape: z.shape })) : []),
+    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind], shape: v.shape })) : []),
   ]);
 }
 
 /** What the slicer and the strength check get: zones plus the advanced design boxes. */
-const printZones = () => [...state.zones, ...state.volumes.map(({ kind, lo, hi }) => ({ kind, lo, hi, walls: 0, infill: 0 }))];
+const printZones = () => [...state.zones, ...state.volumes.map(({ kind, lo, hi, shape }) => ({ kind, lo, hi, shape, walls: 0, infill: 0 }))];
+
+/** Box / cylinder / ball: round shapes fit round things (a boss, the wall round a hole). */
+function shapePicker(value, onchange) {
+  const pick = el("select", { className: "shape-pick", title: "Shape (round ones sit inside the box)" },
+    ...[["box", "Box"], ["cylinder", "Cylinder"], ["ball", "Ball"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+  pick.value = value ?? "box";
+  pick.onchange = () => onchange(pick.value);
+  return el("label", {}, "Shape ", pick);
+}
 
 // ---------- stronger in one area (zones the user picks) ----------
 const BIG_FACE_MM2 = 400; // a face this big gets a box around the clicked spot, not the whole face
@@ -1491,10 +1516,10 @@ async function addZone(hit) {
 }
 
 /** Resize a picked zone: its box is worked out again from the face or spot it was made for. */
-async function resizeZone(i, margin) {
+async function resizeZone(i, margin, shape = state.zones[i].shape) {
   const old = state.zones[i];
   const z = await busy("Resizing the area…", () => call("zone_at", { up: activeOption().up, profile: profile(), ...old.from, margin,
-    walls: old.walls, infill: old.infill }));
+    walls: old.walls, infill: old.infill, shape }));
   remember("the area's size");
   setZones(state.zones.map((q, k) => (k === i ? { ...old, ...z, margin } : q)));
 }
@@ -1513,7 +1538,8 @@ function renderZones() {
         el("label", {}, "Walls ", num(z.walls, base.walls, 20, 1, (e) => set("walls", Math.max(base.walls, Math.round(Number(e.target.value) || 0))))),
         el("label", {}, "Infill ", num(Math.round(z.infill * 100), Math.round(base.infill * 100), 100, 5,
           (e) => set("infill", Math.min(1, Math.max(base.infill, Number(e.target.value) / 100)))), " %"),
-        z.from ? el("label", {}, "Reaches ", num(z.margin, 0, 30, 1, (e) => resizeZone(i, Math.max(0, Number(e.target.value) || 0))), " mm past it") : ""),
+        z.from ? el("label", {}, "Reaches ", num(z.margin, 0, 30, 1, (e) => resizeZone(i, Math.max(0, Number(e.target.value) || 0))), " mm past it") : "",
+        shapePicker(z.shape, (shape) => (z.from ? resizeZone(i, z.margin, shape) : set("shape", shape)))),
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing an area");
         setZones(state.zones.filter((_, k) => k !== i));
@@ -1606,9 +1632,9 @@ async function pickSnap(hit) {
   }
 }
 
-async function resizeVolume(i, margin) {
+async function resizeVolume(i, margin, shape = state.volumes[i].shape ?? "box") {
   const old = state.volumes[i];
-  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin }));
+  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin, shape }));
   remember("the box's size");
   setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, margin } : q)));
 }
@@ -1626,7 +1652,7 @@ function setVolumes(volumes) {
       : el("label", {}, "Reaches ", num(v.margin, 0, 30, 1, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
-      el("div", { className: "row" }, size),
+      el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
       ...v.notes.map((n) => el("p", { className: "hint", textContent: n })),
       SOLID_KINDS.includes(v.kind) ? el("button", { textContent: "Apply to the model", onclick: () => applySolid(i) }) : "",
       el("button", { className: "link", textContent: "Remove", onclick: () => {
@@ -1776,6 +1802,7 @@ function renderFeatures(features) {
 
 /** Tolerances & tuning: each round hole or post with what goes in it. */
 function renderFits(list) {
+  renderGaps();
   $("fits-summary").textContent = list.length ? "Click a name to see it on the part." : "No round holes or posts found.";
   $("fits").replaceChildren(...list.map((f) => {
     const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
@@ -1805,6 +1832,62 @@ function fitControls(f) {
     note ? el("p", { className: "hint", textContent: note }) : "");
 }
 
+// ---------- slots and flat gaps (two flat faces) ----------
+$("gap-pick").onclick = async () => {
+  if (!activeOption()) return;
+  await ensureRegions();
+  state.gapPick = [];
+  $("gap-hint").hidden = false;
+  $("gap-hint").textContent = "Click the first flat face of the slot (or one side of the tab)…";
+};
+
+async function pickGapFace(hit) {
+  state.gapPick.push(state.faceRegions[hit.face]);
+  if (state.gapPick.length < 2) {
+    $("gap-hint").textContent = "Now click the face on the other side…";
+    return;
+  }
+  const faces = state.gapPick;
+  state.gapPick = null;
+  $("gap-hint").hidden = true;
+  try {
+    const g = await call("set_gap", { face_a: faces[0], face_b: faces[1], up: activeOption().up });
+    state.gaps = [...state.gaps.filter((q) => q.faces.join() !== g.faces.join()), { ...g, partner: Math.round(g.distance_mm * 10) / 10, fit: "sliding" }];
+    renderGaps();
+  } catch (err) {
+    setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
+  }
+}
+
+/** Each picked slot or tab with what goes in it: the size to model, offered as a design change. */
+function renderGaps() {
+  $("gaps").replaceChildren(...state.gaps.map((g, i) => {
+    const slot = g.kind === "slot";
+    const size = el("input", { type: "number", min: 0.2, step: 0.1, value: g.partner,
+      title: slot ? "Thickness of what goes into the slot" : "Width of the slot the tab goes into" });
+    const kind = el("select", {}, ...Object.entries(FIT_LABEL).map(([v, t]) => el("option", { value: v, textContent: t })));
+    kind.value = g.fit;
+    const go = el("button", { textContent: "Size it", onclick: () =>
+      busy("Working out the size…", async () => {
+        const r = await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
+        state.gaps = state.gaps.map((q, k) => (k === i ? { ...q, partner: Number(size.value), fit: kind.value, text: r.explanation } : q));
+        renderGaps();
+        if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
+        await suggestDesign();
+      }) });
+    const forget = el("button", { className: "link", textContent: "Remove", onclick: async () => {
+      await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up });
+      state.gaps = state.gaps.filter((_, k) => k !== i);
+      renderGaps();
+      await suggestDesign();
+    } });
+    return el("li", {},
+      el("strong", { textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}` }),
+      el("div", { className: "fit row" }, el("span", { className: "hint", textContent: slot ? "What goes in:" : "Goes into a slot of" }), size, "mm,", kind, go),
+      g.text ? el("p", { className: "hint", textContent: g.text }) : "", forget);
+  }));
+}
+
 async function showFeature(f) {
   await ensureRegions();
   state.selectedRegion = f.region;
@@ -1826,16 +1909,20 @@ const designParams = () =>
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
 /** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
-async function testStressChamfer() {
+const EDIT_NAME = { "stress-chamfer": "the chamfer", "thicken-weak": "the thicker weak spot" };
+
+/** "Test it" on a strength suggestion: apply that design edit as a new version and check the strength again. */
+async function testDesignEdit(id) {
   const before = state.strength?.safety_factor;
+  const name = EDIT_NAME[id] ?? "the change";
   await suggestDesign();
-  const edit = state.edits.find((e) => e.rule === "stress_at_inside_corner");
-  if (!edit) return setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
+  const edit = state.edits.find((e) => e.id === id);
+  if (!edit) return setStatus(`No automatic edit fits there (${name}): change the part in your CAD.`);
   await applyEdits([edit]);
-  if (!readyForStrength()) return setStatus("The chamfer is on a new version, but the loads didn't carry over: set them again to compare.");
+  if (!readyForStrength()) return setStatus(`${name[0].toUpperCase()}${name.slice(1)} is on a new version, but the loads didn't carry over: set them again to compare.`);
   await runStrength();
   const after = state.strength.safety_factor;
-  setStatus(`With the chamfer: safety ×${after.toFixed(1)}${before ? ` (was ×${before.toFixed(1)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
+  setStatus(`With ${name}: safety ×${after.toFixed(1)}${before ? ` (was ×${before.toFixed(1)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
 }
 
 /** Apply ``chosen`` (default: the ticked suggestions) as a new version of the model. */

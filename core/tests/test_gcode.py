@@ -151,3 +151,35 @@ def test_layer_times_from_gcode():
     assert len(lt["z"]) == 5 and np.allclose(lt["layer_height"], LH)
     assert lt["seconds"].sum() == pytest.approx(tp.t1.max() - tp.t0.min(), rel=1e-6)
     assert lt["volume"].sum() == pytest.approx(tp.volume.sum())
+
+
+def test_spot_heat_line_by_line():
+    from fdmcore.profile import Profile
+
+    p = Profile.from_dict({"material": "pla", "printer": "bambu_p1s"})
+    tiny = gcode.spot_heat(gcode.parse(slice_box(4, 4, 4)), lambda x: x, p)
+    big = gcode.spot_heat(gcode.parse(slice_box(60, 60, 2)), lambda x: x, p)
+    assert tiny["seconds"].max() < 2 and tiny["temp_c"].min() > 150  # covered again within a second: still hot
+    assert np.median(big["seconds"]) > 30 and big["temp_c"].max() < 60
+    assert len(tiny["xy"]) == len(tiny["z"]) == len(tiny["temp_c"])
+
+
+def test_detailed_check_colours_spots_and_flags_heat():
+    api.load(to_binary_stl(box_mesh(4, 4, 6)), "pin")
+    api.load_gcode(slice_box(4, 4, 6, walls=2, infill=0.2), [0, 0, 1])
+    simple = api.check([0, 0, 1])
+    detailed = api.check([0, 0, 1], detailed=True)
+    assert detailed["stats"]["heat_from_gcode"]
+    assert any(f["rule"] == "small_layers_cooling" for f in detailed["findings"])
+    assert np.frombuffer(detailed["face_temp"], np.uint8).max() > 0
+    assert len(detailed["face_temp"]) == len(simple["face_temp"])
+
+
+def test_warping_with_the_gcode_layer_times():
+    api.load(to_binary_stl(box_mesh(90, 10, 3)), "bar")
+    api.load_gcode(slice_box(90, 10, 3, walls=2, infill=0.2), [0, 0, 1])
+    prof = {"material": "abs", "printer": "prusa_mk4s"}
+    simple = api.warping([0, 0, 1], prof)
+    detailed = api.warping([0, 0, 1], prof, detailed=True)
+    assert detailed["from_gcode"] and not simple["from_gcode"]
+    assert detailed["curl_mm"] <= simple["curl_mm"] * 1.001

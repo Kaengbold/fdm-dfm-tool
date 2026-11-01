@@ -88,3 +88,33 @@ def test_zone_box_stays_above_the_bed():
     api.load(box(40, 20, 10), "block")
     tris = api._zone_box(api._require().mesh, [0, 0, 1], np.eye(3), {"lo": [0, 0, -5], "hi": [10, 10, 50]})
     assert tris[..., 2].min() == pytest.approx(0) and tris[..., 2].max() == pytest.approx(10)
+
+
+def test_round_zone_shapes():
+    q = np.array([[5.0, 5, 5], [9.9, 5, 5], [9.5, 9.5, 5], [5, 5, 10.5]])
+    box_ = Zone((0.0, 0, 0), (10.0, 10, 10), 3, 0.5)
+    cyl = Zone((0.0, 0, 0), (10.0, 10, 10), 3, 0.5, shape="cylinder")
+    ball = Zone((0.0, 0, 0), (10.0, 10, 10), 3, 0.5, shape="ball")
+    assert np.allclose(box_.gap(q)[:3], 0) and cyl.gap(q)[2] == pytest.approx(np.hypot(4.5, 4.5) - 5, abs=1e-6)
+    assert cyl.gap(q)[1] == 0 and ball.gap(q)[3] == pytest.approx(0.5) and cyl.gap(q)[3] == pytest.approx(0.5)
+    for shape, share in api.SHAPE_VOLUME.items():  # closed, outward meshes filling the right share of the cube
+        t = api._unit_shape(shape)
+        vol = np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])).sum() / 6
+        assert vol == pytest.approx(8 * share, rel=0.03)
+
+
+def test_zone_around_an_upright_hole_is_a_cylinder():
+    from shapely.geometry import Point, box as rect
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    api.load(to_binary_stl(Mesh(extrude(rect(-20, -20, 20, 20).difference(Point(0, 0).buffer(3, 32)), 0, 8))), "plate")
+    hole = next(f for f in api.design([0, 0, 1])["features"] if f["type"] == "hole")
+    z = api.zone_at([0, 0, 1], region=hole["region"], margin=3)
+    assert z["shape"] == "cylinder" and z["hi"][0] - z["lo"][0] == pytest.approx(12, abs=0.3)
+    assert api.zone_at([0, 0, 1], region=hole["region"], shape="box")["shape"] == "box"
+    conf = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {"wall_loops": "2"}, zones=[z]))).read("3D/3dmodel.model").decode()
+    assert conf.count("<triangle ") > 12 + 100  # the part plus a round modifier, not a 12-triangle box
+    with pytest.raises(ValueError, match="shape"):
+        api.zone_at([0, 0, 1], region=hole["region"], shape="cone")

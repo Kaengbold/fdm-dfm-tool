@@ -67,6 +67,9 @@ RULE_IMPACT = {
     "enclosure_recommended": "shape",
     "turned_to_fit": "info",
     "shrinkage_size_error": "shape",
+    "living_hinge": "weak",
+    "snap_fit_upright": "weak",
+    "thick_solid_block": "info",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
 SEVERITY_ORDER = {"problem": 0, "warn": 1, "info": 2}
@@ -146,6 +149,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _first_layer_findings(layers, profile, T)
     findings += _bed_findings(layers, profile, T)
     findings += _weak_findings(layers, tracker, profile, T)
+    findings += _flex_findings(layers, profile, T)
     stats = _estimate(layers, profile)
     heat = _layer_heat(layers, profile, sliced)
     findings += _cooling_findings(layers, heat, profile, T, sliced)
@@ -925,6 +929,173 @@ def _free_top(r: Region, layers: list[Layer]) -> bool:
         return True
     above = layers[r.last_index + 1].geom.intersection(r.last.buffer(0.2, quad_segs=QUAD))
     return above.area < 0.2 * r.last.area
+
+
+# ---------------------------------------------------------------- parts that bend on purpose, thick blocks (T-181)
+
+
+def _flex_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
+    """Living hinges, snap-fit tabs standing upright, and solid blocks better made as ribbed shells."""
+    X = T["flex"]
+    mat = profile.material.get("based_on", profile.material_id)
+    out = _flat_hinges(layers, profile, X, mat) + _upright_hinges(layers, profile, X, mat)
+    out += _upright_snaps(layers, profile, X, mat) + _thick_blocks(layers, profile, X)
+    return out
+
+
+def _hinge_note(mat: str, X: dict, name: str) -> str:
+    if mat in X["hinge_good"]:
+        return f"{name} bends well"
+    if mat in X["hinge_bad"]:
+        return f"{name} cracks after a couple of hundred bends: print it in PETG or TPU if it has to bend often"
+    return f"{name} bends a while; PETG or TPU last longer"
+
+
+def _flat_hinges(layers: list[Layer], profile: Profile, X: dict, mat: str) -> list[dict]:
+    """A thin bottom band that is the only link between two pieces standing on it: a hinge printed flat.
+    Seen where one piece of a layer splits into two or more on the next layer."""
+    out, lo, hi = [], *X["hinge_gap_mm"]
+    for i in range(1, len(layers)):
+        below, above = layers[i - 1].geom, layers[i].geom
+        for band in parts(below, 1.0):
+            pieces = [p for p in parts(above, 2.0) if p.intersects(band)]
+            if len(pieces) < 2:
+                continue
+            a, b = sorted(pieces, key=lambda p: -p.area)[:2]
+            gap = a.distance(b)
+            if not lo <= gap <= hi:
+                continue
+            web = _safe_diff(band, shapely.union_all([a, b]).buffer(0.05, quad_segs=QUAD))
+            web = web.intersection(a.buffer(gap + 0.1, quad_segs=QUAD)).intersection(b.buffer(gap + 0.1, quad_segs=QUAD))
+            long = web.area / max(gap, 1e-6)
+            if web.is_empty or long < X["hinge_min_long_mm"]:
+                continue
+            spot = web.representative_point()
+            k = i - 1
+            while k > 0 and layers[k - 1].geom.contains(spot):
+                k -= 1
+            t = layers[i - 1].z - layers[k].z + profile.layer_height
+            if t > X["hinge_max_mm"] or _band_ends(layers, i, a, b, t):
+                continue
+            x0, y0, x1, y1 = web.bounds
+            sev = "warn" if mat in X["hinge_bad"] else "info"
+            out.append(_finding("living_hinge", sev,
+                                f"Thin hinge {t:.1f} mm thick and {long:.0f} mm long between two parts {gap:.1f} mm apart, printed flat "
+                                f"(the right way). {_hinge_note(mat, X, profile.material['name'])}",
+                                bbox=[[x0, y0, layers[k].z - profile.layer_height / 2], [x1, y1, layers[i - 1].z + profile.layer_height / 2]],
+                                thickness_mm=round(t, 2), length_mm=round(long, 1), gap_mm=round(gap, 2)))
+    return out
+
+
+def _band_ends(layers, i: int, a: Polygon, b: Polygon, t: float) -> bool:
+    """The two pieces don't stand up past the band by twice its thickness: just steps in a thin plate."""
+    top = layers[i].z + 2 * t
+    for j in range(i, len(layers)):
+        if layers[j].z >= top:
+            g = layers[j].geom
+            return not (g.intersects(a.representative_point().buffer(0.3)) and g.intersects(b.representative_point().buffer(0.3)))
+    return True
+
+
+def _upright_hinges(layers: list[Layer], profile: Profile, X: dict, mat: str) -> list[dict]:
+    """A few layers where the whole cross-section is a thin strip, between thick sections: a hinge (or
+    thin link) printed standing up, so it bends across its layers."""
+    t, out = X["hinge_max_mm"], []
+    thin = [i for i in range(1, len(layers) - 1)
+            if not layers[i].geom.is_empty and layers[i].geom.area > 0.5 and _opening(layers[i].geom, t / 2 + 0.05).is_empty]
+    for run in _runs(thin):
+        z0, z1 = layers[run[0]].z, layers[run[-1]].z
+        if z1 - z0 > 6.0 or run[0] == 0 or run[-1] + 1 >= len(layers):
+            continue
+        neighbours = [layers[run[0] - 1].geom, layers[run[-1] + 1].geom]
+        if any(_opening(g, t).area < 5 * layers[run[0]].geom.area for g in neighbours):
+            continue
+        g = layers[run[0]].geom
+        out.append(_finding("living_hinge", "problem",
+                            f"Thin strip {_rect_sides(g.convex_hull)[0]:.1f} mm thick at {z0:.1f} mm joins the parts above and below: if it is "
+                            f"meant to bend (a hinge), it bends across its layers and breaks. Lay the part so the strip lies flat. "
+                            f"{_hinge_note(mat, X, profile.material['name'])}",
+                            bbox=_layer_bbox(g, z0 - profile.layer_height / 2, z1 + profile.layer_height / 2), height_mm=round(z1 - z0, 2)))
+    return out
+
+
+def _upright_snaps(layers: list[Layer], profile: Profile, X: dict, mat: str) -> list[dict]:
+    """Thin tabs that rise from the part, end free and get thicker at the tip (a hook): snap fits that
+    bend across their layers. Says how deep a hook the tab takes, flat and as printed."""
+    lo, hi = X["snap_mm"]
+    chains, done = [], []
+    for i, layer in enumerate(layers):
+        live = []
+        for p in parts(layer.geom, 0.3):
+            w, _ = _rect_sides(p)
+            if w > hi + 3.0 or p.area > 300:
+                continue
+            c = next((c for c in chains if c["piece"].intersects(p)), None)
+            if c is None:
+                c = {"start": i, "ws": [], "piece": p}
+            c["ws"].append(w)
+            c["piece"], c["end"] = p, i
+            live.append(c)
+        done += [c for c in chains if c not in live]
+        chains = live
+    done += chains
+    out = []
+    for c in done:
+        s, e, ws = c["start"], c["end"], np.array(c["ws"])
+        if s == 0 or len(ws) < 6:
+            continue
+        base = layers[s - 1].geom
+        if base.intersection(c["piece"].buffer(0.5)).is_empty or base.area < 3 * c["piece"].area:
+            continue  # not standing on the part
+        if e + 1 < len(layers) and layers[e + 1].geom.intersects(c["piece"]):
+            continue  # not free at the top
+        cut = max(1, int(0.7 * len(ws)))
+        stem, hook = float(np.median(ws[:cut])), float(ws[cut:].max() - np.median(ws[:cut]))
+        length = layers[e].z - layers[s].z
+        if not lo <= stem <= hi or length < X["snap_min_aspect"] * stem or hook < X["hook_min_mm"]:
+            continue
+        eps = X["snap_strain_pct"].get(mat, 1.5) / 100
+        flat = 0.67 * eps * length ** 2 / stem
+        upright = flat * X["across_layers"]
+        sev = "problem" if hook > upright else "warn"
+        x0, y0, x1, y1 = c["piece"].bounds
+        bx = layers[s].geom.intersection(c["piece"].buffer(stem + 3.0)).bounds or (x0, y0, x1, y1)
+        out.append(_finding("snap_fit_upright", sev,
+                            f"Snap-fit tab {length:.0f} mm tall, {stem:.1f} mm thick, hook {hook:.1f} mm, standing upright: it bends across its "
+                            f"layers and takes a hook of only about {upright:.1f} mm in {profile.material['name']}. Lying flat it would take about {flat:.1f} mm",
+                            bbox=[[min(x0, bx[0]), min(y0, bx[1]), layers[s].z], [max(x1, bx[2]), max(y1, bx[3]), layers[e].z]],
+                            length_mm=round(length, 1), thickness_mm=round(stem, 2), hook_mm=round(hook, 2),
+                            hook_max_mm=round(upright, 2), hook_max_flat_mm=round(flat, 2)))
+    return out
+
+
+def _thick_blocks(layers: list[Layer], profile: Profile, X: dict) -> list[dict]:
+    """How much of the part is thicker than ``thick_mm`` all round (morphological opening per layer)."""
+    r = X["thick_mm"] / 2
+    thick = total = 0.0
+    box = None
+    cached = None
+    for layer in layers:
+        g = layer.geom
+        total += g.area * layer.dz
+        if g.is_empty:
+            continue
+        x0, y0, x1, y1 = g.bounds
+        if min(x1 - x0, y1 - y0) < 2 * r:
+            continue
+        core = cached[1] if cached is not None and g.equals_exact(cached[0], 1e-4) else _opening(g, r)
+        cached = (g, core)
+        if core.is_empty:
+            continue
+        thick += core.area * layer.dz
+        b = core.bounds
+        box = b + (layer.z, layer.z) if box is None else (min(box[0], b[0]), min(box[1], b[1]), max(box[2], b[2]), max(box[3], b[3]), box[4], layer.z)
+    if box is None or thick / 1000 < X["thick_min_cm3"] or thick < X["thick_min_share"] * total:
+        return []
+    return [_finding("thick_solid_block", "info",
+                     f"About {thick / 1000:.0f} cm³ of the part ({thick / total:.0%}) is a solid block more than {X['thick_mm']:.0f} mm thick. "
+                     f"The slicer fills it with infill: walls give it its strength, and a ribbed shell is stiffer per gram",
+                     bbox=[[box[0], box[1], box[4]], [box[2], box[3], box[5]]], thick_cm3=round(thick / 1000, 1), share=round(thick / total, 2))]
 
 
 def _runs(idx: list[int]) -> list[list[int]]:

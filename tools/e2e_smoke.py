@@ -286,6 +286,38 @@ def main():
             return note[:110]
         run.step("what fits in a hole", fit_a_hole)
 
+        def flat_gap():
+            # Click a visible flat face that has a parallel face on the other side; the other side is
+            # usually hidden from the camera, so it goes in as the first pick directly.
+            page.click("#gap-pick")
+            page.wait_for_selector("#gap-hint:not([hidden])", timeout=180_000)  # after the faces are grouped
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer, s = fdm.state; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];"
+                " for (let f = 0; f < n; f++) { const r = s.regionInfo[s.faceRegions[f]]; if (!r || r.kind !== 'flat' || r.area_mm2 < 20) continue;"
+                "  const other = s.regionInfo.find((q) => q.kind === 'flat' && dot(q.normal, r.normal) < -0.999 && q.area_mm2 > 20);"
+                "  if (!other) continue; const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);"
+                "  if (el && el.tagName === 'CANVAS' && s.faceRegions[v.pick({clientX: x, clientY: y})] === r.id) { s.gapPick = [other.id]; return [x, y]; } }"
+                " return [0, 0]; }"
+            )
+            if not (x or y):
+                page.evaluate("() => { fdm.state.gapPick = null; }")  # don't leave the next steps' clicks picking gaps
+                raise AssertionError("no pair of parallel flat faces found")
+            page.mouse.click(x, y)  # measuring isn't a busy job: wait for the list instead
+            page.wait_for_selector("#gaps li", timeout=60_000)
+            row = page.locator("#gaps li").first
+            label = row.locator("strong").inner_text()
+            value = float(row.locator("input").input_value())
+            row.locator("input").fill(f"{value - 0.5:.1f}" if label.startswith("Slot") else f"{value + 0.5:.1f}")
+            run.act(lambda: row.get_by_role("button", name="Size it").click())
+            note = page.locator("#gaps li").first.locator("p.hint").inner_text()
+            edits = page.locator("#edits label").all_inner_texts()
+            assert any(("slot" in e or "tab" in e) and "fit" in e for e in edits), edits
+            page.locator("#gaps li").first.get_by_role("button", name="Remove").click()
+            page.wait_for_function("() => !document.querySelector('#gaps li')", timeout=120_000)
+            return f"{label}: {note[:90]}"
+        run.step("slots and flat gaps", flat_gap)
+
         def pick_face():
             # Click the centre of the triangle nearest to the camera's view centre that is visible.
             x, y = page.evaluate(
@@ -471,6 +503,9 @@ def main():
             item.locator("input").nth(1).press("Tab")  # change fires when the field is left
             assert page.evaluate("() => fdm.state.zones.length === 1 && fdm.state.zones[0].infill === 0.8"), "zone infill not set"
             assert page.evaluate("() => fdm.viewer.zones?.children.length ?? 0") >= 2, "zone not shown"
+            run.act(lambda: page.locator("#zone-list li").first.locator("select.shape-pick").select_option("cylinder"))
+            page.wait_for_function("() => fdm.state.zones[0]?.shape === 'cylinder' && fdm.state.zones[0].infill === 0.8")
+            assert page.evaluate("() => fdm.viewer.zones?.children.length ?? 0") >= 3, "round zone not drawn"
             with page.expect_download() as dl:
                 run.act(lambda: page.click("#dl-3mf"), 300_000)
             import zipfile
@@ -479,11 +514,13 @@ def main():
             assert "modifier_part" in conf and 'value="80%"' in conf, "picked zone not in the 3MF"
             label = item.locator("strong").inner_text()
             page.click("#zone-card h3")  # Ctrl+Z isn't undo while typing in a field
+            page.keyboard.press("Control+z")  # back to a box
+            page.wait_for_function("() => fdm.state.zones[0]?.shape !== 'cylinder'")
             page.keyboard.press("Control+z")  # back to the default infill
             page.wait_for_function("() => fdm.state.zones[0]?.infill !== 0.8")
             page.locator("#zone-list li").first.get_by_role("button", name="Remove").click()
             assert page.evaluate("() => fdm.state.zones.length") == 0
-            return f"{label}; 80 % infill in the 3MF, undo and remove work"
+            return f"{label}; cylinder, 80 % infill in the 3MF, undo and remove work"
         run.step("stronger area picked on the part", picked_zone)
 
         def advanced_boxes():
@@ -507,7 +544,7 @@ def main():
 
             conf = zipfile.ZipFile(dl.value.path()).read("Metadata/model_settings.config").decode()
             assert "support_enforcer" in conf and "support_blocker" in conf, "boxes not in the 3MF"
-            page.click("#vol-card")  # Ctrl+Z isn't undo while in a field
+            page.click("#vol-kind-hint")  # Ctrl+Z isn't undo while in a field
             page.keyboard.press("Control+z")
             page.wait_for_function("() => fdm.state.volumes.length === 1")
             page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
@@ -536,6 +573,9 @@ def main():
             text = page.locator("#warp-result").inner_text()
             assert "bar" in text, text
             assert page.locator("#legend").is_visible() and "Curls" in page.locator("#legend").inner_text()
+            page.select_option("#warp-show", "stress")
+            assert "Stress left inside" in page.locator("#legend").inner_text()
+            page.select_option("#warp-show", "shape")
             page.locator("#warp-result input[type=checkbox]").uncheck()
             assert page.locator("#legend").is_hidden()
             return text.splitlines()[0] + " | " + text.splitlines()[1][:120]
@@ -718,7 +758,14 @@ def main():
             run.act(lambda: page.get_by_role("button", name="Test it").first.click(), 600_000)
             status = page.locator("#status").inner_text()
             assert "With the chamfer" in status and page.evaluate("() => fdm.state.versions.length") == 2, status
-            return status
+            # The thicker weak spot on the same part: another version, strength checked again.
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            page.locator("#strength-options summary", has_text="Design changes").evaluate("s => s.parentElement.open = true")
+            thicker = page.locator("#strength-options li", has_text="thicker").get_by_role("button", name="Test it")
+            run.act(lambda: thicker.click(), 600_000)
+            status2 = page.locator("#status").inner_text()
+            assert "With the thicker weak spot" in status2 and page.evaluate("() => fdm.state.versions.length") == 3, status2
+            return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
         def my_presets():

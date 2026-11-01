@@ -152,3 +152,20 @@ shrinkage:
   # dimension comes out this much short. Rough: depends on brand, infill and part shape.
   report_from_mm: 0.3
   warn_from_mm: 0.6
+
+flex:                             # parts that bend on purpose, and thick blocks (T-181)
+  hinge_max_mm: 1.2               # a web this thin between two thicker pieces is a living hinge (0.4–0.6 mm typical) [facfox living hinges]
+  hinge_gap_mm: [0.5, 10.0]       # ... when the pieces it joins are this far apart
+  hinge_min_long_mm: 4.0          # ... and the web is at least this long along the fold
+  hinge_good: [tpu_95a, petg]     # survive many bends; PLA lasts ~150–200 folds [Balderrama-Armendariz, SFF 2016]
+  hinge_bad: [pla, pla_plus, pa_cf]
+  snap_mm: [0.8, 3.5]             # thickness of a snap-fit tab
+  snap_min_aspect: 4.0            # tab length >= this × its thickness
+  hook_min_mm: 0.3                # the tip sticks out at least this much: a hook
+  # Strain a tab may bend to, flat (along the lines), %: ~10–15 % of elongation at break (Hackaday:
+  # PLA ~8 %, PETG ~24 %); across the layers about half [Core77 snap-fit guide]. Estimates: verify.
+  snap_strain_pct: {pla: 1.0, pla_plus: 1.2, petg: 2.5, abs: 2.0, asa: 2.0, pc: 2.5, pa_cf: 1.0, tpu_95a: 10.0}
+  across_layers: 0.5
+  thick_mm: 16.0                  # sections thicker than this all round are solid blocks
+  thick_min_cm3: 15.0             # ... reported when this much of the part is that thick
+  thick_min_share: 0.25           # ... and at least this share of it
