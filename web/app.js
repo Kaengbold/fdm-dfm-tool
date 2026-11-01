@@ -1234,7 +1234,7 @@ function warpView() {
 $("run-warp").onclick = async () => {
   if (!(await askLong("Warping simulation", "warping"))) return;
   return busy(`Simulating the print layer by layer (about ${fmtSeconds(estimate("warping"))})…`, async () => {
-    const w = await timed("warping", () => call("warping", { up: activeOption().up, profile: profile() }));
+    const w = await timed("warping", () => call("warping", { up: activeOption().up, profile: profile(), detailed: useGcode() }));
     state.warp = w;
     state.showWarp = true;
     state.showHeat = false;
@@ -1257,7 +1257,8 @@ $("run-warp").onclick = async () => {
       el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
       el("p", { textContent: w.explanation }),
       el("label", { className: "toggle" }, show, "Show ", what),
-      el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)." })));
+      el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)."
+        + (w.from_gcode ? " Layer times from your G-code." : "") })));
     recolor();
     setStatus(state.summary);
   });

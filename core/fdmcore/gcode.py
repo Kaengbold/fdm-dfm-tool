@@ -306,3 +306,56 @@ def deposit(tp: Toolpath, grid: VoxelGrid, elems: np.ndarray, to_grid) -> dict:
     np.maximum.at(last, e, time)
     return {"volume": by_kind, "tensor": tensor, "first_s": first, "last_s": last,
             "missed": float(sm["volume"][~hit].sum() / max(sm["volume"].sum(), 1e-12))}
+
+
+SPOT_MM = 2.0  # line-by-line heat: the bed is split into cells this wide, per layer
+
+
+def spot_heat(tp: Toolpath, to_frame, profile) -> dict:
+    """Heat line by line within the layers: for each small spot of each layer, how long until the next
+    layer covers it, and how warm it still is then. ``to_frame`` maps printer points to the frame the
+    result is wanted in (x, y on the bed, z up).
+
+    A spot's time is the median print time of the part's lines within 3 × 3 cells (6 mm) around it, so
+    a single line that ends a layer next to where the next one starts doesn't count as a hot spot. Its
+    temperature cools from the nozzle's toward the printer's air exponentially; the time constant is
+    set so a spot covered after exactly the filament's minimum layer time (what the slicer slows a
+    layer down to) is where the layer heat check starts to warn. Rough: no sideways heat flow, no bed."""
+    from .heat import AMBIENT_C
+    from .profile import load_data
+
+    s = samples(tp, SPOT_MM / 2)
+    pts = to_frame(s["points"])
+    cell = np.floor(pts[:, :2] / SPOT_MM).astype(np.int64)
+    layer = s["layer"].astype(np.int64)
+    lo = cell.min(axis=0) - 1
+    nx, ny = (cell.max(axis=0) - lo + 2).tolist()
+    key = lambda l, c: (l * nx + (c[:, 0] - lo[0])) * ny + (c[:, 1] - lo[1])
+    near = []  # every sample counts for its own cell and the 8 around it
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            near.append(key(layer, cell + [dx, dy]))
+    keys = np.concatenate(near)
+    times = np.tile(s["time"], 9)
+    order = np.lexsort((times, keys))
+    keys, times = keys[order], times[order]
+    uniq, start, count = np.unique(keys, return_index=True, return_counts=True)
+    median = times[start + count // 2]
+    own = np.unique(key(layer, cell))  # cells that really have plastic
+    has = np.isin(uniq, own)
+    uniq, median = uniq[has], median[has]
+    above = uniq + nx * ny  # the same spot one layer up
+    j = np.searchsorted(uniq, above)
+    covered = (j < len(uniq)) & (uniq[np.minimum(j, len(uniq) - 1)] == above)
+    dt = np.where(covered, median[np.minimum(j, len(uniq) - 1)] - median, np.nan)
+
+    mat = profile.material
+    t_air, t_noz = AMBIENT_C[profile.enclosure], float(mat["nozzle_temp_c"])
+    warn_at = float(mat["softening_c"]) + load_data("thresholds")["cooling"]["soft_margin_c"]
+    tau = float(mat["min_layer_time_s"]) / np.log((t_noz - t_air) / max(warn_at - t_air, 1.0))
+    temp = t_air + (t_noz - t_air) * np.exp(-np.maximum(dt, 0) / tau)
+    l = uniq // (nx * ny)
+    rest = uniq % (nx * ny)
+    xy = (np.stack([rest // ny, rest % ny], axis=1) + lo + 0.5) * SPOT_MM
+    return {"layer": l[covered], "xy": xy[covered], "z": tp.layer_z[l[covered]], "seconds": dt[covered], "temp_c": temp[covered],
+            "cell_mm": SPOT_MM}
