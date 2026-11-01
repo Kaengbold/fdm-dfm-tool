@@ -1248,8 +1248,8 @@ $("run-warp").onclick = async () => {
       recolor();
     };
     const what = el("select", { id: "warp-show" },
-      el("option", { value: "shape", textContent: "the curled shape (red dots = lifts first)" }),
-      el("option", { value: "stress", textContent: "the stress left inside after it cools" }));
+      el("option", { value: "shape", textContent: "Curled shape (red dots lift first)" }),
+      el("option", { value: "stress", textContent: "Stress left inside after cooling" }));
     what.value = state.warpShow ?? "shape";
     what.onchange = () => {
       state.warpShow = what.value;
@@ -1259,7 +1259,8 @@ $("run-warp").onclick = async () => {
     $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
       el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
       el("p", { textContent: w.explanation }),
-      el("label", { className: "toggle" }, show, "Show ", what),
+      el("label", { className: "toggle" }, show, "Show it on the part"),
+      what,
       el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)."
         + (w.from_gcode ? " Layer times from your G-code." : "") })));
     recolor();
