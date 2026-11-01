@@ -231,3 +231,30 @@ def test_thicker_weak_spot_helps():
     api.load(to_binary_stl(thicker), "bar2")
     after = api.strength([0, 0, 1], loads(), prof)
     assert after["safety_factor"] > before["safety_factor"] * 1.1
+
+
+def test_chamfers_at_every_weak_corner():
+    """Two equal posts pushed sideways are equally weak at their roots. A chamfer at only the worst one
+    just moves the weak spot to the other post (2.07 -> 2.04); both together help (-> 2.85)."""
+    manifold3d = pytest.importorskip("manifold3d")
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    cube = manifold3d.Manifold.cube
+    m = (cube((60, 20, 5)) + cube((8, 8, 20)).translate((6, 6, 5)) + cube((8, 8, 20)).translate((46, 6, 5))).to_mesh()
+    prof = {"material": "pla"}
+
+    def check(mesh_bytes):
+        api.load(mesh_bytes, "posts")
+        info = api.regions()["regions"]
+        face = lambda n, ok: [r["id"] for r in info if np.dot(r["normal"], n) > 0.99 and ok(r["centroid"])]  # noqa: E731
+        loads = [{"region": face([0, 0, -1], lambda c: True)[0], "kind": "fixed"}]
+        loads += [{"region": f, "kind": "force", "kg": 3, "direction": "push"} for f in face([0, -1, 0], lambda c: c[2] > 6)]
+        return api.strength([0, 0, 1], loads, prof)["safety_factor"]
+
+    before = check(to_binary_stl(Mesh(m.vert_properties[m.tri_verts.reshape(-1)].reshape(-1, 3, 3).astype(float))))
+    edit = next(e for e in api.design([0, 0, 1], prof)["edits"] if e["id"] == "stress-chamfer")
+    pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
+    assert "2 inside corners" in edit["title"] and pts[:, 0].min() < 10 and pts[:, 0].max() > 50  # both posts
+    after = check(to_binary_stl(apply_edits(api._require().mesh, [edit])))
+    assert after > 1.25 * before

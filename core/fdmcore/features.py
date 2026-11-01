@@ -110,6 +110,9 @@ CORNER_ARC_STEPS = 8
 OFF_CORNER = 0.01  # mm cutters keep from the part's corner edges
 MAX_FOOT_POINTS = 600  # outline points; more and the slicer's elephant foot compensation is the better tool
 CHAMFER_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot (in analysis voxels) seeds the chamfer
+HOT_SHARE = 0.65  # other inside corners get a chamfer too where the stress is at least this share of the highest
+HOT_REACH_VOXELS = 3  # ... within this many analysis voxels of the corner
+MAX_STRESS_CORNERS = 4
 MAX_FILLET_PIECES = 400
 
 PARAMS = {
@@ -141,9 +144,11 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
 
 
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
-                 weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None) -> list[dict]:
+                 weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None,
+                 hot_spots=None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
-    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner.
+    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner,
+    and at the other inside corners near ``hot_spots`` (points, share of the highest stress).
     ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
     ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
@@ -166,7 +171,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     to_part = _to_part(mesh, r)
     edits += _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"])
     edits += _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"])
-    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"])
+    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots)
     edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"])
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
@@ -451,10 +456,12 @@ def _sweep(rings: list[np.ndarray], closed: bool) -> np.ndarray:
     return t[:, ::-1] if Mesh(t).volume() < 0 else t
 
 
-def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:
+def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=None) -> list[dict]:
     """45° chamfers along the inside corner nearest the weak spot from the strength check (e.g. where a
     stem meets a plate): sharp inside corners concentrate stress, a chamfer spreads it out. Takes the
-    whole connected corner (all inside edges linked to the ones near the weak spot)."""
+    whole connected corner (all inside edges linked to the ones near the weak spot), and the other
+    inside corners the stress is nearly as high at (``hot_spots``): with only the worst one, the weak
+    spot moves to the next corner and the user needs a strength check per corner."""
     if weak_spot is None:
         return []
     edges = concave_edges(mesh)
@@ -465,18 +472,51 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]
     dist = np.linalg.norm(mids - spot, axis=1)
     if dist.min() > max(CHAMFER_REACH_VOXELS * h, size * 2):
         return []  # the weak spot isn't at an inside corner
+    corners = [_connected(edges, [int(np.argmin(dist))])]
+    if hot_spots is not None:
+        heat = _edge_heat(edges, *hot_spots, HOT_REACH_VOXELS * h)
+        left = set(range(len(edges))) - set(corners[0])
+        others = []
+        while left:
+            corner = _connected(edges, [min(left)])
+            left -= set(corner)
+            if heat[corner].max() > 0:
+                others.append((heat[corner].max(), corner))
+        corners += [c for _, c in sorted(others, key=lambda o: -o[0])[:MAX_STRESS_CORNERS - 1]]
     pieces = []
-    for k in _connected(edges, [int(np.argmin(dist))])[:MAX_FILLET_PIECES]:
+    for k in [k for c in corners for k in c][:MAX_FILLET_PIECES]:
         e = edges[k]
         mid = (e["a"] + e["b"]) / 2
         half = (e["b"] - e["a"]) / 2
         inset = -(e["n1"] + e["n2"]) * 0.15  # reach a little into the part, so the union joins it
         prof = [mid + inset, mid + e["t1"] * size - e["n1"] * 0.15, mid + e["t2"] * size - e["n2"] * 0.15]
         pieces.append(_prism(prof, half))
-    return [_edit("stress-chamfer", "stress_at_inside_corner", f"{size:.1f} mm 45° chamfer where the part is weakest",
-                  "The strength check found the most stress at this sharp inside corner. A 45° chamfer spreads the load "
-                  "over more material, often the cheapest way to make a part much stronger (a chamfer prints cleanly where a round fillet would be an overhang).",
+    if len(corners) == 1:
+        title = f"{size:.1f} mm 45° chamfer where the part is weakest"
+        found = "The strength check found the most stress at this sharp inside corner. "
+    else:
+        title = f"{size:.1f} mm 45° chamfers at the {len(corners)} inside corners with the most stress"
+        found = ("The strength check found the most stress at these sharp inside corners, each nearly as weak as the "
+                 "worst one: fixing only one would just move the weak spot to the next. ")
+    return [_edit("stress-chamfer", "stress_at_inside_corner", title,
+                  found + "A 45° chamfer spreads the load over more material, often the cheapest way to make a part much "
+                  "stronger (a chamfer prints cleanly where a round fillet would be an overhang).",
                   pieces, op="add", param="stress_chamfer_mm")]
+
+
+def _edge_heat(edges: list[dict], points: np.ndarray, share: np.ndarray, reach: float) -> np.ndarray:
+    """Per inside edge: the highest stress share among ``points`` within ``reach`` of it (0 if none).
+    Distances to the segment, not its middle: a CAD edge can be one long segment."""
+    a = np.array([e["a"] for e in edges])
+    ab = np.array([e["b"] for e in edges]) - a
+    length2 = np.maximum((ab * ab).sum(axis=1), 1e-12)
+    heat = np.zeros(len(edges))
+    for k in range(0, len(points), 200):  # in chunks: edges x points can be millions
+        p, s = points[k:k + 200], share[k:k + 200]
+        t = np.clip(np.einsum("pec,ec->pe", p[:, None] - a[None], ab) / length2, 0, 1)
+        d = np.linalg.norm(p[:, None] - (a[None] + t[..., None] * ab[None]), axis=2)
+        heat = np.maximum(heat, np.where(d <= reach, s[:, None], 0).max(axis=0))
+    return heat
 
 
 THICKEN_REACH_MM = 8.0  # the added plastic tapers out over at least this length either side of the weak spot
