@@ -17,7 +17,8 @@ def prism(poly, depth: float) -> np.ndarray:
     engine's Delaunay-only ``extrude``)."""
     poly = orient_poly(poly.simplify(0), 1.0)
     caps = shapely.get_coordinates(shapely.get_parts(shapely.constrained_delaunay_triangles(poly))).reshape(-1, 4, 2)[:, :3]
-    cross = np.cross(caps[:, 1] - caps[:, 0], caps[:, 2] - caps[:, 0])
+    u, v = caps[:, 1] - caps[:, 0], caps[:, 2] - caps[:, 0]
+    cross = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]  # 2-D cross product (numpy 2 refuses 2-D np.cross)
     caps = np.where((cross < 0)[:, None, None], caps[:, ::-1], caps)
     lift = lambda t, z: np.concatenate([t, np.full((*t.shape[:2], 1), z)], axis=2)
     ring = np.asarray(poly.exterior.coords)
