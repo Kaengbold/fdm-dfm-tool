@@ -973,6 +973,7 @@ function renderGcode() {
   $("gcode-summary").textContent = !g ? "" : fits
     ? `— ${g.name}: ${g.info.layers} layers, ${g.info.part_grams} g, ${g.info.print_time_min} min`
     : "— the loaded G-code is for another orientation";
+  renderGcodeResult();
 }
 
 $("gcode-file").onchange = async (e) => {
@@ -989,9 +990,27 @@ $("gcode-file").onchange = async (e) => {
     setStatus(`G-code read: ${info.layers} layers, ${info.part_grams} g of part` + (info.turned_deg ? ` (the slicer turned it ${info.turned_deg}°)` : ""));
     await runCheck(); // the heat check uses the real layer times now
     if (readyForStrength()) await runStrength();
+    else renderGcodeResult();
   }).catch(() => {});
 };
-$("use-gcode").onchange = () => state.strength && runStrength();
+$("use-gcode").onchange = () => (state.strength && readyForStrength() ? runStrength() : renderGcodeResult());
+
+/** What the G-code does for the strength check, in its own card: the result itself shows in
+ * "Will it hold?", so without this the user here would see nothing happen (or not know why). */
+function renderGcodeResult() {
+  const box = $("gcode-result");
+  const r = state.strength;
+  const go = el("button", { type: "button", textContent: `Open "${STEP_NAMES.strength}"`, onclick: () => steps.go("strength") });
+  if (!state.gcode || !$("use-gcode").checked) return box.replaceChildren();
+  if (!readyForStrength()) {
+    return box.replaceChildren(el("p", { className: "hint", textContent: `Next: in "${STEP_NAMES.strength}" tap where the part is held and where the load sits. The strength check then uses this G-code.` }), go);
+  }
+  if (!r?.detailed) return box.replaceChildren();
+  box.replaceChildren(el("div", { className: `verdict ${r.verdict.replaceAll(" ", "-")}` },
+    el("strong", { textContent: `With your sliced print: safety ×${r.safety_factor.toFixed(1)}` }),
+    el("p", { textContent: `Uses the walls, infill and line directions from the G-code (${r.detailed.fill_pct} % of the part is plastic). Loads, colours and what to change are in "${STEP_NAMES.strength}".` }),
+    go));
+}
 
 // ---------- how long a simulation takes, asked before the long ones ----------
 // The strength grid has about the same number of cubes for every part, so one strength check takes
@@ -1048,7 +1067,8 @@ function askLong(what, kind, choices = null) {
 async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
-  return busy(fine ? `Simulating again with a finer grid (about ${fmtSeconds(estimate("fine"))})…` : "Simulating the load…", async () => {
+  const what = useGcode() ? " with your sliced print (its walls, infill and line directions)" : "";
+  return busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
     const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: printZones() }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
@@ -1064,6 +1084,7 @@ async function runStrength(fine = false) {
     $("show-temp").checked = false;
     recolor();
     renderStrength();
+    renderGcodeResult();
     setStatus(state.summary);
     return r;
   }, ["strength", "result"]);
