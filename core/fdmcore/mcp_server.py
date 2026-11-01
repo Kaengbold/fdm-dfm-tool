@@ -221,6 +221,15 @@ def set_fit(region: int, up: list[float], partner_mm: float | None = None, fit: 
 
 
 @server.tool()
+def set_gap(face_a: int, face_b: int, up: list[float], partner_mm: float | None = None, fit: str = "sliding", material: str = "pla") -> dict:
+    """A slot or tab between two parallel flat faces (ids from list_faces): their distance and whether
+    it is a slot (empty between) or a tab (plastic between). With partner_mm (thickness of what goes in,
+    or of the slot the tab goes into) and fit ("press", "snug", "sliding", "loose"): the size to model
+    and why; suggest_design_changes then offers moving both faces. partner_mm None only measures."""
+    return api.set_gap(face_a, face_b, up, partner_mm, fit, {"material": material})
+
+
+@server.tool()
 def strength_options(
     up: list[float],
     loads: list[dict],

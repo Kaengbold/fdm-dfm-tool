@@ -286,6 +286,38 @@ def main():
             return note[:110]
         run.step("what fits in a hole", fit_a_hole)
 
+        def flat_gap():
+            # Click a visible flat face that has a parallel face on the other side; the other side is
+            # usually hidden from the camera, so it goes in as the first pick directly.
+            page.click("#gap-pick")
+            page.wait_for_selector("#gap-hint:not([hidden])", timeout=180_000)  # after the faces are grouped
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer, s = fdm.state; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];"
+                " for (let f = 0; f < n; f++) { const r = s.regionInfo[s.faceRegions[f]]; if (!r || r.kind !== 'flat' || r.area_mm2 < 20) continue;"
+                "  const other = s.regionInfo.find((q) => q.kind === 'flat' && dot(q.normal, r.normal) < -0.999 && q.area_mm2 > 20);"
+                "  if (!other) continue; const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);"
+                "  if (el && el.tagName === 'CANVAS' && s.faceRegions[v.pick({clientX: x, clientY: y})] === r.id) { s.gapPick = [other.id]; return [x, y]; } }"
+                " return [0, 0]; }"
+            )
+            if not (x or y):
+                page.evaluate("() => { fdm.state.gapPick = null; }")  # don't leave the next steps' clicks picking gaps
+                raise AssertionError("no pair of parallel flat faces found")
+            page.mouse.click(x, y)  # measuring isn't a busy job: wait for the list instead
+            page.wait_for_selector("#gaps li", timeout=60_000)
+            row = page.locator("#gaps li").first
+            label = row.locator("strong").inner_text()
+            value = float(row.locator("input").input_value())
+            row.locator("input").fill(f"{value - 0.5:.1f}" if label.startswith("Slot") else f"{value + 0.5:.1f}")
+            run.act(lambda: row.get_by_role("button", name="Size it").click())
+            note = page.locator("#gaps li").first.locator("p.hint").inner_text()
+            edits = page.locator("#edits label").all_inner_texts()
+            assert any(("slot" in e or "tab" in e) and "fit" in e for e in edits), edits
+            page.locator("#gaps li").first.get_by_role("button", name="Remove").click()
+            page.wait_for_function("() => !document.querySelector('#gaps li')", timeout=120_000)
+            return f"{label}: {note[:90]}"
+        run.step("slots and flat gaps", flat_gap)
+
         def pick_face():
             # Click the centre of the triangle nearest to the camera's view centre that is visible.
             x, y = page.evaluate(

@@ -140,10 +140,11 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
 
 
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
-                 weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None) -> list[dict]:
+                 weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
     ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner.
-    ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them."""
+    ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
+    ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
 
     up = np.asarray(up, float) / np.linalg.norm(up)
@@ -158,6 +159,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
                 f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
                 [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg"))
     edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
+    edits += _gap_edits(mesh, region, gaps or {}, up, profile)
     r = rotation_to_z(up)
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
@@ -187,16 +189,16 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
 FIT_NAMES = {"press": "be pressed in (stays put)", "snug": "push in snugly", "sliding": "slide and turn freely", "loose": "drop in loosely"}
 
 
-def fit_size(feature: dict, partner_mm: float, fit: str, up, profile=None) -> tuple[float, str]:
+def fit_size(feature: dict, partner_mm: float, fit: str, up, profile=None, warp_mm: float = 0.0) -> tuple[float, str]:
     """Diameter to model a hole (or round post) so a ``partner_mm`` part fits it the ``fit`` way,
-    and why, in plain words."""
+    and why, in plain words. ``warp_mm``: how much the warping simulation says the fit tightens."""
     F = load_data("thresholds")["fits"]
     if fit not in F["gap_mm"]:
         raise ValueError(f"fit must be one of {tuple(F['gap_mm'])}")
     up = np.asarray(up, float) / np.linalg.norm(up)
     sideways = abs(np.asarray(feature["axis"]) @ up) < 0.7
     measured = (profile.material.get("fit_gap_mm") or {}) if profile is not None else {}  # from the fit test print
-    gap = measured.get(fit, F["gap_mm"][fit]) + (F["sideways_extra_mm"] if sideways else 0.0)
+    gap = measured.get(fit, F["gap_mm"][fit]) + (F["sideways_extra_mm"] if sideways else 0.0) + max(warp_mm, 0.0)
     hole = feature["type"] == "hole"
     size = partner_mm + gap if hole else partner_mm - gap
     what = (f"For a Ø{partner_mm:g} mm part to {FIT_NAMES[fit]}, model this hole Ø{size:.2f} mm" if hole else
@@ -204,6 +206,8 @@ def fit_size(feature: dict, partner_mm: float, fit: str, up, profile=None) -> tu
     why = f" (now Ø{feature['diameter']:.2f}: {size - feature['diameter']:+.2f} mm)."
     if sideways:
         why += " It lies on its side when printed, so it comes out a little smaller at the top: that's included."
+    if warp_mm > 0.02:
+        why += f" The warping simulation shows it squeezing by about {warp_mm:.2f} mm as the part curls (rough): added."
     note = (" Using the gaps from your fit test print." if measured.get(fit) is not None
             else " Printers differ by a tenth or two: the fit test print (My materials) gives your printer's numbers.")
     return size, what + why + note
@@ -217,7 +221,7 @@ def _fit_edits(features: list[dict], fits: dict, up, profile=None) -> list[dict]
         want = fits.get(f["region"])
         if not want:
             continue
-        size, why = fit_size(f, want["partner_mm"], want["fit"], up, profile)
+        size, why = fit_size(f, want["partner_mm"], want["fit"], up, profile, want.get("warp_mm", 0.0))
         change = size - f["diameter"]
         if abs(change) < F["min_change_mm"]:
             continue
@@ -571,3 +575,108 @@ def _prism(profile: list[np.ndarray], half: np.ndarray) -> np.ndarray:
     if Mesh(t).volume() < 0:
         t = t[:, ::-1]
     return t
+
+
+# ---------------------------------------------------------------- T-250 slots and flat gaps
+
+GAP_OVERLAP_MM = 0.05  # slabs reach this far past the face, so cuts and unions don't leave a skin
+
+
+def flat_pair(mesh: Mesh, region: np.ndarray, a: int, b: int) -> dict:
+    """Two flat faces facing each other (a slot: the space between is empty) or facing away (a tab:
+    plastic between): their distance, which one it is and the faces' normals and middles."""
+    normals, areas = mesh.normals_and_areas()
+    out = []
+    for r in (a, b):
+        m = region == r
+        if not m.any():
+            raise ValueError(f"Unknown face {r}")
+        n = (normals[m] * areas[m, None]).sum(axis=0)
+        n /= max(np.linalg.norm(n), 1e-12)
+        if np.min(normals[m] @ n) < 0.999:
+            raise ValueError("Pick flat faces")
+        out.append((n, (mesh.triangles[m].mean(axis=1) * areas[m, None]).sum(axis=0) / areas[m].sum()))
+    (na, ca), (nb, cb) = out
+    if na @ nb > -0.99:
+        raise ValueError("The two faces must be parallel and face opposite ways (the two sides of a slot or a tab)")
+    dist = float(abs(na @ (cb - ca)))
+    if dist < 1e-3:
+        raise ValueError("The two faces lie in one plane")
+    return {"kind": "slot" if na @ (cb - ca) > 0 else "tab", "distance_mm": dist, "normal_a": na, "normal_b": nb, "centre_a": ca, "centre_b": cb}
+
+
+def gap_size(pair: dict, partner_mm: float, fit: str, up, profile=None, warp_mm: float = 0.0) -> tuple[float, str]:
+    """Width to model a slot (or thickness of a tab) so a ``partner_mm`` part fits the ``fit`` way,
+    and why. ``warp_mm``: how much the warping simulation says the gap closes as the part curls."""
+    F = load_data("thresholds")["fits"]
+    if fit not in F["gap_mm"]:
+        raise ValueError(f"fit must be one of {tuple(F['gap_mm'])}")
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    measured = (profile.material.get("fit_gap_mm") or {}) if profile is not None else {}
+    across = abs(pair["normal_a"] @ up) > 0.9  # faces lying flat: the gap runs across the layers
+    lh = profile.layer_height if profile is not None else 0.2
+    gap = measured.get(fit, F["gap_mm"][fit]) + (F["sideways_extra_mm"] if across else 0.0) + max(warp_mm, 0.0)
+    if across:
+        gap = max(gap, lh)
+    slot = pair["kind"] == "slot"
+    size = partner_mm + gap if slot else partner_mm - gap
+    what = (f"For a {partner_mm:g} mm thick part to {FIT_NAMES[fit]}, make this slot {size:.2f} mm wide" if slot else
+            f"For this tab to {FIT_NAMES[fit]} into a {partner_mm:g} mm slot, make it {size:.2f} mm thick")
+    why = f" (now {pair['distance_mm']:.2f}: {size - pair['distance_mm']:+.2f} mm, half on each face)."
+    if across:
+        why += (" The faces lie flat when printed, so the gap runs across the layers: the upper face sags a little over it "
+                f"and the printer stops on whole layers ({lh} mm). That's included.")
+    if warp_mm > 0.02:
+        why += f" The warping simulation shows the gap closing by about {warp_mm:.2f} mm as the part curls (rough): added."
+    note = (" Using the gaps from your fit test print." if measured.get(fit) is not None
+            else " Printers differ by a tenth or two: the fit test print (My materials) gives your printer's numbers.")
+    return size, what + why + note
+
+
+def _gap_edits(mesh: Mesh, region: np.ndarray, gaps: dict, up, profile=None) -> list[dict]:
+    """Move both faces of each sized slot or tab by half the change: a slab added onto the face or
+    cut into it, the face's own outline swept along its normal."""
+    F = load_data("thresholds")["fits"]
+    out = []
+    for (a, b), want in gaps.items():
+        pair = flat_pair(mesh, region, a, b)
+        size, why = gap_size(pair, want["partner_mm"], want["fit"], up, profile, want.get("warp_mm", 0.0))
+        change = size - pair["distance_mm"]
+        if abs(change) < F["min_change_mm"]:
+            continue
+        move = (-change if pair["kind"] == "slot" else change) / 2  # along each face's normal: + adds plastic
+        lo, hi = (-GAP_OVERLAP_MM, move) if move > 0 else (move, GAP_OVERLAP_MM)
+        pieces = [p for r in (a, b) for p in _face_slab(mesh, region == r, lo, hi)]
+        if not pieces:
+            continue
+        name = "slot" if pair["kind"] == "slot" else "tab"
+        out.append(_edit(f"gap-{a}-{b}", "fit_size", f"{pair['distance_mm']:.2f} → {size:.2f} mm {name} for a {want['fit']} fit",
+                         why, pieces, op="add" if move > 0 else "cut"))
+    return out
+
+
+def _face_slab(mesh: Mesh, mask: np.ndarray, lo: float, hi: float) -> list[np.ndarray]:
+    """Closed prisms of a flat face's outline from ``lo`` to ``hi`` mm along its normal."""
+    import shapely
+
+    from .additions import extrude
+
+    normals, areas = mesh.normals_and_areas()
+    n = (normals[mask] * areas[mask, None]).sum(axis=0)
+    n /= np.linalg.norm(n)
+    u = np.cross(n, [1.0, 0, 0] if abs(n[0]) < 0.9 else [0, 1.0, 0])
+    u /= np.linalg.norm(u)
+    v = np.cross(n, u)
+    tris = mesh.triangles[mask]
+    origin = tris[0, 0]
+    flat = np.stack([(tris - origin) @ u, (tris - origin) @ v], axis=-1)
+    polys = shapely.polygons(flat)
+    face = shapely.union_all(shapely.make_valid(polys[shapely.area(polys) > 1e-9]), grid_size=1e-4)
+    out = []
+    for poly in getattr(face, "geoms", [face]):
+        if poly.geom_type != "Polygon" or poly.area < 0.01:
+            continue
+        prism = extrude(poly.simplify(0.01), lo, hi)
+        if prism is not None:
+            out.append(origin + prism[..., :1] * u + prism[..., 1:2] * v + prism[..., 2:] * n)
+    return out
