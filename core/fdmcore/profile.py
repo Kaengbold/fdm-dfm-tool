@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import re
 from pathlib import Path
 
 import yaml
@@ -99,8 +100,22 @@ MATERIAL_FIELDS = {
     "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
     "uv_resistance": (("good", "fair", "poor"), None, None),
     "fit_gap_mm": ("fits", 0.0, 2.0),  # measured with the fit test print: {"press", "snug", "sliding", "loose"}
+    "fibre": (("none", "carbon", "glass"), None, None),  # chopped fibre filled (-CF / -GF)
 }
 ENCLOSURES = ("none", "passive", "heated")
+
+FIBRE_NAME = re.compile(r"(?<![a-z])[cg]f(?![a-z])|carbon.?fib|glass.?fib", re.I)  # not "polycarbonate"
+
+
+def fibre(material: dict) -> str | None:
+    """"carbon" or "glass" for chopped-fibre filled filament (PLA-CF, PETG-CF, PA-GF…), else None: from
+    the preset's ``fibre`` value, or for a user's own material without one, from -CF / -GF in its name.
+    Fibres make a print stiffer, not stronger (rules.yaml fibre_filled)."""
+    f = material.get("fibre")
+    if f:
+        return None if f == "none" else f
+    m = FIBRE_NAME.search(material.get("name", ""))
+    return None if m is None else "glass" if m.group(0)[0].lower() == "g" else "carbon"
 FITS = ("press", "snug", "sliding", "loose")
 
 

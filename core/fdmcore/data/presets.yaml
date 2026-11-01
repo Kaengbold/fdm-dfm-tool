@@ -191,6 +191,7 @@ materials:
     uv_resistance: poor     # outdoors in sunlight: good | fair | poor (see note above materials)
   pa_cf:
     name: PA-CF (carbon fibre nylon)
+    fibre: carbon            # chopped fibre filled: stiffer, not stronger (rules.yaml fibre_filled)
     max_overhang_deg: 45
     max_bridge_mm: 20
     min_layer_time_s: 10
