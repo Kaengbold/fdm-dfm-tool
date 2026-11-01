@@ -13,7 +13,7 @@ async function manifold() {
 
 /** Apply design edits to a part soup (Float32Array, 9 floats per triangle). Each edit is
  * {op: "add"|"cut", mesh: Float32Array, pieces: [triangle count per closed piece]};
- * additions go first, then cuts, one closed piece at a time. */
+ * additions go first, then cuts, one closed piece at a time; loose leftovers are dropped. */
 export async function applyEdits(part, edits) {
   const { Manifold, Mesh } = await manifold();
   const toManifold = (soup, what) => {
@@ -23,7 +23,8 @@ export async function applyEdits(part, edits) {
     if (m.status() !== "NoError") throw new Error(`${what} is not a closed (watertight) mesh: ${m.status()}`);
     return m;
   };
-  let result = toManifold(part, "The part");
+  const original = toManifold(part, "The part");
+  let result = original;
   for (const op of ["add", "cut"]) {
     for (const e of edits.filter((x) => x.op === op)) {
       let start = 0;
@@ -34,6 +35,12 @@ export async function applyEdits(part, edits) {
       }
     }
   }
+  // Drop pieces that don't overlap the part: a bit of an addition that ends up apart from it (two
+  // changes meeting at a corner, a taper cut short) would print as a loose crumb. Pieces a cut
+  // splits off the part still overlap it and stay.
+  const pieces = result.decompose();
+  const keep = pieces.filter((m) => m.intersect(original).volume() > 1e-3);
+  if (keep.length < pieces.length) result = Manifold.compose(keep);
   const out = result.getMesh();
   const soup = new Float32Array(out.triVerts.length * 3);
   out.triVerts.forEach((v, i) => soup.set(out.vertProperties.subarray(v * out.numProp, v * out.numProp + 3), i * 3));

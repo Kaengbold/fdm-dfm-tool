@@ -562,6 +562,8 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float) -> list[dict]:
         if max(x1 - x0, y1 - y0) > 2 * reach:  # a wide section (a plate): only round the spot
             grown = grown.intersection(around)
         for poly in parts(grown.simplify(0.05), 0.05):
+            if not poly.intersects(piece):  # a bit cut off by the round around the spot: it would float
+                continue
             # Slabs overlap a little so they join, but never stick out past the part's ends (a lip there
             # would make a new face where a clamp or load sits).
             prism = extrude(poly, max(layer.z - THICKEN_STEP_MM / 2 - 0.02, 0.0), min(layer.z + THICKEN_STEP_MM / 2 + 0.02, top))
@@ -615,6 +617,8 @@ def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
     centroids = tris.mean(axis=1)
     out = []
     for (a, b), f1, f2 in pairs:
+        if a == b:  # a sliver triangle (common after a boolean) whose corners round to one point
+            continue
         n1, n2 = normals[f1], normals[f2]
         if n1 @ n2 > cos:
             continue

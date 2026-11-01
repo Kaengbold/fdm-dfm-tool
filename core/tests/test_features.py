@@ -258,3 +258,19 @@ def test_chamfers_at_every_weak_corner():
     assert "2 inside corners" in edit["title"] and pts[:, 0].min() < 10 and pts[:, 0].max() > 50  # both posts
     after = check(to_binary_stl(apply_edits(api._require().mesh, [edit])))
     assert after > 1.25 * before
+def test_loose_pieces_after_edits_are_dropped():
+    # An addition that ends up apart from the part (two changes meeting at a corner, a taper cut
+    # short) would print as a loose crumb; one that overlaps the part joins it.
+    pytest.importorskip("manifold3d")
+    from shapely.geometry import box
+
+    from fdmcore.additions import extrude
+    from fdmcore.booleans import apply_edits
+
+    part = Mesh(extrude(box(0, 0, 20, 20), 0, 10))
+    joined, loose = extrude(box(18, 5, 25, 15), 0, 5), extrude(box(30, 5, 32, 7), 0, 2)
+    pieces = np.concatenate([joined, loose]).astype("<f4")
+    edit = {"id": "test", "op": "add", "mesh": pieces.tobytes(), "pieces": [len(joined), len(loose)]}
+    out = apply_edits(part, [edit])
+    assert abs(out.volume()) == pytest.approx(20 * 20 * 10 + 5 * 10 * 5)
+    assert out.triangles[..., 0].max() == pytest.approx(25)
