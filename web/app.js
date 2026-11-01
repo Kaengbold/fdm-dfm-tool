@@ -6,7 +6,7 @@ import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
-import { Steps } from "./steps.js";
+import { Steps, STEP_NAMES } from "./steps.js";
 import { reportHtml } from "./report.js";
 
 const $ = (id) => document.getElementById(id);
@@ -726,9 +726,12 @@ $("viewer").addEventListener("pointerup", async (e) => {
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
-  steps.reveal($("pick-panel"));
   state.showHeat = false;
   recolor();
+  // Looking around the part in another step must not pull the user to "Will it hold?": the face
+  // stays picked there for later, and the status line says where to use it.
+  if (shows("strength")) steps.reveal($("pick-panel"));
+  else setStatus(`Picked: ${$("pick-info").textContent}. To hold or load it, or keep it clean or on the bed, open "${STEP_NAMES.strength}".`);
 });
 
 const SPOT_RADIUS = 3; // mm, for loads "only around the clicked spot"
