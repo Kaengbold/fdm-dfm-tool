@@ -750,6 +750,77 @@ rules:
     - CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion
     - Slant 3D — Design Unbreakable Pins with Perfect Tolerances — https://www.youtube.com/watch?v=uMA-Wt-z_BU
     - Slant 3D — Make a Pin that Doesn't Break. Use Ripples — https://www.youtube.com/shorts/njTfpxL71zk
+  living_hinge:
+    title: Thin hinge that bends
+    why: A thin strip joining two thicker parts works as a hinge that bends instead of a pin. Printed, it only
+      lasts if it lies flat on the bed so the lines run across the fold, and in a plastic that likes to bend.
+      PLA cracks after a couple of hundred folds; printed standing up it can break at the first one.
+    fixes:
+    - domain: geometry
+      text: Keep the hinge 0.4–0.6 mm thick (two or three layers) and a few millimetres long, with rounded edges where
+        it meets the thicker parts so the bend spreads out.
+    - domain: slicer
+      text: Print the hinge solid with lines across the fold, and slower, so the few layers bond well.
+      settings:
+        sparse_infill_density: 100%
+        bottom_shell_layers: '3'
+    - domain: process
+      text: Print the hinge in PETG or TPU (or PP if your printer handles it), lying flat. Bend it once while it is
+        still warm from the bed. For a hinge that must last, use a pin hinge instead.
+    tags:
+    - strength
+    - hinge
+    sources:
+    - Balderrama-Armendariz et al., folding endurance of FDM living hinges (PLA ~136–211 cycles, PP and TPU far more),
+      SFF Symposium 2016 — https://utw10945.utweb.utexas.edu/sites/default/files/2016/188-Balderrama-Armendariz.pdf
+    - FacFox — How to design living hinges for 3D printed parts (0.4–0.6 mm, at least two layers, flat on the bed)
+      — https://facfox.com/docs/kb/how-to-design-living-hinges-for-3d-printed-parts
+  snap_fit_upright:
+    title: Snap-fit tab bends across its layers
+    why: A thin tab with a hook at the end clicks into a slot by bending. Standing upright it bends across the layer
+      lines, which hold about half as much stretch as the plastic along the lines, so it snaps off at a layer the
+      first time it is pushed in.
+    fixes:
+    - domain: geometry
+      text: Make the tab longer or thinner, or the hook shallower, so it bends less; round the corner where the tab
+        meets the part.
+    - domain: slicer
+      text: Print the tab with only walls, no infill, so it bends along whole lines.
+      settings:
+        wall_loops: '4'
+    - domain: process
+      text: Turn the part so the tab lies flat or on its side; then it bends along the lines. PETG bends further
+        than PLA before it breaks.
+    tags:
+    - strength
+    - snap-fit
+    sources:
+    - Core77 — How to design snap fit components (allowable strain; halve it for cantilevers along the build
+      direction) — https://www.core77.com/posts/65318/how-to-design-snap-fit-components
+    - Hackaday — 3D printing snapping parts without breakage (PLA ~8 %, PETG ~24 % elongation; design to a fraction)
+      — https://hackaday.com/tag/snap-fit
+  thick_solid_block:
+    title: Thick solid block
+    why: The CAD model is solid, but the slicer prints a thick block as a few walls with infill inside, so it is
+      mostly air. Its strength comes from the walls, and raising the infill adds time and plastic but little
+      strength.
+    fixes:
+    - domain: geometry
+      text: If it has to be stiff, make it a shell with ribs (2–3 mm walls, a rib every 10–20 mm). That is stiffer
+        per gram than infill. Otherwise leave it as it is.
+    - domain: slicer
+      text: Add walls before you add infill; keep the infill low.
+      settings:
+        wall_loops: '4'
+        sparse_infill_density: 15%
+    - domain: process
+      text: Thick blocks of ABS or ASA warp more as they cool; an enclosure helps.
+    tags:
+    - strength
+    - material-use
+    sources:
+    - HackSpace — Experiments with strong 3D prints (perimeters add more strength than infill)
+      — https://hackspace.raspberrypi.com/articles/experiments-with-strong-3d-prints
   thin_neck:
     title: Thin neck takes the whole load
     why: The CAD model shows a narrow waist between two thicker sections, but under any real-world load the printed

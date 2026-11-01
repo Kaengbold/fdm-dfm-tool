@@ -674,7 +674,7 @@ function showMarkers() {
   }
   if (shows("sims") && state.showWarp && state.warp) {
     viewer.showFindings([]);
-    for (const p of state.warp.lift_points_print) viewer.mark(p);
+    if (state.warpShow !== "stress") for (const p of state.warp.lift_points_print) viewer.mark(p);
     return;
   }
   viewer.showFindings(viewStep() == null || ["orient", "problems", "result"].includes(viewStep()) ? state.check?.findings ?? [] : []);
@@ -1214,16 +1214,20 @@ function stopSwing() {
 
 // ---------- warping simulation ----------
 const WARP_FIELD = { title: "Curls by (mm)", note: "exaggerated shape, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+const RESIDUAL_FIELD = { title: "Stress left inside (MPa)", note: "after it cools, rough", fmt: (v) => v.toFixed(v < 10 ? 1 : 0) };
 
+/** The warping result in the 3D view: the curled shape, or the stress the shrinking leaves inside. */
 function warpView() {
   const w = state.warp;
-  const key = `warp|${w.curl_mm}|${activeOption().up}`;
+  const stress = state.warpShow === "stress";
+  const max = Math.max(stress ? w.stress_max : w.max_mm, 1e-9);
+  const key = `warp|${w.curl_mm}|${activeOption().up}|${stress}`;
   if (viewer.fieldKey !== key || !viewer.field) {
-    viewer.showField({ triangles: f32(w.field_triangles), values: f32(w.vertex_value), disp: f32(w.vertex_disp), max: Math.max(w.max_mm, 1e-9) });
+    viewer.showField({ triangles: f32(w.field_triangles), values: f32(stress ? w.stress_value : w.vertex_value), disp: f32(w.vertex_disp), max });
     viewer.fieldKey = key;
   }
-  viewer.setDeformation((0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
-  renderLegend(WARP_FIELD, Math.max(w.max_mm, 1e-9));
+  viewer.setDeformation(stress ? 0 : (0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
+  renderLegend(stress ? RESIDUAL_FIELD : WARP_FIELD, max);
   return true;
 }
 
@@ -1240,10 +1244,19 @@ $("run-warp").onclick = async () => {
       state.showWarp = show.checked;
       recolor();
     };
+    const what = el("select", { id: "warp-show" },
+      el("option", { value: "shape", textContent: "the curled shape (red dots = lifts first)" }),
+      el("option", { value: "stress", textContent: "the stress left inside after it cools" }));
+    what.value = state.warpShow ?? "shape";
+    what.onchange = () => {
+      state.warpShow = what.value;
+      state.showWarp = show.checked = true;
+      recolor();
+    };
     $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
       el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
       el("p", { textContent: w.explanation }),
-      el("label", { className: "toggle" }, show, "Show the curled shape (red dots = lifts first)"),
+      el("label", { className: "toggle" }, show, "Show ", what),
       el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)."
         + (w.from_gcode ? " Layer times from your G-code." : "") })));
     recolor();
@@ -1456,13 +1469,22 @@ const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", k
 /** Zones (orange) and the advanced design boxes (their own colours) in the 3D view. */
 function drawBoxes() {
   viewer.showZones([
-    ...(zonesShown() ? state.zones.map((z) => z.corners_print) : []),
-    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind] })) : []),
+    ...(zonesShown() ? state.zones.map((z) => ({ corners: z.corners_print, shape: z.shape })) : []),
+    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind], shape: v.shape })) : []),
   ]);
 }
 
 /** What the slicer and the strength check get: zones plus the advanced design boxes. */
-const printZones = () => [...state.zones, ...state.volumes.map(({ kind, lo, hi }) => ({ kind, lo, hi, walls: 0, infill: 0 }))];
+const printZones = () => [...state.zones, ...state.volumes.map(({ kind, lo, hi, shape }) => ({ kind, lo, hi, shape, walls: 0, infill: 0 }))];
+
+/** Box / cylinder / ball: round shapes fit round things (a boss, the wall round a hole). */
+function shapePicker(value, onchange) {
+  const pick = el("select", { className: "shape-pick", title: "Shape (round ones sit inside the box)" },
+    ...[["box", "Box"], ["cylinder", "Cylinder"], ["ball", "Ball"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+  pick.value = value ?? "box";
+  pick.onchange = () => onchange(pick.value);
+  return el("label", {}, "Shape ", pick);
+}
 
 // ---------- stronger in one area (zones the user picks) ----------
 const BIG_FACE_MM2 = 400; // a face this big gets a box around the clicked spot, not the whole face
@@ -1491,10 +1513,10 @@ async function addZone(hit) {
 }
 
 /** Resize a picked zone: its box is worked out again from the face or spot it was made for. */
-async function resizeZone(i, margin) {
+async function resizeZone(i, margin, shape = state.zones[i].shape) {
   const old = state.zones[i];
   const z = await busy("Resizing the area…", () => call("zone_at", { up: activeOption().up, profile: profile(), ...old.from, margin,
-    walls: old.walls, infill: old.infill }));
+    walls: old.walls, infill: old.infill, shape }));
   remember("the area's size");
   setZones(state.zones.map((q, k) => (k === i ? { ...old, ...z, margin } : q)));
 }
@@ -1513,7 +1535,8 @@ function renderZones() {
         el("label", {}, "Walls ", num(z.walls, base.walls, 20, 1, (e) => set("walls", Math.max(base.walls, Math.round(Number(e.target.value) || 0))))),
         el("label", {}, "Infill ", num(Math.round(z.infill * 100), Math.round(base.infill * 100), 100, 5,
           (e) => set("infill", Math.min(1, Math.max(base.infill, Number(e.target.value) / 100)))), " %"),
-        z.from ? el("label", {}, "Reaches ", num(z.margin, 0, 30, 1, (e) => resizeZone(i, Math.max(0, Number(e.target.value) || 0))), " mm past it") : ""),
+        z.from ? el("label", {}, "Reaches ", num(z.margin, 0, 30, 1, (e) => resizeZone(i, Math.max(0, Number(e.target.value) || 0))), " mm past it") : "",
+        shapePicker(z.shape, (shape) => (z.from ? resizeZone(i, z.margin, shape) : set("shape", shape)))),
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing an area");
         setZones(state.zones.filter((_, k) => k !== i));
@@ -1569,9 +1592,9 @@ async function pickVolume(hit) {
   }
 }
 
-async function resizeVolume(i, margin) {
+async function resizeVolume(i, margin, shape = state.volumes[i].shape ?? "box") {
   const old = state.volumes[i];
-  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin }));
+  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin, shape }));
   remember("the box's size");
   setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, margin } : q)));
 }
@@ -1589,7 +1612,7 @@ function setVolumes(volumes) {
       : el("label", {}, "Reaches ", num(v.margin, 0, 30, 1, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
-      el("div", { className: "row" }, size),
+      el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
       ...v.notes.map((n) => el("p", { className: "hint", textContent: n })),
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing a box");

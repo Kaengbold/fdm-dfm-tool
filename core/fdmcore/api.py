@@ -698,7 +698,7 @@ def _zone_info(z, mesh: Mesh, up, bed) -> dict:
     r0 = rotation_to_z(up)
     rot = print_rotation(mesh, up, bed)[0]
     corners = np.array(list(product(*zip(z.lo, z.hi)))) @ r0  # build frame -> part
-    return {"lo": list(z.lo), "hi": list(z.hi), "walls": z.walls, "infill": z.infill,
+    return {"lo": list(z.lo), "hi": list(z.hi), "walls": z.walls, "infill": z.infill, "shape": z.shape,
             "corners_print": [_to_print_frame(mesh, rot, c) for c in corners]}
 
 
@@ -706,12 +706,17 @@ ZONE_MARGIN_MM = 3.0  # a zone reaches this far past the picked face, so the sli
 
 
 def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARGIN_MM, walls: int | None = None,
-            infill: float | None = None, profile: dict | None = None) -> dict:
+            infill: float | None = None, profile: dict | None = None, shape: str | None = None) -> dict:
     """A zone the user picks: an upright box around a face (``region``) or a spot (``point``, part
     coordinates), ``margin`` mm bigger on every side, printed with more walls and infill (default
-    two more walls and 40 %). Same form as the optimiser's zones, so strength and export take it."""
+    two more walls and 40 %). Same form as the optimiser's zones, so strength and export take it.
+    ``shape`` "box", "cylinder" or "ball" (strength.ZONE_SHAPES); default a cylinder around a round
+    hole or post that stands upright, else a box."""
     from .regions import find_regions
-    from .strength import Zone
+    from .strength import ZONE_SHAPES, Zone
+
+    if shape is not None and shape not in ZONE_SHAPES:
+        raise ValueError(f"shape must be one of {ZONE_SHAPES}")
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -727,8 +732,17 @@ def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARG
         raise ValueError("Give a face (region) or a point")
     built = pts @ rotation_to_z(up).T
     plan = goal_plan(p)
-    z = Zone(tuple((built.min(axis=0) - margin).tolist()), tuple((built.max(axis=0) + margin).tolist()),
-             int(walls if walls is not None else plan["walls"] + 2), float(infill if infill is not None else max(0.4, plan["infill"] / 100)))
+    if shape is None:
+        shape = "cylinder" if region is not None and _upright_round(int(region), up) else "box"
+    lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
+    if shape != "box":  # the round shape sits inside its box: grow the box so it still reaches past the face
+        grow = (hi - lo) * (np.sqrt(2) - 1) / 2 if shape == "ball" else np.r_[(hi - lo)[:2] * (np.sqrt(2) - 1) / 2, 0.0]
+        if region is not None and shape == "cylinder" and _upright_round(int(region), up):
+            grow[:2] = 0.0  # a circle around a round face already fits it
+        lo, hi = lo - grow, hi + grow
+    z = Zone(tuple(lo.tolist()), tuple(hi.tolist()),
+             int(walls if walls is not None else plan["walls"] + 2), float(infill if infill is not None else max(0.4, plan["infill"] / 100)),
+             shape=shape)
     return _zone_info(z, s.mesh, up, p.printer["bed"])
 
 
@@ -738,13 +752,14 @@ VOID_COVER_MM = 1.0  # plastic left above and below such a pin hole, so it doesn
 
 
 def volume_at(up, kind: str, region: int | None = None, point=None, point2=None, margin: float | None = None,
-              profile: dict | None = None) -> dict:
+              profile: dict | None = None, shape: str = "box") -> dict:
     """An advanced design box, upright in the build frame like a zone: around a face (``region``),
     a spot (``point``) or between two spots (``point`` and ``point2``, part coordinates), ``margin``
     mm bigger on every side. ``kind``: "support" / "blocker" (support enforcer / blocker in the 3MF),
     "void" (a hidden gap: a negative volume the slicer prints walls round; on one spot a thin pin
     hole up through the part that stays inside it), "keep_clear" (space that must stay empty; not
-    exported). Returns the box, its corners on the bed and plain notes on what it does here."""
+    exported). Returns the box, its corners on the bed and plain notes on what it does here. ``shape``:
+    "box", "cylinder" or "ball" inside that box (strength.ZONE_SHAPES)."""
     from .regions import find_regions
 
     if kind not in VOLUME_KINDS:
@@ -775,7 +790,11 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     lo[2], hi[2] = max(lo[2], zs.min()), (hi[2] if kind == "keep_clear" else min(hi[2], zs.max()))
     if np.any(hi - lo <= 0):
         raise ValueError("That box is outside the part's height")
-    box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0}
+    from .strength import ZONE_SHAPES
+
+    if shape not in ZONE_SHAPES:
+        raise ValueError(f"shape must be one of {ZONE_SHAPES}")
+    box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0, "shape": shape}
     corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"])["corners_print"]
     return {**box, "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
 
@@ -784,7 +803,19 @@ def _box_zone(box: dict):
     """A zone or advanced design box (dict) as the strength model's Zone."""
     from .strength import Zone
 
-    return Zone(tuple(box["lo"]), tuple(box["hi"]), int(box.get("walls", 0)), float(box.get("infill", 0)), box.get("kind") == "void")
+    return Zone(tuple(box["lo"]), tuple(box["hi"]), int(box.get("walls", 0)), float(box.get("infill", 0)), box.get("kind") == "void",
+                box.get("shape", "box"))
+
+
+def _upright_round(region: int, up) -> bool:
+    """Is face ``region`` a round hole or post whose axis stands upright for this build direction?"""
+    from .features import accepted, detect_features
+
+    s = _require()
+    for f in accepted(detect_features(s.mesh, s.regions, s.tags)):
+        if f["region"] == region:
+            return abs(np.dot(f["axis"], np.asarray(up, float) / np.linalg.norm(up))) > 0.98
+    return False
 
 
 def _inside_test(mesh: Mesh, r0: np.ndarray):
@@ -824,27 +855,34 @@ def _solid_run(inside, at: np.ndarray, zmin: float, zmax: float) -> tuple[float,
     return lo, hi
 
 
+SHAPE_VOLUME = {"box": 1.0, "cylinder": np.pi / 4, "ball": np.pi / 6}  # share of the box it fills
+
+
 def _volume_notes(mesh: Mesh, r0: np.ndarray, inside, box: dict, p: Profile) -> list[str]:
     """What an advanced design box does on this part, in plain words."""
     lo, hi = np.asarray(box["lo"]), np.asarray(box["hi"])
-    kind = box["kind"]
+    kind, zone = box["kind"], _box_zone(box)
     if kind in ("void", "keep_clear"):
         n = np.clip(np.ceil((hi - lo) / (inside.h / 2)).astype(int) + 1, 2, 40)
         g = np.stack(np.meshgrid(*[np.linspace(lo[i], hi[i], n[i]) for i in range(3)], indexing="ij"), -1).reshape(-1, 3)
+        g = g[zone.gap(g) <= 1e-9]
         filled = inside(g)
         if kind == "keep_clear":
             if filled.mean() < 0.01:
                 return ["The part stays out of it."]
-            return [f"The part fills about {filled.mean():.0%} of this space ({filled.mean() * float(np.prod(hi - lo)) / 1000:.1f} cm³): "
+            volume = float(np.prod(hi - lo)) * SHAPE_VOLUME[zone.shape]
+            return [f"The part fills about {filled.mean():.0%} of this space ({filled.mean() * volume / 1000:.1f} cm³): "
                     "change the design to clear it."]
         notes = ["The slicer prints walls all round it, so the plastic next to it is solid: stronger there, a little heavier. "
                  "The strength check counts it (roughly)."]
-        if not filled[np.any(np.isclose(g, lo) | np.isclose(g, hi), axis=1)].all():
+        c, r = (lo + hi) / 2, (hi - lo) / 2
+        rim = _box_zone({**box, "lo": c - 0.9 * r, "hi": c + 0.9 * r}).gap(g) > 1e-9  # the outer tenth of the shape
+        if not filled[rim].all():
             notes.append("It reaches the outside of the part, so it shows as a hole in the surface. Keep it inside if it should stay hidden.")
         return notes
     normals, areas = mesh.normals_and_areas()
     c = mesh.triangles.mean(axis=1) @ r0.T
-    inbox = np.all((c >= lo) & (c <= hi), axis=1)
+    inbox = zone.gap(c) <= 1e-9
     steep = (normals @ r0.T)[:, 2] < -np.cos(np.radians(p.material["max_overhang_deg"]))
     above_bed = c[:, 2] > (mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2].min() + 0.2
     hang = float(areas[inbox & steep & above_bed].sum())
@@ -949,11 +987,13 @@ _warp_reference: dict = {}
 def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
     longest bar that stays flat (1 = like that bar), where it lifts first, and the curled shape
-    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm).
+    (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm);
+    the stress left inside after it cools: ``stress_value`` (MPa per vertex), ``stress_max`` (MPa, 99th percentile
+    of the elements: single voxel corners spike) and ``stress_share`` (of what the layers hold).
     ``detailed``: with the loaded G-code's real layer times (layers that come quickly are still warm
     when the next go on and shrink less); ``from_gcode`` says whether it was used."""
     from . import warp
-    from .strength import refine, sample_nodes
+    from .strength import refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -988,6 +1028,10 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
            "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
            "from_gcode": warm is not None}
+    vm = warp.residual_stress(r)
+    out["stress_value"] = surface_values(model, vm, fine).astype(np.float32).tobytes()
+    out["stress_max"] = round(float(np.percentile(vm, 99)), 2) if len(vm) else 0.0
+    out["stress_share"] = round(out["stress_max"] / r["material"].strength_z, 2)
     out["explanation"] = _warp_story(out, p)
     return out
 
@@ -1033,7 +1077,20 @@ def _warp_story(r: dict, p: Profile) -> str:
     }[r["verdict"]]
     fix = "" if r["verdict"] == "fine" else (" A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
                                               " or rounding the corners of the base help. Upper layers shrinking onto the warm bottom cause it.")
-    return head + fix + " The shape shown is exaggerated."
+    return head + fix + " The shape shown is exaggerated." + _stress_story(r)
+
+
+def _stress_story(r: dict) -> str:
+    """One sentence on the stress the shrinking leaves inside the part."""
+    share = r.get("stress_share")
+    if share is None:
+        return ""
+    if share < 0.25:
+        return f" Little stress stays inside once it cools (up to about {r['stress_max']:.0f} MPa)."
+    tail = ("it can crack along a layer later, or bend when it gets warm. Rounded inside corners, an enclosure or annealing lower it."
+            if share >= 0.5 else "fine for most parts, but heat (a hot car) can let it bend a little.")
+    return (f" Shrinking leaves up to about {r['stress_max']:.0f} MPa of stress inside, {share:.0%} of what the layers hold "
+            f"(rough, real plastic relaxes some of it): {tail}")
 
 
 def regions() -> dict:
@@ -1831,12 +1888,35 @@ def _zone_box(mesh: Mesh, up, rotation: np.ndarray, zone: dict) -> np.ndarray:
     zs = (mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2]
     lo, hi = np.array(zone["lo"], float), np.array(zone["hi"], float)
     lo[2], hi[2] = max(lo[2], zs.min()), min(hi[2], zs.max())
-    v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * (hi - lo) + lo
-    f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
-    part = v[np.array(f)] @ r0  # build frame -> part
+    part = (_unit_shape(zone.get("shape", "box")) * (hi - lo) / 2 + (lo + hi) / 2) @ r0  # build frame -> part
     turned = mesh.triangles.reshape(-1, 3) @ rotation.T
     lo_t, hi_t = turned.min(axis=0), turned.max(axis=0)
     return part @ rotation.T - [(lo_t[0] + hi_t[0]) / 2, (lo_t[1] + hi_t[1]) / 2, lo_t[2]]
+
+
+def _unit_shape(shape: str, n: int = 32) -> np.ndarray:
+    """Closed, outward-wound triangles of a shape filling the cube [-1, 1]³: box, upright cylinder or ball."""
+    if shape == "box":
+        v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * 2 - 1
+        f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
+        return v[np.array(f)]
+    a = np.linspace(0, 2 * np.pi, n + 1)
+    ring = np.stack([np.cos(a), np.sin(a)], axis=1)
+    if shape == "cylinder":
+        p0, p1 = ring[:-1], ring[1:]
+        lo = lambda p: np.c_[p, -np.ones(len(p))]
+        hi = lambda p: np.c_[p, np.ones(len(p))]
+        zero = np.zeros((n, 2))
+        return np.concatenate([np.stack([lo(p0), lo(p1), hi(p1)], 1), np.stack([lo(p0), hi(p1), hi(p0)], 1),
+                               np.stack([hi(zero), hi(p0), hi(p1)], 1), np.stack([lo(zero), lo(p1), lo(p0)], 1)])
+    rows = n // 2
+    lat = np.linspace(-np.pi / 2, np.pi / 2, rows + 1)
+    grid = np.stack([np.cos(lat)[:, None] * ring[None, :, 0], np.cos(lat)[:, None] * ring[None, :, 1],
+                     np.repeat(np.sin(lat)[:, None], n + 1, axis=1)], axis=-1)
+    a, b, c, d = grid[:-1, :-1], grid[:-1, 1:], grid[1:, 1:], grid[1:, :-1]
+    tris = np.concatenate([np.stack([a, b, c], 2).reshape(-1, 3, 3), np.stack([a, c, d], 2).reshape(-1, 3, 3)])
+    area = np.linalg.norm(np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]), axis=1)
+    return tris[area > 1e-12]  # the poles' collapsed triangles
 
 
 def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
