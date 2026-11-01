@@ -223,7 +223,9 @@ def test_thicker_weak_spot_helps():
     edit = next(e for e in api.design([0, 0, 1], prof, {"thicken_mm": 2})["edits"] if e["id"] == "thicken-weak")
     assert edit["op"] == "add" and edit["param"] == "thicken_mm" and "2.0 mm" in edit["title"]
     pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
-    assert pts[:, 0].max() < spot[0] + 30 and pts[:, 1].max() > 13 and pts[:, 2].max() > 13  # all round the bar, tapering out
+    # All round the bar along the stretch bent hardest (stress at least 65 % of the clamp's: the first third),
+    # tapering out well before the loaded end.
+    assert pts[:, 0].max() < 60 and pts[:, 1].max() > 13 and pts[:, 2].max() > 13
     assert any(o.get("edit") == "thicken-weak" for o in api.strength_options([0, 0, 1], loads(), prof))
     part = api._require().mesh
     thicker = apply_edits(part, [edit])
@@ -274,3 +276,36 @@ def test_loose_pieces_after_edits_are_dropped():
     out = apply_edits(part, [edit])
     assert abs(out.volume()) == pytest.approx(20 * 20 * 10 + 5 * 10 * 5)
     assert out.triangles[..., 0].max() == pytest.approx(25)
+
+
+def test_thicken_only_the_neck_of_a_flat_dog_bone():
+    """A flat dog-bone pulled apart is weakest at its narrow neck (the stress peaks where it meets the
+    wide ends). Thickening grows the neck only, never below the bed, and helps; growing all round the
+    worst spot made the ends wider, the part lift off the bed and the strength worse (1.33 -> 0.09)."""
+    manifold3d = pytest.importorskip("manifold3d")
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    cube = manifold3d.Manifold.cube
+    m = (cube((20, 40, 6)).translate((0, -20, 0)) + cube((40, 12, 6)).translate((20, -6, 0))
+         + cube((20, 40, 6)).translate((60, -20, 0))).to_mesh()
+    prof = {"material": "pla"}
+
+    def check(data):
+        api.load(data, "bone")
+        info = api.regions()["regions"]
+        end = lambda n, ok: next(r["id"] for r in info if np.dot(r["normal"], n) > 0.99 and ok(r["centroid"][0]))  # noqa: E731
+        loads = [{"region": end([-1, 0, 0], lambda x: x < 1), "kind": "fixed"},
+                 {"region": end([1, 0, 0], lambda x: x > 79), "kind": "force", "kg": 60, "direction": "pull"}]
+        return api.strength([0, 0, 1], loads, prof)["safety_factor"]
+
+    before = check(to_binary_stl(Mesh(m.vert_properties[m.tri_verts.reshape(-1)].reshape(-1, 3, 3).astype(float))))
+    edit = next(e for e in api.design([0, 0, 1], prof)["edits"] if e["id"] == "thicken-weak")
+    out = apply_edits(api._require().mesh, [edit])
+    t = out.triangles.reshape(-1, 3)
+    head = (t[:, 0] < 18) | (t[:, 0] > 62)
+    neck = (t[:, 0] > 30) & (t[:, 0] < 50)
+    assert t[:, 2].min() > -0.01  # still flat on the bed
+    assert np.abs(t[head, 1]).max() < 20.01 and t[head, 2].max() < 6.01  # the wide ends stay as they are
+    assert np.abs(t[neck, 1]).max() > 7 and t[neck, 2].max() > 7  # the neck is thicker
+    assert check(to_binary_stl(out)) > 1.05 * before
