@@ -366,6 +366,9 @@ summary::marker { color: var(--accent); }
 .verdict.borderline { background: var(--warn-soft); } .verdict.borderline strong { color: var(--warn); }
 .verdict.likely-to-break { background: var(--bad-soft); } .verdict.likely-to-break strong { color: var(--bad); }
 .verdict p { margin-top: 4px; }
+/* Controls in a result box stay inside it, however long their options are. */
+.verdict .toggle { flex-wrap: wrap; }
+.verdict > select { display: block; width: 100%; min-width: 0; margin-top: 6px; }
 .options { list-style: none; padding: 0; margin: 4px 0 0; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
 .options li { display: flex; justify-content: space-between; gap: 6px; align-items: center; }
 .option-groups { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
