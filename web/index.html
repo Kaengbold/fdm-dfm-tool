@@ -429,6 +429,8 @@
                   <option value="blocker">No support here</option>
                   <option value="void">Hidden gap (solid walls inside)</option>
                   <option value="keep_clear">Keep clear (space that stays empty)</option>
+                  <option value="add_solid">Add plastic (a block)</option>
+                  <option value="cut_solid">Cut away (a block)</option>
                 </select></label>
               <p id="vol-kind-hint" class="hint"></p>
               <div class="row">
@@ -437,6 +439,16 @@
                 <span id="vol-hint" class="hint" hidden></span>
               </div>
               <ul id="vol-list" class="zone-list vol-list"></ul>
+            </div>
+            <div class="sim-card" id="snap-card">
+              <h3>Add another model</h3>
+              <p class="hint">Put a second part onto this one and print them as one: a bracket onto a box, a knob onto a lid. Its biggest flat
+                face goes flat onto the face you click, centred where you click. It becomes a new version of the model (Undo goes back).</p>
+              <div class="row">
+                <label class="file-button">Choose a model (STL or 3MF)<input id="snap-file" type="file" accept=".stl,.3mf" hidden /></label>
+                <label>Turn it <input id="snap-spin" type="number" value="0" step="15" min="-180" max="180" /> °</label>
+                <span id="snap-hint" class="hint" hidden></span>
+              </div>
             </div>
           </div>
         </section>

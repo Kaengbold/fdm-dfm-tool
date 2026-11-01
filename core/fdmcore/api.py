@@ -748,7 +748,10 @@ def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARG
     return _zone_info(z, s.mesh, up, p.printer["bed"])
 
 
-VOLUME_KINDS = {"support": "Support here", "blocker": "No support here", "void": "Hidden gap (extra walls)", "keep_clear": "Keep clear"}
+VOLUME_KINDS = {"support": "Support here", "blocker": "No support here", "void": "Hidden gap (extra walls)", "keep_clear": "Keep clear",
+                "add_solid": "Add plastic", "cut_solid": "Cut away"}
+SOLID_KINDS = ("add_solid", "cut_solid")  # change the model itself (volume_solid), not for the slicer
+DESIGN_ONLY = ("keep_clear", *SOLID_KINDS)  # not in the 3MF
 VOID_MM = 0.6  # a gap picked on a spot: a thin upright pin hole, the "holes that force walls" trick
 VOID_COVER_MM = 1.0  # plastic left above and below such a pin hole, so it doesn't show
 
@@ -760,7 +763,8 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     mm bigger on every side. ``kind``: "support" / "blocker" (support enforcer / blocker in the 3MF),
     "void" (a hidden gap: a negative volume the slicer prints walls round; on one spot a thin pin
     hole up through the part that stays inside it), "keep_clear" (space that must stay empty; not
-    exported). Returns the box, its corners on the bed and plain notes on what it does here. ``shape``:
+    exported), "add_solid" / "cut_solid" (a block of plastic added to or cut from the model itself: see
+    volume_solid). Returns the box, its corners on the bed and plain notes on what it does here. ``shape``:
     "box", "cylinder" or "ball" inside that box (strength.ZONE_SHAPES)."""
     from .regions import find_regions
 
@@ -789,7 +793,7 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     if pin:
         lo[2], hi[2] = _solid_run(inside, built[0], zs.min(), zs.max())
     # Slicer boxes stay between the bed and the top of the part (see _zone_box); keep-clear space may be above it.
-    lo[2], hi[2] = max(lo[2], zs.min()), (hi[2] if kind == "keep_clear" else min(hi[2], zs.max()))
+    lo[2], hi[2] = max(lo[2], zs.min()), (hi[2] if kind in DESIGN_ONLY else min(hi[2], zs.max()))
     if np.any(hi - lo <= 0):
         raise ValueError("That box is outside the part's height")
     from .strength import ZONE_SHAPES
@@ -799,6 +803,86 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0, "shape": shape}
     corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"])["corners_print"]
     return {**box, "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
+
+
+def volume_solid(up, boxes: list[dict]) -> list[dict]:
+    """The "add plastic" / "cut away" boxes (volume_at) as design edits in part coordinates, for the
+    web app to apply like any design change (a new version of the model)."""
+    r0 = rotation_to_z(up)
+    unit = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float)
+    faces = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]])
+    out = []
+    for i, b in enumerate(boxes):
+        if b.get("kind") not in SOLID_KINDS:
+            continue
+        lo, hi = np.asarray(b["lo"], float), np.asarray(b["hi"], float)
+        tris = ((unit * (hi - lo) + lo)[faces]) @ r0  # build frame -> part
+        add = b["kind"] == "add_solid"
+        size = " × ".join(f"{v:.0f}" for v in hi - lo)
+        out.append({"id": f"solid-{i}", "rule": "design_change", "title": f"{'Add' if add else 'Cut away'} a {size} mm block",
+                    "description": "Placed under Advanced design changes.", "op": "add" if add else "cut", "param": None,
+                    "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)]})
+    return out
+
+
+SNAP_SINK_MM = 0.05  # the snapped model reaches this far into the part, so the union joins them
+
+
+def snap_model(data: bytes, point, normal, spin_deg: float = 0.0, name: str = "other part") -> dict:
+    """Put another model (STL or 3MF bytes) onto the part: its biggest flat face goes flat onto
+    the part's face at ``point`` (part coordinates, ``normal`` pointing out of the part), centred there
+    and turned ``spin_deg`` about that normal. Returns a design edit (``op: "add"``) the web app joins
+    to the part as a new version: an assembly made into one print, or a bracket stuck onto a box."""
+    from .regions import find_regions, region_info
+
+    other = max(read_bodies(bytes(data)), key=lambda b: abs(b[1].volume()))[1]
+    info = region_info(other, find_regions(other))
+    face = max((r for r in info if r["kind"] == "flat"), key=lambda r: r["area_mm2"], default=None)
+    if face is None:
+        raise ValueError("The other model has no flat face to put down")
+    n_to = -np.asarray(normal, float) / np.linalg.norm(normal)  # its face looks into the part
+    turn = _rotation_between(np.asarray(face["normal"], float), n_to)
+    spin = _axis_rotation(n_to, np.radians(spin_deg))
+    tris = (other.triangles - np.asarray(face["centroid"], float)) @ (spin @ turn).T + np.asarray(point, float) + n_to * SNAP_SINK_MM
+    lo, hi = tris.reshape(-1, 3).min(axis=0), tris.reshape(-1, 3).max(axis=0)
+    return {"id": "snap", "rule": "design_change", "title": f"Add {name}",
+            "description": f"Its biggest flat face ({face['area_mm2']:.0f} mm²) sits on the clicked face; it is {hi[0] - lo[0]:.0f} × {hi[1] - lo[1]:.0f} × {hi[2] - lo[2]:.0f} mm.",
+            "op": "add", "param": None, "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)]}
+
+
+def _rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Rotation matrix turning unit vector ``a`` onto ``b`` (a half turn about any perpendicular when opposite)."""
+    a, b = a / np.linalg.norm(a), b / np.linalg.norm(b)
+    v, c = np.cross(a, b), float(a @ b)
+    if c < -0.999999:
+        p = np.cross(a, [1.0, 0, 0] if abs(a[0]) < 0.9 else [0, 1.0, 0])
+        return _axis_rotation(p / np.linalg.norm(p), np.pi)
+    k = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    return np.eye(3) + k + k @ k / (1 + c)
+
+
+def _axis_rotation(axis: np.ndarray, angle: float) -> np.ndarray:
+    axis = axis / np.linalg.norm(axis)
+    k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    return np.eye(3) + np.sin(angle) * k + (1 - np.cos(angle)) * k @ k
+
+
+def _keep_clear_clash(edits: list[dict], up, keep_clear: list[dict] | None) -> list[dict]:
+    """Design edits that add plastic into a keep-clear box get ``clash`` (plain words) so the app
+    leaves them unticked: the user said that space has to stay empty."""
+    if not keep_clear:
+        return edits
+    r0 = rotation_to_z(up)
+    for e in edits:
+        if e["op"] != "add":
+            continue
+        tris = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3).astype(float)
+        pts = np.concatenate([tris.reshape(-1, 3), tris.mean(axis=1), (tris + np.roll(tris, 1, axis=1)).reshape(-1, 3) / 2]) @ r0.T
+        for b in keep_clear:
+            if np.all((pts >= np.asarray(b["lo"]) - 1e-6) & (pts <= np.asarray(b["hi"]) + 1e-6), axis=1).any():
+                e["clash"] = "It reaches into a space you marked to keep clear, so it is not ticked."
+                break
+    return edits
 
 
 def _box_zone(box: dict):
@@ -882,6 +966,19 @@ def _volume_notes(mesh: Mesh, r0: np.ndarray, inside, box: dict, p: Profile) -> 
         if not filled[rim].all():
             notes.append("It reaches the outside of the part, so it shows as a hole in the surface. Keep it inside if it should stay hidden.")
         return notes
+    if kind in SOLID_KINDS:
+        size = float(np.prod(hi - lo))
+        n = np.clip(np.ceil((hi - lo) / (inside.h / 2)).astype(int) + 1, 2, 40)
+        g = np.stack(np.meshgrid(*[np.linspace(lo[i], hi[i], n[i]) for i in range(3)], indexing="ij"), -1).reshape(-1, 3)
+        filled = float(inside(g).mean())
+        if kind == "add_solid":
+            new = (1 - filled) * size / 1000
+            if filled == 0:
+                return [f"Adds about {new:.1f} cm³ of plastic, but it doesn't touch the part: move it so it overlaps."]
+            return [f"Adds about {new:.1f} cm³ of plastic. Apply it to make a new version of the model (Undo goes back)."]
+        if filled < 0.01:
+            return ["The part isn't in this box: nothing to cut."]
+        return [f"Cuts away about {filled * size / 1000:.1f} cm³ of the part. Apply it to make a new version of the model (Undo goes back)."]
     normals, areas = mesh.normals_and_areas()
     c = mesh.triangles.mean(axis=1) @ r0.T
     inbox = zone.gap(c) <= 1e-9
@@ -1587,11 +1684,13 @@ def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", p
             "verdict": verdict, "explanation": text}
 
 
-def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
+def design(up, profile: dict | None = None, params: dict | None = None, keep_clear: list[dict] | None = None) -> dict:
     """Detected features (holes, bosses) and suggested geometry edits for this orientation.
     Each edit has a ``mesh`` (float32 triangles, part coordinates) made of closed ``pieces`` (triangle
     counts) to add to the part (``op: "add"``) or cut away (``op: "cut"``).
-    ``params`` adjusts edit sizes (see features.PARAMS); the values used come back in ``params``."""
+    ``params`` adjusts edit sizes (see features.PARAMS); the values used come back in ``params``.
+    ``keep_clear``: boxes (volume_at, kind "keep_clear") that must stay empty: edits adding plastic
+    there come back with ``clash``."""
     from .features import PARAMS, design_edits, detect_features, edit_params
     from .regions import find_regions
 
@@ -1601,7 +1700,8 @@ def design(up, profile: dict | None = None, params: dict | None = None) -> dict:
     p = Profile.from_dict(profile)
     return {
         "features": detect_features(s.mesh, s.regions, s.tags),
-        "edits": design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits, gaps=s.gaps),
+        "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
+                                                gaps=s.gaps), up, keep_clear),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
@@ -1949,7 +2049,7 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     modifiers = []
     for z in zones or []:
         kind = z.get("kind", "stronger")
-        if kind == "keep_clear":  # a design aid: nothing for the slicer
+        if kind in DESIGN_ONLY:  # design aids and model changes: nothing for the slicer
             continue
         conf = {"wall_loops": str(int(z["walls"])), "sparse_infill_density": f"{float(z['infill']):.0%}"} if kind == "stronger" else {}
         modifiers.append((_zone_box(s.mesh, up, rotation, z), conf, kind))
@@ -2075,6 +2175,8 @@ METHODS = {
     "warping": warping,
     "set_fit": set_fit,
     "set_gap": set_gap,
+    "volume_solid": volume_solid,
+    "snap_model": snap_model,
     "material_advice": material_advice,
     "dynamics": dynamics,
     "select_body": select_body,

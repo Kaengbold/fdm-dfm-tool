@@ -735,6 +735,7 @@ def main():
             return f"{out.stat().st_size // 1024} kB STEP, {text.count('ADVANCED_FACE')} faces; reloaded: {page.locator('#status').inner_text()}"
         run.step("STEP in, design change, STEP out", step_round_trip)
 
+
         def test_design_change():
             # Mushroom held by its cap and pulled on the stem: the weak spot is the inside corner at the stem.
             run.act(lambda: page.click("[data-sample=mushroom]"))
@@ -816,6 +817,35 @@ def main():
                 page.context.set_offline(False)
             return f"offline: {status}"
         run.step("works offline after a visit", offline)
+
+        def solids_and_snap():
+            run.act(lambda: page.click("[data-sample=l_bracket]"))  # last: it changes the model
+            page.evaluate("() => fdm.steps.go('extra')")
+            spot = (
+                "() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f += Math.max(1, Math.floor(n / 50))) { const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); if (el && el.tagName === 'CANVAS' && v.pick({clientX: x, clientY: y}) >= 0) return [x, y]; } return [0, 0]; }"
+            )
+            before = page.evaluate("() => fdm.state.versions.length")
+            x, y = page.evaluate(spot)
+            page.select_option("#vol-kind", "add_solid")
+            page.click("#vol-pick")
+            run.act(lambda: page.mouse.click(x, y))
+            assert page.evaluate("() => fdm.state.volumes.at(-1)?.kind") == "add_solid", "block not placed"
+            run.act(lambda: page.locator("#vol-list li", has_text="Add plastic").get_by_role("button", name="Apply to the model").click(), 300_000)
+            after = page.evaluate("() => fdm.state.versions.length")
+            assert after > before, "block not applied as a version"
+            assert not page.evaluate("() => fdm.state.volumes.some((v) => v.kind === 'add_solid')")
+            page.evaluate("() => fdm.steps.go('extra')")
+            cube = OUT / "snap_cube.stl"
+            cube.write_bytes(_box_stl([((0, 0, 0), 8)]))
+            page.set_input_files("#snap-file", str(cube))
+            page.wait_for_selector("#snap-hint:not([hidden])", timeout=180_000)
+            x, y = page.evaluate(spot)
+            run.act(lambda: page.mouse.click(x, y), 300_000)
+            assert page.evaluate("() => fdm.state.versions.length") == after + 1, page.locator("#status").inner_text()
+            return page.locator("#status").inner_text()[:120]
+        run.step("advanced design changes: add plastic, snap a model on", solids_and_snap)
 
         for part in args.parts:
             def load_part(part=part):

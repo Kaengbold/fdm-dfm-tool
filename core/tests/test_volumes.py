@@ -60,3 +60,56 @@ def test_unknown_kind():
     api.load(box(40, 20, 10), "block")
     with pytest.raises(ValueError, match="Unknown kind"):
         api.volume_at([0, 0, 1], "glue", point=[0, 0, 0])
+
+
+def test_add_and_cut_blocks_change_the_model():
+    from fdmcore.booleans import apply_edits
+
+    api.load(box(40, 20, 10), "block")
+    add = api.volume_at([0, 0, 1], "add_solid", point=[40, 10, 5], margin=3)  # 6 mm cube, half outside the end
+    cut = api.volume_at([0, 0, 1], "cut_solid", point=[5, 10, 10], margin=2)  # 4 mm cube at the top edge, half inside
+    assert "Adds about 0.1 cm³" in add["notes"][0] and "Cuts away about 0.0 cm³" in cut["notes"][0]
+    far = api.volume_at([0, 0, 1], "add_solid", point=[80, 10, 5], margin=3)
+    assert "doesn't touch" in far["notes"][0]
+    edits = api.volume_solid([0, 0, 1], [add, cut, {"kind": "support", "lo": [0, 0, 0], "hi": [1, 1, 1]}])
+    assert [e["op"] for e in edits] == ["add", "cut"]
+    part = api._require().mesh
+    grown = apply_edits(part, [edits[0]])
+    assert abs(grown.volume()) - abs(part.volume()) == pytest.approx(3 * 6 * 6, rel=0.02)
+    assert abs(part.volume()) - abs(apply_edits(part, [edits[1]]).volume()) == pytest.approx(4 * 4 * 2, rel=0.05)
+    z = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {"wall_loops": "2"}, zones=[add, cut])))
+    assert "Metadata/Slic3r_PE_model.config" in z.namelist()  # nothing for the slicer: the plain single-file 3MF
+
+
+def test_snap_another_model_onto_a_face():
+    from fdmcore.mesh import to_binary_stl, Mesh
+
+    api.load(box(40, 20, 10), "block")
+    cube = Mesh(_cube(6))
+    e = api.snap_model(to_binary_stl(cube), point=[20, 10, 10], normal=[0, 0, 1], name="cube")
+    tris = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3)
+    assert e["op"] == "add" and tris[:, 2].min() == pytest.approx(10 - api.SNAP_SINK_MM, abs=1e-4)
+    assert tris[:, 2].max() == pytest.approx(16 - api.SNAP_SINK_MM, abs=1e-4)
+    assert tris[:, 0].mean() == pytest.approx(20, abs=0.5) and tris[:, 1].mean() == pytest.approx(10, abs=0.5)
+    side = api.snap_model(to_binary_stl(cube), point=[40, 10, 5], normal=[1, 0, 0], spin_deg=45)
+    pts = np.frombuffer(side["mesh"], "<f4").reshape(-1, 3)
+    assert pts[:, 0].min() == pytest.approx(40 - api.SNAP_SINK_MM, abs=1e-4) and pts[:, 1].max() - pts[:, 1].min() == pytest.approx(6 * np.sqrt(2), abs=0.01)
+
+
+def _cube(size):
+    v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * size
+    f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
+    return v[np.array(f)]
+
+
+def test_suggestions_keep_out_of_keep_clear_space():
+    api.load(box(40, 20, 10), "block")
+    block = api.volume_at([0, 0, 1], "add_solid", point=[40, 10, 5], margin=3)
+    edits = api.volume_solid([0, 0, 1], [block])
+    clear = api.volume_at([0, 0, 1], "keep_clear", point=[44, 10, 5], margin=1)  # just past the end, where the block goes
+    elsewhere = api.volume_at([0, 0, 1], "keep_clear", point=[0, 10, 20], margin=1)
+    assert "clash" in api._keep_clear_clash([dict(e) for e in edits], [0, 0, 1], [clear])[0]
+    assert "clash" not in api._keep_clear_clash([dict(e) for e in edits], [0, 0, 1], [elsewhere])[0]
+    cut = api.volume_solid([0, 0, 1], [{**block, "kind": "cut_solid"}])
+    assert "clash" not in api._keep_clear_clash(cut, [0, 0, 1], [clear])[0]  # cutting never fills the space
+    assert "edits" in api.design([0, 0, 1], {}, keep_clear=[clear])
