@@ -231,3 +231,19 @@ def test_thicker_weak_spot_helps():
     api.load(to_binary_stl(thicker), "bar2")
     after = api.strength([0, 0, 1], loads(), prof)
     assert after["safety_factor"] > before["safety_factor"] * 1.1
+
+
+def test_carry_less_is_always_the_last_idea():
+    """Carrying less doesn't make the part stronger: it comes after every other idea, even when it
+    has the best number (it is set to just reach the needed safety)."""
+    from test_hold import box, region_facing
+
+    api.load(box(80, 12, 12), "bar")
+    api.regions()
+    loads = [{"region": region_facing([-1, 0, 0]), "kind": "fixed"},
+             {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 60, "direction": "down"}]
+    opts = api.strength_options([0, 0, 1], loads, {"material": "pla"})
+    kinds = [o["kind"] for o in opts]
+    assert kinds[-1] == "load" and kinds.count("load") == 1
+    rated = [o["safety_factor"] for o in opts if o["safety_factor"] is not None]
+    assert max(rated) == opts[-1]["safety_factor"]  # the best number, still last
