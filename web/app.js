@@ -1085,6 +1085,7 @@ async function runStrength(fine = false) {
     recolor();
     renderStrength();
     renderGcodeResult();
+    renderZones(); // its stressed places become zone suggestions
     setStatus(state.summary);
     return r;
   }, ["strength", "result"]);
@@ -1549,7 +1550,23 @@ async function resizeZone(i, margin, shape = state.zones[i].shape) {
   setZones(state.zones.map((q, k) => (k === i ? { ...old, ...z, margin } : q)));
 }
 
+/** Zones from the strength result: where the stress is high, not a guess. One click adds them; they
+ * can then be changed or removed like picked ones. */
+function renderZoneSuggestion() {
+  const found = state.strength?.stress_zones ?? [];
+  const added = state.zones.some((z) => z.stress);
+  $("zone-suggest").replaceChildren(...(!found.length ? [el("p", { className: "hint", textContent: "Run “Will it hold?” first and the stressed places are proposed here." })]
+    : added ? [el("p", { className: "hint", textContent: "The stressed places from the strength check are in the list. Run “Will it hold?” again to see what they change." })]
+    : [el("p", { textContent: `The strength check found ${found.length === 1 ? "one place" : `${found.length} places`} where the plastic works hardest.` }),
+      el("button", { textContent: found.length === 1 ? "Make it a stronger area" : "Make them stronger areas", onclick: () => {
+        remember("the stressed areas");
+        setZones([...state.zones, ...found.map((z, k) => ({ ...z, stress: k + 1 }))]);
+        setStatus("Stronger areas added where the stress is (orange boxes). Change or remove them below.");
+      } })]));
+}
+
 function renderZones() {
+  renderZoneSuggestion();
   $("zone-list").replaceChildren(...state.zones.map((z, i) => {
     const set = (key, value) => {
       remember("the area's settings");
@@ -1558,7 +1575,7 @@ function renderZones() {
     const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
     const base = currentShells(); // an area is never weaker than the rest (the strength check counts it that way)
     return el("li", {},
-      el("strong", { textContent: z.from ? `Around ${z.what}` : "From the lightest-settings search" }),
+      el("strong", { textContent: z.from ? `Around ${z.what}` : z.stress ? `Stressed place ${z.stress} (works ${z.share_pct} % as hard as the worst spot)` : "From the lightest-settings search" }),
       el("div", { className: "row" },
         el("label", {}, "Walls ", num(z.walls, base.walls, 20, 1, (e) => set("walls", Math.max(base.walls, Math.round(Number(e.target.value) || 0))))),
         el("label", {}, "Infill ", num(Math.round(z.infill * 100), Math.round(base.infill * 100), 100, 5,
@@ -1716,7 +1733,7 @@ async function applyOption(o, recheck = true) {
     if (edit) {
       showSelectedGhosts(edit);
       viewer.focusEdit(edit);
-      setStatus("The chamfer at the weak spot is lit up in yellow. Apply it, then check the strength again.");
+      setStatus("The rounded corners at the weak spot are lit up in yellow. Apply them, then check the strength again.");
     } else if (r) setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
   }
 }
@@ -1933,8 +1950,8 @@ const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
-/** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
-const EDIT_NAME = { "stress-chamfer": "the chamfer", "thicken-weak": "the thicker weak spot" };
+/** The rounded corners (or the thicker weak spot) on a new version, checked again: the strength before and after side by side. */
+const EDIT_NAME = { "stress-chamfer": "the rounded corners", "thicken-weak": "the thicker weak spot" };
 
 /** "Test it" on a strength suggestion: apply that design edit as a new version and check the strength again. */
 async function testDesignEdit(id) {
