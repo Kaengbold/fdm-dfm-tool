@@ -14,5 +14,6 @@
 | `thresholds_extracted.yaml` | Numbers pulled from the sourced files (by Gemini) → `core/fdmcore/data/thresholds.yaml` | used |
 | `kb_new_rules_draft.yaml` | Gemini draft of 12 rules, reviewed and merged into `rules.yaml` | merged |
 | `fdm_knowledge.md` | Early overview from model knowledge, no live sources | unverified |
+| `topology_optimisation.md` | Can SIMP topology optimisation run in the browser? Method, measured solve times, plan (T-291) | timings measured, method refs from memory |
 
 YAML from LLMs often has quoting errors: `python tools/fix_research_yaml.py research/*.yaml`.

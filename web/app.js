@@ -1,6 +1,3 @@
-import { Assistant, MODELS } from "./assistant.js";
-import { GeminiAssistant, listGeminiModels } from "./gemini.js";
-import { listOpenAIModels, OpenAIAssistant } from "./openai.js";
 import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
@@ -18,9 +15,6 @@ const el = (tag, props = {}, ...children) => {
 
 /** Show ``node`` only from this level up (Simple / Advanced / Expert, see style.css). */
 const from = (level, node) => ((node.dataset.min = level), node);
-
-// The AI features (Ask AI, paste back an answer) are being redone; hidden unless the page is opened with ?ai=1.
-const AI_ENABLED = new URLSearchParams(location.search).has("ai");
 
 // ---------- engine (Pyodide worker) ----------
 // Cancelling kills the worker (Python can't be interrupted mid-call); a fresh one boots and
@@ -110,6 +104,8 @@ const state = {
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
   volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
+  fitSel: null, // the hole, post or slot selected in Tolerances & tuning: {key, regions, label}
+  fitList: [], // the holes and posts listed there
   gaps: [], // slots and tabs between two flat faces (set_gap): {faces, kind, distance_mm, partner, fit, text}
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
@@ -139,10 +135,17 @@ const profile = () => ({
   nozzle: $("nozzle").value,
   multi_material: $("multi-material").checked,
   goal: document.querySelector("input[name=goal]:checked").value,
-  use_temp_c: $("use-temp").value === "" ? null : Number($("use-temp").value),
+  use_temp_c: useTemp(),
   constant_load: $("constant-load").checked,
 });
 const mode = () => document.querySelector("input[name=mode]:checked").value;
+
+/** Where the part is used (°C), or null for room temperature: a choice from the list or the user's own number. */
+function useTemp() {
+  const v = $("use-temp").value;
+  if (v === "custom") return Number.isFinite(parseFloat($("use-temp-c").value)) ? parseFloat($("use-temp-c").value) : null;
+  return v === "" ? null : Number(v);
+}
 const activeOption = () => state.options[state.active];
 
 function setStatus(text, isError = false) {
@@ -288,7 +291,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [] });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [], fitSel: null, fitList: [] });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -376,8 +379,6 @@ async function runCheck() {
     state.check = result;
     renderCheck();
     $("design-block").hidden = mode() === "print";
-    $("ai-block").hidden = !AI_ENABLED;
-    $("paste-block").hidden = !AI_ENABLED;
     setStatus(state.summary);
     steps.render();
     suggestDesignIfShown();
@@ -656,6 +657,7 @@ function recolor() {
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
     const r = state.faceRegions[f];
+    if (shows("fits") && state.fitSel?.regions.includes(r)) return REGION_COLORS.fit;
     if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
@@ -716,6 +718,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   if (state.volPick) return pickVolume(hit);
   if (state.gapPick) return pickGapFace(hit);
   if (state.snapPick) return pickSnap(hit);
+  if (shows("fits") && pickFit(state.faceRegions[hit.face])) return;
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
@@ -1016,7 +1019,7 @@ function renderGcodeResult() {
 // The strength grid has about the same number of cubes for every part, so one strength check takes
 // about the same time on a given computer; the others are a steady multiple of it (measured on the
 // samples in the browser: fine grid 2.6–5.4×, warping 1.8–2.9×, shaking 2.5–5.2×, optimiser 3.6–5.1×).
-const RUN_RATIO = { strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3 };
+const RUN_RATIO = { strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3, trials: 8.5, trials_few: 4.3 };
 const ASK_ABOVE_S = 30;
 let strengthSeconds = Number(localStorage.getItem("fdm-strength-s")) || 8; // this computer, once measured
 
@@ -1085,6 +1088,7 @@ async function runStrength(fine = false) {
     recolor();
     renderStrength();
     renderGcodeResult();
+    renderZones(); // its stressed places become zone suggestions
     setStatus(state.summary);
     return r;
   }, ["strength", "result"]);
@@ -1134,7 +1138,7 @@ $("run-box-heat").onclick = () =>
     // The walls sit at about the inside temperature: let the other checks use it as "where it's used".
     const use = el("button", { textContent: `Check the part at ${t} °C`, onclick: async () => {
       let opt = [...$("use-temp").options].find((o) => o.value === String(t));
-      if (!opt) $("use-temp").append((opt = el("option", { value: String(t), textContent: `Inside the electronics box (${t} °C)` })));
+      if (!opt) $("use-temp").querySelector("[value=custom]").before((opt = el("option", { value: String(t), textContent: `Inside the electronics box (${t} °C)` })));
       $("use-temp").value = opt.value;
       await $("use-temp").onchange();
       setStatus(`The checks now use ${t} °C, the air inside the box.`);
@@ -1352,9 +1356,109 @@ function renderStrength() {
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
     el("button", { className: "primary", textContent: "How can I make it stronger?", onclick: showStrengthOptions,
       title: "Shows every option: slicer settings, orientation, design changes and materials, each with what it costs" }),
+    el("button", { id: "try-designs", textContent: "Test design changes for me ", onclick: tryDesigns, hidden: mode() === "print",
+      title: "Builds rounded corners and a thicker weak spot in several sizes on copies of your part and checks each with your loads" },
+      etaTag("trials")),
     el("button", { textContent: "Find the best orientation including strength", onclick: rankWithStrength }),
     el("div", { id: "strength-options", className: "option-groups" }),
+    el("div", { id: "design-trials" }),
   );
+}
+
+// ---------- strength: design changes tested in the background (Thorough) ----------
+// Each change is built on a copy of the part and checked with the user's loads; only the one the
+// user picks becomes a model version, so the model list doesn't fill up with tries.
+const TRIALS = {
+  all: [
+    { what: "Testing corner sizes", id: "stress-chamfer", key: "stress_chamfer_mm", sizes: [1, 2, 3, 4] },
+    { what: "Testing a thicker weak spot", id: "thicken-weak", key: "thicken_mm", sizes: [1, 1.5, 2.5] },
+  ],
+  few: [
+    { what: "Testing corner sizes", id: "stress-chamfer", key: "stress_chamfer_mm", sizes: [2, 4] },
+    { what: "Testing a thicker weak spot", id: "thicken-weak", key: "thicken_mm", sizes: [1.5] },
+  ],
+};
+
+async function tryDesigns() {
+  const how = await askLong("Test design changes", "trials", [
+    { value: "all", kind: "trials", label: "Every size, then the best two together (8 checks)" },
+    { value: "few", kind: "trials_few", label: "A few sizes, then both together (4 checks)" }]);
+  if (!how) return;
+  const up = activeOption().up;
+  const before = state.strength.safety_factor;
+  const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
+  const check = { up, loads: state.loads, profile: profile(), ...currentShells(), zones: printZones() };
+  const plan = TRIALS[how];
+  const total = plan.reduce((n, p) => n + p.sizes.length, 0) + 1;
+  const results = [];
+  let done = 0;
+  const step = (text) => {
+    const t = `${text} (${++done} of ${total})…`;
+    setStatus(t);
+    showWorking(t);
+  };
+  /** One variant: the suggested edits with these sizes, built on a copy and checked; null if one doesn't fit. */
+  const trial = async (params, ids, title) => {
+    const r = await call("design", { up, profile: profile(), params: { ...designParams(), ...params }, keep_clear });
+    const edits = r.edits.filter((e) => ids.includes(e.id) && !e.clash).map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) }));
+    if (edits.length !== ids.length) return null;
+    const soup = await applyDesignEdits(state.triangles, edits);
+    return { ...(await call("strength_variant", check, stlBytes(soup))), edits, title: title ?? edits[0].title };
+  };
+  await busy("Testing design changes…", async () => {
+    const best = [];
+    for (const p of plan) {
+      let top = null;
+      for (const size of p.sizes) {
+        step(p.what);
+        const t = await trial({ [p.key]: size }, [p.id]);
+        if (!t) continue;
+        results.push(t);
+        if (!top || t.safety_factor > top.t.safety_factor) top = { p, size, t };
+      }
+      if (top) best.push(top);
+    }
+    step("Testing the best two together");
+    if (best.length === 2) {
+      const both = await trial(Object.fromEntries(best.map((b) => [b.p.key, b.size])), best.map((b) => b.p.id),
+        `${best[0].t.title}, and ${best[1].t.title[0].toLowerCase()}${best[1].t.title.slice(1)}`);
+      if (both) results.push(both);
+    }
+    setStatus(state.summary);
+  }, ["strength"]);
+  renderTrials(results, before);
+}
+
+/** The tested changes, strongest first, with the measured safety and the plastic they add. */
+function renderTrials(results, before) {
+  const box = $("design-trials");
+  if (!results.length) {
+    return box.replaceChildren(el("p", { className: "hint",
+      textContent: "No automatic design change fits where it is weak: change the part in your CAD (the weak spot is marked)." }));
+  }
+  results.sort((a, b) => b.safety_factor - a.safety_factor);
+  // The one that is enough with the least plastic, if any is enough.
+  const enough = results.filter((t) => t.verdict === "fine").sort((a, b) => a.added_g - b.added_g)[0];
+  box.replaceChildren(
+    el("h3", { textContent: "Tested design changes" }),
+    el("p", { className: "hint", textContent: `Each one was built on a copy of your part and checked with your loads (now ×${before.toFixed(1)}). Pick one to make it a new version.` }),
+    el("ul", { className: "options strength-options" }, ...results.map((t) => {
+      const gain = Math.round((t.safety_factor / before - 1) * 100);
+      const tag = t === results[0] ? "strongest" : t === enough ? "enough, least plastic" : "";
+      return el("li", { className: "option design" },
+        el("div", { className: "option-head" },
+          el("strong", { textContent: t.title }, tag ? el("span", { className: "tag", textContent: tag }) : ""),
+          el("span", { className: "gain", textContent: `×${t.safety_factor.toFixed(1)} (${gain >= 0 ? "+" : ""}${gain} %)` })),
+        el("p", { className: "hint", textContent: `+${t.added_g.toFixed(1)} g of plastic` }),
+        el("div", { className: "row" }, el("button", { textContent: "Use this", onclick: () => useTrial(t) })));
+    })),
+  );
+}
+
+async function useTrial(t) {
+  await applyEdits(t.edits);
+  if (readyForStrength()) await runStrength();
+  setStatus(`${t.title}: safety ×${state.strength.safety_factor.toFixed(1)}, as a new version (Undo or the Model list goes back).`);
 }
 
 /** Re-rank with the loads, then show the strength of the new best orientation (not the old result). */
@@ -1474,8 +1578,10 @@ $("run-advice").onclick = () =>
   });
 
 // Where the part is used changes the checks (too hot?) and the strength (weaker when warm, more margin for loads that stay on).
-for (const id of ["use-temp", "constant-load"]) {
+for (const id of ["use-temp", "use-temp-c", "constant-load"]) {
   $(id).onchange = async () => {
+    $("use-temp-own").hidden = $("use-temp").value !== "custom";
+    renderTempCurve();
     if (!activeOption()) return;
     await runCheck();
     if (state.strength) await runStrength();
@@ -1514,6 +1620,71 @@ function shapePicker(value, onchange) {
   return el("label", {}, "Shape ", pick);
 }
 
+// ---------- strength vs. temperature (top of Optional simulations) ----------
+const ROOM_C = 23; // service.ROOM_C: "Indoors" in the list
+
+/** Pick a temperature: the matching choice in "Where is it used?", else "Another temperature…". */
+async function setUseTemp(t) {
+  const match = t === ROOM_C ? "" : [...$("use-temp").options].find((o) => o.value !== "custom" && o.value !== "" && Number(o.value) === t)?.value;
+  if (match !== undefined) $("use-temp").value = match;
+  else {
+    $("use-temp").value = "custom";
+    $("use-temp-c").value = String(t);
+  }
+  await $("use-temp").onchange();
+}
+
+$("sim-temp-use").onclick = async () => {
+  const t = parseFloat($("sim-temp").value);
+  if (!Number.isFinite(t)) return setStatus("Type the temperature it's used at, in °C.");
+  await setUseTemp(t);
+  setStatus(activeOption() ? `Checked again at ${t} °C.` : `The checks will use ${t} °C.`);
+};
+
+/** The material's strength from a winter's day to past its heat limit, with where it's used marked. */
+async function renderTempCurve() {
+  if (!state.presets) return;
+  const c = await call("heat_curve", { profile: profile() });
+  if (document.activeElement !== $("sim-temp")) $("sim-temp").value = String(c.use_temp_c);
+  $("temp-story").textContent = c.explanation;
+  $("temp-chart").replaceChildren(tempChart(c));
+}
+
+function tempChart(c) {
+  const W = 320, H = 150, L = 34, R = 10, T = 10, B = 26;
+  const t0 = c.temps_c[0], t1 = c.temps_c.at(-1);
+  const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
+  const y = (pct) => T + (1 - pct / 100) * (H - T - B);
+  const svg = (tag, attrs, text) => {
+    const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text) e.textContent = text;
+    return e;
+  };
+  const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Strength of ${c.material} from ${t0} to ${t1} °C` });
+  chart.append(
+    svg("rect", { class: "cold", x: x(t0), y: T, width: x(c.cold_c) - x(t0), height: H - T - B }),
+    svg("rect", { class: "soft", x: x(c.soft_c), y: T, width: x(t1) - x(c.soft_c), height: H - T - B }),
+    svg("text", { class: "zone", x: x(t0) + 3, y: H - B - 4 }, "brittle"),
+    svg("text", { class: "zone", x: x(c.soft_c) + 3, y: T + 11 }, "soft"));
+  for (const pct of [0, 50, 100]) {
+    chart.append(svg("line", { class: "grid", x1: L, x2: W - R, y1: y(pct), y2: y(pct) }),
+      svg("text", { class: "tick", x: L - 4, y: y(pct) + 4, "text-anchor": "end" }, `${pct} %`));
+  }
+  for (let t = Math.ceil(t0 / 20) * 20; t <= t1; t += 20) {
+    chart.append(svg("text", { class: "tick", x: x(t), y: H - B + 14, "text-anchor": "middle" }, `${t}`));
+  }
+  chart.append(svg("text", { class: "tick", x: L - 11, y: H - B + 14, "text-anchor": "end" }, "°C"));
+  chart.append(svg("polyline", { class: "curve", points: c.temps_c.map((t, i) => `${x(t).toFixed(1)},${y(c.share_pct[i]).toFixed(1)}`).join(" ") }));
+  const at = Math.min(Math.max(c.use_temp_c, t0), t1);
+  const right = x(at) > W / 2;
+  chart.append(svg("line", { class: "now", x1: x(at), x2: x(at), y1: T, y2: H - B }),
+    svg("circle", { class: "now", cx: x(at), cy: y(c.share_at_pct), r: 4 }),
+    svg("text", { class: "label", x: x(at) + (right ? -6 : 6), y: Math.min(Math.max(y(c.share_at_pct) + (c.share_at_pct > 50 ? 16 : -8), T + 24), H - B - 16),
+      "text-anchor": right ? "end" : "start" }, `${Math.round(c.share_at_pct)} % at ${Math.round(c.use_temp_c)} °C`));
+  return chart;
+}
+
 // ---------- stronger in one area (zones the user picks) ----------
 const BIG_FACE_MM2 = 400; // a face this big gets a box around the clicked spot, not the whole face
 const SPOT_ZONE_MM = 8;
@@ -1549,7 +1720,23 @@ async function resizeZone(i, margin, shape = state.zones[i].shape) {
   setZones(state.zones.map((q, k) => (k === i ? { ...old, ...z, margin } : q)));
 }
 
+/** Zones from the strength result: where the stress is high, not a guess. One click adds them; they
+ * can then be changed or removed like picked ones. */
+function renderZoneSuggestion() {
+  const found = state.strength?.stress_zones ?? [];
+  const added = state.zones.some((z) => z.stress);
+  $("zone-suggest").replaceChildren(...(!found.length ? [el("p", { className: "hint", textContent: "Run “Will it hold?” first and the stressed places are proposed here." })]
+    : added ? [el("p", { className: "hint", textContent: "The stressed places from the strength check are in the list. Run “Will it hold?” again to see what they change." })]
+    : [el("p", { textContent: `The strength check found ${found.length === 1 ? "one place" : `${found.length} places`} where the plastic works hardest.` }),
+      el("button", { textContent: found.length === 1 ? "Make it a stronger area" : "Make them stronger areas", onclick: () => {
+        remember("the stressed areas");
+        setZones([...state.zones, ...found.map((z, k) => ({ ...z, stress: k + 1 }))]);
+        setStatus("Stronger areas added where the stress is (orange boxes). Change or remove them below.");
+      } })]));
+}
+
 function renderZones() {
+  renderZoneSuggestion();
   $("zone-list").replaceChildren(...state.zones.map((z, i) => {
     const set = (key, value) => {
       remember("the area's settings");
@@ -1558,7 +1745,7 @@ function renderZones() {
     const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
     const base = currentShells(); // an area is never weaker than the rest (the strength check counts it that way)
     return el("li", {},
-      el("strong", { textContent: z.from ? `Around ${z.what}` : "From the lightest-settings search" }),
+      el("strong", { textContent: z.from ? `Around ${z.what}` : z.stress ? `Stressed place ${z.stress} (works ${z.share_pct} % as hard as the worst spot)` : "From the lightest-settings search" }),
       el("div", { className: "row" },
         el("label", {}, "Walls ", num(z.walls, base.walls, 20, 1, (e) => set("walls", Math.max(base.walls, Math.round(Number(e.target.value) || 0))))),
         el("label", {}, "Infill ", num(Math.round(z.infill * 100), Math.round(base.infill * 100), 100, 5,
@@ -1716,7 +1903,7 @@ async function applyOption(o, recheck = true) {
     if (edit) {
       showSelectedGhosts(edit);
       viewer.focusEdit(edit);
-      setStatus("The chamfer at the weak spot is lit up in yellow. Apply it, then check the strength again.");
+      setStatus("The rounded corners at the weak spot are lit up in yellow. Apply them, then check the strength again.");
     } else if (r) setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
   }
 }
@@ -1827,13 +2014,62 @@ function renderFeatures(features) {
 
 /** Tolerances & tuning: each round hole or post with what goes in it. */
 function renderFits(list) {
+  state.fitList = list;
+  if (state.fitSel?.region !== undefined && !list.some((f) => f.region === state.fitSel.region)) state.fitSel = null;
   renderGaps();
-  $("fits-summary").textContent = list.length ? "Click a name to see it on the part." : "No round holes or posts found.";
+  $("fits-summary").textContent = list.length ? "Click a name (or the hole on the part) to see it." : "No round holes or posts found.";
   $("fits").replaceChildren(...list.map((f) => {
     const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
-    return el("li", {}, el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
+    return el("li", { className: state.fitSel?.key === fitKey(f) ? "picked" : "" },
+      el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
       fitControls(f));
   }));
+  renderFitSelection();
+}
+
+// ---------- what's selected in Tolerances & tuning ----------
+const fitKey = (f) => `hole-${f.region}`;
+const gapKey = (g) => `gap-${g.faces.join("-")}`;
+
+/** Select a hole / post (``f``) or a slot / tab (``g``): its faces light up on the part and its row in the list. */
+function selectFit(sel) {
+  state.fitSel = sel;
+  state.selectedRegion = -1;
+  state.showHeat = false;
+  renderFits(state.fitList);
+  recolor();
+}
+const selectHole = (f) => selectFit({ key: fitKey(f), regions: [f.region], region: f.region });
+const selectGap = (g) => selectFit({ key: gapKey(g), regions: [...g.faces] });
+
+/** A click on the part in Tolerances & tuning: the hole, post or slot it belongs to, if any. */
+function pickFit(region) {
+  const f = state.fitList.find((q) => q.region === region);
+  if (f) return selectHole(f), true;
+  const g = state.gaps.find((q) => q.faces.includes(region));
+  if (g) return selectGap(g), true;
+  return false;
+}
+
+/** "Selected: Ø8.0 mm hole, sliding fit for Ø8 mm" and a way to clear it. */
+function renderFitSelection() {
+  const sel = state.fitSel;
+  if (!sel) {
+    $("fit-selected").replaceChildren(el("span", { className: "hint", textContent: "Nothing selected: click a hole, post or slot in the lists below, or on the part." }));
+    return;
+  }
+  let text;
+  if (sel.region !== undefined) {
+    const f = state.fitList.find((q) => q.region === sel.region);
+    const n = state.fitNotes?.[sel.region];
+    text = `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]}` + (n ? `, ${FIT_LABEL[n.fit]} fit ${f.type === "hole" ? "for" : "into"} Ø${n.partner} mm` : ", not sized yet");
+  } else {
+    const g = state.gaps.find((q) => gapKey(q) === sel.key);
+    if (!g) return selectFit(null);
+    text = `${g.kind === "slot" ? "slot" : "tab"} ${g.distance_mm.toFixed(2)} mm` + (g.text ? `, ${FIT_LABEL[g.fit]} fit for ${g.partner} mm` : ", not sized yet");
+  }
+  $("fit-selected").replaceChildren(el("span", { className: "swatch" }), el("strong", { textContent: "Selected: " }), text,
+    el("button", { className: "link", textContent: "Clear", onclick: () => selectFit(null) }));
 }
 
 const FIT_LABEL = { press: "pressed in", snug: "snug", sliding: "sliding / turning", loose: "loose" };
@@ -1850,6 +2086,8 @@ function fitControls(f) {
     busy("Working out the size…", async () => {
       const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
       state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
+      state.fitSel = { key: fitKey(f), regions: [f.region], region: f.region }; // the one just sized
+      renderFits(state.fitList);
       if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
       await suggestDesign();
     }) });
@@ -1878,7 +2116,7 @@ async function pickGapFace(hit) {
   try {
     const g = await call("set_gap", { face_a: faces[0], face_b: faces[1], up: activeOption().up });
     state.gaps = [...state.gaps.filter((q) => q.faces.join() !== g.faces.join()), { ...g, partner: Math.round(g.distance_mm * 10) / 10, fit: "sliding" }];
-    renderGaps();
+    selectGap(g);
   } catch (err) {
     setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
   }
@@ -1896,18 +2134,20 @@ function renderGaps() {
       busy("Working out the size…", async () => {
         const r = await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
         state.gaps = state.gaps.map((q, k) => (k === i ? { ...q, partner: Number(size.value), fit: kind.value, text: r.explanation } : q));
-        renderGaps();
+        state.fitSel = { key: gapKey(g), regions: [...g.faces] };
+        renderFits(state.fitList);
         if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
         await suggestDesign();
       }) });
     const forget = el("button", { className: "link", textContent: "Remove", onclick: async () => {
       await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up });
       state.gaps = state.gaps.filter((_, k) => k !== i);
-      renderGaps();
+      if (state.fitSel?.key === gapKey(g)) selectFit(null);
+      else renderGaps();
       await suggestDesign();
     } });
-    return el("li", {},
-      el("strong", { textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}` }),
+    return el("li", { className: state.fitSel?.key === gapKey(g) ? "picked" : "" },
+      el("button", { className: "link", textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}`, onclick: () => selectGap(g) }),
       el("div", { className: "fit row" }, el("span", { className: "hint", textContent: slot ? "What goes in:" : "Goes into a slot of" }), size, "mm,", kind, go),
       g.text ? el("p", { className: "hint", textContent: g.text }) : "", forget);
   }));
@@ -1915,6 +2155,7 @@ function renderGaps() {
 
 async function showFeature(f) {
   await ensureRegions();
+  if (shows("fits")) return selectHole(f);
   state.selectedRegion = f.region;
   state.showHeat = false;
   recolor();
@@ -1933,8 +2174,8 @@ const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
-/** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
-const EDIT_NAME = { "stress-chamfer": "the chamfer", "thicken-weak": "the thicker weak spot" };
+/** The rounded corners (or the thicker weak spot) on a new version, checked again: the strength before and after side by side. */
+const EDIT_NAME = { "stress-chamfer": "the rounded corners", "thicken-weak": "the thicker weak spot" };
 
 /** "Test it" on a strength suggestion: apply that design edit as a new version and check the strength again. */
 async function testDesignEdit(id) {
@@ -2088,199 +2329,6 @@ async function showVersion(i, carry = true) {
 }
 $("apply-edits").onclick = () => applyEdits();
 
-// ---------- AI assistant (bring your own key) ----------
-const round = (v, d = 2) => (Array.isArray(v) ? v.map((x) => round(x, d)) : typeof v === "number" ? Number(v.toFixed(d)) : v);
-
-function summarizeState() {
-  const o = activeOption();
-  const s = state.strength;
-  return {
-    part: state.summary,
-    profile: profile(),
-    mode: mode(),
-    orientation: o && { index: state.active, label: o.label, up: round(o.up, 3), reasons: o.reasons },
-    findings: state.check?.findings.map((f) => ({ severity: f.severity, rule: f.rule, title: f.title, detail: f.detail })),
-    estimate: state.check && { print_time_min: Math.round(state.check.stats.print_time_min), filament_g: Math.round(state.check.stats.filament_g) },
-    settings: Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value])),
-    loads: state.loads,
-    strength: s && { safety_factor: round(s.safety_factor), verdict: s.verdict, mode: s.mode, walls: s.walls, infill: s.infill },
-  };
-}
-
-// What the AI may do: the same actions as the UI. Shared by all providers.
-const aiActions = {
-  get_current_analysis: async () => summarizeState(),
-  list_orientations: async () => state.options.map((o, i) => ({ index: i, label: o.label, up: round(o.up, 3), reasons: o.reasons, why_lower: o.why_lower })),
-  select_orientation: async ({ index }) => {
-    if (!state.options[index]) throw new Error(`No orientation ${index}`);
-    await selectOption(index);
-    return summarizeState();
-  },
-  list_faces: async () => {
-    await ensureRegions();
-    return state.regionInfo.map((r) => ({ id: r.id, kind: r.kind, area_mm2: Math.round(r.area_mm2), normal: round(r.normal), centroid: round(r.centroid, 1) }));
-  },
-  set_loads: async ({ loads }) => {
-    await ensureRegions();
-    for (const l of loads) if (!l.point && !state.regionInfo[l.region]) throw new Error(`Unknown face ${l.region}`);
-    state.loads = loads.map((l) => {
-      const at = l.point ? { point: l.point, radius: l.radius ?? SPOT_RADIUS } : { region: l.region };
-      return l.kind === "fixed" ? { ...at, kind: "fixed", ...(l.hold && l.hold !== "clamped" ? { hold: l.hold } : {}) } : { ...at, kind: "force", kg: l.kg ?? 1, direction: l.direction ?? "push", case: l.case ?? 1 };
-    });
-    renderLoads();
-    recolor();
-    return { loads: state.loads };
-  },
-  check_strength: async () => {
-    if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
-    const r = await runStrength();
-    return { safety_factor: round(r.safety_factor), verdict: r.verdict, mode: r.mode, explanation: r.explanation, bends_mm: round(r.max_displacement_mm, 1),
-      walls: r.walls, top: r.top, bottom: r.bottom, infill: r.infill };
-  },
-  optimise_strength: async () => {
-    if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
-    const o = await runOptimise();
-    return { met: o.met, target: o.target, safety_factor: round(o.safety_factor), grams: o.grams, orientation: o.orientation, settings: o.settings, explanation: o.explanation,
-      ...(o.beyond ? { beyond: o.beyond.map((b) => ({ change: b.change, kind: b.kind, safety_factor: round(b.safety_factor), why: b.why })) } : {}) };
-  },
-  strength_options: async () => {
-    if (!state.strength) throw new Error("Run check_strength first");
-    return (await showStrengthOptions()).map((o) => ({ ...o, safety_factor: round(o.safety_factor) }));
-  },
-  suggest_design_changes: async () => {
-    const r = await suggestDesign();
-    return {
-      features: r.features.filter(shown).map((f) => ({ region: f.region, type: f.type, diameter_mm: round(f.diameter, 1), axis: round(f.axis), confidence: f.confidence, tag: f.tag })),
-      edits: r.edits.map((e) => ({ id: e.id, op: e.op, title: e.title, description: e.description })),
-    };
-  },
-  tag_feature: async ({ region, tag }) => {
-    const r = await tagFeature(region, tag === "forget" ? null : tag);
-    return r.features.filter(shown).map((f) => ({ region: f.region, type: f.type, diameter_mm: round(f.diameter, 1), tag: f.tag }));
-  },
-  apply_design_changes: async ({ ids }) => {
-    if (!state.edits.length) await suggestDesign();
-    const unknown = ids.filter((id) => !state.edits.some((e) => e.id === id));
-    if (unknown.length) throw new Error(`Unknown edit ids: ${unknown.join(", ")}`);
-    state.edits.forEach((e) => (e.selected = ids.includes(e.id)));
-    await applyEdits();
-    return summarizeState();
-  },
-  set_slicer_settings: async ({ settings }) => {
-    Object.assign(state.overrides, settings);
-    renderSettings();
-    return Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value]));
-  },
-};
-
-const PROVIDERS = {
-  anthropic: {
-    assistant: new Assistant(aiActions),
-    storage: "fdmdfm.anthropicKey",
-    placeholder: "sk-ant-...",
-    keyHelp: "console.anthropic.com -> API keys",
-    models: async () => MODELS,
-  },
-  gemini: {
-    assistant: new GeminiAssistant(aiActions),
-    storage: "fdmdfm.geminiKey",
-    placeholder: "AIza...",
-    keyHelp: "aistudio.google.com -> Get API key",
-    models: (key) => listGeminiModels(key),
-  },
-  openai: {
-    assistant: new OpenAIAssistant(aiActions),
-    storage: "fdmdfm.openaiKey",
-    placeholder: "sk-...",
-    keyHelp: "platform.openai.com -> API keys",
-    models: (key) => listOpenAIModels(key),
-  },
-};
-const provider = () => PROVIDERS[$("ai-provider").value];
-
-async function refreshModels() {
-  const p = provider();
-  const key = $("ai-key").value.trim();
-  if (!key && p !== PROVIDERS.anthropic) {
-    $("ai-model").replaceChildren(el("option", { value: "", textContent: "Enter your key to load models" }));
-    return;
-  }
-  try {
-    const models = await p.models(key);
-    $("ai-model").replaceChildren(...models.map((m) => el("option", { value: m.id, textContent: m.label })));
-  } catch (err) {
-    $("ai-model").replaceChildren(el("option", { value: "", textContent: "Could not load models" }));
-    aiLog("tool", err.message);
-  }
-}
-
-function switchProvider() {
-  const p = provider();
-  $("ai-key").placeholder = p.placeholder;
-  $("ai-key").value = localStorage.getItem(p.storage) ?? "";
-  $("ai-remember").checked = Boolean(localStorage.getItem(p.storage));
-  refreshModels();
-}
-
-const rememberKey = () =>
-  $("ai-remember").checked ? localStorage.setItem(provider().storage, $("ai-key").value) : localStorage.removeItem(provider().storage);
-$("ai-provider").onchange = switchProvider;
-$("ai-remember").onchange = rememberKey;
-$("ai-key").onchange = () => {
-  rememberKey();
-  refreshModels();
-};
-switchProvider();
-
-function aiLog(cls, text) {
-  const node = el("div", { className: `msg ${cls}`, textContent: text });
-  $("ai-log").append(node);
-  node.scrollIntoView({ block: "nearest" });
-}
-
-const TOOL_LABEL = {
-  get_current_analysis: "reading the analysis",
-  list_orientations: "comparing orientations",
-  select_orientation: "switching orientation",
-  list_faces: "looking at the faces",
-  set_loads: "setting loads",
-  check_strength: "running the strength check",
-  strength_options: "trying stronger options",
-  optimise_strength: "finding the lightest settings that hold",
-  suggest_design_changes: "looking for design changes",
-  apply_design_changes: "applying design changes",
-  tag_feature: "noting what a feature is",
-  set_slicer_settings: "changing slicer settings",
-};
-
-$("ai-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const text = $("ai-input").value.trim();
-  const apiKey = $("ai-key").value.trim();
-  if (!text) return;
-  if (!apiKey) return aiLog("tool", `Enter your API key first (${provider().keyHelp}).`);
-  if (!$("ai-model").value) return aiLog("tool", "Pick a model first.");
-  $("ai-input").value = "";
-  aiLog("user", text);
-  const button = $("ai-form").querySelector("button");
-  button.disabled = true;
-  try {
-    await provider().assistant.ask(text, { apiKey, model: $("ai-model").value }, (ev) =>
-      ev.type === "text" ? aiLog("assistant", ev.text) : aiLog("tool", `... ${TOOL_LABEL[ev.name] ?? ev.name}`),
-    );
-  } catch (err) {
-    aiLog("tool", `Error: ${err.message}`);
-  } finally {
-    button.disabled = false;
-  }
-};
-$("ai-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    $("ai-form").requestSubmit();
-  }
-});
-
 // ---------- Expert: all settings ----------
 const loadExpert = () => JSON.parse(localStorage.getItem("fdm-expert") ?? "{}");
 let expertChanged = false;
@@ -2393,6 +2441,7 @@ async function applyMine(mine, select = {}) {
   viewer.setBed(p.printers[$("printer").value].bed);
   syncMultiMaterial();
   renderMine(mine);
+  renderTempCurve();
 }
 
 // ---------- my printers & materials ----------
@@ -2570,6 +2619,7 @@ for (const id of ["printer", "material", "nozzle", "multi-material"]) {
     viewer.setBed(state.presets.printers[$("printer").value].bed);
     syncMultiMaterial();
     $("nozzle-block").open = false; // comparison belongs to the old setup
+    if (id === "material") renderTempCurve();
     if (state.triangles) findOrientations();
   };
 }
@@ -2596,6 +2646,7 @@ function updateModeNote() {
   if ($("mode-note")) $("mode-note").textContent = MODE_NOTES[m] || "";
   $("design-block").hidden = m === "print";
   $("design-off").hidden = m !== "print";
+  if ($("try-designs")) $("try-designs").hidden = m === "print"; // only when the user can change the design
 }
 $("design-on").onclick = () => {
   const both = document.querySelector("input[name=mode][value=both]");
@@ -2799,79 +2850,8 @@ $("dl-step").onclick = () =>
 
 $("copy-report").onclick = async () => {
   const md = await call("report", { up: activeOption().up, profile: profile(), mode: mode() });
-  await navigator.clipboard.writeText(md + answerFormat());
+  await navigator.clipboard.writeText(md);
   setStatus("Copied. Paste it into your AI chat so it can help you with the design of your part.");
-};
-
-// ---------- paste-back: an answer from any AI chat ----------
-/** Report appendix telling a chat AI how to answer so the tool can apply it (only the choices that exist now). */
-function answerFormat() {
-  const lines = [
-    "", "## For the AI assistant: how to answer", "",
-    "Answer the user's question in plain language. If you recommend changes, end your reply with one JSON block",
-    "the tool can apply (leave out what you don't want to change):", "",
-    "```json",
-    JSON.stringify({ orientation: 0, settings: { wall_loops: "4" }, design_changes: ["edit-id"], not_features: [0] }),
-    "```", "",
-    "- `orientation`: index from this list:",
-    ...state.options.map((o, i) => `  - ${i}: ${o.label}, up = [${round(o.up, 2).join(", ")}]${i === state.active ? " (current)" : ""}`),
-    "- `settings`: OrcaSlicer setting keys with string values (see the settings table above).",
-  ];
-  if (state.edits.length) lines.push("- `design_changes`: ids of these suggested edits:", ...state.edits.map((e) => `  - ${e.id}: ${e.title}`));
-  const features = state.features.filter(shown);
-  if (features.length) lines.push("- `not_features`: regions of detected features that aren't really holes/posts:", ...features.map((f) => `  - ${f.region}: Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]}`));
-  return lines.join("\n") + "\n";
-}
-
-/** The JSON object in a pasted reply: a ```json block, or the last {...} that parses. */
-function parseAnswer(text) {
-  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]);
-  const candidates = [...fenced.reverse(), ...[...text.matchAll(/\{[\s\S]*\}/g)].map((m) => m[0])];
-  for (const c of candidates) {
-    try {
-      const v = JSON.parse(c);
-      if (v && typeof v === "object" && !Array.isArray(v)) return v;
-    } catch {
-      // not this one
-    }
-  }
-  throw new Error("No JSON answer found — ask the AI to end its reply with the JSON block from the report.");
-}
-
-async function applyAnswer(answer) {
-  const done = [];
-  const step = async (what, fn) => {
-    try {
-      done.push({ text: `${what}: ${(await fn()) ?? "done"}` });
-    } catch (err) {
-      done.push({ text: `${what}: ${err.message ?? err}`, error: true });
-    }
-  };
-  if (answer.orientation != null) {
-    await step("Orientation", async () => (await aiActions.select_orientation({ index: Number(answer.orientation) }), state.options[state.active].label));
-  }
-  for (const region of answer.not_features ?? []) {
-    await step(`Feature ${region}`, async () => (await aiActions.tag_feature({ region: Number(region), tag: "none" }), "marked as not a feature"));
-  }
-  if (answer.settings && Object.keys(answer.settings).length) {
-    const settings = Object.fromEntries(Object.entries(answer.settings).map(([k, v]) => [k, String(v)]));
-    await step("Slicer settings", async () => (await aiActions.set_slicer_settings({ settings }), Object.entries(settings).map(([k, v]) => `${k} = ${v}`).join(", ")));
-  }
-  if (answer.design_changes?.length) {
-    await step("Design changes", async () => (await aiActions.apply_design_changes({ ids: answer.design_changes.map(String) }), answer.design_changes.join(", ")));
-  }
-  if (!done.length) done.push({ text: "The answer suggests no changes." });
-  return done;
-}
-
-$("paste-apply").onclick = async () => {
-  let rows;
-  try {
-    rows = await applyAnswer(parseAnswer($("paste-input").value));
-  } catch (err) {
-    rows = [{ text: err.message, error: true }];
-  }
-  $("paste-result").replaceChildren(...rows.map((r) => el("li", { className: r.error ? "error" : "", textContent: r.text })));
 };
 
 // Offline after the first visit (see sw.js). Not on file:// pages, where service workers don't run.

@@ -114,6 +114,11 @@ CHAMFER_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot 
 HOT_SHARE = 0.65  # other inside corners get a chamfer too where the stress is at least this share of the highest
 HOT_REACH_VOXELS = 3  # ... within this many analysis voxels of the corner
 MAX_STRESS_CORNERS = 4
+# A round as wide as gives the same plastic as the chamfer it replaces (square corner: c²/2 = r²(1 − π/4)).
+# Just as wide, a round fills less than half as much and checked weaker (mushroom: 1.78 vs 1.92); with the
+# same plastic both check the same (1.91 vs 1.92), and the round has no small corners for cracks to start
+# at (rules.yaml stress_at_inside_corner).
+ROUND_SAME_PLASTIC = float(np.sqrt(0.5 / (1 - np.pi / 4)))
 MAX_FILLET_PIECES = 400
 
 PARAMS = {
@@ -172,7 +177,8 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     to_part = _to_part(mesh, r)
     edits += _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"])
     edits += _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"])
-    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots)
+    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
+                              profile.material["max_overhang_deg"])
     edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
@@ -457,9 +463,12 @@ def _sweep(rings: list[np.ndarray], closed: bool) -> np.ndarray:
     return t[:, ::-1] if Mesh(t).volume() < 0 else t
 
 
-def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=None) -> list[dict]:
-    """45° chamfers along the inside corner nearest the weak spot from the strength check (e.g. where a
-    stem meets a plate): sharp inside corners concentrate stress, a chamfer spreads it out. Takes the
+def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=None, up=None,
+                     max_overhang_deg: float = 45.0) -> list[dict]:
+    """Rounds (fillets) along the inside corner nearest the weak spot from the strength check (e.g. where
+    a stem meets a plate): sharp inside corners concentrate stress, a round spreads it out best. Where a
+    round would hang over (a corner under a ledge: its surface faces down) it is a 45° chamfer instead,
+    which supports itself (rules.yaml stress_at_inside_corner; ``up`` is the print direction). Takes the
     whole connected corner (all inside edges linked to the ones near the weak spot), and the other
     inside corners the stress is nearly as high at (``hot_spots``): with only the worst one, the weak
     spot moves to the next corner and the user needs a strength check per corner."""
@@ -484,25 +493,72 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
             if heat[corner].max() > 0:
                 others.append((heat[corner].max(), corner))
         corners += [c for _, c in sorted(others, key=lambda o: -o[0])[:MAX_STRESS_CORNERS - 1]]
-    pieces = []
+    pieces, rounds = [], 0
     for k in [k for c in corners for k in c][:MAX_FILLET_PIECES]:
         e = edges[k]
         mid = (e["a"] + e["b"]) / 2
         half = (e["b"] - e["a"]) / 2
         inset = -(e["n1"] + e["n2"]) * 0.15  # reach a little into the part, so the union joins it
-        prof = [mid + inset, mid + e["t1"] * size - e["n1"] * 0.15, mid + e["t2"] * size - e["n2"] * 0.15]
-        pieces.append(_prism(prof, half))
+        rounded = up is None or _round_prints(e, up, max_overhang_deg)
+        d = size * ROUND_SAME_PLASTIC if rounded else size
+        ends = [mid + e["t1"] * d - e["n1"] * 0.15, mid + e["t2"] * d - e["n2"] * 0.15]
+        if rounded:
+            pieces.append(_prism([mid + inset, ends[0], *_round_arc(e, mid, d), ends[1]], half))
+            rounds += 1
+        else:
+            pieces.append(_prism([mid + inset, *ends], half))
+    r_mm = size * ROUND_SAME_PLASTIC
+    shape = (f"{r_mm:.1f} mm round" if rounds == len(pieces) else f"{size:.1f} mm 45° chamfer" if not rounds
+             else f"{r_mm:.1f} mm round / {size:.1f} mm chamfer")
+    shape = shape[0].upper() + shape[1:]
     if len(corners) == 1:
-        title = f"{size:.1f} mm 45° chamfer where the part is weakest"
+        title = f"{shape} where the part is weakest"
         found = "The strength check found the most stress at this sharp inside corner. "
     else:
-        title = f"{size:.1f} mm 45° chamfers at the {len(corners)} inside corners with the most stress"
+        title = f"{shape} at the {len(corners)} inside corners with the most stress"
         found = ("The strength check found the most stress at these sharp inside corners, each nearly as weak as the "
                  "worst one: fixing only one would just move the weak spot to the next. ")
-    return [_edit("stress-chamfer", "stress_at_inside_corner", title,
-                  found + "A 45° chamfer spreads the load over more material, often the cheapest way to make a part much "
-                  "stronger (a chamfer prints cleanly where a round fillet would be an overhang).",
-                  pieces, op="add", param="stress_chamfer_mm")]
+    how = ("A round spreads the load over more material, often the cheapest way to make a part much stronger."
+           if rounds == len(pieces) else
+           "A 45° chamfer spreads the load over more material and prints without support where a round would hang over."
+           if not rounds else
+           "Rounds spread the load best; where one would hang over in this orientation it is a 45° chamfer, which prints "
+           "without support.")
+    return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how, pieces, op="add", param="stress_chamfer_mm")]
+
+
+def _round_prints(e: dict, up, max_overhang_deg: float) -> bool:
+    """Whether a round in inside corner ``e`` prints without support: its surface turns from one face's
+    direction to the other's, and nowhere in between may it face down more than the material can
+    overhang. A round under a ledge starts almost flat and facing down; one that opens upwards (a stem
+    on a plate) or stands upright never does."""
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    limit = np.sin(np.radians(max_overhang_deg))
+    for k in (0.25, 0.5, 0.75):
+        n = (1 - k) * e["n1"] + k * e["n2"]
+        n /= max(np.linalg.norm(n), 1e-12)
+        if -(n @ up) > limit:
+            return False
+    return True
+
+
+def _round_arc(e: dict, mid: np.ndarray, size: float, steps: int = 6) -> list[np.ndarray]:
+    """Inner points of a round filling inside corner ``e``, tangent to both faces ``size`` from the edge
+    (the same footprint as a chamfer of that size), from face 1 to face 2."""
+    t1, t2 = e["t1"], e["t2"]
+    phi = np.arccos(np.clip(t1 @ t2, -1.0, 1.0))  # the open angle between the two faces
+    if phi < 1e-3 or phi > np.pi - 1e-3:
+        return []
+    radius = size * np.tan(phi / 2)
+    bis = (t1 + t2) / np.linalg.norm(t1 + t2)
+    centre = mid + bis * radius / np.sin(phi / 2)
+    a, b = mid + t1 * size - centre, mid + t2 * size - centre
+    turn = np.arccos(np.clip(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)), -1.0, 1.0))
+    out = []
+    for i in range(1, steps):
+        k = i / steps
+        out.append(centre + (np.sin((1 - k) * turn) * a + np.sin(k * turn) * b) / np.sin(turn))
+    return out
 
 
 def _edge_heat(edges: list[dict], points: np.ndarray, share: np.ndarray, reach: float) -> np.ndarray:
@@ -558,9 +614,11 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
         near = [p for p in parts(layer.geom, 0.05) if p.distance(Point(s[:2])) <= within] if not layer.geom.is_empty else []
         return min(near, key=lambda p: p.distance(Point(s[:2]))) if near else None
 
-    # The narrowest section in the weak stretch is what gets thicker (a neck, not the wide ends it joins).
+    # The narrowest section in and next to the weak stretch is what gets thicker (a neck, not the wide ends
+    # it joins): the stretch can lie just inside the wide part, where a stem starts (as in _narrowest).
     wide = 2 * max(thickness, THICKEN_REACH_MM) + grow
-    stretch = [p for layer in layers if lo - 1e-9 <= layer.z <= hi + 1e-9 for p in [section(layer, wide)] if p is not None]
+    stretch = [p for layer in layers if lo - THICKEN_REACH_MM <= layer.z <= hi + THICKEN_REACH_MM
+               for p in [section(layer, wide)] if p is not None]
     narrow = min(stretch, key=lambda p: p.area) if stretch else None
     if narrow is not None:
         x0, y0, x1, y1 = narrow.bounds

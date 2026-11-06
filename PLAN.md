@@ -88,7 +88,7 @@ Key decisions:
 - [ ] Ghost preview of geometry fixes (teardrop/diamond holes, chamfer bed edges, add ribs, thicken walls) using manifold-3d; export modified STL/STEP
 - [ ] A/B compare of two orientations or settings
 - [ ] Agent toolkit: Claude Code / Codex / Claude Desktop operate the tool with the user's own subscription (MCP server + command line), and get reports, charts and images back as files
-- [ ] "Copy for your AI chat": a plain-text report to paste into any chat (no paste-back)
+- [x] "Copy for your AI chat": a plain-text report to paste into any chat (no paste-back)
 - [ ] Local mode: real slicing via OrcaSlicer CLI + Orca profile import
 
 ### Later

@@ -121,12 +121,17 @@
 
             <label class="field" data-min="basic">Where is it used?
               <select id="use-temp" title="Plastic gets weaker as it warms up, and soft near its limit (PLA around 60 °C)">
+                <option value="-20">Outdoors in winter (−20 °C)</option>
                 <option value="">Indoors (room temperature)</option>
+                <option value="35">Outdoors on a hot day (35 °C)</option>
                 <option value="40">Warm spot: sunny window, near electronics (40 °C)</option>
                 <option value="55">Outdoors in the sun (55 °C)</option>
                 <option value="70">In a car in summer (70 °C)</option>
                 <option value="90">Near a motor or heater (90 °C)</option>
+                <option value="custom">Another temperature…</option>
               </select></label>
+            <label id="use-temp-own" class="field" data-min="basic" hidden>Its temperature
+              <span><input id="use-temp-c" type="number" step="1" min="-60" max="300" value="23" /> °C</span></label>
 
             <div class="choice" role="radiogroup" aria-label="What can you change?" data-min="advanced">
               <span class="choice-label">What can you change?</span>
@@ -298,6 +303,16 @@
           <h2>Optional simulations</h2>
           <p class="lead">Extra checks that take longer. None is needed: run the ones that matter for your part.</p>
           <div id="blk-sims">
+            <div id="temp-card" class="sim-card">
+              <h3>How warm or cold it gets</h3>
+              <p class="hint">Plastic gets weaker as it warms up and soft near its limit. The strength check and the other checks use this temperature.</p>
+              <div class="row">
+                <label>Where it's used <input id="sim-temp" type="number" step="1" min="-60" max="300" /> °C</label>
+                <button id="sim-temp-use">Check again at this temperature</button>
+              </div>
+              <div id="temp-chart" class="temp-chart"></div>
+              <p id="temp-story"></p>
+            </div>
             <div class="sim-card">
               <h3>Warping: will the corners lift?</h3>
               <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
@@ -350,6 +365,7 @@
         <section class="pane" data-pane="fits">
           <h2>Tolerances &amp; tuning</h2>
           <p class="lead">Make parts fit together: holes, pegs, bearings, screws, things that slide or press in.</p>
+          <p id="fit-selected" class="fit-selected" aria-live="polite"></p>
           <div id="blk-fits">
             <div class="sim-card">
               <h3>Holes and what goes in them</h3>
@@ -470,6 +486,7 @@
               <p class="hint">More walls and infill only where it's needed: around a screw hole, a hinge, a clip. The rest stays light.
                 The area goes into the 3MF as a modifier (orange box) and counts in the strength check. Let it reach well past
                 the spot that carries the load: where a stiff area ends, the stress gathers.</p>
+              <div id="zone-suggest" class="zone-suggest"></div>
               <div class="row">
                 <button id="zone-pick">Pick a face on the part</button>
                 <span id="zone-hint" class="hint" hidden>Click the face or spot that needs it…</span>
@@ -493,13 +510,6 @@
               <button id="dl-step" hidden>STEP: your CAD file with the design changes</button>
               <button id="copy-report" title="A text summary of the part, its problems and the settings, for an AI chat or a forum post">Copy for your AI chat</button>
             </div>
-            <details id="paste-block" class="more-block paste" data-min="advanced" hidden>
-              <summary>Paste an AI answer</summary>
-              <p class="hint">Paste the report into any AI chat, ask your question, then paste its whole reply here. The tool applies the orientation, settings and design changes it suggests.</p>
-              <textarea id="paste-input" rows="4" placeholder="Paste the AI's reply (with its JSON block) here"></textarea>
-              <button id="paste-apply">Apply the answer</button>
-              <ul id="paste-result" class="paste-result"></ul>
-            </details>
           </div>
         </section>
 
@@ -507,28 +517,6 @@
           <div id="verdict" class="summary"></div>
         </section>
 
-        <details id="ai-block" data-min="expert" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
-          <summary>Ask AI <small>with your own API key</small></summary>
-          <form class="ai-config" onsubmit="return false" autocomplete="off">
-            <input type="text" name="username" autocomplete="username" value="api-key" hidden />
-            <label>Provider
-              <select id="ai-provider">
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="gemini">Google (Gemini)</option>
-                <option value="openai">OpenAI (GPT)</option>
-              </select>
-            </label>
-            <label>API key <input id="ai-key" type="password" autocomplete="new-password" placeholder="sk-ant-..." /></label>
-            <label>Model <select id="ai-model"></select></label>
-            <label class="toggle"><input id="ai-remember" type="checkbox" /> Remember key on this computer</label>
-          </form>
-          <div id="ai-log" class="ai-log"></div>
-          <form id="ai-form" class="ai-form">
-            <textarea id="ai-input" rows="2" placeholder="e.g. Will this hold 5 kg? How can it print without supports?"></textarea>
-            <button class="primary">Send</button>
-          </form>
-          <p class="hint">The key goes only from this browser to the provider; usage is billed to your account there.</p>
-        </details>
         <div id="parking" hidden></div>
       </div>
 

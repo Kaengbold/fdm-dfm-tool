@@ -57,3 +57,17 @@ def test_box_heat():
     assert api.box_heat(5, 25, "closed", {"material": "asa"})["verdict"] == "fine"
     with pytest.raises(ValueError):
         api.box_heat(1, 25, "vents")
+
+
+def test_heat_curve_for_the_chart():
+    """Full strength from winter to room, falling towards the heat limit; the marked temperature is
+    the one asked for (or the profile's), and cold is called brittle, not weaker."""
+    r = api.heat_curve({"material": "pla", "use_temp_c": 55})
+    temps, share = r["temps_c"], r["share_pct"]
+    assert temps[0] == -20 and temps[-1] >= r["soft_c"] + 20 and temps == sorted(temps)
+    assert share[temps.index(r["room_c"])] == 100 and share[-1] < 10
+    assert all(a >= b for a, b in zip(share, share[1:]))  # never stronger when warmer
+    assert r["use_temp_c"] == 55 and 30 < r["share_at_pct"] < 70 and "55 °C" in r["explanation"]
+    cold = api.heat_curve({"material": "pla"}, use_temp_c=-20)
+    assert cold["share_at_pct"] == 100 and "brittle" in cold["explanation"]
+    assert api.heat_curve({"material": "pla"})["use_temp_c"] == r["room_c"]
