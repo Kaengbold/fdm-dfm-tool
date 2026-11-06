@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -235,9 +236,26 @@ def test_thicker_weak_spot_helps():
     assert after["safety_factor"] > before["safety_factor"] * 1.1
 
 
+def test_carry_less_is_always_the_last_idea():
+    """Carrying less doesn't make the part stronger: it comes after every other idea, even when it
+    has the best number (it is set to just reach the needed safety)."""
+    from test_hold import box, region_facing
+
+    api.load(box(80, 12, 12), "bar")
+    api.regions()
+    loads = [{"region": region_facing([-1, 0, 0]), "kind": "fixed"},
+             {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 60, "direction": "down"}]
+    opts = api.strength_options([0, 0, 1], loads, {"material": "pla"})
+    kinds = [o["kind"] for o in opts]
+    assert kinds[-1] == "load" and kinds.count("load") == 1
+    rated = [o["safety_factor"] for o in opts if o["safety_factor"] is not None]
+    assert max(rated) == opts[-1]["safety_factor"]  # the best number, still last
+
+
 def test_chamfers_at_every_weak_corner():
     """Two equal posts pushed sideways are equally weak at their roots. A chamfer at only the worst one
-    just moves the weak spot to the other post (2.07 -> 2.04); both together help (-> 2.85)."""
+    just moves the weak spot to the other post (2.07 -> 2.04); both together help (chamfers -> 2.85,
+    the rounds these upright corners now get -> 2.58)."""
     manifold3d = pytest.importorskip("manifold3d")
     from fdmcore.booleans import apply_edits
     from fdmcore.mesh import to_binary_stl
@@ -259,7 +277,7 @@ def test_chamfers_at_every_weak_corner():
     pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
     assert "2 inside corners" in edit["title"] and pts[:, 0].min() < 10 and pts[:, 0].max() > 50  # both posts
     after = check(to_binary_stl(apply_edits(api._require().mesh, [edit])))
-    assert after > 1.25 * before
+    assert after > 1.2 * before
 def test_loose_pieces_after_edits_are_dropped():
     # An addition that ends up apart from the part (two changes meeting at a corner, a taper cut
     # short) would print as a loose crumb; one that overlaps the part joins it.
@@ -309,3 +327,39 @@ def test_thicken_only_the_neck_of_a_flat_dog_bone():
     assert np.abs(t[head, 1]).max() < 20.01 and t[head, 2].max() < 6.01  # the wide ends stay as they are
     assert np.abs(t[neck, 1]).max() > 7 and t[neck, 2].max() > 7  # the neck is thicker
     assert check(to_binary_stl(out)) > 1.05 * before
+
+
+def test_round_where_it_prints_chamfer_where_it_would_hang():
+    """The weak corner where the mushroom's stem meets the cap: printed cap down, the corner opens upwards
+    and gets a round; printed cap up, a round under the cap would hang over, so it is a 45° chamfer."""
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
+    api.regions()
+    prof = {"material": "pla"}
+    api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}], prof)
+    cap_down = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
+    cap_up = next(e for e in api.design([0, 0, 1], prof)["edits"] if e["id"] == "stress-chamfer")
+    assert "round" in cap_down["title"] and "chamfer" not in cap_down["title"]
+    assert "chamfer" in cap_up["title"] and "round" not in cap_up["title"]
+    # The round fills about as much as the chamfer would (just as wide, it would be about half).
+    tris = lambda e: np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3).astype(float)  # noqa: E731
+    assert Mesh(tris(cap_down)).volume() == pytest.approx(Mesh(tris(cap_up)).volume(), rel=0.35)
+
+
+def test_strength_of_a_variant_keeps_the_part():
+    """A design change checked in the background: the loads move to the variant's matching faces and the
+    user's part stays loaded."""
+    pytest.importorskip("manifold3d")
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
+    api.regions()
+    prof = {"material": "pla"}
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}]
+    before = api.strength([0, 1, 0], loads, prof)["safety_factor"]
+    part = api._require().mesh
+    edit = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
+    data = to_binary_stl(apply_edits(part, [edit]))
+    r = api.dispatch("strength_variant", json.dumps({"up": [0, 1, 0], "loads": loads, "profile": prof}), data)
+    assert api._require().mesh is part
+    assert r["safety_factor"] > before and 0 < r["added_g"] < 1

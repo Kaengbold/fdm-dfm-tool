@@ -677,8 +677,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
-        best["beyond"] = sorted(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target),
-                                key=lambda o: -(o["safety_factor"] or 0))
+        best["beyond"] = _strongest_first(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target))
     if zones:
         with stage(0.9, 1.0):
             light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
@@ -1382,10 +1381,70 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     n = np.cross(tri[1] - tri[0], tri[2] - tri[0])
     r["weak_marker"] = {"point": _to_print_frame(s.mesh, rot, tri.mean(axis=0)), "normal": (rot @ (n / max(np.linalg.norm(n), 1e-12))).tolist()}
     r.update(walls=sh.walls, infill=sh.infill, top=sh.top, bottom=sh.bottom, material=p.material["name"])
+    r["stress_zones"] = _stress_zones(model, fi, worst.ignore, up, sh, s.mesh, p)
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
+
+
+def strength_variant(up, loads: list[dict], data: bytes, profile: dict | None = None, walls: int | None = None,
+                     infill: float | None = None, top: int | None = None, bottom: int | None = None,
+                     zones: list[dict] | None = None) -> dict:
+    """The strength of a changed copy of the loaded part (a design variant, as STL / 3MF ``data``) without
+    replacing the part: for trying design changes in the background and showing only the one the user
+    picks. Held faces and loads move to the variant's matching face (facing the same way, middle nearest
+    the old one's, as the web app does for a new version; spots keep their point). Returns the safety
+    factor, its verdict and how much plastic the change adds (``added_g``, solid)."""
+    global _session
+    from .regions import find_regions, region_info
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    old = region_info(s.mesh, s.regions)
+    mesh = read_bodies(bytes(data))[0][1]
+    variant = Session(mesh, f"{s.name} (variant)", find_regions(mesh))
+    new = region_info(mesh, variant.regions)
+    moved = []
+    for load in loads:
+        if load.get("point") is not None or "region" not in load:
+            moved.append(load)
+            continue
+        was = old[load["region"]]
+        same = [r for r in new if np.dot(r["normal"], was["normal"]) > 0.9]
+        if not same:
+            raise ValueError("A held or loaded face is gone in this design change")
+        near = min(same, key=lambda r: np.linalg.norm(np.subtract(r["centroid"], was["centroid"])))
+        moved.append({**load, "region": near["id"]})
+    _session = variant
+    try:
+        r = strength(up, moved, profile, walls, infill, top, bottom, zones=zones)
+    finally:
+        _session = s
+    added = (abs(mesh.volume()) - abs(s.mesh.volume())) / 1000 * p.material["density_g_cm3"]
+    return {"safety_factor": r["safety_factor"], "verdict": r["verdict"], "added_g": float(added)}
+
+def _stress_zones(model, fi: np.ndarray, ignore: np.ndarray, up, sh, mesh: Mesh, p: Profile) -> list[dict]:
+    """"Stronger in one area" zones where this result's stress is high, instead of the user's guess:
+    the optimiser's boxes round the most stressed cubes, printed like a picked zone (two more walls,
+    at least 40 % infill) and never weaker than the rest of the part."""
+    from .strength import find_zones
+
+    boxes = find_zones(model, fi, ignore, up, sh.walls + 2, max(0.4, sh.infill))
+    return [{**_zone_info(z, mesh, up, p.printer["bed"]), "share_pct": round(share * 100)}
+            for z, share in zip(boxes, _zone_shares(model, fi, ignore, up, boxes))]
+
+
+def _zone_shares(model, fi: np.ndarray, ignore: np.ndarray, up, boxes: list) -> list[float]:
+    """How hard the plastic in each zone works at its peak, as a share of the worst spot: tells the
+    user which zone matters most."""
+    worst = fi[~ignore].max(initial=0)
+    if worst <= 0:
+        return [0.0] * len(boxes)
+    c = model.grid.centers(model.elems)
+    return [float(fi[(z.gap(c @ rotation_to_z(up).T) <= 1e-9) & ~ignore].max(initial=0) / worst) for z in boxes]
 
 
 def _hot_spots(model, fi: np.ndarray, ok: np.ndarray, most: int = 1500) -> tuple | None:
@@ -1454,7 +1513,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
-    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest first."""
+    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest
+    first, a lighter load always last."""
     from dataclasses import replace
 
     from .strength import cases_safety, material_volume, verdict
@@ -1499,8 +1559,13 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "may need more support or take longer", up=axes[best].tolist())
 
     out += _beyond_settings(base, p, profile, loads)
-    out.sort(key=lambda o: -(o["safety_factor"] or 0))
-    return out
+    return _strongest_first(out)
+
+
+def _strongest_first(options: list[dict]) -> list[dict]:
+    """Strongest first, but carrying less always last: it doesn't make the part any stronger, it's
+    the way out when nothing else is enough — so it never leads, even with the best number."""
+    return sorted(options, key=lambda o: (o["kind"] == "load", -(o["safety_factor"] or 0)))
 
 
 def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:
@@ -1523,10 +1588,11 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
         spot = np.asarray(s.weak_spot[0])
         edges = concave_edges(s.mesh)
         if edges and min(np.linalg.norm((e["a"] + e["b"]) / 2 - spot) for e in edges) <= 8 * s.weak_spot[1]:
-            add("Add 45° chamfers at the weak inside corners (design change)", "design", None,
-                "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. Every inside corner "
-                "that is nearly as weak gets one too, so the weak spot doesn't just move to the next corner. On a test "
-                "part 2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
+            add("Round off the weak inside corners (design change)", "design", None,
+                "The most stress sits at a sharp inside corner; a 2–4 mm round spreads it out (a 45° chamfer where a "
+                "round would hang over in this orientation). Every inside corner that is nearly as weak gets one too, "
+                "so the weak spot doesn't just move to the next corner. On a test part a 2 mm chamfer gave about +15 %, "
+                "4 mm about +40 %. Preview it under Design changes, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
@@ -1678,6 +1744,41 @@ def _outer_area_mm2(mesh: Mesh) -> float:
         height = float(np.ptp(pts[:, axis]))
         best = min(best, hull.length * height + 2 * hull.area)
     return float(best)
+
+
+COLD_C = 0.0  # below this, printed plastic gets brittle: knocks break it more easily
+
+
+def heat_curve(profile: dict | None = None, use_temp_c: float | None = None) -> dict:
+    """How much of its strength the material keeps from a winter's day to past its heat limit
+    (service.heat_factor), for the "strength vs. temperature" chart; ``use_temp_c`` (default the
+    profile's) is marked on it. No part needed: it depends only on the material."""
+    from dataclasses import replace
+
+    from .service import ROOM_C, heat_factor, heat_limit
+
+    p = Profile.from_dict(profile)
+    t = p.use_temp_c if use_temp_c is None else float(use_temp_c)
+    limit = heat_limit(p)
+    top = max(limit + 20.0, 100.0)
+    temps = np.unique(np.r_[np.arange(-20.0, top + 0.1, 5.0), ROOM_C, limit, p.material["softening_c"]])
+    shares = [heat_factor(replace(p, use_temp_c=float(c))) for c in temps]
+    at = t if t is not None else ROOM_C
+    k = heat_factor(replace(p, use_temp_c=at))
+    name = p.material["name"]
+    if at < COLD_C:
+        story = (f"At {at:.0f} °C {name} is about as strong as at room temperature, but more brittle: a knock or a drop breaks it more easily.")
+    elif k > 0.999:
+        story = f"At {at:.0f} °C {name} keeps its full strength."
+    elif at >= limit:
+        story = f"At {at:.0f} °C {name} is past the point where it goes soft (about {limit:.0f} °C): only about {k:.0%} of its strength is left."
+    else:
+        story = f"At {at:.0f} °C {name} keeps about {k:.0%} of its strength. It goes soft at about {limit:.0f} °C."
+    return {"material": name, "temps_c": temps.round(1).tolist(), "share_pct": [round(x * 100, 1) for x in shares],
+            "room_c": ROOM_C, "softening_c": float(p.material["softening_c"]), "soft_c": float(limit), "cold_c": COLD_C,
+            "use_temp_c": at, "share_at_pct": round(k * 100, 1), "explanation": story}
+
+
 
 
 def _heat_source(mesh: Mesh, point=None, face: int | None = None) -> np.ndarray:
@@ -2255,6 +2356,7 @@ METHODS = {
     "volume_solid": volume_solid,
     "snap_model": snap_model,
     "material_advice": material_advice,
+    "heat_curve": heat_curve,
     "dynamics": dynamics,
     "select_body": select_body,
     "scale": scale,
@@ -2272,6 +2374,7 @@ METHODS = {
     "volume_at": volume_at,
     "tag_feature": tag_feature,
     "strength": strength,
+    "strength_variant": strength_variant,
     "strength_options": strength_options,
     "design": design,
     "compare_nozzles": compare_nozzles,

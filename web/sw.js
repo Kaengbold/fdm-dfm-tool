@@ -1,7 +1,7 @@
 // Offline support: after a visit, the app, the Python engine and the libraries it downloaded
 // (Pyodide packages, three.js, manifold, OpenCascade) come from this cache when the network is gone.
 // CDN files are versioned in their URLs, so they are cached for good; the app's own files are
-// fetched fresh when online, so updates show up. AI provider calls are never cached.
+// fetched fresh when online, so updates show up.
 const CDN = "fdm-cdn-v1";
 const APP = "fdm-app-v1";
 const CDN_HOSTS = ["cdn.jsdelivr.net"];
