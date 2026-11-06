@@ -677,8 +677,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
-        best["beyond"] = sorted(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target),
-                                key=lambda o: -(o["safety_factor"] or 0))
+        best["beyond"] = _strongest_first(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target))
     if zones:
         with stage(0.9, 1.0):
             light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
@@ -1382,10 +1381,32 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     n = np.cross(tri[1] - tri[0], tri[2] - tri[0])
     r["weak_marker"] = {"point": _to_print_frame(s.mesh, rot, tri.mean(axis=0)), "normal": (rot @ (n / max(np.linalg.norm(n), 1e-12))).tolist()}
     r.update(walls=sh.walls, infill=sh.infill, top=sh.top, bottom=sh.bottom, material=p.material["name"])
+    r["stress_zones"] = _stress_zones(model, fi, worst.ignore, up, sh, s.mesh, p)
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
+
+
+def _stress_zones(model, fi: np.ndarray, ignore: np.ndarray, up, sh, mesh: Mesh, p: Profile) -> list[dict]:
+    """"Stronger in one area" zones where this result's stress is high, instead of the user's guess:
+    the optimiser's boxes round the most stressed cubes, printed like a picked zone (two more walls,
+    at least 40 % infill) and never weaker than the rest of the part."""
+    from .strength import find_zones
+
+    boxes = find_zones(model, fi, ignore, up, sh.walls + 2, max(0.4, sh.infill))
+    return [{**_zone_info(z, mesh, up, p.printer["bed"]), "share_pct": round(share * 100)}
+            for z, share in zip(boxes, _zone_shares(model, fi, ignore, up, boxes))]
+
+
+def _zone_shares(model, fi: np.ndarray, ignore: np.ndarray, up, boxes: list) -> list[float]:
+    """How hard the plastic in each zone works at its peak, as a share of the worst spot: tells the
+    user which zone matters most."""
+    worst = fi[~ignore].max(initial=0)
+    if worst <= 0:
+        return [0.0] * len(boxes)
+    c = model.grid.centers(model.elems)
+    return [float(fi[(z.gap(c @ rotation_to_z(up).T) <= 1e-9) & ~ignore].max(initial=0) / worst) for z in boxes]
 
 
 def _hot_spots(model, fi: np.ndarray, ok: np.ndarray, most: int = 1500) -> tuple | None:
@@ -1454,7 +1475,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
-    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest first."""
+    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest
+    first, a lighter load always last."""
     from dataclasses import replace
 
     from .strength import cases_safety, material_volume, verdict
@@ -1499,8 +1521,13 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "may need more support or take longer", up=axes[best].tolist())
 
     out += _beyond_settings(base, p, profile, loads)
-    out.sort(key=lambda o: -(o["safety_factor"] or 0))
-    return out
+    return _strongest_first(out)
+
+
+def _strongest_first(options: list[dict]) -> list[dict]:
+    """Strongest first, but carrying less always last: it doesn't make the part any stronger, it's
+    the way out when nothing else is enough — so it never leads, even with the best number."""
+    return sorted(options, key=lambda o: (o["kind"] == "load", -(o["safety_factor"] or 0)))
 
 
 def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:
@@ -1523,10 +1550,11 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
         spot = np.asarray(s.weak_spot[0])
         edges = concave_edges(s.mesh)
         if edges and min(np.linalg.norm((e["a"] + e["b"]) / 2 - spot) for e in edges) <= 8 * s.weak_spot[1]:
-            add("Add 45° chamfers at the weak inside corners (design change)", "design", None,
-                "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. Every inside corner "
-                "that is nearly as weak gets one too, so the weak spot doesn't just move to the next corner. On a test "
-                "part 2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
+            add("Round off the weak inside corners (design change)", "design", None,
+                "The most stress sits at a sharp inside corner; a 2–4 mm round spreads it out (a 45° chamfer where a "
+                "round would hang over in this orientation). Every inside corner that is nearly as weak gets one too, "
+                "so the weak spot doesn't just move to the next corner. On a test part a 2 mm chamfer gave about +15 %, "
+                "4 mm about +40 %. Preview it under Design changes, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,

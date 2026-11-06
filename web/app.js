@@ -110,6 +110,8 @@ const state = {
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
   volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
+  fitSel: null, // the hole, post or slot selected in Tolerances & tuning: {key, regions, label}
+  fitList: [], // the holes and posts listed there
   gaps: [], // slots and tabs between two flat faces (set_gap): {faces, kind, distance_mm, partner, fit, text}
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
@@ -295,7 +297,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [] });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [], fitSel: null, fitList: [] });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -663,6 +665,7 @@ function recolor() {
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
     const r = state.faceRegions[f];
+    if (shows("fits") && state.fitSel?.regions.includes(r)) return REGION_COLORS.fit;
     if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
@@ -723,6 +726,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   if (state.volPick) return pickVolume(hit);
   if (state.gapPick) return pickGapFace(hit);
   if (state.snapPick) return pickSnap(hit);
+  if (shows("fits") && pickFit(state.faceRegions[hit.face])) return;
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
@@ -1092,6 +1096,7 @@ async function runStrength(fine = false) {
     recolor();
     renderStrength();
     renderGcodeResult();
+    renderZones(); // its stressed places become zone suggestions
     setStatus(state.summary);
     return r;
   }, ["strength", "result"]);
@@ -1623,7 +1628,23 @@ async function resizeZone(i, margin, shape = state.zones[i].shape) {
   setZones(state.zones.map((q, k) => (k === i ? { ...old, ...z, margin } : q)));
 }
 
+/** Zones from the strength result: where the stress is high, not a guess. One click adds them; they
+ * can then be changed or removed like picked ones. */
+function renderZoneSuggestion() {
+  const found = state.strength?.stress_zones ?? [];
+  const added = state.zones.some((z) => z.stress);
+  $("zone-suggest").replaceChildren(...(!found.length ? [el("p", { className: "hint", textContent: "Run “Will it hold?” first and the stressed places are proposed here." })]
+    : added ? [el("p", { className: "hint", textContent: "The stressed places from the strength check are in the list. Run “Will it hold?” again to see what they change." })]
+    : [el("p", { textContent: `The strength check found ${found.length === 1 ? "one place" : `${found.length} places`} where the plastic works hardest.` }),
+      el("button", { textContent: found.length === 1 ? "Make it a stronger area" : "Make them stronger areas", onclick: () => {
+        remember("the stressed areas");
+        setZones([...state.zones, ...found.map((z, k) => ({ ...z, stress: k + 1 }))]);
+        setStatus("Stronger areas added where the stress is (orange boxes). Change or remove them below.");
+      } })]));
+}
+
 function renderZones() {
+  renderZoneSuggestion();
   $("zone-list").replaceChildren(...state.zones.map((z, i) => {
     const set = (key, value) => {
       remember("the area's settings");
@@ -1632,7 +1653,7 @@ function renderZones() {
     const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
     const base = currentShells(); // an area is never weaker than the rest (the strength check counts it that way)
     return el("li", {},
-      el("strong", { textContent: z.from ? `Around ${z.what}` : "From the lightest-settings search" }),
+      el("strong", { textContent: z.from ? `Around ${z.what}` : z.stress ? `Stressed place ${z.stress} (works ${z.share_pct} % as hard as the worst spot)` : "From the lightest-settings search" }),
       el("div", { className: "row" },
         el("label", {}, "Walls ", num(z.walls, base.walls, 20, 1, (e) => set("walls", Math.max(base.walls, Math.round(Number(e.target.value) || 0))))),
         el("label", {}, "Infill ", num(Math.round(z.infill * 100), Math.round(base.infill * 100), 100, 5,
@@ -1790,7 +1811,7 @@ async function applyOption(o, recheck = true) {
     if (edit) {
       showSelectedGhosts(edit);
       viewer.focusEdit(edit);
-      setStatus("The chamfer at the weak spot is lit up in yellow. Apply it, then check the strength again.");
+      setStatus("The rounded corners at the weak spot are lit up in yellow. Apply them, then check the strength again.");
     } else if (r) setStatus("No chamfer fits at the weak spot: make the part thicker there in your CAD.");
   }
 }
@@ -1901,13 +1922,62 @@ function renderFeatures(features) {
 
 /** Tolerances & tuning: each round hole or post with what goes in it. */
 function renderFits(list) {
+  state.fitList = list;
+  if (state.fitSel?.region !== undefined && !list.some((f) => f.region === state.fitSel.region)) state.fitSel = null;
   renderGaps();
-  $("fits-summary").textContent = list.length ? "Click a name to see it on the part." : "No round holes or posts found.";
+  $("fits-summary").textContent = list.length ? "Click a name (or the hole on the part) to see it." : "No round holes or posts found.";
   $("fits").replaceChildren(...list.map((f) => {
     const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
-    return el("li", {}, el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
+    return el("li", { className: state.fitSel?.key === fitKey(f) ? "picked" : "" },
+      el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
       fitControls(f));
   }));
+  renderFitSelection();
+}
+
+// ---------- what's selected in Tolerances & tuning ----------
+const fitKey = (f) => `hole-${f.region}`;
+const gapKey = (g) => `gap-${g.faces.join("-")}`;
+
+/** Select a hole / post (``f``) or a slot / tab (``g``): its faces light up on the part and its row in the list. */
+function selectFit(sel) {
+  state.fitSel = sel;
+  state.selectedRegion = -1;
+  state.showHeat = false;
+  renderFits(state.fitList);
+  recolor();
+}
+const selectHole = (f) => selectFit({ key: fitKey(f), regions: [f.region], region: f.region });
+const selectGap = (g) => selectFit({ key: gapKey(g), regions: [...g.faces] });
+
+/** A click on the part in Tolerances & tuning: the hole, post or slot it belongs to, if any. */
+function pickFit(region) {
+  const f = state.fitList.find((q) => q.region === region);
+  if (f) return selectHole(f), true;
+  const g = state.gaps.find((q) => q.faces.includes(region));
+  if (g) return selectGap(g), true;
+  return false;
+}
+
+/** "Selected: Ø8.0 mm hole, sliding fit for Ø8 mm" and a way to clear it. */
+function renderFitSelection() {
+  const sel = state.fitSel;
+  if (!sel) {
+    $("fit-selected").replaceChildren(el("span", { className: "hint", textContent: "Nothing selected: click a hole, post or slot in the lists below, or on the part." }));
+    return;
+  }
+  let text;
+  if (sel.region !== undefined) {
+    const f = state.fitList.find((q) => q.region === sel.region);
+    const n = state.fitNotes?.[sel.region];
+    text = `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]}` + (n ? `, ${FIT_LABEL[n.fit]} fit ${f.type === "hole" ? "for" : "into"} Ø${n.partner} mm` : ", not sized yet");
+  } else {
+    const g = state.gaps.find((q) => gapKey(q) === sel.key);
+    if (!g) return selectFit(null);
+    text = `${g.kind === "slot" ? "slot" : "tab"} ${g.distance_mm.toFixed(2)} mm` + (g.text ? `, ${FIT_LABEL[g.fit]} fit for ${g.partner} mm` : ", not sized yet");
+  }
+  $("fit-selected").replaceChildren(el("span", { className: "swatch" }), el("strong", { textContent: "Selected: " }), text,
+    el("button", { className: "link", textContent: "Clear", onclick: () => selectFit(null) }));
 }
 
 const FIT_LABEL = { press: "pressed in", snug: "snug", sliding: "sliding / turning", loose: "loose" };
@@ -1924,6 +1994,8 @@ function fitControls(f) {
     busy("Working out the size…", async () => {
       const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
       state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
+      state.fitSel = { key: fitKey(f), regions: [f.region], region: f.region }; // the one just sized
+      renderFits(state.fitList);
       if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
       await suggestDesign();
     }) });
@@ -1952,7 +2024,7 @@ async function pickGapFace(hit) {
   try {
     const g = await call("set_gap", { face_a: faces[0], face_b: faces[1], up: activeOption().up });
     state.gaps = [...state.gaps.filter((q) => q.faces.join() !== g.faces.join()), { ...g, partner: Math.round(g.distance_mm * 10) / 10, fit: "sliding" }];
-    renderGaps();
+    selectGap(g);
   } catch (err) {
     setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
   }
@@ -1970,18 +2042,20 @@ function renderGaps() {
       busy("Working out the size…", async () => {
         const r = await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
         state.gaps = state.gaps.map((q, k) => (k === i ? { ...q, partner: Number(size.value), fit: kind.value, text: r.explanation } : q));
-        renderGaps();
+        state.fitSel = { key: gapKey(g), regions: [...g.faces] };
+        renderFits(state.fitList);
         if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
         await suggestDesign();
       }) });
     const forget = el("button", { className: "link", textContent: "Remove", onclick: async () => {
       await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up });
       state.gaps = state.gaps.filter((_, k) => k !== i);
-      renderGaps();
+      if (state.fitSel?.key === gapKey(g)) selectFit(null);
+      else renderGaps();
       await suggestDesign();
     } });
-    return el("li", {},
-      el("strong", { textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}` }),
+    return el("li", { className: state.fitSel?.key === gapKey(g) ? "picked" : "" },
+      el("button", { className: "link", textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}`, onclick: () => selectGap(g) }),
       el("div", { className: "fit row" }, el("span", { className: "hint", textContent: slot ? "What goes in:" : "Goes into a slot of" }), size, "mm,", kind, go),
       g.text ? el("p", { className: "hint", textContent: g.text }) : "", forget);
   }));
@@ -1989,6 +2063,7 @@ function renderGaps() {
 
 async function showFeature(f) {
   await ensureRegions();
+  if (shows("fits")) return selectHole(f);
   state.selectedRegion = f.region;
   state.showHeat = false;
   recolor();
@@ -2007,8 +2082,8 @@ const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
 document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
 
-/** The chamfer at the weak spot on a new version, checked again: the strength before and after side by side. */
-const EDIT_NAME = { "stress-chamfer": "the chamfer", "thicken-weak": "the thicker weak spot" };
+/** The rounded corners (or the thicker weak spot) on a new version, checked again: the strength before and after side by side. */
+const EDIT_NAME = { "stress-chamfer": "the rounded corners", "thicken-weak": "the thicker weak spot" };
 
 /** "Test it" on a strength suggestion: apply that design edit as a new version and check the strength again. */
 async function testDesignEdit(id) {

@@ -330,6 +330,8 @@ summary::marker { color: var(--accent); }
 .zone-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; align-self: stretch; font-size: 14px; }
 .zone-list li { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; }
 .zone-list input { width: 4.5em; }
+.zone-suggest { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.zone-suggest p { margin: 0; }
 #cooling-summary { font-size: 14px; }
 #cooling-summary b { font-weight: 700; }
 #nozzle-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -403,6 +405,7 @@ summary::marker { color: var(--accent); }
 .edit-params { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; }
 .features { list-style: none; padding: 0; margin: 0; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
 .features li { display: flex; align-items: center; gap: 6px 8px; padding: 8px 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--r); }
+.features li.picked { border-color: var(--now); background: #fdf6dc; box-shadow: inset 4px 0 0 var(--now); }
 .features li.ask { border-color: var(--borderline-ink); background: var(--warn-soft); }
 .features .question { flex-basis: 100%; font-weight: 700; }
 .features .fit { flex-basis: 100%; }
@@ -541,3 +544,9 @@ button.primary:disabled { opacity: 1; background: var(--soft); border-color: var
 .temp-chart .zone { font-style: italic; }
 .temp-chart .label { font-size: 11px; fill: var(--text); font-weight: 600; }
 #temp-card input[type=number] { width: 5em; }
+
+/* what's selected in Tolerances & tuning */
+.fit-selected { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--r); background: var(--soft); font-size: 14px; position: sticky; top: 0; z-index: 1; }
+.fit-selected .swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--now); }
+.fit-selected .link { margin-left: auto; }
