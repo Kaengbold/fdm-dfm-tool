@@ -881,3 +881,27 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
     - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
+  fibre_filled:
+    title: Carbon or glass fibre filament makes it stiffer, not stronger
+    why: The short fibres in PLA-CF, PETG-CF, PA-CF and similar filaments line up along each printed line. The part
+      bends less and warps less, but the fibres never cross from one layer to the next, so the layers hold together
+      worse and the part breaks more suddenly. Polymaker's PLA-CF is weaker than their plain PLA (31 vs 46 MPa
+      along the lines, 15 MPa between layers), and Bambu's ASA-CF takes about half the knock of plain ASA.
+    fixes:
+    - domain: process
+      text: For a part that must not break, print the plain plastic (or a tougher one such as PETG, ASA or PC) and add
+        walls. Use a fibre filament when the part should bend less or stay flat, not when it should hold more.
+    - domain: process
+      text: Fibre filament wears a brass nozzle quickly; use a hardened one (0.6 mm clogs less than 0.4 mm).
+    - domain: slicer
+      text: If you print it in a fibre filament anyway, print a little hotter and slower so the layers fuse better,
+        and turn the part so the load runs along the layers.
+    tags:
+    - material
+    - strength
+    - stiffness
+    sources:
+    - Polymaker — PolyLite PLA-CF Technical Data Sheet — https://shop.polymaker.com/products/polylite-pla-cf
+    - Polymaker — PolyLite PLA Technical Data Sheet — https://shop.polymaker.com/products/polylite-pla
+    - Bambu Lab Wiki — ASA-CF / PAHT-CF guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf
+    - CNC Kitchen — Does carbon fiber make 3D prints stronger? — https://www.youtube.com/watch?v=64dd03814yU

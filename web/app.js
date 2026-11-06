@@ -6,7 +6,7 @@ import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
-import { Steps } from "./steps.js";
+import { Steps, STEP_NAMES } from "./steps.js";
 import { reportHtml } from "./report.js";
 
 const $ = (id) => document.getElementById(id);
@@ -726,9 +726,12 @@ $("viewer").addEventListener("pointerup", async (e) => {
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
-  steps.reveal($("pick-panel"));
   state.showHeat = false;
   recolor();
+  // Looking around the part in another step must not pull the user to "Will it hold?": the face
+  // stays picked there for later, and the status line says where to use it.
+  if (shows("strength")) steps.reveal($("pick-panel"));
+  else setStatus(`Picked: ${$("pick-info").textContent}. To hold or load it, or keep it clean or on the bed, open "${STEP_NAMES.strength}".`);
 });
 
 const SPOT_RADIUS = 3; // mm, for loads "only around the clicked spot"
@@ -970,6 +973,7 @@ function renderGcode() {
   $("gcode-summary").textContent = !g ? "" : fits
     ? `— ${g.name}: ${g.info.layers} layers, ${g.info.part_grams} g, ${g.info.print_time_min} min`
     : "— the loaded G-code is for another orientation";
+  renderGcodeResult();
 }
 
 $("gcode-file").onchange = async (e) => {
@@ -986,9 +990,27 @@ $("gcode-file").onchange = async (e) => {
     setStatus(`G-code read: ${info.layers} layers, ${info.part_grams} g of part` + (info.turned_deg ? ` (the slicer turned it ${info.turned_deg}°)` : ""));
     await runCheck(); // the heat check uses the real layer times now
     if (readyForStrength()) await runStrength();
+    else renderGcodeResult();
   }).catch(() => {});
 };
-$("use-gcode").onchange = () => state.strength && runStrength();
+$("use-gcode").onchange = () => (state.strength && readyForStrength() ? runStrength() : renderGcodeResult());
+
+/** What the G-code does for the strength check, in its own card: the result itself shows in
+ * "Will it hold?", so without this the user here would see nothing happen (or not know why). */
+function renderGcodeResult() {
+  const box = $("gcode-result");
+  const r = state.strength;
+  const go = el("button", { type: "button", textContent: `Open "${STEP_NAMES.strength}"`, onclick: () => steps.go("strength") });
+  if (!state.gcode || !$("use-gcode").checked) return box.replaceChildren();
+  if (!readyForStrength()) {
+    return box.replaceChildren(el("p", { className: "hint", textContent: `Next: in "${STEP_NAMES.strength}" tap where the part is held and where the load sits. The strength check then uses this G-code.` }), go);
+  }
+  if (!r?.detailed) return box.replaceChildren();
+  box.replaceChildren(el("div", { className: `verdict ${r.verdict.replaceAll(" ", "-")}` },
+    el("strong", { textContent: `With your sliced print: safety ×${r.safety_factor.toFixed(1)}` }),
+    el("p", { textContent: `Uses the walls, infill and line directions from the G-code (${r.detailed.fill_pct} % of the part is plastic). Loads, colours and what to change are in "${STEP_NAMES.strength}".` }),
+    go));
+}
 
 // ---------- how long a simulation takes, asked before the long ones ----------
 // The strength grid has about the same number of cubes for every part, so one strength check takes
@@ -1045,7 +1067,8 @@ function askLong(what, kind, choices = null) {
 async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
-  return busy(fine ? `Simulating again with a finer grid (about ${fmtSeconds(estimate("fine"))})…` : "Simulating the load…", async () => {
+  const what = useGcode() ? " with your sliced print (its walls, infill and line directions)" : "";
+  return busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
     const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: printZones() }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
@@ -1061,6 +1084,7 @@ async function runStrength(fine = false) {
     $("show-temp").checked = false;
     recolor();
     renderStrength();
+    renderGcodeResult();
     setStatus(state.summary);
     return r;
   }, ["strength", "result"]);
@@ -1248,8 +1272,8 @@ $("run-warp").onclick = async () => {
       recolor();
     };
     const what = el("select", { id: "warp-show" },
-      el("option", { value: "shape", textContent: "the curled shape (red dots = lifts first)" }),
-      el("option", { value: "stress", textContent: "the stress left inside after it cools" }));
+      el("option", { value: "shape", textContent: "Curled shape (red dots lift first)" }),
+      el("option", { value: "stress", textContent: "Stress left inside after cooling" }));
     what.value = state.warpShow ?? "shape";
     what.onchange = () => {
       state.warpShow = what.value;
@@ -1259,7 +1283,8 @@ $("run-warp").onclick = async () => {
     $("warp-result").replaceChildren(el("div", { className: `verdict ${w.verdict === "fine" ? "fine" : w.verdict === "might lift" ? "borderline" : "likely-to-break"}` },
       el("strong", { textContent: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift" }),
       el("p", { textContent: w.explanation }),
-      el("label", { className: "toggle" }, show, "Show ", what),
+      el("label", { className: "toggle" }, show, "Show it on the part"),
+      what,
       el("p", { className: "hint", textContent: "Rough: rated against the longest test bar that stays flat in this material and printer (your warping calibration print if you made one)."
         + (w.from_gcode ? " Layer times from your G-code." : "") })));
     recolor();

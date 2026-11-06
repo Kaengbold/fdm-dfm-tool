@@ -458,6 +458,8 @@ def main():
             assert page.is_checked("#use-gcode"), page.locator("#status").inner_text()
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('as sliced in')", timeout=300_000)
             text = page.locator("#strength-result").inner_text()
+            # The result also shows in the G-code's own card, where the user loaded it.
+            assert "With your sliced print: safety" in page.locator("#gcode-result").inner_text(), page.locator("#gcode-result").inner_text()
             page.uncheck("#use-gcode")
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('walls')", timeout=300_000)
             return f"{page.locator('#gcode-summary').inner_text()} | {text.splitlines()[0]}"
