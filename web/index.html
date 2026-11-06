@@ -510,13 +510,6 @@
               <button id="dl-step" hidden>STEP: your CAD file with the design changes</button>
               <button id="copy-report" title="A text summary of the part, its problems and the settings, for an AI chat or a forum post">Copy for your AI chat</button>
             </div>
-            <details id="paste-block" class="more-block paste" data-min="advanced" hidden>
-              <summary>Paste an AI answer</summary>
-              <p class="hint">Paste the report into any AI chat, ask your question, then paste its whole reply here. The tool applies the orientation, settings and design changes it suggests.</p>
-              <textarea id="paste-input" rows="4" placeholder="Paste the AI's reply (with its JSON block) here"></textarea>
-              <button id="paste-apply">Apply the answer</button>
-              <ul id="paste-result" class="paste-result"></ul>
-            </details>
           </div>
         </section>
 
@@ -524,28 +517,6 @@
           <div id="verdict" class="summary"></div>
         </section>
 
-        <details id="ai-block" data-min="expert" class="ai wip" data-wip="not tested with real API keys yet (T-063)." hidden>
-          <summary>Ask AI <small>with your own API key</small></summary>
-          <form class="ai-config" onsubmit="return false" autocomplete="off">
-            <input type="text" name="username" autocomplete="username" value="api-key" hidden />
-            <label>Provider
-              <select id="ai-provider">
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="gemini">Google (Gemini)</option>
-                <option value="openai">OpenAI (GPT)</option>
-              </select>
-            </label>
-            <label>API key <input id="ai-key" type="password" autocomplete="new-password" placeholder="sk-ant-..." /></label>
-            <label>Model <select id="ai-model"></select></label>
-            <label class="toggle"><input id="ai-remember" type="checkbox" /> Remember key on this computer</label>
-          </form>
-          <div id="ai-log" class="ai-log"></div>
-          <form id="ai-form" class="ai-form">
-            <textarea id="ai-input" rows="2" placeholder="e.g. Will this hold 5 kg? How can it print without supports?"></textarea>
-            <button class="primary">Send</button>
-          </form>
-          <p class="hint">The key goes only from this browser to the provider; usage is billed to your account there.</p>
-        </details>
         <div id="parking" hidden></div>
       </div>
 
