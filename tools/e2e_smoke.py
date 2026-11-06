@@ -693,24 +693,17 @@ def main():
             return f"{status} | after restart: {after} options, {len(findings(page))} findings"
         run.step("progress + cancel", cancel)
 
-        def paste_back():
+        def copy_report():
             run.act(lambda: page.click("[data-sample=hook]"))
             page.context.grant_permissions(["clipboard-read", "clipboard-write"])
             page.click("#copy-report")
             page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Copied')")
             report = page.evaluate("() => navigator.clipboard.readText()")
-            assert "## For the AI assistant: how to answer" in report and "- 1: " in report, report[-600:]
-            page.evaluate("() => { document.getElementById('paste-block').hidden = false; }")  # AI features are off by default (?ai=1)
-            page.click("#paste-block > summary")
-            reply = 'Lay it on its side.\n```json\n{"orientation": 1, "settings": {"wall_loops": 5}}\n```'
-            page.fill("#paste-input", reply)
-            run.act(lambda: page.click("#paste-apply"))
-            result = page.locator("#paste-result li").all_inner_texts()
-            walls = page.evaluate("() => document.querySelector('#settings').innerText")
-            assert page.evaluate("() => fdm.state.active") == 1 and not page.locator("#paste-result li.error").count(), result
-            assert "5" in [line.split("\t")[-1].strip() for line in walls.splitlines() if line.startswith("Walls")], walls
-            return f"{result}"
-        run.step("paste back an AI answer", paste_back)
+            assert report.startswith("# Print check:") and "## Findings" in report, report[:600]
+            assert "For the AI assistant" not in report, report[-600:]
+            assert not page.locator("#ai-block, #paste-block").count()
+            return f"{len(report)} characters"
+        run.step("copy the report", copy_report)
 
         def bodies_and_units():
             plate, tiny = test_files()

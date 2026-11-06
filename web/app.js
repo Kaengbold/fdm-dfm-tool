@@ -1,6 +1,3 @@
-import { Assistant, MODELS } from "./assistant.js";
-import { GeminiAssistant, listGeminiModels } from "./gemini.js";
-import { listOpenAIModels, OpenAIAssistant } from "./openai.js";
 import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
@@ -18,9 +15,6 @@ const el = (tag, props = {}, ...children) => {
 
 /** Show ``node`` only from this level up (Simple / Advanced / Expert, see style.css). */
 const from = (level, node) => ((node.dataset.min = level), node);
-
-// The AI features (Ask AI, paste back an answer) are being redone; hidden unless the page is opened with ?ai=1.
-const AI_ENABLED = new URLSearchParams(location.search).has("ai");
 
 // ---------- engine (Pyodide worker) ----------
 // Cancelling kills the worker (Python can't be interrupted mid-call); a fresh one boots and
@@ -378,8 +372,6 @@ async function runCheck() {
     state.check = result;
     renderCheck();
     $("design-block").hidden = mode() === "print";
-    $("ai-block").hidden = !AI_ENABLED;
-    $("paste-block").hidden = !AI_ENABLED;
     setStatus(state.summary);
     steps.render();
     suggestDesignIfShown();
@@ -2263,199 +2255,6 @@ async function showVersion(i, carry = true) {
 }
 $("apply-edits").onclick = () => applyEdits();
 
-// ---------- AI assistant (bring your own key) ----------
-const round = (v, d = 2) => (Array.isArray(v) ? v.map((x) => round(x, d)) : typeof v === "number" ? Number(v.toFixed(d)) : v);
-
-function summarizeState() {
-  const o = activeOption();
-  const s = state.strength;
-  return {
-    part: state.summary,
-    profile: profile(),
-    mode: mode(),
-    orientation: o && { index: state.active, label: o.label, up: round(o.up, 3), reasons: o.reasons },
-    findings: state.check?.findings.map((f) => ({ severity: f.severity, rule: f.rule, title: f.title, detail: f.detail })),
-    estimate: state.check && { print_time_min: Math.round(state.check.stats.print_time_min), filament_g: Math.round(state.check.stats.filament_g) },
-    settings: Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value])),
-    loads: state.loads,
-    strength: s && { safety_factor: round(s.safety_factor), verdict: s.verdict, mode: s.mode, walls: s.walls, infill: s.infill },
-  };
-}
-
-// What the AI may do: the same actions as the UI. Shared by all providers.
-const aiActions = {
-  get_current_analysis: async () => summarizeState(),
-  list_orientations: async () => state.options.map((o, i) => ({ index: i, label: o.label, up: round(o.up, 3), reasons: o.reasons, why_lower: o.why_lower })),
-  select_orientation: async ({ index }) => {
-    if (!state.options[index]) throw new Error(`No orientation ${index}`);
-    await selectOption(index);
-    return summarizeState();
-  },
-  list_faces: async () => {
-    await ensureRegions();
-    return state.regionInfo.map((r) => ({ id: r.id, kind: r.kind, area_mm2: Math.round(r.area_mm2), normal: round(r.normal), centroid: round(r.centroid, 1) }));
-  },
-  set_loads: async ({ loads }) => {
-    await ensureRegions();
-    for (const l of loads) if (!l.point && !state.regionInfo[l.region]) throw new Error(`Unknown face ${l.region}`);
-    state.loads = loads.map((l) => {
-      const at = l.point ? { point: l.point, radius: l.radius ?? SPOT_RADIUS } : { region: l.region };
-      return l.kind === "fixed" ? { ...at, kind: "fixed", ...(l.hold && l.hold !== "clamped" ? { hold: l.hold } : {}) } : { ...at, kind: "force", kg: l.kg ?? 1, direction: l.direction ?? "push", case: l.case ?? 1 };
-    });
-    renderLoads();
-    recolor();
-    return { loads: state.loads };
-  },
-  check_strength: async () => {
-    if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
-    const r = await runStrength();
-    return { safety_factor: round(r.safety_factor), verdict: r.verdict, mode: r.mode, explanation: r.explanation, bends_mm: round(r.max_displacement_mm, 1),
-      walls: r.walls, top: r.top, bottom: r.bottom, infill: r.infill };
-  },
-  optimise_strength: async () => {
-    if (!readyForStrength()) throw new Error("Set loads first: at least one fixed face and one force");
-    const o = await runOptimise();
-    return { met: o.met, target: o.target, safety_factor: round(o.safety_factor), grams: o.grams, orientation: o.orientation, settings: o.settings, explanation: o.explanation,
-      ...(o.beyond ? { beyond: o.beyond.map((b) => ({ change: b.change, kind: b.kind, safety_factor: round(b.safety_factor), why: b.why })) } : {}) };
-  },
-  strength_options: async () => {
-    if (!state.strength) throw new Error("Run check_strength first");
-    return (await showStrengthOptions()).map((o) => ({ ...o, safety_factor: round(o.safety_factor) }));
-  },
-  suggest_design_changes: async () => {
-    const r = await suggestDesign();
-    return {
-      features: r.features.filter(shown).map((f) => ({ region: f.region, type: f.type, diameter_mm: round(f.diameter, 1), axis: round(f.axis), confidence: f.confidence, tag: f.tag })),
-      edits: r.edits.map((e) => ({ id: e.id, op: e.op, title: e.title, description: e.description })),
-    };
-  },
-  tag_feature: async ({ region, tag }) => {
-    const r = await tagFeature(region, tag === "forget" ? null : tag);
-    return r.features.filter(shown).map((f) => ({ region: f.region, type: f.type, diameter_mm: round(f.diameter, 1), tag: f.tag }));
-  },
-  apply_design_changes: async ({ ids }) => {
-    if (!state.edits.length) await suggestDesign();
-    const unknown = ids.filter((id) => !state.edits.some((e) => e.id === id));
-    if (unknown.length) throw new Error(`Unknown edit ids: ${unknown.join(", ")}`);
-    state.edits.forEach((e) => (e.selected = ids.includes(e.id)));
-    await applyEdits();
-    return summarizeState();
-  },
-  set_slicer_settings: async ({ settings }) => {
-    Object.assign(state.overrides, settings);
-    renderSettings();
-    return Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value]));
-  },
-};
-
-const PROVIDERS = {
-  anthropic: {
-    assistant: new Assistant(aiActions),
-    storage: "fdmdfm.anthropicKey",
-    placeholder: "sk-ant-...",
-    keyHelp: "console.anthropic.com -> API keys",
-    models: async () => MODELS,
-  },
-  gemini: {
-    assistant: new GeminiAssistant(aiActions),
-    storage: "fdmdfm.geminiKey",
-    placeholder: "AIza...",
-    keyHelp: "aistudio.google.com -> Get API key",
-    models: (key) => listGeminiModels(key),
-  },
-  openai: {
-    assistant: new OpenAIAssistant(aiActions),
-    storage: "fdmdfm.openaiKey",
-    placeholder: "sk-...",
-    keyHelp: "platform.openai.com -> API keys",
-    models: (key) => listOpenAIModels(key),
-  },
-};
-const provider = () => PROVIDERS[$("ai-provider").value];
-
-async function refreshModels() {
-  const p = provider();
-  const key = $("ai-key").value.trim();
-  if (!key && p !== PROVIDERS.anthropic) {
-    $("ai-model").replaceChildren(el("option", { value: "", textContent: "Enter your key to load models" }));
-    return;
-  }
-  try {
-    const models = await p.models(key);
-    $("ai-model").replaceChildren(...models.map((m) => el("option", { value: m.id, textContent: m.label })));
-  } catch (err) {
-    $("ai-model").replaceChildren(el("option", { value: "", textContent: "Could not load models" }));
-    aiLog("tool", err.message);
-  }
-}
-
-function switchProvider() {
-  const p = provider();
-  $("ai-key").placeholder = p.placeholder;
-  $("ai-key").value = localStorage.getItem(p.storage) ?? "";
-  $("ai-remember").checked = Boolean(localStorage.getItem(p.storage));
-  refreshModels();
-}
-
-const rememberKey = () =>
-  $("ai-remember").checked ? localStorage.setItem(provider().storage, $("ai-key").value) : localStorage.removeItem(provider().storage);
-$("ai-provider").onchange = switchProvider;
-$("ai-remember").onchange = rememberKey;
-$("ai-key").onchange = () => {
-  rememberKey();
-  refreshModels();
-};
-switchProvider();
-
-function aiLog(cls, text) {
-  const node = el("div", { className: `msg ${cls}`, textContent: text });
-  $("ai-log").append(node);
-  node.scrollIntoView({ block: "nearest" });
-}
-
-const TOOL_LABEL = {
-  get_current_analysis: "reading the analysis",
-  list_orientations: "comparing orientations",
-  select_orientation: "switching orientation",
-  list_faces: "looking at the faces",
-  set_loads: "setting loads",
-  check_strength: "running the strength check",
-  strength_options: "trying stronger options",
-  optimise_strength: "finding the lightest settings that hold",
-  suggest_design_changes: "looking for design changes",
-  apply_design_changes: "applying design changes",
-  tag_feature: "noting what a feature is",
-  set_slicer_settings: "changing slicer settings",
-};
-
-$("ai-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const text = $("ai-input").value.trim();
-  const apiKey = $("ai-key").value.trim();
-  if (!text) return;
-  if (!apiKey) return aiLog("tool", `Enter your API key first (${provider().keyHelp}).`);
-  if (!$("ai-model").value) return aiLog("tool", "Pick a model first.");
-  $("ai-input").value = "";
-  aiLog("user", text);
-  const button = $("ai-form").querySelector("button");
-  button.disabled = true;
-  try {
-    await provider().assistant.ask(text, { apiKey, model: $("ai-model").value }, (ev) =>
-      ev.type === "text" ? aiLog("assistant", ev.text) : aiLog("tool", `... ${TOOL_LABEL[ev.name] ?? ev.name}`),
-    );
-  } catch (err) {
-    aiLog("tool", `Error: ${err.message}`);
-  } finally {
-    button.disabled = false;
-  }
-};
-$("ai-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    $("ai-form").requestSubmit();
-  }
-});
-
 // ---------- Expert: all settings ----------
 const loadExpert = () => JSON.parse(localStorage.getItem("fdm-expert") ?? "{}");
 let expertChanged = false;
@@ -2975,79 +2774,8 @@ $("dl-step").onclick = () =>
 
 $("copy-report").onclick = async () => {
   const md = await call("report", { up: activeOption().up, profile: profile(), mode: mode() });
-  await navigator.clipboard.writeText(md + answerFormat());
+  await navigator.clipboard.writeText(md);
   setStatus("Copied. Paste it into your AI chat so it can help you with the design of your part.");
-};
-
-// ---------- paste-back: an answer from any AI chat ----------
-/** Report appendix telling a chat AI how to answer so the tool can apply it (only the choices that exist now). */
-function answerFormat() {
-  const lines = [
-    "", "## For the AI assistant: how to answer", "",
-    "Answer the user's question in plain language. If you recommend changes, end your reply with one JSON block",
-    "the tool can apply (leave out what you don't want to change):", "",
-    "```json",
-    JSON.stringify({ orientation: 0, settings: { wall_loops: "4" }, design_changes: ["edit-id"], not_features: [0] }),
-    "```", "",
-    "- `orientation`: index from this list:",
-    ...state.options.map((o, i) => `  - ${i}: ${o.label}, up = [${round(o.up, 2).join(", ")}]${i === state.active ? " (current)" : ""}`),
-    "- `settings`: OrcaSlicer setting keys with string values (see the settings table above).",
-  ];
-  if (state.edits.length) lines.push("- `design_changes`: ids of these suggested edits:", ...state.edits.map((e) => `  - ${e.id}: ${e.title}`));
-  const features = state.features.filter(shown);
-  if (features.length) lines.push("- `not_features`: regions of detected features that aren't really holes/posts:", ...features.map((f) => `  - ${f.region}: Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]}`));
-  return lines.join("\n") + "\n";
-}
-
-/** The JSON object in a pasted reply: a ```json block, or the last {...} that parses. */
-function parseAnswer(text) {
-  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]);
-  const candidates = [...fenced.reverse(), ...[...text.matchAll(/\{[\s\S]*\}/g)].map((m) => m[0])];
-  for (const c of candidates) {
-    try {
-      const v = JSON.parse(c);
-      if (v && typeof v === "object" && !Array.isArray(v)) return v;
-    } catch {
-      // not this one
-    }
-  }
-  throw new Error("No JSON answer found — ask the AI to end its reply with the JSON block from the report.");
-}
-
-async function applyAnswer(answer) {
-  const done = [];
-  const step = async (what, fn) => {
-    try {
-      done.push({ text: `${what}: ${(await fn()) ?? "done"}` });
-    } catch (err) {
-      done.push({ text: `${what}: ${err.message ?? err}`, error: true });
-    }
-  };
-  if (answer.orientation != null) {
-    await step("Orientation", async () => (await aiActions.select_orientation({ index: Number(answer.orientation) }), state.options[state.active].label));
-  }
-  for (const region of answer.not_features ?? []) {
-    await step(`Feature ${region}`, async () => (await aiActions.tag_feature({ region: Number(region), tag: "none" }), "marked as not a feature"));
-  }
-  if (answer.settings && Object.keys(answer.settings).length) {
-    const settings = Object.fromEntries(Object.entries(answer.settings).map(([k, v]) => [k, String(v)]));
-    await step("Slicer settings", async () => (await aiActions.set_slicer_settings({ settings }), Object.entries(settings).map(([k, v]) => `${k} = ${v}`).join(", ")));
-  }
-  if (answer.design_changes?.length) {
-    await step("Design changes", async () => (await aiActions.apply_design_changes({ ids: answer.design_changes.map(String) }), answer.design_changes.join(", ")));
-  }
-  if (!done.length) done.push({ text: "The answer suggests no changes." });
-  return done;
-}
-
-$("paste-apply").onclick = async () => {
-  let rows;
-  try {
-    rows = await applyAnswer(parseAnswer($("paste-input").value));
-  } catch (err) {
-    rows = [{ text: err.message, error: true }];
-  }
-  $("paste-result").replaceChildren(...rows.map((r) => el("li", { className: r.error ? "error" : "", textContent: r.text })));
 };
 
 // Offline after the first visit (see sw.js). Not on file:// pages, where service workers don't run.
