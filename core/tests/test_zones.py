@@ -48,6 +48,11 @@ def test_zoned_optimiser_is_not_heavier():
     assert z["met"] and z["zones"] and z["grams"] <= r["grams"] + 0.1
     assert "zone" in z["explanation"]
     assert len(z["zones"][0]["corners_print"]) == 8
+    # Time follows the plastic saved: none saved, no time; more saved, more time.
+    assert z["saves_min"] >= 0 and (z["saves_min"] > 0) == (z["saves_grams"] > 0)
+    p = Profile.from_dict({"material": "pla"})
+    assert api._grams_minutes(20, p) == pytest.approx(2 * api._grams_minutes(10, p))
+    assert 1 < api._grams_minutes(10, p) < 30  # 10 g of PLA infill: minutes, not seconds or hours
 
 
 def test_picked_zone_wraps_the_face_and_counts():

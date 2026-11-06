@@ -1148,6 +1148,14 @@ LAYER_OVERHEAD_S = 7.0  # layer change, travel, retractions, slow first moves
 START_MIN = 3.0  # heating, homing, bed levelling, purge line
 
 
+def print_minutes(volume_mm3: float, profile: Profile) -> float:
+    """Rough minutes to print ``volume_mm3`` of infill and walls inside the part: the infill speed of
+    ``_estimate`` (or the melt-rate limit). For what more or less plastic costs, not a whole print."""
+    lw, lh = profile.line_width, goal_plan(profile)["layer_height"]
+    v = min(profile.speeds["infill"] * TIME_EFFICIENCY, profile.material["max_flow_mm3s"] / (lw * lh))
+    return float(volume_mm3) / (lw * lh * v) / 60
+
+
 def _estimate(layers: list[Layer], profile: Profile) -> dict:
     """Rough print time and filament use, with the walls / infill / layer height of the user's goal.
     Counts solid top/bottom skins and the slicer slowing down small layers to the material's

@@ -688,6 +688,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
                 zoned = _climb(cases, best["up"], p, target, s.mesh, boxes)
                 zoned["up"] = best["up"]
                 zoned["saves_grams"] = round(best["grams"] - zoned["grams"], 1)
+                zoned["saves_min"] = round(_grams_minutes(zoned["saves_grams"], p), 1)
                 zoned["explanation"] = _zoned_story(zoned, best, target)
                 best["zoned"] = zoned
     return best
@@ -993,6 +994,13 @@ def _volume_notes(mesh: Mesh, r0: np.ndarray, inside, box: dict, p: Profile) -> 
     return ["No support is printed here."]
 
 
+def _grams_minutes(grams: float, p: Profile) -> float:
+    """About how long ``grams`` of plastic take to print (checks.print_minutes)."""
+    from .checks import print_minutes
+
+    return print_minutes(grams / p.material["density_g_cm3"] * 1000, p)
+
+
 def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     z = zoned["zones"][0]
     head = (f"Stronger only where it's needed: {len(zoned['zones'])} zone{'s' if len(zoned['zones']) > 1 else ''} with "
@@ -1000,7 +1008,9 @@ def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     if not zoned["met"]:
         return f"{head} only reach ×{zoned['safety_factor']:.1f} (you need ×{target:.0f})."
     if zoned["saves_grams"] > 0.5:
-        return f"{head}: ×{zoned['safety_factor']:.1f} with {zoned['grams']:.0f} g — {zoned['saves_grams']:.0f} g less than the same settings everywhere."
+        time = f" and about {zoned['saves_min']:.0f} min" if zoned.get("saves_min", 0) >= 1 else ""
+        return (f"{head}: ×{zoned['safety_factor']:.1f} with {zoned['grams']:.0f} g — {zoned['saves_grams']:.0f} g{time} less than the same settings"
+                " everywhere (checked again with the zones).")
     return f"{head}: ×{zoned['safety_factor']:.1f}, but it saves almost nothing here — the load spreads through most of the part."
 
 
