@@ -2,7 +2,7 @@
 
 Runs locally over stdio with the user's own agent subscription — the tool itself
 never talks to an AI provider. Every tool maps onto fdmcore.api, the same API the
-web app uses.
+web app uses, and every API method has a tool (``API_TOOLS``), so an agent can do what the app does.
 
     pip install -e "core[local]"
     claude mcp add fdm-dfm -- python -m fdmcore.mcp_server
@@ -135,6 +135,7 @@ def check_strength(
     fine: bool = False,
     use_temp_c: float | None = None,
     constant_load: bool = False,
+    zones: list[dict] | None = None,
 ) -> dict:
     """Rough strength check. use_temp_c: hottest the part gets in use (weaker when warm, soft near the
     material's heat limit); constant_load: the load stays on (creep: needs ×3 instead of ×2). fine=True: a finer grid (slower); compare with the normal one to see how
@@ -144,9 +145,10 @@ def check_strength(
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
     (default 3) — for an edge, a corner or part of a big face.
+    ``zones``: stronger areas (add_zone, or optimise_strength's ``zoned``) printed with their own walls / infill.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
     return _clean(api.strength(up, loads, _profile(printer, material, nozzle, use_temp_c=use_temp_c, constant_load=constant_load),
-                               walls, infill, top, bottom, fine))
+                               walls, infill, top, bottom, fine, zones=zones))
 
 
 @server.tool()
@@ -158,12 +160,18 @@ def check_dynamics(
     nozzle: str = "0.4",
     drop_mm: float = 0.0,
     mounted_kg: float = 0.0,
+    walls: int | None = None,
+    infill: float | None = None,
+    top: int | None = None,
+    bottom: int | None = None,
+    zones: list[dict] | None = None,
 ) -> dict:
     """Vibration and knocks (simplified). frequency_hz: how fast the part swings as held — 20–200 Hz is
     where motors, fans and printers shake, so it may resonate; drop_mm: the load falls this far onto the
     part (impact_factor = how many times harder than held still, impact_safety = safety factor then);
-    mounted_kg: something fixed on the loaded face that swings with it. loads as in check_strength."""
-    r = api.dynamics(up, loads, _profile(printer, material, nozzle), drop_mm, mounted_kg)
+    mounted_kg: something fixed on the loaded face that swings with it. loads, walls, infill, top, bottom
+    and zones as in check_strength."""
+    r = api.dynamics(up, loads, _profile(printer, material, nozzle), drop_mm, mounted_kg, True, walls, infill, top, bottom, zones)
     return _clean({k: v for k, v in r.items() if not isinstance(v, bytes)})
 
 
@@ -268,14 +276,16 @@ def optimise_strength(
 
 @server.tool()
 def suggest_design_changes(
-    up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", params: dict | None = None
+    up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", params: dict | None = None,
+    keep_clear: list[dict] | None = None,
 ) -> dict:
     """Detected holes/bosses and suggested geometry edits for this orientation: teardrop holes and corner
     chamfers (cut away, ``op: cut``), 45° fills under ledges, sacrificial layers over holes that start in
     mid-air and thicker walls (added, ``op: add``).
     ``params`` sets edit sizes, e.g. {"chamfer_mm": 2, "teardrop_angle_deg": 40, "ledge_max_mm": 20,
-    "wall_lines": 3}; ranges come back in the result."""
-    return _clean(api.design(up, _profile(printer, material, nozzle), params))
+    "wall_lines": 3}; ranges come back in the result. ``keep_clear``: boxes from place_box(kind="keep_clear");
+    edits that would add plastic into one come back with ``clash``."""
+    return _clean(api.design(up, _profile(printer, material, nozzle), params, keep_clear))
 
 
 @server.tool()
@@ -295,18 +305,16 @@ def apply_design_changes(
     material: str = "pla",
     nozzle: str = "0.4",
     params: dict | None = None,
+    keep_clear: list[dict] | None = None,
 ) -> dict:
-    """Apply suggested edits (ids from suggest_design_changes, same params), save the modified STL and load it."""
+    """Apply suggested edits (ids from suggest_design_changes, same params and keep_clear), save the modified STL and load it."""
     from .booleans import apply_edits
 
-    edits = {e["id"]: e for e in api.design(up, _profile(printer, material, nozzle), params)["edits"]}
+    edits = {e["id"]: e for e in api.design(up, _profile(printer, material, nozzle), params, keep_clear)["edits"]}
     unknown = [i for i in edit_ids if i not in edits]
     if unknown:
         raise ValueError(f"Unknown edit ids: {unknown}")
-    mesh = apply_edits(api._require().mesh, [edits[i] for i in edit_ids])
-    out = Path(output_path).expanduser()
-    out.write_bytes(to_binary_stl(mesh))
-    return {"saved": str(out), **_clean(api.load(out.read_bytes(), out.name))}
+    return _save_and_load(apply_edits(api._require().mesh, [edits[i] for i in edit_ids]), output_path)
 
 
 @server.tool()
@@ -321,7 +329,8 @@ def export_3mf(
     slicer: str = "orca",
 ) -> str:
     """Write the oriented part as 3MF with slicer settings (recommended ones unless overridden).
-    ``zones`` (from optimise_strength's ``zoned``) become modifier volumes; then the file is for one
+    ``zones`` (add_zone, or optimise_strength's ``zoned``) become modifier volumes, and boxes from place_box
+    (support, blocker, void) support enforcers, blockers and negative volumes; then the file is for one
     slicer: ``slicer`` "orca" (OrcaSlicer and Bambu Studio) or "prusa"."""
     prof = _profile(printer, material, nozzle)
     merged = {r["key"]: r["value"] for r in api.check(up, prof)["settings"]}
@@ -377,6 +386,212 @@ def _slice(up, printer: str, material: str, nozzle: str, settings: dict | None, 
 def get_report(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", mode: str = "both") -> str:
     """Markdown report of findings, fixes and settings."""
     return api.report(up, _profile(printer, material, nozzle), mode)
+
+
+@server.tool()
+def set_custom_presets(printers: dict | None = None, materials: dict | None = None) -> dict:
+    """Add the user's own printers and materials (same fields as presets.yaml; a material can say
+    ``based_on`` a built-in one and change only some values). Replaces earlier custom ones; their ids
+    then work in every tool. Returns the full list like list_presets."""
+    api.custom_presets(printers, materials)
+    return list_presets()
+
+
+@server.tool()
+def calibration_part(kind: str, output_path: str) -> dict:
+    """Save a test print as STL for measuring the user's own material on their printer. ``kind``:
+    "layer_strength", "warping", "fit", "overhang" or "bridge"; ``how`` says what to print and measure.
+    The measured numbers go into a custom material (set_custom_presets)."""
+    r = api.calibration_part(kind)
+    out = Path(output_path).expanduser()
+    out.write_bytes(r["stl"])
+    return {"saved": str(out), "how": _doc_entry(api.calibration_part, kind)}
+
+
+def _doc_entry(fn, key: str) -> str:
+    """The ``key: …`` paragraph of a docstring that lists its options (the text the web app shows too)."""
+    lines, out = (fn.__doc__ or "").splitlines(), []
+    for line in lines:
+        if out and (not line.startswith("      ") or not line.strip()):
+            break
+        if out or line.strip().startswith(f"{key}:"):
+            out.append(line.strip())
+    return " ".join(out).removeprefix(f"{key}:").strip()
+
+
+@server.tool()
+def check_orientation(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Score one build direction of your choice (``up``: the part axis that points up on the printer),
+    packed like the entries of find_orientations: score, support area, bed contact, height, reasons."""
+    return _clean(api.orientation(up, _profile(printer, material, nozzle)))
+
+
+@server.tool()
+def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> list[dict]:
+    """The same part with every nozzle size: print time, filament, problems that come with the bigger
+    nozzles (``new``) and the detail each one can't print."""
+    return _clean(api.compare_nozzles(up, _profile(printer, material, nozzle)))
+
+
+@server.tool()
+def check_warping(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4",
+                  detailed: bool = False) -> dict:
+    """Warping simulation: how hard the base wants to curl off the bed (``lift_ratio``: 1 = like the longest
+    bar that stays flat for this material and printer, above 1 it likely lifts), where it lifts first
+    (``lift_points_print``) and the stress left inside after cooling. ``detailed`` uses the G-code from
+    load_gcode (its real layer times)."""
+    return _clean(api.warping(up, _profile(printer, material, nozzle), detailed))
+
+
+@server.tool()
+def load_gcode(path: str, up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Read the G-code the part was sliced to (from our 3MF, in orientation ``up``; plain G-code or a
+    ``.gcode.3mf``) and check that it is this part. Afterwards check_warping(detailed=True) uses its real
+    layer times; detailed_strength does the same for strength (and can slice by itself)."""
+    return _clean(api.load_gcode(Path(path).expanduser().read_bytes(), up, _profile(printer, material, nozzle)))
+
+
+@server.tool()
+def heat_curve(material: str = "pla", use_temp_c: float | None = None) -> dict:
+    """How much of its strength a material keeps from −20 °C to past its heat limit (``temps_c`` with
+    ``share_pct``), where it gets brittle (``cold_c``) or soft (``soft_c``), and a plain sentence for
+    ``use_temp_c``. No part needed."""
+    return _clean(api.heat_curve({"material": material}, use_temp_c))
+
+
+@server.tool()
+def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", printer: str = "bambu_p1s",
+             material: str = "pla", nozzle: str = "0.4") -> dict:
+    """The loaded part as a box for electronics using ``power_w`` watts in a room at ``ambient_c``: the air
+    temperature inside and whether the plastic stays below where it goes soft. ``cooling``: "closed" or
+    "fan" (vents land in between)."""
+    return _clean(api.box_heat(power_w, ambient_c, cooling, _profile(printer, material, nozzle)))
+
+
+@server.tool()
+def add_zone(up: list[float], region: int | None = None, point: list[float] | None = None, margin: float = 3.0,
+             walls: int | None = None, infill: float | None = None, shape: str | None = None,
+             printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """A "strong in one area" zone: an upright box (or "cylinder" / "ball" ``shape``) around a face
+    (``region`` from list_faces) or a spot (``point``, part coordinates), ``margin`` mm bigger, printed
+    with more walls and denser infill (default two more walls and 40 %). Pass returned zones as
+    ``zones`` to strength_variant or export_3mf."""
+    return _clean(api.zone_at(up, region, point, margin, walls, infill, _profile(printer, material, nozzle), shape))
+
+
+@server.tool()
+def place_box(up: list[float], kind: str, region: int | None = None, point: list[float] | None = None,
+              point2: list[float] | None = None, margin: float | None = None, shape: str = "box",
+              printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """An advanced design box around a face (``region``), a spot (``point``) or between two spots
+    (``point`` and ``point2``, part coordinates). ``kind``: "support" / "blocker" (force or forbid
+    supports there), "void" (a hidden gap the slicer prints walls round), "keep_clear" (space that must
+    stay empty: pass it in ``keep_clear`` to suggest_design_changes), "add_solid" / "cut_solid" (plastic
+    to add or cut: apply_blocks). Returns the box and plain notes on what it does here."""
+    return _clean(api.volume_at(up, kind, region, point, point2, margin, _profile(printer, material, nozzle), shape))
+
+
+@server.tool()
+def apply_blocks(up: list[float], boxes: list[dict], output_path: str) -> dict:
+    """Join the "add_solid" boxes onto the part and cut the "cut_solid" ones out of it (boxes from
+    place_box with the same ``up``), save the changed STL and load it as the part."""
+    from .booleans import apply_edits
+
+    edits = api.volume_solid(up, boxes)
+    if not edits:
+        raise ValueError('No "add_solid" or "cut_solid" boxes given')
+    return _save_and_load(apply_edits(api._require().mesh, edits), output_path)
+
+
+@server.tool()
+def snap_model(path: str, point: list[float], normal: list[float], output_path: str, spin_deg: float = 0.0) -> dict:
+    """Put another model (STL / 3MF at ``path``) onto the part: its biggest flat face goes flat onto the
+    part's face at ``point`` (part coordinates; ``normal`` points out of the part, e.g. that face's normal
+    from list_faces), centred there and turned ``spin_deg``. Joined into one part, saved as STL and loaded."""
+    from .booleans import apply_edits
+
+    src = Path(path).expanduser()
+    edit = api.snap_model(src.read_bytes(), point, normal, spin_deg, src.stem)
+    return {"placed": edit["description"], **_save_and_load(apply_edits(api._require().mesh, [edit]), output_path)}
+
+
+@server.tool()
+def strength_variant(
+    up: list[float],
+    loads: list[dict],
+    variant_path: str,
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    walls: int | None = None,
+    infill: float | None = None,
+    top: int | None = None,
+    bottom: int | None = None,
+    zones: list[dict] | None = None,
+) -> dict:
+    """Strength of a changed copy of the part (STL / 3MF at ``variant_path``) without replacing the loaded
+    one: for comparing design ideas. Loads move to the matching faces of the copy. Returns the safety
+    factor, verdict and how much plastic the change adds (``added_g``). loads as in check_strength."""
+    data = Path(variant_path).expanduser().read_bytes()
+    return _clean(api.strength_variant(up, loads, data, _profile(printer, material, nozzle), walls, infill, top, bottom, zones))
+
+
+@server.tool()
+def expert_settings() -> dict:
+    """Every number the checks use (analysis grids and all thresholds), grouped, each with its default,
+    the value in use, its range and the note on what it does and where it comes from."""
+    return api.expert_settings()
+
+
+@server.tool()
+def set_expert_settings(values: dict[str, float]) -> dict:
+    """Change numbers from expert_settings by ``path``, e.g. {"analysis.strength_voxels": 20000}.
+    Values not given go back to their defaults. Only for users who know why they change them."""
+    return api.set_expert(values)
+
+
+def _save_and_load(mesh, output_path: str) -> dict:
+    out = Path(output_path).expanduser()
+    out.write_bytes(to_binary_stl(mesh))
+    return {"saved": str(out), **_clean(api.load(out.read_bytes(), out.name))}
+
+
+# The tool for every api.METHODS entry (test_mcp fails when a new API method has none).
+API_TOOLS = {
+    "presets": "list_presets",
+    "custom_presets": "set_custom_presets",
+    "calibration_part": "calibration_part",
+    "load": "load_part",
+    "load_gcode": "load_gcode",
+    "warping": "check_warping",
+    "set_fit": "set_fit",
+    "set_gap": "set_gap",
+    "volume_solid": "apply_blocks",
+    "snap_model": "snap_model",
+    "material_advice": "material_advice",
+    "heat_curve": "heat_curve",
+    "dynamics": "check_dynamics",
+    "select_body": "select_body",
+    "scale": "scale_part",
+    "orientations": "find_orientations",
+    "orientation": "check_orientation",
+    "check": "check_print",
+    "export": "export_3mf",
+    "report": "get_report",
+    "regions": "list_faces",
+    "optimise_strength": "optimise_strength",
+    "expert_settings": "expert_settings",
+    "set_expert": "set_expert_settings",
+    "box_heat": "box_heat",
+    "zone_at": "add_zone",
+    "volume_at": "place_box",
+    "tag_feature": "tag_feature",
+    "strength": "check_strength",
+    "strength_variant": "strength_variant",
+    "strength_options": "strength_options",
+    "design": "suggest_design_changes",
+    "compare_nozzles": "compare_nozzles",
+}
 
 
 def main():
