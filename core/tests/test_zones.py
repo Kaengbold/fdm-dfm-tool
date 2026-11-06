@@ -118,3 +118,18 @@ def test_zone_around_an_upright_hole_is_a_cylinder():
     assert conf.count("<triangle ") > 12 + 100  # the part plus a round modifier, not a 12-triangle box
     with pytest.raises(ValueError, match="shape"):
         api.zone_at([0, 0, 1], region=hole["region"], shape="cone")
+
+
+def test_strength_proposes_zones_where_the_stress_is():
+    """A cantilever is stressed most at its fixed end: the strength check proposes a zone there,
+    the most stressed first, and using it makes the part stronger."""
+    loads = cantilever()
+    r = api.strength([0, 0, 1], loads, {})
+    zones = r["stress_zones"]
+    assert zones and zones[0]["share_pct"] == 100
+    lo, hi = np.asarray(zones[0]["lo"]), np.asarray(zones[0]["hi"])
+    root = api._require().mesh.triangles[..., 0].min()
+    assert lo[0] - root < 5 and hi[0] - lo[0] < 80  # at the fixed end, not the whole bar
+    assert zones[0]["walls"] == r["walls"] + 2 and zones[0]["infill"] >= max(0.4, r["infill"])
+    stronger = api.strength([0, 0, 1], loads, {}, zones=zones)
+    assert stronger["safety_factor"] > r["safety_factor"]

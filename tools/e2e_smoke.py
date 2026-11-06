@@ -522,7 +522,17 @@ def main():
             page.wait_for_function("() => fdm.state.zones[0]?.infill !== 0.8")
             page.locator("#zone-list li").first.get_by_role("button", name="Remove").click()
             assert page.evaluate("() => fdm.state.zones.length") == 0
-            return f"{label}; cylinder, 80 % infill in the 3MF, undo and remove work"
+            found = page.evaluate("() => fdm.state.strength?.stress_zones?.length ?? 0")
+            assert found, "the strength check proposed no stressed places"
+            page.locator("#zone-suggest button").click()  # starts no engine work
+            assert page.evaluate("() => fdm.state.zones.length") == found, "stressed places not added"
+            first = page.locator("#zone-list li strong").first.inner_text()
+            assert first.startswith("Stressed place 1"), first
+            assert page.locator("#zone-suggest button").count() == 0, "suggestion still offered after adding"
+            page.click("#zone-card h3")
+            page.keyboard.press("Control+z")
+            page.wait_for_function("() => fdm.state.zones.length === 0")
+            return f"{label}; cylinder, 80 % infill in the 3MF, undo and remove work | {first}"
         run.step("stronger area picked on the part", picked_zone)
 
         def advanced_boxes():
