@@ -677,8 +677,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
-        best["beyond"] = sorted(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target),
-                                key=lambda o: -(o["safety_factor"] or 0))
+        best["beyond"] = _strongest_first(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target))
     if zones:
         with stage(0.9, 1.0):
             light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
@@ -1476,7 +1475,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
-    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest first."""
+    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest
+    first, a lighter load always last."""
     from dataclasses import replace
 
     from .strength import cases_safety, material_volume, verdict
@@ -1521,8 +1521,13 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "may need more support or take longer", up=axes[best].tolist())
 
     out += _beyond_settings(base, p, profile, loads)
-    out.sort(key=lambda o: -(o["safety_factor"] or 0))
-    return out
+    return _strongest_first(out)
+
+
+def _strongest_first(options: list[dict]) -> list[dict]:
+    """Strongest first, but carrying less always last: it doesn't make the part any stronger, it's
+    the way out when nothing else is enough — so it never leads, even with the best number."""
+    return sorted(options, key=lambda o: (o["kind"] == "load", -(o["safety_factor"] or 0)))
 
 
 def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:
