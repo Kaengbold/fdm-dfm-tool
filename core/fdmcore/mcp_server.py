@@ -409,7 +409,7 @@ def calibration_part(kind: str, output_path: str) -> dict:
 
 
 def _doc_entry(fn, key: str) -> str:
-    """The ``key: …`` paragraph of a docstring that lists its options (the text the web app shows too)."""
+    """The ``key: …`` paragraph of a docstring that lists its options (calibration_part keeps the how-to there)."""
     lines, out = (fn.__doc__ or "").splitlines(), []
     for line in lines:
         if out and (not line.startswith("      ") or not line.strip()):
