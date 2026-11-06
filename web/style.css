@@ -514,6 +514,19 @@ button.primary:disabled { opacity: 1; background: var(--soft); border-color: var
 .vol-list li[data-kind="add_solid"] { --dot: var(--bed); }
 .vol-list li[data-kind="cut_solid"] { --dot: var(--force); }
 
+/* strength vs. temperature (Optional simulations) */
+.temp-chart svg { width: 100%; max-width: 420px; height: auto; display: block; }
+.temp-chart .curve { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+.temp-chart .grid { stroke: var(--line); }
+.temp-chart .cold { fill: var(--fixed); opacity: 0.1; }
+.temp-chart .soft { fill: var(--bad-soft); }
+.temp-chart .now { stroke: var(--text); stroke-dasharray: 3 3; fill: var(--text); }
+.temp-chart circle.now { stroke: none; }
+.temp-chart text { font-size: 10px; fill: var(--muted); }
+.temp-chart .zone { font-style: italic; }
+.temp-chart .label { font-size: 11px; fill: var(--text); font-weight: 600; }
+#temp-card input[type=number] { width: 5em; }
+
 /* what's selected in Tolerances & tuning */
 .fit-selected { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line);
   border-radius: var(--r); background: var(--soft); font-size: 14px; position: sticky; top: 0; z-index: 1; }
