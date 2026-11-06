@@ -230,7 +230,7 @@ then simulations and UI, then the bigger extras (topology optimisation).
 
 ### Extras
 
-- [ ] **T-290 P3** Infill optimisation from the strength result: dense infill / more walls only where the stress is (modifier volumes in the 3MF, like the zones), light infill elsewhere; show the weight and time saved and check the safety again. Builds on T-277. · files: `core/fdmcore/api.py`, `core/fdmcore/export3mf.py` · owner: —
+- [ ] **T-290 P3** Infill optimisation from the strength result: dense infill / more walls only where the stress is (modifier volumes in the 3MF, like the zones), light infill elsewhere; show the weight and time saved and check the safety again. Builds on T-277. · files: `core/fdmcore/api.py`, `core/fdmcore/export3mf.py` · owner: Claude (`task/T-290-infill-time`)
 - [ ] **T-291 P3** Real topology optimisation (opt-in, only when the design can change): SIMP on the voxel strength grid (numpy / scipy only, coarse grid, capped threads), keeps loads, held faces and keep-clear boxes; result shown as a suggested lighter shape and as an STL to rebuild in CAD. Time estimate first; first a research note on what runs in the browser in reasonable time. · files: new `core/fdmcore/topopt.py` (+ `make_manifest.py`), `web/app.js` · owner: —
 
 ## Done
