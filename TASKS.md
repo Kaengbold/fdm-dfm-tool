@@ -222,7 +222,7 @@ then simulations and UI, then the bigger extras (topology optimisation).
 ### Simulations
 
 - [ ] **T-285 P2** Heat simulation (electronics box, T-242) visible in 3D: colours on the part for how warm each wall gets, and the user places the heat source (click a spot inside the box) instead of assuming it's in the middle. · files: `core/fdmcore/api.py` (`box_heat`), `web/app.js`, `web/viewer.js` · owner: —
-- [ ] **T-286 P2** Surroundings temperature: pick where the part lives (winter outside −20 °C, room 23 °C, hot day 35 °C, car in the sun 70 °C, or a number) and re-run the strength with it. At the top of Optional simulations a small line / chart "strength vs. temperature" for the chosen material so it's clear how much a hot day costs; mark where it goes soft. · files: `core/fdmcore/service.py` (`heat_factor`), `core/fdmcore/api.py`, `web/app.js` · owner: —
+- [ ] **T-286 P2** Surroundings temperature: pick where the part lives (winter outside −20 °C, room 23 °C, hot day 35 °C, car in the sun 70 °C, or a number) and re-run the strength with it. At the top of Optional simulations a small line / chart "strength vs. temperature" for the chosen material so it's clear how much a hot day costs; mark where it goes soft. · files: `core/fdmcore/service.py` (`heat_factor`), `core/fdmcore/api.py`, `web/app.js` · owner: Claude (`task/T-286-surroundings-temp`)
 
 ### UI
 
