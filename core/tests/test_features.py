@@ -237,7 +237,8 @@ def test_thicker_weak_spot_helps():
 
 def test_chamfers_at_every_weak_corner():
     """Two equal posts pushed sideways are equally weak at their roots. A chamfer at only the worst one
-    just moves the weak spot to the other post (2.07 -> 2.04); both together help (-> 2.85)."""
+    just moves the weak spot to the other post (2.07 -> 2.04); both together help (chamfers -> 2.85,
+    the rounds these upright corners now get -> 2.58)."""
     manifold3d = pytest.importorskip("manifold3d")
     from fdmcore.booleans import apply_edits
     from fdmcore.mesh import to_binary_stl
@@ -259,7 +260,7 @@ def test_chamfers_at_every_weak_corner():
     pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
     assert "2 inside corners" in edit["title"] and pts[:, 0].min() < 10 and pts[:, 0].max() > 50  # both posts
     after = check(to_binary_stl(apply_edits(api._require().mesh, [edit])))
-    assert after > 1.25 * before
+    assert after > 1.2 * before
 def test_loose_pieces_after_edits_are_dropped():
     # An addition that ends up apart from the part (two changes meeting at a corner, a taper cut
     # short) would print as a loose crumb; one that overlaps the part joins it.
