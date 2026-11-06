@@ -1534,9 +1534,13 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             + "Adds 1.5 mm of plastic all round the weak spot, tapering out either side (size under Design changes). "
             "Test it to see how much it helps.", "changes the shape", edit="thicken-weak")
 
-    # Other materials: stresses don't depend on stiffness here, only the strengths change.
+    # Other materials: stresses don't depend on stiffness here, only the strengths change. Fibre filled
+    # ones (PLA-CF, PA-CF…) are never "stronger": the fibres make it stiffer, but more brittle and weaker
+    # between the layers than the plain plastic (rules.yaml fibre_filled).
+    from .profile import fibre
+
     for mid, m in presets()["materials"].items():
-        if mid == p.material_id or mid.startswith("tpu") or m.get("based_on", "").startswith("tpu"):
+        if mid == p.material_id or mid.startswith("tpu") or m.get("based_on", "").startswith("tpu") or fibre(m):
             continue
         other = Profile.from_dict({**(profile or {}), "material": mid})
         sf = _scaled_safety(base, p, other)
@@ -1587,6 +1591,7 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
     the reasons — heat where it's used (profile ``use_temp_c``), sunlight (``outdoors``), a flexible
     part, what this printer can print (enclosure, hardened nozzle), and with ``up`` and ``loads``
     the safety factor for the load. Best first."""
+    from .profile import fibre
     from .service import heat_factor, heat_limit, required_safety
     from .strength import verdict
 
@@ -1626,6 +1631,8 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
             care.append("may warp on an open printer")
         if m["hygroscopic"] == "high":
             care.append("keep the filament dry")
+        if fibre(m):
+            care.append(f"{fibre(m)} fibre: stiffer, not stronger: more brittle and weaker between the layers")
         sf = None
         if base is not None:
             sf = float(_scaled_safety(base, p, other))
