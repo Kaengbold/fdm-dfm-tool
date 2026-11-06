@@ -69,6 +69,15 @@ This is the supported way to use a Claude, ChatGPT or Gemini *subscription* with
 the official client (Claude Code, Codex, Gemini CLI) runs the model, our MCP server only
 provides the tools. The web app itself never uses subscription logins.
 
+No MCP? The same engine as a command line (JSON out, errors as one line on stderr):
+
+```sh
+fdmdfm check part.stl --material petg          # findings + settings, best orientation
+fdmdfm faces part.stl                          # face ids for loads
+fdmdfm strength part.stl --loads loads.json    # safety factor
+fdmdfm export part.stl -o part.3mf             # 3MF for your slicer
+```
+
 Then ask e.g. *"Load ~/parts/bracket.stl, find the best orientation for PETG on my P1S,
 check it holds 5 kg on the top face, apply sensible design fixes and export a 3MF."*
 

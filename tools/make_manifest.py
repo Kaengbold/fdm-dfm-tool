@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parents[1] / "core" / "fdmcore"
-LOCAL_ONLY = {"mcp_server.py", "booleans.py", "slicer_cli.py"}  # need packages Pyodide doesn't have, or run programs
+LOCAL_ONLY = {"mcp_server.py", "booleans.py", "slicer_cli.py", "cli.py"}  # need packages Pyodide doesn't have, or run programs
 
 if __name__ == "__main__":
     files = sorted(
