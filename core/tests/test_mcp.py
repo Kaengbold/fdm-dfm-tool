@@ -47,3 +47,46 @@ def test_orcaslicer_profiles_and_gcode_stats():
         pytest.skip("OrcaSlicer not installed")
     m = match_profiles(orca.parent / "resources" / "profiles", "Bambu Lab P1S", "0.4", "petg", 0.2)
     assert m["machine"].stem == "Bambu Lab P1S 0.4 nozzle" and "PETG" in m["filament"].stem
+
+
+def test_every_api_method_has_a_tool():
+    """Agents can do everything the web app does: a new api.METHODS entry needs a tool in API_TOOLS."""
+    import asyncio
+
+    from fdmcore import api
+
+    tools = {t.name for t in asyncio.run(m.server.list_tools())}
+    assert set(api.METHODS) - set(m.API_TOOLS) == set(), "add a tool and an API_TOOLS entry"
+    assert set(m.API_TOOLS) - set(api.METHODS) == set()
+    assert set(m.API_TOOLS.values()) - tools == set()
+
+
+def test_more_tools(tmp_path):
+    m.load_part(str(SAMPLES / "l_bracket.stl"))
+    up = [0.0, 0.0, 1.0]
+    assert m.check_orientation(up)["up"] == pytest.approx(up)
+    assert "lift_ratio" in m.check_warping(up, material="abs")
+    assert len(m.compare_nozzles(up)) >= 2
+    assert m.heat_curve("petg", 70)["temps_c"]
+    assert m.box_heat(3.0)["verdict"] in {"fine", "warm", "too hot"}
+    cal = m.calibration_part("fit", str(tmp_path / "fit.stl"))
+    assert (tmp_path / "fit.stl").stat().st_size > 0 and "peg" in cal["how"]
+    assert m.expert_settings()["sections"]
+
+    faces = sorted((f for f in m.list_faces() if f["kind"] == "flat"), key=lambda f: -f["area_mm2"])
+    held, pushed = faces[0], next(f for f in faces[1:] if abs(f["normal"][2]) < 0.5)
+    loads = [{"region": held["id"], "kind": "fixed"}, {"region": pushed["id"], "kind": "force", "kg": 2}]
+    zone = m.add_zone(up, region=pushed["id"])
+    base = m.check_strength(up, loads, zones=[zone])["safety_factor"]
+    same = m.strength_variant(up, loads, str(SAMPLES / "l_bracket.stl"), zones=[zone])
+    assert same["safety_factor"] == pytest.approx(base, rel=0.05) and abs(same["added_g"]) < 0.5
+
+    box = m.place_box(up, "add_solid", region=pushed["id"])
+    before = m.load_part(str(SAMPLES / "l_bracket.stl"))["volume_mm3"]
+    grown = m.apply_blocks(up, [box], str(tmp_path / "grown.stl"))
+    assert grown["volume_mm3"] > before
+    keep = m.place_box(up, "keep_clear", region=pushed["id"])
+    assert "edits" in m.suggest_design_changes(up, keep_clear=[keep])
+
+    snapped = m.snap_model(str(tmp_path / "fit.stl"), pushed["centroid"], pushed["normal"], str(tmp_path / "joined.stl"))
+    assert snapped["volume_mm3"] > grown["volume_mm3"] and snapped["placed"]
