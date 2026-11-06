@@ -529,18 +529,24 @@ def test_small_or_deep_text_on_an_upright_face():
     assert not found([wall, *letters(6, 12, 0.6)])  # 6 mm tall: fine
 
 
-def test_thick_blocks_skip_pieces_too_thin_to_shrink():
-    """A layer 2–6 mm thick shrunk by 8 mm vanishes; the older GEOS in Pyodide threw "depth mismatch"
-    on exactly this buffer and killed the engine (T-268: L-bracket, teardrops, a block added). Such
-    pieces are now dropped before any buffer; thick pieces still count."""
-    from shapely.geometry import MultiPolygon, Polygon, box
+def test_thick_blocks_without_a_buffer():
+    """Shrinking a layer by 8 mm with a buffer killed the engine in the browser ("depth mismatch" in
+    Pyodide's older GEOS) on an L-shaped layer 2–6 mm thick and on a rounded square (T-268). The thick
+    core is now found on a grid with distances only, and matches the buffer's answer."""
+    from shapely.geometry import MultiPolygon, Point, Polygon, box
 
-    from fdmcore.checks import _wide_parts
+    from fdmcore.checks import _thick_core
 
     layer = MultiPolygon([
         Polygon([(10.4777, 21.5), (10.4777, 16.5), (-23.5, 16.5), (-23.5, -3.6592), (-25.5, -3.6592), (-25.5, -9.3566),
                  (-23.5, -9.3566), (-23.5, -18.5), (-25.5, -18.5), (-25.5, -21.5), (-31.5, -21.5), (-31.5, 21.5)]),
         Polygon([(31.5, 21.5), (31.5, 16.5), (12.5223, 16.5), (12.5223, 21.5)])])
-    assert _wide_parts(layer, 8.0).is_empty
-    block = box(0, 0, 40, 40)
-    assert _wide_parts(MultiPolygon([block, box(50, 0, 90, 3)]), 8.0).equals(block)
+    assert _thick_core(layer, 8.0) == (0.0, None)
+    # Exact openings: a 40 mm square loses its corners to 8 mm rounds; a thin strip on it vanishes; a disc stays.
+    square = 40 * 40 - (4 - np.pi) * 8 ** 2
+    for shape, exact, where in ((box(0, 0, 40, 40), square, (0, 0, 40, 40)),
+                                (box(0, 0, 40, 40).union(box(40, 0, 90, 3)), square, (0, 0, 40, 40)),
+                                (Point(0, 0).buffer(11, quad_segs=16), np.pi * 11 ** 2, (-11, -11, 11, 11))):
+        area, bounds = _thick_core(shape, 8.0)
+        assert area == pytest.approx(exact, rel=0.1)
+        assert bounds == pytest.approx(where, abs=1.0)

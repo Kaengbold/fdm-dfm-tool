@@ -349,22 +349,31 @@ def _opening(g, r: float):
     return b.buffer(r * 1.05, quad_segs=QUAD)
 
 
-def _wide_parts(g, r: float):
-    """The pieces of ``g`` that a circle of radius ``r`` fits into, found without a buffer: shrinking a
-    piece by far more than it is thick (it vanishes) can make the older GEOS in Pyodide throw "depth
-    mismatch", which kills the engine (T-268: an L-shaped layer 2–6 mm thick, shrunk by 8 mm). The
-    pole of inaccessibility only measures distances, so it can't."""
-    from shapely.ops import polylabel
-
-    keep = []
-    for piece in shapely.get_parts(g):
-        x0, y0, x1, y1 = piece.bounds
-        if min(x1 - x0, y1 - y0) < 2 * r:
-            continue
-        tol = 0.05 * r
-        if piece.boundary.distance(polylabel(piece, tol)) >= r - tol:
-            keep.append(piece)
-    return MultiPolygon(keep) if len(keep) != 1 else keep[0]
+def _thick_core(g, r: float, cells: float = 4.0) -> tuple[float, tuple | None]:
+    """Area and bounds of the part of ``g`` thicker than 2r all round (its morphological opening), on
+    a grid of r / ``cells`` — without a buffer. Pyodide's GEOS 3.12 throws "depth mismatch" on large
+    shrinking buffers of some plain outlines (T-268: an L-shaped layer 2–6 mm thick, a rounded square
+    22 mm wide, both shrunk by 8 mm), which kills the engine; no buffer setting avoided it for both.
+    Point-in-polygon tests and distances can't throw that. Bounds None: nothing that thick."""
+    h = r / cells
+    x0, y0, x1, y1 = g.bounds
+    X, Y = np.meshgrid(np.arange(x0 + h / 2, x1, h), np.arange(y0 + h / 2, y1, h))
+    inside = shapely.contains_xy(g, X, Y)
+    deep = np.zeros_like(inside)
+    deep[inside] = shapely.distance(g.boundary, shapely.points(X[inside], Y[inside])) >= r
+    if not deep.any():
+        return 0.0, None
+    # Grow the deep cells back by r (a disc of cells): together they are the opening.
+    k = int(np.ceil(cells))
+    padded = np.pad(deep, k)
+    opened = np.zeros_like(deep)
+    for dy in range(-k, k + 1):
+        for dx in range(-k, k + 1):
+            if dx * dx + dy * dy <= cells * cells:
+                opened |= padded[k + dy:k + dy + deep.shape[0], k + dx:k + dx + deep.shape[1]]
+    opened &= inside
+    xs, ys = X[opened], Y[opened]
+    return float(opened.sum() * h * h), (xs.min() - h / 2, ys.min() - h / 2, xs.max() + h / 2, ys.max() + h / 2)
 
 
 def _closing(g, r: float):
@@ -1102,15 +1111,13 @@ def _thick_blocks(layers: list[Layer], profile: Profile, X: dict) -> list[dict]:
         if min(x1 - x0, y1 - y0) < 2 * r:
             continue
         if cached is not None and g.equals_exact(cached[0], 1e-4):
-            core = cached[1]
+            area, b = cached[1]
         else:
-            wide = _wide_parts(g, r)
-            core = Polygon() if wide.is_empty else _opening(wide, r)
-        cached = (g, core)
-        if core.is_empty:
+            area, b = _thick_core(g, r)
+        cached = (g, (area, b))
+        if b is None:
             continue
-        thick += core.area * layer.dz
-        b = core.bounds
+        thick += area * layer.dz
         box = b + (layer.z, layer.z) if box is None else (min(box[0], b[0]), min(box[1], b[1]), max(box[2], b[2]), max(box[3], b[3]), box[4], layer.z)
     if box is None or thick / 1000 < X["thick_min_cm3"] or thick < X["thick_min_share"] * total:
         return []
