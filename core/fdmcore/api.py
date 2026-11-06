@@ -1545,10 +1545,11 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
         spot = np.asarray(s.weak_spot[0])
         edges = concave_edges(s.mesh)
         if edges and min(np.linalg.norm((e["a"] + e["b"]) / 2 - spot) for e in edges) <= 8 * s.weak_spot[1]:
-            add("Add 45° chamfers at the weak inside corners (design change)", "design", None,
-                "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. Every inside corner "
-                "that is nearly as weak gets one too, so the weak spot doesn't just move to the next corner. On a test "
-                "part 2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
+            add("Round off the weak inside corners (design change)", "design", None,
+                "The most stress sits at a sharp inside corner; a 2–4 mm round spreads it out (a 45° chamfer where a "
+                "round would hang over in this orientation). Every inside corner that is nearly as weak gets one too, "
+                "so the weak spot doesn't just move to the next corner. On a test part a 2 mm chamfer gave about +15 %, "
+                "4 mm about +40 %. Preview it under Design changes, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
