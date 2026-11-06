@@ -330,6 +330,8 @@ summary::marker { color: var(--accent); }
 .zone-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; align-self: stretch; font-size: 14px; }
 .zone-list li { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; }
 .zone-list input { width: 4.5em; }
+.zone-suggest { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.zone-suggest p { margin: 0; }
 #cooling-summary { font-size: 14px; }
 #cooling-summary b { font-weight: 700; }
 #nozzle-table { width: 100%; border-collapse: collapse; font-size: 13px; }

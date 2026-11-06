@@ -1381,9 +1381,31 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     n = np.cross(tri[1] - tri[0], tri[2] - tri[0])
     r["weak_marker"] = {"point": _to_print_frame(s.mesh, rot, tri.mean(axis=0)), "normal": (rot @ (n / max(np.linalg.norm(n), 1e-12))).tolist()}
     r.update(walls=sh.walls, infill=sh.infill, top=sh.top, bottom=sh.bottom, material=p.material["name"])
-    s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
+    r["stress_zones"] = _stress_zones(model, fi, worst.ignore, up, sh, s.mesh, p)
+    s.weak_spot =(r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
+
+
+def _stress_zones(model, fi: np.ndarray, ignore: np.ndarray, up, sh, mesh: Mesh, p: Profile) -> list[dict]:
+    """"Stronger in one area" zones where this result's stress is high, instead of the user's guess:
+    the optimiser's boxes round the most stressed cubes, printed like a picked zone (two more walls,
+    at least 40 % infill) and never weaker than the rest of the part."""
+    from .strength import find_zones
+
+    boxes = find_zones(model, fi, ignore, up, sh.walls + 2, max(0.4, sh.infill))
+    return [{**_zone_info(z, mesh, up, p.printer["bed"]), "share_pct": round(share * 100)}
+            for z, share in zip(boxes, _zone_shares(model, fi, ignore, up, boxes))]
+
+
+def _zone_shares(model, fi: np.ndarray, ignore: np.ndarray, up, boxes: list) -> list[float]:
+    """How hard the plastic in each zone works at its peak, as a share of the worst spot: tells the
+    user which zone matters most."""
+    worst = fi[~ignore].max(initial=0)
+    if worst <= 0:
+        return [0.0] * len(boxes)
+    c = model.grid.centers(model.elems)
+    return [float(fi[(z.gap(c @ rotation_to_z(up).T) <= 1e-9) & ~ignore].max(initial=0) / worst) for z in boxes]
 
 
 def dynamics(up, loads: list[dict], profile: dict | None = None, drop_mm: float = 0.0, mounted_kg: float = 0.0, shake: bool = True,
