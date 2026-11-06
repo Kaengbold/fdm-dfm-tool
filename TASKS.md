@@ -100,7 +100,7 @@ tool through the MCP server or the command line and gets reports, charts and pic
 - [ ] **T-262 P2** Pictures without a browser: the engine renders PNG images of the part (numpy software renderer, no new dependency): on the bed, problem close-ups, overhang map, stress colours with load arrows, warp shape, before / after a design change. MCP `render_image` returns the file path (and the image). · owner: —
 - [ ] **T-263 P2** Charts as SVG from the engine: safety factor per orientation, print time / weight per nozzle and setting, warping per corner, settings sweeps. Same colours as the app. · owner: —
 - [ ] **T-264 P2** Reports for agents: the human report (T-253) built by the engine as one HTML file and as Markdown (pictures from T-262, charts from T-263), written to a path the agent chooses. · owner: —
-- [ ] **T-265 P2** Command line `fdmdfm` for agents and scripts without MCP: `check`, `orient`, `strength`, `report`, `render`, `export`, JSON out; one part per call or a saved project file. · owner: —
+- [ ] **T-265 P2** Command line `fdmdfm` for agents and scripts without MCP: `check`, `orient`, `strength`, `report`, `render`, `export`, JSON out; one part per call or a saved project file. · owner: Claude (`task/T-265-cli`)
 - [ ] **T-266 P2** Project files shared with the web app: the agent saves part + orientation + loads + zones + design changes + settings; the web app opens it (and saves the same format), so the user sees in 3D what the agent did. · owner: —
 - [ ] **T-267 P2** Agent guide: a Claude Code skill and an `AGENTS.md` snippet for Codex with the usual flow, units, what the numbers mean and how to explain them in plain language; setup steps in README. · owner: —
 
