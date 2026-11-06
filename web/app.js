@@ -139,10 +139,17 @@ const profile = () => ({
   nozzle: $("nozzle").value,
   multi_material: $("multi-material").checked,
   goal: document.querySelector("input[name=goal]:checked").value,
-  use_temp_c: $("use-temp").value === "" ? null : Number($("use-temp").value),
+  use_temp_c: useTemp(),
   constant_load: $("constant-load").checked,
 });
 const mode = () => document.querySelector("input[name=mode]:checked").value;
+
+/** Where the part is used (°C), or null for room temperature: a choice from the list or the user's own number. */
+function useTemp() {
+  const v = $("use-temp").value;
+  if (v === "custom") return Number.isFinite(parseFloat($("use-temp-c").value)) ? parseFloat($("use-temp-c").value) : null;
+  return v === "" ? null : Number(v);
+}
 const activeOption = () => state.options[state.active];
 
 function setStatus(text, isError = false) {
@@ -1134,7 +1141,7 @@ $("run-box-heat").onclick = () =>
     // The walls sit at about the inside temperature: let the other checks use it as "where it's used".
     const use = el("button", { textContent: `Check the part at ${t} °C`, onclick: async () => {
       let opt = [...$("use-temp").options].find((o) => o.value === String(t));
-      if (!opt) $("use-temp").append((opt = el("option", { value: String(t), textContent: `Inside the electronics box (${t} °C)` })));
+      if (!opt) $("use-temp").querySelector("[value=custom]").before((opt = el("option", { value: String(t), textContent: `Inside the electronics box (${t} °C)` })));
       $("use-temp").value = opt.value;
       await $("use-temp").onchange();
       setStatus(`The checks now use ${t} °C, the air inside the box.`);
@@ -1474,8 +1481,10 @@ $("run-advice").onclick = () =>
   });
 
 // Where the part is used changes the checks (too hot?) and the strength (weaker when warm, more margin for loads that stay on).
-for (const id of ["use-temp", "constant-load"]) {
+for (const id of ["use-temp", "use-temp-c", "constant-load"]) {
   $(id).onchange = async () => {
+    $("use-temp-own").hidden = $("use-temp").value !== "custom";
+    renderTempCurve();
     if (!activeOption()) return;
     await runCheck();
     if (state.strength) await runStrength();
@@ -1512,6 +1521,71 @@ function shapePicker(value, onchange) {
   pick.value = value ?? "box";
   pick.onchange = () => onchange(pick.value);
   return el("label", {}, "Shape ", pick);
+}
+
+// ---------- strength vs. temperature (top of Optional simulations) ----------
+const ROOM_C = 23; // service.ROOM_C: "Indoors" in the list
+
+/** Pick a temperature: the matching choice in "Where is it used?", else "Another temperature…". */
+async function setUseTemp(t) {
+  const match = t === ROOM_C ? "" : [...$("use-temp").options].find((o) => o.value !== "custom" && o.value !== "" && Number(o.value) === t)?.value;
+  if (match !== undefined) $("use-temp").value = match;
+  else {
+    $("use-temp").value = "custom";
+    $("use-temp-c").value = String(t);
+  }
+  await $("use-temp").onchange();
+}
+
+$("sim-temp-use").onclick = async () => {
+  const t = parseFloat($("sim-temp").value);
+  if (!Number.isFinite(t)) return setStatus("Type the temperature it's used at, in °C.");
+  await setUseTemp(t);
+  setStatus(activeOption() ? `Checked again at ${t} °C.` : `The checks will use ${t} °C.`);
+};
+
+/** The material's strength from a winter's day to past its heat limit, with where it's used marked. */
+async function renderTempCurve() {
+  if (!state.presets) return;
+  const c = await call("heat_curve", { profile: profile() });
+  if (document.activeElement !== $("sim-temp")) $("sim-temp").value = String(c.use_temp_c);
+  $("temp-story").textContent = c.explanation;
+  $("temp-chart").replaceChildren(tempChart(c));
+}
+
+function tempChart(c) {
+  const W = 320, H = 150, L = 34, R = 10, T = 10, B = 26;
+  const t0 = c.temps_c[0], t1 = c.temps_c.at(-1);
+  const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
+  const y = (pct) => T + (1 - pct / 100) * (H - T - B);
+  const svg = (tag, attrs, text) => {
+    const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text) e.textContent = text;
+    return e;
+  };
+  const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Strength of ${c.material} from ${t0} to ${t1} °C` });
+  chart.append(
+    svg("rect", { class: "cold", x: x(t0), y: T, width: x(c.cold_c) - x(t0), height: H - T - B }),
+    svg("rect", { class: "soft", x: x(c.soft_c), y: T, width: x(t1) - x(c.soft_c), height: H - T - B }),
+    svg("text", { class: "zone", x: x(t0) + 3, y: H - B - 4 }, "brittle"),
+    svg("text", { class: "zone", x: x(c.soft_c) + 3, y: T + 11 }, "soft"));
+  for (const pct of [0, 50, 100]) {
+    chart.append(svg("line", { class: "grid", x1: L, x2: W - R, y1: y(pct), y2: y(pct) }),
+      svg("text", { class: "tick", x: L - 4, y: y(pct) + 4, "text-anchor": "end" }, `${pct} %`));
+  }
+  for (let t = Math.ceil(t0 / 20) * 20; t <= t1; t += 20) {
+    chart.append(svg("text", { class: "tick", x: x(t), y: H - B + 14, "text-anchor": "middle" }, `${t}`));
+  }
+  chart.append(svg("text", { class: "tick", x: L - 11, y: H - B + 14, "text-anchor": "end" }, "°C"));
+  chart.append(svg("polyline", { class: "curve", points: c.temps_c.map((t, i) => `${x(t).toFixed(1)},${y(c.share_pct[i]).toFixed(1)}`).join(" ") }));
+  const at = Math.min(Math.max(c.use_temp_c, t0), t1);
+  const right = x(at) > W / 2;
+  chart.append(svg("line", { class: "now", x1: x(at), x2: x(at), y1: T, y2: H - B }),
+    svg("circle", { class: "now", cx: x(at), cy: y(c.share_at_pct), r: 4 }),
+    svg("text", { class: "label", x: x(at) + (right ? -6 : 6), y: Math.min(Math.max(y(c.share_at_pct) + (c.share_at_pct > 50 ? 16 : -8), T + 24), H - B - 16),
+      "text-anchor": right ? "end" : "start" }, `${Math.round(c.share_at_pct)} % at ${Math.round(c.use_temp_c)} °C`));
+  return chart;
 }
 
 // ---------- stronger in one area (zones the user picks) ----------
@@ -2393,6 +2467,7 @@ async function applyMine(mine, select = {}) {
   viewer.setBed(p.printers[$("printer").value].bed);
   syncMultiMaterial();
   renderMine(mine);
+  renderTempCurve();
 }
 
 // ---------- my printers & materials ----------
@@ -2570,6 +2645,7 @@ for (const id of ["printer", "material", "nozzle", "multi-material"]) {
     viewer.setBed(state.presets.printers[$("printer").value].bed);
     syncMultiMaterial();
     $("nozzle-block").open = false; // comparison belongs to the old setup
+    if (id === "material") renderTempCurve();
     if (state.triangles) findOrientations();
   };
 }

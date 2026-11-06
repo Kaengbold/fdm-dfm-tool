@@ -1650,6 +1650,39 @@ def _outer_area_mm2(mesh: Mesh) -> float:
     return float(best)
 
 
+COLD_C = 0.0  # below this, printed plastic gets brittle: knocks break it more easily
+
+
+def heat_curve(profile: dict | None = None, use_temp_c: float | None = None) -> dict:
+    """How much of its strength the material keeps from a winter's day to past its heat limit
+    (service.heat_factor), for the "strength vs. temperature" chart; ``use_temp_c`` (default the
+    profile's) is marked on it. No part needed: it depends only on the material."""
+    from dataclasses import replace
+
+    from .service import ROOM_C, heat_factor, heat_limit
+
+    p = Profile.from_dict(profile)
+    t = p.use_temp_c if use_temp_c is None else float(use_temp_c)
+    limit = heat_limit(p)
+    top = max(limit + 20.0, 100.0)
+    temps = np.unique(np.r_[np.arange(-20.0, top + 0.1, 5.0), ROOM_C, limit, p.material["softening_c"]])
+    shares = [heat_factor(replace(p, use_temp_c=float(c))) for c in temps]
+    at = t if t is not None else ROOM_C
+    k = heat_factor(replace(p, use_temp_c=at))
+    name = p.material["name"]
+    if at < COLD_C:
+        story = (f"At {at:.0f} °C {name} is about as strong as at room temperature, but more brittle: a knock or a drop breaks it more easily.")
+    elif k > 0.999:
+        story = f"At {at:.0f} °C {name} keeps its full strength."
+    elif at >= limit:
+        story = f"At {at:.0f} °C {name} is past the point where it goes soft (about {limit:.0f} °C): only about {k:.0%} of its strength is left."
+    else:
+        story = f"At {at:.0f} °C {name} keeps about {k:.0%} of its strength. It goes soft at about {limit:.0f} °C."
+    return {"material": name, "temps_c": temps.round(1).tolist(), "share_pct": [round(x * 100, 1) for x in shares],
+            "room_c": ROOM_C, "softening_c": float(p.material["softening_c"]), "soft_c": float(limit), "cold_c": COLD_C,
+            "use_temp_c": at, "share_at_pct": round(k * 100, 1), "explanation": story}
+
+
 def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", profile: dict | None = None) -> dict:
     """Air temperature inside the part used as a box for electronics that use ``power_w`` watts, with
     the room at ``ambient_c``: the heat leaves through the outside surface (``BOX_HEAT_U`` for a
@@ -2178,6 +2211,7 @@ METHODS = {
     "volume_solid": volume_solid,
     "snap_model": snap_model,
     "material_advice": material_advice,
+    "heat_curve": heat_curve,
     "dynamics": dynamics,
     "select_body": select_body,
     "scale": scale,

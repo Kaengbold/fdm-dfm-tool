@@ -428,6 +428,23 @@ def main():
             return text.splitlines()[1][:140]
         run.step("used in a hot car", hot_car)
 
+        def temperature_chart():
+            page.evaluate("() => fdm.steps.go('sims')")
+            chart = page.locator("#temp-chart svg")
+            assert chart.locator("polyline").count() == 1, "no strength vs. temperature curve"
+            assert "at 23 °C" in chart.text_content(), chart.text_content()
+            page.fill("#sim-temp", "50")
+            run.act(lambda: page.click("#sim-temp-use"), 300_000)
+            assert page.input_value("#use-temp") == "custom" and page.input_value("#use-temp-c") == "50"
+            page.wait_for_function("() => document.querySelector('#temp-chart svg')?.textContent.includes('at 50 °C')")
+            text = page.locator("#strength-result").inner_text()
+            assert "50 °C" in text, text[:300]
+            story = page.locator("#temp-story").inner_text()
+            run.act(lambda: page.select_option("#use-temp", ""), 300_000)
+            assert page.locator("#use-temp-own").is_hidden()
+            return story
+        run.step("strength vs. temperature", temperature_chart)
+
         def material_advisor():
             page.locator("#advice > summary").click()
             page.check("#adv-outdoors")
