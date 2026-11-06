@@ -283,7 +283,15 @@ def main():
             note = page.locator("#fits li", has_text="Ø8.0 mm hole").locator(".fit p").inner_text()
             edits = page.locator("#edits label").all_inner_texts()
             assert any("sliding fit" in e for e in edits), edits
-            return note[:110]
+            # The sized hole is the selection: its row marked, a line saying so, its faces coloured.
+            assert "picked" in (page.locator("#fits li", has_text="Ø8.0 mm hole").get_attribute("class") or ""), "sized hole not marked"
+            selected = page.locator("#fit-selected").inner_text()
+            assert "Selected:" in selected and "Ø8.0 mm hole, sliding / turning fit for Ø8 mm" in selected, selected
+            page.locator("#fit-selected").get_by_role("button", name="Clear").click()
+            assert "Nothing selected" in page.locator("#fit-selected").inner_text()
+            assert page.locator("#fits li.picked").count() == 0, "row still marked after Clear"
+            return f"{note[:90]} | {selected.splitlines()[-1][:60]}"
+
         run.step("what fits in a hole", fit_a_hole)
 
         def flat_gap():
@@ -306,7 +314,9 @@ def main():
             page.mouse.click(x, y)  # measuring isn't a busy job: wait for the list instead
             page.wait_for_selector("#gaps li", timeout=60_000)
             row = page.locator("#gaps li").first
-            label = row.locator("strong").inner_text()
+            label = row.locator("button.link").first.inner_text()
+            assert "picked" in (row.get_attribute("class") or ""), "picked gap not selected"
+            assert page.evaluate("() => fdm.state.fitSel?.regions.length") == 2, "both faces of the gap should light up"
             value = float(row.locator("input").input_value())
             row.locator("input").fill(f"{value - 0.5:.1f}" if label.startswith("Slot") else f"{value + 0.5:.1f}")
             run.act(lambda: row.get_by_role("button", name="Size it").click())

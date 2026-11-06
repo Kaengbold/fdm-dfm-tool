@@ -226,7 +226,7 @@ then simulations and UI, then the bigger extras (topology optimisation).
 
 ### UI
 
-- [ ] **T-287 P2** Tolerances & tuning: make it obvious what is selected — the picked surfaces in a clear colour in 3D, the matching row in the list highlighted, a short line "Selected: hole Ø8, bearing fit", and a way to clear it. · files: `web/app.js`, `web/style.css` · owner: Claude (`task/T-287-fit-selection`)
+- [x] **T-287 P2** Tolerances & tuning: make it obvious what is selected — the picked surfaces in a clear colour in 3D, the matching row in the list highlighted, a short line "Selected: hole Ø8, bearing fit", and a way to clear it. · files: `web/app.js`, `web/style.css` · owner: Claude (`task/T-287-fit-selection`) — one selection for the whole step (`state.fitSel`): a hole, post or slot / tab picked in the lists or clicked on the part lights up in yellow (`REGION_COLORS.fit`, both faces of a slot), its row is marked, and a sticky line at the top says "Selected: Ø8.0 mm hole, sliding / turning fit for Ø8 mm" (or "not sized yet") with Clear. Sizing or picking selects it. e2e in "what fits in a hole" and "slots and flat gaps".
 
 ### Extras
 
