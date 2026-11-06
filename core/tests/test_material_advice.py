@@ -34,3 +34,23 @@ def test_material_options_include_heat():
     opts = api.strength_options([1, 0, 0], loads, {"material": "pla", "printer": "bambu_x1c", "use_temp_c": 55})
     mats = {o["material"]: o["safety_factor"] for o in opts if o["kind"] == "material"}
     assert "pc" in mats and "pla_plus" not in mats  # PLA+ goes soft just like PLA
+
+
+def test_fibre_filament_is_never_stronger():
+    """Carbon / glass fibre filament is stiffer, not stronger: never offered to make it stronger, even
+    when its numbers say so (a user's PLA-CF copied from PLA with a datasheet's higher XY strength)."""
+    from fdmcore.profile import fibre
+
+    assert fibre({"name": "PLA-CF"}) == "carbon" and fibre({"name": "Bambu PETG GF"}) == "glass"
+    assert fibre({"name": "PLA Basic"}) is None and fibre({"name": "PC (polycarbonate)"}) is None and fibre({"name": "My CF", "fibre": "none"}) is None
+    api.custom_presets(materials={"my_pla_cf": {"based_on": "pla", "name": "PLA-CF", "tensile_xy_mpa": 90}})
+    try:
+        loads = hook_loads()
+        opts = api.strength_options([1, 0, 0], loads, {"material": "pla", "printer": "bambu_x1c"})
+        mats = {o["material"] for o in opts if o["kind"] == "material"}
+        assert "my_pla_cf" not in mats and "pa_cf" not in mats
+        advice = {r["material"]: r for r in api.material_advice(profile={"printer": "bambu_x1c"})}
+        assert any("stiffer, not stronger" in why for why in advice["my_pla_cf"]["reasons"])
+        assert advice["pa_cf"]["rating"] != "good"
+    finally:
+        api.custom_presets()
