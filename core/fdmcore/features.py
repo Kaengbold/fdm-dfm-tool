@@ -13,6 +13,7 @@ then reloads the result. ``pieces`` says how many triangles each closed piece ha
 from __future__ import annotations
 
 import numpy as np
+import shapely
 from shapely.geometry import LineString
 
 from .checks import orient
@@ -110,6 +111,9 @@ CORNER_ARC_STEPS = 8
 OFF_CORNER = 0.01  # mm cutters keep from the part's corner edges
 MAX_FOOT_POINTS = 600  # outline points; more and the slicer's elephant foot compensation is the better tool
 CHAMFER_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot (in analysis voxels) seeds the chamfer
+HOT_SHARE = 0.65  # other inside corners get a chamfer too where the stress is at least this share of the highest
+HOT_REACH_VOXELS = 3  # ... within this many analysis voxels of the corner
+MAX_STRESS_CORNERS = 4
 MAX_FILLET_PIECES = 400
 
 PARAMS = {
@@ -141,9 +145,11 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
 
 
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
-                 weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None) -> list[dict]:
+                 weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None,
+                 hot_spots=None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
-    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner.
+    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner,
+    and at the other inside corners near ``hot_spots`` (points, share of the highest stress).
     ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
     ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
@@ -166,8 +172,8 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     to_part = _to_part(mesh, r)
     edits += _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"])
     edits += _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"])
-    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"])
-    edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"])
+    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots)
+    edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
@@ -451,10 +457,12 @@ def _sweep(rings: list[np.ndarray], closed: bool) -> np.ndarray:
     return t[:, ::-1] if Mesh(t).volume() < 0 else t
 
 
-def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]:
+def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=None) -> list[dict]:
     """45° chamfers along the inside corner nearest the weak spot from the strength check (e.g. where a
     stem meets a plate): sharp inside corners concentrate stress, a chamfer spreads it out. Takes the
-    whole connected corner (all inside edges linked to the ones near the weak spot)."""
+    whole connected corner (all inside edges linked to the ones near the weak spot), and the other
+    inside corners the stress is nearly as high at (``hot_spots``): with only the worst one, the weak
+    spot moves to the next corner and the user needs a strength check per corner."""
     if weak_spot is None:
         return []
     edges = concave_edges(mesh)
@@ -465,31 +473,69 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float) -> list[dict]
     dist = np.linalg.norm(mids - spot, axis=1)
     if dist.min() > max(CHAMFER_REACH_VOXELS * h, size * 2):
         return []  # the weak spot isn't at an inside corner
+    corners = [_connected(edges, [int(np.argmin(dist))])]
+    if hot_spots is not None:
+        heat = _edge_heat(edges, *hot_spots, HOT_REACH_VOXELS * h)
+        left = set(range(len(edges))) - set(corners[0])
+        others = []
+        while left:
+            corner = _connected(edges, [min(left)])
+            left -= set(corner)
+            if heat[corner].max() > 0:
+                others.append((heat[corner].max(), corner))
+        corners += [c for _, c in sorted(others, key=lambda o: -o[0])[:MAX_STRESS_CORNERS - 1]]
     pieces = []
-    for k in _connected(edges, [int(np.argmin(dist))])[:MAX_FILLET_PIECES]:
+    for k in [k for c in corners for k in c][:MAX_FILLET_PIECES]:
         e = edges[k]
         mid = (e["a"] + e["b"]) / 2
         half = (e["b"] - e["a"]) / 2
         inset = -(e["n1"] + e["n2"]) * 0.15  # reach a little into the part, so the union joins it
         prof = [mid + inset, mid + e["t1"] * size - e["n1"] * 0.15, mid + e["t2"] * size - e["n2"] * 0.15]
         pieces.append(_prism(prof, half))
-    return [_edit("stress-chamfer", "stress_at_inside_corner", f"{size:.1f} mm 45° chamfer where the part is weakest",
-                  "The strength check found the most stress at this sharp inside corner. A 45° chamfer spreads the load "
-                  "over more material, often the cheapest way to make a part much stronger (a chamfer prints cleanly where a round fillet would be an overhang).",
+    if len(corners) == 1:
+        title = f"{size:.1f} mm 45° chamfer where the part is weakest"
+        found = "The strength check found the most stress at this sharp inside corner. "
+    else:
+        title = f"{size:.1f} mm 45° chamfers at the {len(corners)} inside corners with the most stress"
+        found = ("The strength check found the most stress at these sharp inside corners, each nearly as weak as the "
+                 "worst one: fixing only one would just move the weak spot to the next. ")
+    return [_edit("stress-chamfer", "stress_at_inside_corner", title,
+                  found + "A 45° chamfer spreads the load over more material, often the cheapest way to make a part much "
+                  "stronger (a chamfer prints cleanly where a round fillet would be an overhang).",
                   pieces, op="add", param="stress_chamfer_mm")]
+
+
+def _edge_heat(edges: list[dict], points: np.ndarray, share: np.ndarray, reach: float) -> np.ndarray:
+    """Per inside edge: the highest stress share among ``points`` within ``reach`` of it (0 if none).
+    Distances to the segment, not its middle: a CAD edge can be one long segment."""
+    a = np.array([e["a"] for e in edges])
+    ab = np.array([e["b"] for e in edges]) - a
+    length2 = np.maximum((ab * ab).sum(axis=1), 1e-12)
+    heat = np.zeros(len(edges))
+    for k in range(0, len(points), 200):  # in chunks: edges x points can be millions
+        p, s = points[k:k + 200], share[k:k + 200]
+        t = np.clip(np.einsum("pec,ec->pe", p[:, None] - a[None], ab) / length2, 0, 1)
+        d = np.linalg.norm(p[:, None] - (a[None] + t[..., None] * ab[None]), axis=2)
+        heat = np.maximum(heat, np.where(d <= reach, s[:, None], 0).max(axis=0))
+    return heat
 
 
 THICKEN_REACH_MM = 8.0  # the added plastic tapers out over at least this length either side of the weak spot
 THICKEN_TAPER = 10.0  # ... and at least this × the thickness added, and twice the member's own thickness:
 # a short, steep taper is a new step that takes the stress instead (on a 12 mm bar, 8 mm made it weaker)
 THICKEN_STEP_MM = 0.5  # slab height of the added plastic
+NARROW_SHARE = 1.5  # in the weak stretch, sections up to this × the narrowest one get thicker; bigger ones are the wide ends
 
 
-def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float) -> list[dict]:
-    """Grow the part's cross-section round the weak spot by ``grow`` mm, tapering to nothing either
-    side (see THICKEN_TAPER), so no new sharp step takes the stress instead. The cross-sections
-    are cut across the member the spot is on (its long direction nearby), so an arm gets thicker,
-    not longer."""
+def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=None) -> list[dict]:
+    """Grow the part's cross-section by ``grow`` mm where it is weak, tapering to nothing either side
+    (see THICKEN_TAPER), so no new sharp step takes the stress instead. The cross-sections are cut
+    across the member the spot is on (its long direction nearby), so an arm gets thicker, not longer.
+
+    Only where it is needed: the full thickness runs along the stretch of the member that is nearly as
+    stressed as the weak spot (``hot_spots`` from the strength check), the taper continues that
+    stretch's own shape, and a section that is already bigger than the thickened one (the wide end of
+    a dog-bone) gets nothing. With ``up``, nothing grows below the bed (the part must stay flat on it)."""
     if weak_spot is None:
         return []
     from shapely.geometry import Point
@@ -498,30 +544,51 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float) -> list[dict]:
     from .slicer import parts
 
     spot = np.asarray(weak_spot, float)
-    axis, thickness = _member_axis(mesh, spot, 2.5 * THICKEN_REACH_MM)
-    reach = max(THICKEN_REACH_MM, THICKEN_TAPER * grow, 2 * thickness)
+    axis, thickness, joined = _weak_axis(mesh, spot, hot_spots)
     r = rotation_to_z(axis)
     turned = mesh.triangles @ r.T
     base = turned[..., 2].min()
     s = r @ spot - [0, 0, base]
     top = turned[..., 2].max() - base
+    lo, hi = _weak_stretch(s, r, base, thickness + grow, hot_spots, joined=joined)
     layers = slice_mesh(Mesh(turned - [0, 0, base]), THICKEN_STEP_MM, max_layers=4000)
+    bed = _above_bed(turned - [0, 0, base], r, up)
+
+    def section(layer, within: float):
+        near = [p for p in parts(layer.geom, 0.05) if p.distance(Point(s[:2])) <= within] if not layer.geom.is_empty else []
+        return min(near, key=lambda p: p.distance(Point(s[:2]))) if near else None
+
+    # The narrowest section in the weak stretch is what gets thicker (a neck, not the wide ends it joins).
+    wide = 2 * max(thickness, THICKEN_REACH_MM) + grow
+    stretch = [p for layer in layers if lo - 1e-9 <= layer.z <= hi + 1e-9 for p in [section(layer, wide)] if p is not None]
+    narrow = min(stretch, key=lambda p: p.area) if stretch else None
+    if narrow is not None:
+        x0, y0, x1, y1 = narrow.bounds
+        thickness = min(x1 - x0, y1 - y0)
+    reach = max(THICKEN_REACH_MM, THICKEN_TAPER * grow, 2 * thickness)
     around = Point(s[:2]).buffer(reach + grow, quad_segs=8)
     pieces = []
     for layer in layers:
-        dz = abs(layer.z - s[2])
+        dz = max(lo - layer.z, layer.z - hi, 0.0)
         g = grow * (1 - dz / reach)
         if dz > reach or g < 0.1 or layer.geom.is_empty:
             continue
-        near = [p for p in parts(layer.geom, 0.05) if p.distance(Point(s[:2])) <= reach]
-        if not near:
+        piece = section(layer, max(reach, wide))
+        if piece is None:
             continue
-        piece = min(near, key=lambda p: p.distance(Point(s[:2])))
-        x0, y0, x1, y1 = piece.bounds
-        grown = piece.buffer(g, quad_segs=4)
+        own = dz == 0 and (narrow is None or piece.area <= NARROW_SHARE * narrow.area)
+        shape = piece if own or narrow is None else narrow
+        x0, y0, x1, y1 = shape.bounds
+        grown = shape.buffer(g, quad_segs=4)
+        if not own and piece.area >= grown.area:
+            continue  # already bigger than the thickened neck (a wide end): nothing to add or soften here
         if max(x1 - x0, y1 - y0) > 2 * reach:  # a wide section (a plate): only round the spot
             grown = grown.intersection(around)
+        if bed is not None:
+            grown = shapely.intersection(grown, bed(layer.z), grid_size=1e-4)
         for poly in parts(grown.simplify(0.05), 0.05):
+            if not poly.intersects(piece):  # a bit cut off by the round around the spot: it would float
+                continue
             # Slabs overlap a little so they join, but never stick out past the part's ends (a lip there
             # would make a new face where a clamp or load sits).
             prism = extrude(poly, max(layer.z - THICKEN_STEP_MM / 2 - 0.02, 0.0), min(layer.z + THICKEN_STEP_MM / 2 + 0.02, top))
@@ -529,10 +596,103 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float) -> list[dict]:
                 pieces.append((prism + [0, 0, base]) @ r)
     if not pieces:
         return []
+    where = "where the strength check found the most stress" if hi - lo < 1 else f"along the {hi - lo:.0f} mm that carry the most stress"
     return [_edit("thicken-weak", "thin_neck", f"Make the weak spot {grow:.1f} mm thicker",
-                  f"Adds {grow:.1f} mm of plastic all round where the strength check found the most stress, tapering out over "
-                  f"{reach:.0f} mm either side. More cross-section is the direct fix when the plastic itself is the limit. "
-                  "Check that nothing needs to fit there.", pieces, op="add", param="thicken_mm")]
+                  f"Adds {grow:.1f} mm of plastic all round {where}, tapering out over {reach:.0f} mm either side; "
+                  "parts that are already thicker stay as they are. More cross-section is the direct fix when the plastic "
+                  "itself is the limit. Check that nothing needs to fit there.", pieces, op="add", param="thicken_mm")]
+
+
+def _weak_axis(mesh: Mesh, spot: np.ndarray, hot_spots) -> tuple[np.ndarray, float, bool]:
+    """Long direction of the member that is weak at ``spot``, its rough thickness, and whether the hot
+    spots run along it (then the whole stretch between them is that member, see _weak_stretch).
+
+    The worst spot is often where a neck or stem meets a wide part, and the solid round it there points
+    across the wide part. So the candidates — the solid nearby (_member_axis), the hot spots' long
+    direction and the axis of a flat disc of them (a stem in tension is hot all across) — are compared
+    by their cross-section near the spot: the weak member is the narrow one."""
+    candidates = [(_member_axis(mesh, spot, 2.5 * THICKEN_REACH_MM)[0], False)]
+    if hot_spots is not None and len(hot_spots[0]) >= 8:
+        pts = hot_spots[0]
+        w, v = np.linalg.eigh(np.cov((pts - pts.mean(axis=0)).T))
+        candidates.append((v[:, 2], bool(w[2] >= 4 * max(w[1], 1e-9))))
+        if w[0] < 0.25 * w[1]:
+            candidates.append((v[:, 0], False))
+    # Another direction only wins when clearly narrower: a hot spot cloud a few degrees off a straight bar
+    # would tilt the slabs, and tilted slabs cut into the bar's end faces (where it is clamped or loaded).
+    best = None
+    for a, joined in candidates:
+        area = _narrowest(mesh, spot, a)
+        if best is None or area < 0.85 * best[0]:
+            best = (area, a, joined)
+    return best[1], float(np.sqrt(best[0])), best[2]
+
+
+def _narrowest(mesh: Mesh, spot: np.ndarray, axis: np.ndarray, reach: float = THICKEN_REACH_MM) -> float:
+    """Smallest area of the part's section across ``axis`` within ``reach`` of ``spot`` (the piece
+    the spot sits on)."""
+    from shapely.geometry import Point
+
+    from .slicer import parts, section
+
+    r = rotation_to_z(axis)
+    turned = mesh.triangles @ r.T
+    s = r @ spot
+    zmin, zmax = turned[..., 2].min(axis=1), turned[..., 2].max(axis=1)
+    best = np.inf
+    for z in s[2] + np.arange(-reach, reach + 1e-9, 1.0):
+        geom = section(turned[(zmin < z) & (zmax > z)], float(z))
+        near = [p for p in parts(geom, 0.05) if p.distance(Point(s[:2])) <= 1.0] if not geom.is_empty else []
+        if near:
+            best = min(best, min(p.area for p in near))
+    return best
+
+
+def _weak_stretch(s: np.ndarray, r: np.ndarray, base: float, width: float, hot_spots, joined: bool = False) -> tuple[float, float]:
+    """From where to where along the member (heights in the turned frame) it is nearly as weak as the
+    spot ``s``: the hot spots across from it within ``width`` (in the member, not in a neighbour), as one
+    run from the spot without gaps longer than THICKEN_REACH_MM — or, ``joined`` (the hot spots lie along
+    the member, see _weak_axis), all of them: a neck under tension is weakest where it meets the wide
+    ends, and everything between is the same neck."""
+    if hot_spots is None:
+        return s[2], s[2]
+    h = hot_spots[0] @ r.T - [0, 0, base]
+    z = np.sort(h[np.linalg.norm(h[:, :2] - s[:2], axis=1) <= width, 2])
+    if joined and len(z):
+        return min(z[0], s[2]), max(z[-1], s[2])
+    lo = hi = s[2]
+    for v in z[z > s[2]]:
+        if v - hi > THICKEN_REACH_MM:
+            break
+        hi = v
+    for v in z[z < s[2]][::-1]:
+        if lo - v > THICKEN_REACH_MM:
+            break
+        lo = v
+    return lo, hi
+
+
+def _above_bed(turned: np.ndarray, r: np.ndarray, up):
+    """For a layer height in the turned frame: the half-plane of that layer above the bed (the part's
+    lowest point along ``up``), or None when the bed doesn't cut across layers (no ``up``, or the member
+    stands upright: its slabs already end at the part's ends)."""
+    if up is None:
+        return None
+    from shapely.geometry import Polygon
+
+    u = r @ (np.asarray(up, float) / np.linalg.norm(up))
+    across = np.hypot(u[0], u[1])
+    if across < 1e-3:
+        return None
+    floor = float((turned.reshape(-1, 3) @ u).min())
+    n, t = u[:2] / across, np.array([-u[1], u[0]]) / across
+    big = 1e4
+
+    def half(z: float):
+        q = n * (floor - z * u[2]) / across  # on the bed line in this layer
+        return Polygon([q - t * big, q + t * big, q + t * big + n * big, q - t * big + n * big])
+
+    return half
 
 
 def _member_axis(mesh: Mesh, spot: np.ndarray, reach: float) -> tuple[np.ndarray, float]:
@@ -575,6 +735,8 @@ def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
     centroids = tris.mean(axis=1)
     out = []
     for (a, b), f1, f2 in pairs:
+        if a == b:  # a sliver triangle (common after a boolean) whose corners round to one point
+            continue
         n1, n2 = normals[f1], normals[f2]
         if n1 @ n2 > cos:
             continue

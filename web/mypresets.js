@@ -13,6 +13,7 @@ export const MATERIAL_FIELDS = [
   ["shrinkage_pct", "Shrinkage (%)", "number", 0.1],
   ["tensile_xy_mpa", "Tensile strength (MPa)", "number", 1],
   ["warp_risk", "Warping", ["low", "medium", "high"]],
+  ["fibre", "Fibre filled (-CF / -GF: stiffer, not stronger)", ["none", "carbon", "glass"]],
   ["z_strength", "Layer strength factor (0–1, from the test below)", "number", 0.01],
   ["warp_length", "Warping length on your printer (mm, from the test below)", "number", 1],
   ["fit_snug", "Gap for a snug fit (mm, from the fit test below)", "number", 0.05],
@@ -57,7 +58,7 @@ export function toSpec(kind, values) {
     if (key === "z_strength") spec.z_strength_factor = Object.fromEntries(ENCLOSURES.map((e) => [e, Number(v)]));
     else if (key === "warp_length") spec.warp_length_mm = Object.fromEntries(ENCLOSURES.map((e) => [e, Number(v)]));
     else if (key === "fit_snug" || key === "fit_sliding") spec.fit_gap_mm = { ...spec.fit_gap_mm, ...fitGaps(key, Number(v)) };
-    else spec[key] = key === "name" || key === "warp_risk" ? v : Number(v);
+    else spec[key] = ["name", "warp_risk", "fibre"].includes(key) ? v : Number(v);
   }
   return spec;
 }
@@ -78,15 +79,29 @@ function fitGaps(key, gap) {
   return key === "fit_snug" ? { snug: r(gap), press: r(gap - 0.1) } : { sliding: r(gap), loose: r(gap + 0.15) };
 }
 
-const ORCA_TYPES = { PLA: "pla", "PLA+": "pla_plus", PETG: "petg", ABS: "abs", ASA: "asa", PC: "pc", TPU: "tpu_95a", "PA-CF": "pa_cf", PA: "pa_cf" };
+const ORCA_TYPES = { PLA: "pla", "PLA+": "pla_plus", PETG: "petg", ABS: "abs", ASA: "asa", PC: "pc", TPU: "tpu_95a", "PA-CF": "pa_cf", PA: "pa_cf",
+  PA6: "pa_cf", PA12: "pa_cf", PAHT: "pa_cf", PET: "petg" };
+// Fibre filled types start from their plain plastic, with the strength a fibre filament really has:
+// Polymaker's PLA-CF is 31 MPa where their PLA is 47 (×0.67), and the layers hold less (15 MPa, about
+// a quarter less than plain PLA's share) — stiffer, not stronger (rules.yaml fibre_filled).
+const FIBRE_TYPE = /^(.*?)[-\s]?([CG])F$/;
+const FIBRE_STRENGTH = 0.67;
+const FIBRE_LAYERS = 0.75;
 
 /** An OrcaSlicer / Bambu Studio filament profile (.json, exported or from the user folder) as form values. */
 export function fromOrcaFilament(json, builtins) {
   const first = (k) => (Array.isArray(json[k]) ? json[k][0] : json[k]);
   const type = String(first("filament_type") ?? "").toUpperCase();
-  const based_on = ORCA_TYPES[type] ?? Object.keys(builtins).find((k) => builtins[k].name.toUpperCase() === type) ?? "pla";
+  const filled = type !== "PA-CF" && FIBRE_TYPE.exec(type);
+  const plain = filled ? filled[1] : type;
+  const based_on = ORCA_TYPES[plain] ?? Object.keys(builtins).find((k) => builtins[k].name.toUpperCase() === plain) ?? "pla";
   const values = toForm("materials", builtins[based_on]);
   values.based_on = based_on;
+  if (filled && !builtins[based_on].fibre) {
+    values.fibre = filled[2] === "C" ? "carbon" : "glass";
+    values.tensile_xy_mpa = Math.round(values.tensile_xy_mpa * FIBRE_STRENGTH);
+    values.z_strength = Math.round(values.z_strength * FIBRE_LAYERS * 100) / 100;
+  } else values.fibre = builtins[based_on].fibre ?? "none";
   values.name = String(json.name ?? `${type} filament`).replace(/\s*@.*$/, "").slice(0, 60);
   const num = (k) => (first(k) != null && !Number.isNaN(Number(first(k))) ? Number(first(k)) : undefined);
   values.density_g_cm3 = num("filament_density") || values.density_g_cm3;

@@ -45,6 +45,7 @@ class Session:
     body: int = 0  # which body is loaded
     tags: dict = field(default_factory=dict)  # region id -> what the user says the feature is (features.TAGS)
     weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
+    hot_spots: tuple | None = None  # (points, share of the highest stress) where it is nearly as high (features.HOT_SHARE)
     gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
     fits: dict = field(default_factory=dict)  # region id -> {"partner_mm", "fit"}: what goes into a hole / onto a post
     gaps: dict = field(default_factory=dict)  # (face, face) -> {"partner_mm", "fit", "warp_mm"}: slots and tabs (set_gap)
@@ -1381,8 +1382,22 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     r["weak_marker"] = {"point": _to_print_frame(s.mesh, rot, tri.mean(axis=0)), "normal": (rot @ (n / max(np.linalg.norm(n), 1e-12))).tolist()}
     r.update(walls=sh.walls, infill=sh.infill, top=sh.top, bottom=sh.bottom, material=p.material["name"])
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
+    s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
+
+
+def _hot_spots(model, fi: np.ndarray, ok: np.ndarray, most: int = 1500) -> tuple | None:
+    """Centres of the analysis cubes with at least features.HOT_SHARE of the highest stress (not right at
+    a support or load) and their share of it, at most ``most`` of the highest."""
+    from .features import HOT_SHARE
+
+    top = fi[ok].max(initial=0)
+    if top <= 0:
+        return None
+    idx = np.flatnonzero(ok & (fi >= HOT_SHARE * top))
+    idx = idx[np.argsort(-fi[idx])[:most]]
+    return model.grid.centers(model.elems[idx]), fi[idx] / top
 
 
 def dynamics(up, loads: list[dict], profile: dict | None = None, drop_mm: float = 0.0, mounted_kg: float = 0.0, shake: bool = True,
@@ -1513,9 +1528,10 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
         spot = np.asarray(s.weak_spot[0])
         edges = concave_edges(s.mesh)
         if edges and min(np.linalg.norm((e["a"] + e["b"]) / 2 - spot) for e in edges) <= 8 * s.weak_spot[1]:
-            add("Add a 45° chamfer at the weak spot (design change)", "design", None,
-                "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. On a test part "
-                "2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
+            add("Add 45° chamfers at the weak inside corners (design change)", "design", None,
+                "The most stress sits at a sharp inside corner; a 2–4 mm chamfer spreads it out. Every inside corner "
+                "that is nearly as weak gets one too, so the weak spot doesn't just move to the next corner. On a test "
+                "part 2 mm gave about +15 %, 4 mm about +40 %. Preview it under Design changes, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
@@ -1523,9 +1539,13 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             + "Adds 1.5 mm of plastic all round the weak spot, tapering out either side (size under Design changes). "
             "Test it to see how much it helps.", "changes the shape", edit="thicken-weak")
 
-    # Other materials: stresses don't depend on stiffness here, only the strengths change.
+    # Other materials: stresses don't depend on stiffness here, only the strengths change. Fibre filled
+    # ones (PLA-CF, PA-CF…) are never "stronger": the fibres make it stiffer, but more brittle and weaker
+    # between the layers than the plain plastic (rules.yaml fibre_filled).
+    from .profile import fibre
+
     for mid, m in presets()["materials"].items():
-        if mid == p.material_id or mid.startswith("tpu") or m.get("based_on", "").startswith("tpu"):
+        if mid == p.material_id or mid.startswith("tpu") or m.get("based_on", "").startswith("tpu") or fibre(m):
             continue
         other = Profile.from_dict({**(profile or {}), "material": mid})
         sf = _scaled_safety(base, p, other)
@@ -1576,6 +1596,7 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
     the reasons — heat where it's used (profile ``use_temp_c``), sunlight (``outdoors``), a flexible
     part, what this printer can print (enclosure, hardened nozzle), and with ``up`` and ``loads``
     the safety factor for the load. Best first."""
+    from .profile import fibre
     from .service import heat_factor, heat_limit, required_safety
     from .strength import verdict
 
@@ -1615,6 +1636,8 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
             care.append("may warp on an open printer")
         if m["hygroscopic"] == "high":
             care.append("keep the filament dry")
+        if fibre(m):
+            care.append(f"{fibre(m)} fibre: stiffer, not stronger: more brittle and weaker between the layers")
         sf = None
         if base is not None:
             sf = float(_scaled_safety(base, p, other))
@@ -1706,7 +1729,7 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     return {
         "features": detect_features(s.mesh, s.regions, s.tags),
         "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
-                                                gaps=s.gaps), up, keep_clear),
+                                                gaps=s.gaps, hot_spots=s.hot_spots), up, keep_clear),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
