@@ -121,12 +121,17 @@
 
             <label class="field" data-min="basic">Where is it used?
               <select id="use-temp" title="Plastic gets weaker as it warms up, and soft near its limit (PLA around 60 °C)">
+                <option value="-20">Outdoors in winter (−20 °C)</option>
                 <option value="">Indoors (room temperature)</option>
+                <option value="35">Outdoors on a hot day (35 °C)</option>
                 <option value="40">Warm spot: sunny window, near electronics (40 °C)</option>
                 <option value="55">Outdoors in the sun (55 °C)</option>
                 <option value="70">In a car in summer (70 °C)</option>
                 <option value="90">Near a motor or heater (90 °C)</option>
+                <option value="custom">Another temperature…</option>
               </select></label>
+            <label id="use-temp-own" class="field" data-min="basic" hidden>Its temperature
+              <span><input id="use-temp-c" type="number" step="1" min="-60" max="300" value="23" /> °C</span></label>
 
             <div class="choice" role="radiogroup" aria-label="What can you change?" data-min="advanced">
               <span class="choice-label">What can you change?</span>
@@ -298,6 +303,16 @@
           <h2>Optional simulations</h2>
           <p class="lead">Extra checks that take longer. None is needed: run the ones that matter for your part.</p>
           <div id="blk-sims">
+            <div id="temp-card" class="sim-card">
+              <h3>How warm or cold it gets</h3>
+              <p class="hint">Plastic gets weaker as it warms up and soft near its limit. The strength check and the other checks use this temperature.</p>
+              <div class="row">
+                <label>Where it's used <input id="sim-temp" type="number" step="1" min="-60" max="300" /> °C</label>
+                <button id="sim-temp-use">Check again at this temperature</button>
+              </div>
+              <div id="temp-chart" class="temp-chart"></div>
+              <p id="temp-story"></p>
+            </div>
             <div class="sim-card">
               <h3>Warping: will the corners lift?</h3>
               <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
