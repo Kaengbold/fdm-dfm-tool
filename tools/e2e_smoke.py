@@ -790,6 +790,26 @@ def main():
             return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
+        def thorough_design_test():
+            # Thorough: sizes tried on copies in the background; only the picked one becomes a version.
+            def set_mode(value):  # a click on the mode already chosen starts no check
+                if not page.is_checked(f"input[name=mode][value={value}]"):
+                    run.act(lambda: page.click(f"input[name=mode][value={value}] >> xpath=.."))
+            set_mode("print")
+            assert page.locator("#try-designs").is_hidden(), "shown although the design can't change"
+            set_mode("both")
+            page.evaluate("() => fdm.steps.go('strength')")
+            versions = page.evaluate("() => fdm.state.versions.length")
+            run.act(lambda: page.click("#try-designs"), 1_200_000)
+            text = page.locator("#design-trials").inner_text()
+            assert "Tested design changes" in text and page.locator("#design-trials li").count() >= 3, text
+            assert page.evaluate("() => fdm.state.versions.length") == versions, "tries became versions"
+            run.act(lambda: page.locator("#design-trials").get_by_role("button", name="Use this").first.click(), 600_000)
+            assert page.evaluate("() => fdm.state.versions.length") == versions + 1
+            set_mode("print")
+            return " | ".join(text.splitlines()[2:4]) + " | " + page.locator("#status").inner_text()[:90]
+        run.step("thorough: test design changes in the background", thorough_design_test)
+
         def my_presets():
             page.click("#my-presets > summary")
             page.click("#new-material")

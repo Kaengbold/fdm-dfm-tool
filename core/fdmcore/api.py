@@ -1388,6 +1388,44 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     return r
 
 
+def strength_variant(up, loads: list[dict], data: bytes, profile: dict | None = None, walls: int | None = None,
+                     infill: float | None = None, top: int | None = None, bottom: int | None = None,
+                     zones: list[dict] | None = None) -> dict:
+    """The strength of a changed copy of the loaded part (a design variant, as STL / 3MF ``data``) without
+    replacing the part: for trying design changes in the background and showing only the one the user
+    picks. Held faces and loads move to the variant's matching face (facing the same way, middle nearest
+    the old one's, as the web app does for a new version; spots keep their point). Returns the safety
+    factor, its verdict and how much plastic the change adds (``added_g``, solid)."""
+    global _session
+    from .regions import find_regions, region_info
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    old = region_info(s.mesh, s.regions)
+    mesh = read_bodies(bytes(data))[0][1]
+    variant = Session(mesh, f"{s.name} (variant)", find_regions(mesh))
+    new = region_info(mesh, variant.regions)
+    moved = []
+    for load in loads:
+        if load.get("point") is not None or "region" not in load:
+            moved.append(load)
+            continue
+        was = old[load["region"]]
+        same = [r for r in new if np.dot(r["normal"], was["normal"]) > 0.9]
+        if not same:
+            raise ValueError("A held or loaded face is gone in this design change")
+        near = min(same, key=lambda r: np.linalg.norm(np.subtract(r["centroid"], was["centroid"])))
+        moved.append({**load, "region": near["id"]})
+    _session = variant
+    try:
+        r = strength(up, moved, profile, walls, infill, top, bottom, zones=zones)
+    finally:
+        _session = s
+    added = (abs(mesh.volume()) - abs(s.mesh.volume())) / 1000 * p.material["density_g_cm3"]
+    return {"safety_factor": r["safety_factor"], "verdict": r["verdict"], "added_g": float(added)}
+
 def _stress_zones(model, fi: np.ndarray, ignore: np.ndarray, up, sh, mesh: Mesh, p: Profile) -> list[dict]:
     """"Stronger in one area" zones where this result's stress is high, instead of the user's guess:
     the optimiser's boxes round the most stressed cubes, printed like a picked zone (two more walls,
@@ -2246,6 +2284,7 @@ METHODS = {
     "volume_at": volume_at,
     "tag_feature": tag_feature,
     "strength": strength,
+    "strength_variant": strength_variant,
     "strength_options": strength_options,
     "design": design,
     "compare_nozzles": compare_nozzles,

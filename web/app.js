@@ -1020,7 +1020,7 @@ function renderGcodeResult() {
 // The strength grid has about the same number of cubes for every part, so one strength check takes
 // about the same time on a given computer; the others are a steady multiple of it (measured on the
 // samples in the browser: fine grid 2.6–5.4×, warping 1.8–2.9×, shaking 2.5–5.2×, optimiser 3.6–5.1×).
-const RUN_RATIO = { strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3 };
+const RUN_RATIO = { strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3, trials: 8.5, trials_few: 4.3 };
 const ASK_ABOVE_S = 30;
 let strengthSeconds = Number(localStorage.getItem("fdm-strength-s")) || 8; // this computer, once measured
 
@@ -1357,9 +1357,109 @@ function renderStrength() {
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
     el("button", { className: "primary", textContent: "How can I make it stronger?", onclick: showStrengthOptions,
       title: "Shows every option: slicer settings, orientation, design changes and materials, each with what it costs" }),
+    el("button", { id: "try-designs", textContent: "Test design changes for me ", onclick: tryDesigns, hidden: mode() === "print",
+      title: "Builds rounded corners and a thicker weak spot in several sizes on copies of your part and checks each with your loads" },
+      etaTag("trials")),
     el("button", { textContent: "Find the best orientation including strength", onclick: rankWithStrength }),
     el("div", { id: "strength-options", className: "option-groups" }),
+    el("div", { id: "design-trials" }),
   );
+}
+
+// ---------- strength: design changes tested in the background (Thorough) ----------
+// Each change is built on a copy of the part and checked with the user's loads; only the one the
+// user picks becomes a model version, so the model list doesn't fill up with tries.
+const TRIALS = {
+  all: [
+    { what: "Testing corner sizes", id: "stress-chamfer", key: "stress_chamfer_mm", sizes: [1, 2, 3, 4] },
+    { what: "Testing a thicker weak spot", id: "thicken-weak", key: "thicken_mm", sizes: [1, 1.5, 2.5] },
+  ],
+  few: [
+    { what: "Testing corner sizes", id: "stress-chamfer", key: "stress_chamfer_mm", sizes: [2, 4] },
+    { what: "Testing a thicker weak spot", id: "thicken-weak", key: "thicken_mm", sizes: [1.5] },
+  ],
+};
+
+async function tryDesigns() {
+  const how = await askLong("Test design changes", "trials", [
+    { value: "all", kind: "trials", label: "Every size, then the best two together (8 checks)" },
+    { value: "few", kind: "trials_few", label: "A few sizes, then both together (4 checks)" }]);
+  if (!how) return;
+  const up = activeOption().up;
+  const before = state.strength.safety_factor;
+  const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
+  const check = { up, loads: state.loads, profile: profile(), ...currentShells(), zones: printZones() };
+  const plan = TRIALS[how];
+  const total = plan.reduce((n, p) => n + p.sizes.length, 0) + 1;
+  const results = [];
+  let done = 0;
+  const step = (text) => {
+    const t = `${text} (${++done} of ${total})…`;
+    setStatus(t);
+    showWorking(t);
+  };
+  /** One variant: the suggested edits with these sizes, built on a copy and checked; null if one doesn't fit. */
+  const trial = async (params, ids, title) => {
+    const r = await call("design", { up, profile: profile(), params: { ...designParams(), ...params }, keep_clear });
+    const edits = r.edits.filter((e) => ids.includes(e.id) && !e.clash).map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) }));
+    if (edits.length !== ids.length) return null;
+    const soup = await applyDesignEdits(state.triangles, edits);
+    return { ...(await call("strength_variant", check, stlBytes(soup))), edits, title: title ?? edits[0].title };
+  };
+  await busy("Testing design changes…", async () => {
+    const best = [];
+    for (const p of plan) {
+      let top = null;
+      for (const size of p.sizes) {
+        step(p.what);
+        const t = await trial({ [p.key]: size }, [p.id]);
+        if (!t) continue;
+        results.push(t);
+        if (!top || t.safety_factor > top.t.safety_factor) top = { p, size, t };
+      }
+      if (top) best.push(top);
+    }
+    step("Testing the best two together");
+    if (best.length === 2) {
+      const both = await trial(Object.fromEntries(best.map((b) => [b.p.key, b.size])), best.map((b) => b.p.id),
+        `${best[0].t.title}, and ${best[1].t.title[0].toLowerCase()}${best[1].t.title.slice(1)}`);
+      if (both) results.push(both);
+    }
+    setStatus(state.summary);
+  }, ["strength"]);
+  renderTrials(results, before);
+}
+
+/** The tested changes, strongest first, with the measured safety and the plastic they add. */
+function renderTrials(results, before) {
+  const box = $("design-trials");
+  if (!results.length) {
+    return box.replaceChildren(el("p", { className: "hint",
+      textContent: "No automatic design change fits where it is weak: change the part in your CAD (the weak spot is marked)." }));
+  }
+  results.sort((a, b) => b.safety_factor - a.safety_factor);
+  // The one that is enough with the least plastic, if any is enough.
+  const enough = results.filter((t) => t.verdict === "fine").sort((a, b) => a.added_g - b.added_g)[0];
+  box.replaceChildren(
+    el("h3", { textContent: "Tested design changes" }),
+    el("p", { className: "hint", textContent: `Each one was built on a copy of your part and checked with your loads (now ×${before.toFixed(1)}). Pick one to make it a new version.` }),
+    el("ul", { className: "options strength-options" }, ...results.map((t) => {
+      const gain = Math.round((t.safety_factor / before - 1) * 100);
+      const tag = t === results[0] ? "strongest" : t === enough ? "enough, least plastic" : "";
+      return el("li", { className: "option design" },
+        el("div", { className: "option-head" },
+          el("strong", { textContent: t.title }, tag ? el("span", { className: "tag", textContent: tag }) : ""),
+          el("span", { className: "gain", textContent: `×${t.safety_factor.toFixed(1)} (${gain >= 0 ? "+" : ""}${gain} %)` })),
+        el("p", { className: "hint", textContent: `+${t.added_g.toFixed(1)} g of plastic` }),
+        el("div", { className: "row" }, el("button", { textContent: "Use this", onclick: () => useTrial(t) })));
+    })),
+  );
+}
+
+async function useTrial(t) {
+  await applyEdits(t.edits);
+  if (readyForStrength()) await runStrength();
+  setStatus(`${t.title}: safety ×${state.strength.safety_factor.toFixed(1)}, as a new version (Undo or the Model list goes back).`);
 }
 
 /** Re-rank with the loads, then show the strength of the new best orientation (not the old result). */
@@ -2671,6 +2771,7 @@ function updateModeNote() {
   if ($("mode-note")) $("mode-note").textContent = MODE_NOTES[m] || "";
   $("design-block").hidden = m === "print";
   $("design-off").hidden = m !== "print";
+  if ($("try-designs")) $("try-designs").hidden = m === "print"; // only when the user can change the design
 }
 $("design-on").onclick = () => {
   const both = document.querySelector("input[name=mode][value=both]");
