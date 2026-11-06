@@ -110,6 +110,8 @@ const state = {
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
   volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
+  fitSel: null, // the hole, post or slot selected in Tolerances & tuning: {key, regions, label}
+  fitList: [], // the holes and posts listed there
   gaps: [], // slots and tabs between two flat faces (set_gap): {faces, kind, distance_mm, partner, fit, text}
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
   features: [], // detected holes/posts from the last design suggestion
@@ -288,7 +290,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [] });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [], fitSel: null, fitList: [] });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -656,6 +658,7 @@ function recolor() {
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
     const r = state.faceRegions[f];
+    if (shows("fits") && state.fitSel?.regions.includes(r)) return REGION_COLORS.fit;
     if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
@@ -716,6 +719,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   if (state.volPick) return pickVolume(hit);
   if (state.gapPick) return pickGapFace(hit);
   if (state.snapPick) return pickSnap(hit);
+  if (shows("fits") && pickFit(state.faceRegions[hit.face])) return;
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
@@ -1844,13 +1848,62 @@ function renderFeatures(features) {
 
 /** Tolerances & tuning: each round hole or post with what goes in it. */
 function renderFits(list) {
+  state.fitList = list;
+  if (state.fitSel?.region !== undefined && !list.some((f) => f.region === state.fitSel.region)) state.fitSel = null;
   renderGaps();
-  $("fits-summary").textContent = list.length ? "Click a name to see it on the part." : "No round holes or posts found.";
+  $("fits-summary").textContent = list.length ? "Click a name (or the hole on the part) to see it." : "No round holes or posts found.";
   $("fits").replaceChildren(...list.map((f) => {
     const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
-    return el("li", {}, el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
+    return el("li", { className: state.fitSel?.key === fitKey(f) ? "picked" : "" },
+      el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
       fitControls(f));
   }));
+  renderFitSelection();
+}
+
+// ---------- what's selected in Tolerances & tuning ----------
+const fitKey = (f) => `hole-${f.region}`;
+const gapKey = (g) => `gap-${g.faces.join("-")}`;
+
+/** Select a hole / post (``f``) or a slot / tab (``g``): its faces light up on the part and its row in the list. */
+function selectFit(sel) {
+  state.fitSel = sel;
+  state.selectedRegion = -1;
+  state.showHeat = false;
+  renderFits(state.fitList);
+  recolor();
+}
+const selectHole = (f) => selectFit({ key: fitKey(f), regions: [f.region], region: f.region });
+const selectGap = (g) => selectFit({ key: gapKey(g), regions: [...g.faces] });
+
+/** A click on the part in Tolerances & tuning: the hole, post or slot it belongs to, if any. */
+function pickFit(region) {
+  const f = state.fitList.find((q) => q.region === region);
+  if (f) return selectHole(f), true;
+  const g = state.gaps.find((q) => q.faces.includes(region));
+  if (g) return selectGap(g), true;
+  return false;
+}
+
+/** "Selected: Ø8.0 mm hole, sliding fit for Ø8 mm" and a way to clear it. */
+function renderFitSelection() {
+  const sel = state.fitSel;
+  if (!sel) {
+    $("fit-selected").replaceChildren(el("span", { className: "hint", textContent: "Nothing selected: click a hole, post or slot in the lists below, or on the part." }));
+    return;
+  }
+  let text;
+  if (sel.region !== undefined) {
+    const f = state.fitList.find((q) => q.region === sel.region);
+    const n = state.fitNotes?.[sel.region];
+    text = `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]}` + (n ? `, ${FIT_LABEL[n.fit]} fit ${f.type === "hole" ? "for" : "into"} Ø${n.partner} mm` : ", not sized yet");
+  } else {
+    const g = state.gaps.find((q) => gapKey(q) === sel.key);
+    if (!g) return selectFit(null);
+    text = `${g.kind === "slot" ? "slot" : "tab"} ${g.distance_mm.toFixed(2)} mm` + (g.text ? `, ${FIT_LABEL[g.fit]} fit for ${g.partner} mm` : ", not sized yet");
+  }
+  $("fit-selected").replaceChildren(el("span", { className: "swatch" }), el("strong", { textContent: "Selected: " }), text,
+    el("button", { className: "link", textContent: "Clear", onclick: () => selectFit(null) }));
 }
 
 const FIT_LABEL = { press: "pressed in", snug: "snug", sliding: "sliding / turning", loose: "loose" };
@@ -1867,6 +1920,8 @@ function fitControls(f) {
     busy("Working out the size…", async () => {
       const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
       state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
+      state.fitSel = { key: fitKey(f), regions: [f.region], region: f.region }; // the one just sized
+      renderFits(state.fitList);
       if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
       await suggestDesign();
     }) });
@@ -1895,7 +1950,7 @@ async function pickGapFace(hit) {
   try {
     const g = await call("set_gap", { face_a: faces[0], face_b: faces[1], up: activeOption().up });
     state.gaps = [...state.gaps.filter((q) => q.faces.join() !== g.faces.join()), { ...g, partner: Math.round(g.distance_mm * 10) / 10, fit: "sliding" }];
-    renderGaps();
+    selectGap(g);
   } catch (err) {
     setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
   }
@@ -1913,18 +1968,20 @@ function renderGaps() {
       busy("Working out the size…", async () => {
         const r = await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
         state.gaps = state.gaps.map((q, k) => (k === i ? { ...q, partner: Number(size.value), fit: kind.value, text: r.explanation } : q));
-        renderGaps();
+        state.fitSel = { key: gapKey(g), regions: [...g.faces] };
+        renderFits(state.fitList);
         if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
         await suggestDesign();
       }) });
     const forget = el("button", { className: "link", textContent: "Remove", onclick: async () => {
       await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up });
       state.gaps = state.gaps.filter((_, k) => k !== i);
-      renderGaps();
+      if (state.fitSel?.key === gapKey(g)) selectFit(null);
+      else renderGaps();
       await suggestDesign();
     } });
-    return el("li", {},
-      el("strong", { textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}` }),
+    return el("li", { className: state.fitSel?.key === gapKey(g) ? "picked" : "" },
+      el("button", { className: "link", textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}`, onclick: () => selectGap(g) }),
       el("div", { className: "fit row" }, el("span", { className: "hint", textContent: slot ? "What goes in:" : "Goes into a slot of" }), size, "mm,", kind, go),
       g.text ? el("p", { className: "hint", textContent: g.text }) : "", forget);
   }));
@@ -1932,6 +1989,7 @@ function renderGaps() {
 
 async function showFeature(f) {
   await ensureRegions();
+  if (shows("fits")) return selectHole(f);
   state.selectedRegion = f.region;
   state.showHeat = false;
   recolor();
