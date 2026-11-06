@@ -18,6 +18,7 @@ dev = ["pytest", "scipy>=1.11", "trimesh", "manifold3d>=3.0", "mcp>=2.3"]
 
 [project.scripts]
 fdm-dfm-mcp = "fdmcore.mcp_server:main"
+fdmdfm = "fdmcore.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["fdmcore*"]
