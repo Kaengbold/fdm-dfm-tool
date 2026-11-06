@@ -59,6 +59,30 @@ def test_box_heat():
         api.box_heat(1, 25, "vents")
 
 
+def test_box_heat_on_the_walls():
+    """A hollow box with the electronics placed on the floor at one end: the walls near them get
+    warmer than the air, the far end stays at about the air inside, and both sides of a wall match."""
+    import numpy as np
+
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float)
+    f = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]])
+    outer = (v * [80, 60, 40])[f]
+    inner = (v * [76, 56, 36] + 2.0)[f][:, ::-1]  # turned inside out: its faces point into the room inside
+    api.load(to_binary_stl(Mesh(np.concatenate([outer, inner]))), "hollow.stl")
+    floor = len(outer) + next(i for i, t in enumerate(inner) if np.allclose(t[:, 2], 2.0))
+    r = api.box_heat(5, 25, "closed", {"material": "pla"}, point=[10.0, 30.0, 2.0], face=floor)
+    assert np.allclose(r["source"], [10, 30, 12])  # lifted off the floor, into the box
+    temps = np.frombuffer(r["face_temp_c"], np.float32)
+    assert len(temps) == len(outer) * 2 and temps.min() >= r["inside_c"] - 1e-3
+    centres = api._require().mesh.triangles.mean(axis=1)
+    near, far = temps[centres[:, 0] < 5], temps[centres[:, 0] > 75]
+    assert near.max() > r["inside_c"] + 5 > far.max()
+    assert r["wall_max_c"] == pytest.approx(temps.max(), abs=0.1) and r["hottest_point"][0] < 20
+    assert "wall closest to the electronics" in r["explanation"]
+
+
 def test_heat_curve_for_the_chart():
     """Full strength from winter to room, falling towards the heat limit; the marked temperature is
     the one asked for (or the profile's), and cold is called brittle, not weaker."""

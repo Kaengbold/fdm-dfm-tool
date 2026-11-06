@@ -343,7 +343,11 @@
                 </select>
               </div>
               <p class="hint">A Raspberry Pi 4 uses about 3–6 W, an ESP32 or Arduino under 1 W. Vents help: the result lies between the two choices.</p>
-              <button id="run-box-heat">Work it out</button>
+              <div class="row">
+                <button id="run-box-heat">Work it out</button>
+                <button id="heat-place" title="Walls next to the electronics get warmest">Place the electronics</button>
+                <span id="heat-place-hint" class="hint" hidden>Click inside the box where they sit…</span>
+              </div>
               <div id="box-heat-result"></div>
             </div>
             <div class="sim-card">
