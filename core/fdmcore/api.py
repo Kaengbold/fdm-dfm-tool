@@ -1656,6 +1656,13 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
 # about 0.2 W/m·K (PLA 0.13 … PETG 0.2): a 2 mm wall adds only ~7 %.
 BOX_HEAT_U = {"closed": 4.6, "fan": 20.0}
 PLASTIC_K = 0.2
+# Walls next to the electronics get warmer than the air: part of the heat reaches them straight away
+# (radiation, the warm air rising off a chip). Rough: a third of it, spread like light from a point
+# (cos / 4πd²), the wall passing it on to the air on both sides; the plastic spreads a hot spot over
+# about WALL_SPREAD_MM. Good enough to see which wall gets warmest, not for exact numbers.
+RADIANT_SHARE = 0.3
+WALL_SPREAD_MM = 15.0
+SOURCE_LIFT_MM = 10.0  # a board sits on standoffs: its heat starts this far off the face it's placed on
 
 
 def _outer_area_mm2(mesh: Mesh) -> float:
@@ -1673,12 +1680,47 @@ def _outer_area_mm2(mesh: Mesh) -> float:
     return float(best)
 
 
-def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", profile: dict | None = None) -> dict:
+def _heat_source(mesh: Mesh, point=None, face: int | None = None) -> np.ndarray:
+    """Where the electronics sit (part coordinates): ``SOURCE_LIFT_MM`` off the clicked ``point`` on
+    ``face`` (into the box: a face of the inside wall points into the room inside), or the middle of the part."""
+    tri = mesh.triangles
+    if point is None:
+        return (tri.reshape(-1, 3).min(axis=0) + tri.reshape(-1, 3).max(axis=0)) / 2
+    p = np.asarray(point, float)
+    if face is None:
+        return p
+    n = np.cross(tri[face, 1] - tri[face, 0], tri[face, 2] - tri[face, 0])
+    return p + SOURCE_LIFT_MM * n / max(np.linalg.norm(n), 1e-12)
+
+
+def _wall_temps(tris: np.ndarray, source: np.ndarray, power_w: float, u: float, air_c: float, corners: bool = False) -> np.ndarray:
+    """Temperature (°C) of every triangle (or of its three ``corners``): the air inside, plus what
+    reaches that wall straight from the source (RADIANT_SHARE). The wall is thin, so its outside face
+    gets as warm as its inside one."""
+    n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+    c = tris.reshape(-1, 3) if corners else tris.mean(axis=1)
+    if corners:
+        n = np.repeat(n, 3, axis=0)
+    d = source - c
+    dist = np.linalg.norm(d, axis=1)
+    cos = np.abs(np.einsum("ij,ij->i", n, d)) / np.maximum(dist, 1e-9)
+    r2 = (dist**2 + WALL_SPREAD_MM**2) * 1e-6
+    q = RADIANT_SHARE * float(power_w) * cos / (4 * np.pi * r2)  # W/m² reaching the wall
+    return air_c + q / (2 * u)  # it leaves to the air on both sides
+
+
+def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", profile: dict | None = None,
+             point=None, face: int | None = None) -> dict:
     """Air temperature inside the part used as a box for electronics that use ``power_w`` watts, with
     the room at ``ambient_c``: the heat leaves through the outside surface (``BOX_HEAT_U`` for a
     closed box or one with a fan) and the printed wall. Compared with where the plastic goes soft.
-    Vents help too, but how much depends on their size: between the two."""
+    Vents help too, but how much depends on their size: between the two.
+    ``point`` / ``face``: where the electronics sit (a click inside the box; default the middle).
+    ``face_temp_c`` (float32 per face) shows which walls get warmest (``_wall_temps``); for the 3D view
+    also on a finer copy of the surface (``field_triangles``, ``vertex_temp_c`` at every corner)."""
     from .service import heat_limit
+    from .strength import refine
 
     if cooling not in BOX_HEAT_U:
         raise ValueError(f"cooling must be one of {', '.join(BOX_HEAT_U)}")
@@ -1702,9 +1744,21 @@ def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", p
              "too hot": f"{name} goes soft at about {limit:.0f} °C: the box will sag and clips loosen. Add a fan or vents, or print it in ASA, ABS or PC."}[verdict]
     if inside >= 70:  # commercial-grade chips are rated 0–70 °C (industrial 85 °C), whatever the box is printed in
         text += " That's too hot for the electronics too: this needs a fan or a much bigger box."
+    source = _heat_source(s.mesh, point, face)
+    walls = _wall_temps(s.mesh.triangles, source, power_w, u, inside)
+    fine = refine(s.mesh.triangles, max(float(np.ptp(s.mesh.triangles.reshape(-1, 3), axis=0).max()) / 40, 1.0))
+    hot = int(np.argmax(walls))
+    wall_c = float(walls[hot])
+    if wall_c >= max(soft, inside + 5):
+        text += (f" The wall closest to the electronics gets warmer still, about {wall_c:.0f} °C (red on the part)"
+                 + (": it can sag there first. Move the electronics away from the wall or add a vent there." if wall_c >= limit
+                    else ": it may slowly give way there first." if wall_c >= soft else "."))
     return {"power_w": float(power_w), "ambient_c": float(ambient_c), "cooling": cooling, "area_cm2": round(area / 100, 1),
             "rise_c": round(rise, 1), "inside_c": round(inside, 1), "softening_c": soft, "heat_limit_c": limit,
-            "verdict": verdict, "explanation": text}
+            "verdict": verdict, "explanation": text, "source": source.tolist(), "wall_max_c": round(wall_c, 1),
+            "hottest_point": s.mesh.triangles[hot].mean(axis=0).tolist(), "face_temp_c": walls.astype(np.float32).tobytes(),
+            "field_triangles": fine.astype(np.float32).tobytes(),
+            "vertex_temp_c": _wall_temps(fine, source, power_w, u, inside, corners=True).astype(np.float32).tobytes()}
 
 
 def design(up, profile: dict | None = None, params: dict | None = None, keep_clear: list[dict] | None = None) -> dict:

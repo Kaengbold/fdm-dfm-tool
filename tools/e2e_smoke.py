@@ -613,13 +613,26 @@ def main():
             run.act(lambda: page.click("#run-box-heat"))
             text = page.locator("#box-heat-result").inner_text()
             assert "°C" in text and "above the room" in text, text
+            legend = page.locator("#legend")
+            assert legend.is_visible() and "Wall temperature" in legend.inner_text(), "walls not coloured by temperature"
+            # Put the electronics somewhere on the part: worked out again there, the dot shows where.
+            page.click("#heat-place")
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f += Math.max(1, Math.floor(n / 50))) { const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); if (el && el.tagName === 'CANVAS' && v.pick({clientX: x, clientY: y}) >= 0) return [x, y]; } return [0, 0]; }"
+            )
+            run.act(lambda: page.mouse.click(x, y))
+            assert page.evaluate("() => Boolean(fdm.state.heatSource && fdm.state.boxHeat.wall_max_c >= fdm.state.boxHeat.inside_c)")
+            assert "where you put the electronics" in page.locator("#box-heat-result").inner_text()
+            text += f" | walls up to {page.evaluate('() => fdm.state.boxHeat.wall_max_c')} °C"
             use = page.locator("#box-heat-result button")
             if use.count():
                 run.act(lambda: use.click(), 300_000)
                 assert "Inside the electronics box" in page.locator("#use-temp option:checked").inner_text()
                 page.select_option("#use-temp", "")  # back to room temperature for the next steps
                 run.act(lambda: page.dispatch_event("#use-temp", "change"), 300_000)
-            return text[:160]
+            return text[:120] + " …" + text[text.index(" | walls"):]
         run.step("heat inside an electronics box", box_heat)
 
         def report_with_pictures():

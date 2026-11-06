@@ -288,7 +288,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [] });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [], boxHeat: null, heatSource: null, heatPick: false });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -673,6 +673,11 @@ function showMarkers() {
     viewer.showFindings([]);
     return r.weak_marker ? viewer.markWeak(r.weak_marker.point, r.weak_marker.normal) : viewer.mark(r.critical_point_print);
   }
+  if (shows("sims") && state.showBoxHeat && state.boxHeat && !state.showWarp && !state.showSwing) {
+    viewer.showFindings([]);
+    viewer.mark(viewer.toShown(state.boxHeat.source), "--force"); // the electronics
+    return;
+  }
   if (shows("sims") && state.showWarp && state.warp) {
     viewer.showFindings([]);
     if (state.warpShow !== "stress") for (const p of state.warp.lift_points_print) viewer.mark(p);
@@ -716,6 +721,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   if (state.volPick) return pickVolume(hit);
   if (state.gapPick) return pickGapFace(hit);
   if (state.snapPick) return pickSnap(hit);
+  if (state.heatPick) return placeHeatSource(hit);
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
@@ -1109,6 +1115,7 @@ $("run-dynamics").onclick = async () => {
     }));
     state.swing = r.vertex_disp ? r : null; // only the shaking check has a swing to show
     state.showSwing = Boolean(state.swing);
+    if (state.showSwing) state.showBoxHeat = false;
     const show = el("input", { type: "checkbox", checked: true });
     show.onchange = () => {
       state.showSwing = show.checked;
@@ -1126,10 +1133,37 @@ $("run-dynamics").onclick = async () => {
 
 // ---------- heat inside an electronics box ----------
 const HEAT_CLASS = { fine: "fine", warm: "borderline", "too hot": "likely-to-break" };
-$("run-box-heat").onclick = () =>
+const BOX_HEAT_FIELD = { title: "Wall temperature (°C)", note: "rough: the warmest walls are next to the electronics" };
+
+$("heat-place").onclick = async () => {
+  if (!activeOption()) return;
+  state.heatPick = true;
+  $("heat-place-hint").hidden = false;
+  setStatus("Click inside the box where the electronics sit: the floor or a wall they are fixed to.");
+};
+
+/** Where the electronics sit: a click on the inside of the box. The result is worked out again there. */
+async function placeHeatSource(hit) {
+  state.heatPick = false;
+  $("heat-place-hint").hidden = true;
+  state.heatSource = { point: hit.point, face: hit.face };
+  $("heat-place").textContent = "Move the electronics";
+  await runBoxHeat();
+}
+
+const runBoxHeat = () =>
   busy("Working out the heat inside…", async () => {
     const r = await call("box_heat", { power_w: Number($("heat-w").value) || 0, ambient_c: Number($("heat-room").value) || 25,
-      cooling: $("heat-cooling").value, profile: profile() });
+      cooling: $("heat-cooling").value, profile: profile(), ...(state.heatSource ?? {}) });
+    r.face_temp_c = f32(r.face_temp_c);
+    state.boxHeat = r;
+    state.showBoxHeat = true;
+    state.showWarp = state.showSwing = false;
+    const show = el("input", { type: "checkbox", checked: true });
+    show.onchange = () => {
+      state.showBoxHeat = show.checked;
+      recolor();
+    };
     const t = Math.round(r.inside_c);
     // The walls sit at about the inside temperature: let the other checks use it as "where it's used".
     const use = el("button", { textContent: `Check the part at ${t} °C`, onclick: async () => {
@@ -1140,9 +1174,28 @@ $("run-box-heat").onclick = () =>
       setStatus(`The checks now use ${t} °C, the air inside the box.`);
     } });
     $("box-heat-result").replaceChildren(
-      el("div", { className: `verdict ${HEAT_CLASS[r.verdict]}` }, el("p", { textContent: r.explanation }), r.inside_c > 30 ? use : ""));
+      el("div", { className: `verdict ${HEAT_CLASS[r.verdict]}` }, el("p", { textContent: r.explanation }),
+        el("label", { className: "toggle" }, show, `Show it on the part (${state.heatSource ? "the dot is where you put the electronics" : "electronics in the middle: place them for a better picture"})`),
+        r.inside_c > 30 ? use : ""));
+    recolor();
     setStatus(state.summary);
   }, ["sims"]);
+$("run-box-heat").onclick = () => runBoxHeat();
+
+/** The box heat result on the part: blue = the air inside, red = the warmest wall. */
+function boxHeatView() {
+  const r = state.boxHeat;
+  const base = r.inside_c;
+  const max = Math.max(r.wall_max_c - base, 0.5);
+  if (viewer.fieldKey !== r || !viewer.field) {
+    viewer.showField({ triangles: f32(r.field_triangles), values: f32(r.vertex_temp_c).map((t) => t - base), max });
+    viewer.fieldKey = r;
+  }
+  viewer.setDeformation(0);
+  viewer.setSection(null, null, null, max);
+  renderLegend({ ...BOX_HEAT_FIELD, fmt: (v) => `${Math.round(base + v)}` }, max);
+  return true;
+}
 
 // ---------- strength: FEA result view ----------
 const f32 = (b) => new Float32Array(b.slice().buffer);
@@ -1164,6 +1217,7 @@ function strengthView() {
   if (shows("sims") && state.showSwing && state.swing) return swingView();
   stopSwing();
   if (shows("sims") && state.showWarp && state.warp) return warpView();
+  if (shows("sims") && state.showBoxHeat && state.boxHeat) return boxHeatView();
   const r = state.strength;
   if (!(shows("strength") && state.showHeat && r)) {
     viewer.hideField();
@@ -1264,6 +1318,7 @@ $("run-warp").onclick = async () => {
     const w = await timed("warping", () => call("warping", { up: activeOption().up, profile: profile(), detailed: useGcode() }));
     state.warp = w;
     state.showWarp = true;
+    state.showBoxHeat = false;
     state.showHeat = false;
     $("show-temp").checked = false;
     const show = el("input", { type: "checkbox", checked: true });
