@@ -63,6 +63,11 @@ For Gemini CLI, add to `~/.gemini/settings.json`:
 { "mcpServers": { "fdm-dfm": { "command": "python", "args": ["-m", "fdmcore.mcp_server"] } } }
 ```
 
+Then give the agent the guide (how to use the tools, the units, how to explain the results):
+
+- Claude Code: copy `agents/fdm-check/` to `~/.claude/skills/` (or to `.claude/skills/` in your project).
+- Codex and others: paste `agents/AGENTS-snippet.md` into your project's `AGENTS.md`.
+
 With OrcaSlicer installed, the agent can also slice for real (`slice_with_orcaslicer`: OrcaSlicer's own print time and filament use).
 
 This is the supported way to use a Claude, ChatGPT or Gemini *subscription* with the tool:
