@@ -1,0 +1,47 @@
+name: Browser smoke test
+
+# The slowest check (~15 min): only when the app, the API it calls, the rules it shows or the test change
+# (AGENTS.md: e2e when web/ or api.py changed).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "web/**"
+      - "core/fdmcore/api.py"
+      - "core/fdmcore/manifest.json"
+      - "core/fdmcore/data/**"
+      - "tools/e2e_smoke.py"
+      - "tools/fixtures/**"
+      - ".github/workflows/browser.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Browser smoke test
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/browser.yml
+      - run: pip install playwright==1.64.1  # pinned: the cached browser below must match it
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.64.1
+      - run: python -m playwright install --with-deps chromium
+      - run: python tools/e2e_smoke.py --browser chromium
+      - uses: actions/upload-artifact@v4
+        if: failure()  # screenshots only when something broke
+        with:
+          name: e2e-screenshots
+          path: e2e-output/
+          retention-days: 7
