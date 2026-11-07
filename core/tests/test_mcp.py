@@ -68,10 +68,15 @@ def test_more_tools(tmp_path):
     assert "lift_ratio" in m.check_warping(up, material="abs")
     assert len(m.compare_nozzles(up)) >= 2
     assert m.heat_curve("petg", 70)["temps_c"]
-    assert m.box_heat(3.0)["verdict"] in {"fine", "warm", "too hot"}
+    heat = m.box_heat(3.0)
+    assert heat["verdict"] in {"fine", "warm", "too hot"} and "face_temp_c" not in heat
+    corner = m.box_heat(3.0, point=heat["hottest_point"])
+    assert corner["source"] != heat["source"] and corner["wall_max_c"] >= heat["inside_c"]
     cal = m.calibration_part("fit", str(tmp_path / "fit.stl"))
     assert (tmp_path / "fit.stl").stat().st_size > 0 and "peg" in cal["how"]
     assert m.expert_settings()["sections"]
+    saved, image = m.render_image("bed", up, str(tmp_path / "bed.png"), width=160, height=120)
+    assert (tmp_path / "bed.png").read_bytes() == image.data and "bed.png" in saved
 
     faces = sorted((f for f in m.list_faces() if f["kind"] == "flat"), key=lambda f: -f["area_mm2"])
     held, pushed = faces[0], next(f for f in faces[1:] if abs(f["normal"][2]) < 0.5)

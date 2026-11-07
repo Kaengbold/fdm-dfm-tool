@@ -22,7 +22,7 @@ from pathlib import Path
 for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     os.environ.setdefault(_var, str(max(1, (os.cpu_count() or 2) // 2)))
 
-from mcp.server.mcpserver import MCPServer  # noqa: E402  (after the thread cap)
+from mcp.server.mcpserver import Image, MCPServer  # noqa: E402  (after the thread cap)
 
 from . import api
 from .mesh import to_binary_stl
@@ -460,12 +460,14 @@ def heat_curve(material: str = "pla", use_temp_c: float | None = None) -> dict:
 
 
 @server.tool()
-def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", printer: str = "bambu_p1s",
-             material: str = "pla", nozzle: str = "0.4") -> dict:
+def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", point: list[float] | None = None,
+             face: int | None = None, printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
     """The loaded part as a box for electronics using ``power_w`` watts in a room at ``ambient_c``: the air
     temperature inside and whether the plastic stays below where it goes soft. ``cooling``: "closed" or
-    "fan" (vents land in between)."""
-    return _clean(api.box_heat(power_w, ambient_c, cooling, _profile(printer, material, nozzle)))
+    "fan" (vents land in between). Where the electronics sit: ``point`` (part coordinates, mm) or
+    ``face`` (a triangle index; they sit just inside it); default the middle. ``wall_max_c`` and
+    ``hottest_point`` say which wall gets warmest."""
+    return _clean(api.box_heat(power_w, ambient_c, cooling, _profile(printer, material, nozzle), point, face))
 
 
 @server.tool()
@@ -549,6 +551,26 @@ def set_expert_settings(values: dict[str, float]) -> dict:
     Values not given go back to their defaults. Only for users who know why they change them."""
     return api.set_expert(values)
 
+
+
+@server.tool()
+def render_image(view: str, up: list[float], output_path: str, loads: list[dict] | None = None, finding: int = 0,
+                 other_path: str | None = None, width: int = 800, height: int = 600, printer: str = "bambu_p1s",
+                 material: str = "pla", nozzle: str = "0.4") -> list:
+    """PNG picture of the loaded part printed with ``up`` as the build direction, saved to ``output_path`` and
+    returned so you can see it. ``view``: "bed" (on the bed), "overhangs" (seen from below; red needs
+    support, amber borderline, green on the bed), "problem" (finding number ``finding`` from check_part,
+    its area in red), "stress" (needs ``loads`` like check_strength; blue little stress, red close to
+    breaking, blue faces held, purple arrows the forces), "warp" (curled shape after cooling,
+    exaggerated), "compare" (``other_path``, an earlier STL / 3MF, on the left, the loaded part on the
+    right). Takes 1–8 s."""
+    from . import render
+
+    other = Path(other_path).expanduser().read_bytes() if other_path else None
+    data = render.picture(view, up, _profile(printer, material, nozzle), loads, finding, other, width, height)
+    out = Path(output_path).expanduser()
+    out.write_bytes(data)
+    return [f"saved {out}", Image(data=data, format="png")]
 
 def _save_and_load(mesh, output_path: str) -> dict:
     out = Path(output_path).expanduser()
