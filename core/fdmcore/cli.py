@@ -7,6 +7,7 @@ One part per call, JSON on stdout (files where a command makes one), so an agent
     fdmdfm strength part.stl --loads '[{"region": 3, "kind": "fixed"}, {"region": 7, "kind": "force", "kg": 5}]'
     fdmdfm report part.stl -o report.md
     fdmdfm export part.stl -o part.3mf
+    fdmdfm render part.stl --view overhangs -o under.png
 
 Without ``--up`` every command uses the best orientation (as ``orient`` ranks it first). Errors go to
 stderr as one line with exit code 1, so a script can tell them apart from results.
@@ -112,6 +113,16 @@ def cmd_export(a, profile, up):
     return {"up": up, "saved": str(out), "settings": settings}
 
 
+def cmd_render(a, profile, up):
+    from .render import picture
+
+    other = Path(a.other).expanduser().read_bytes() if a.other else None
+    loads = _json_arg(a.loads) if a.view == "stress" else None
+    out = Path(a.output).expanduser()
+    out.write_bytes(picture(a.view, up, profile, loads, a.finding, other, a.width, a.height))
+    return {"up": up, "view": a.view, "saved": str(out)}
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="fdmdfm", description="Check a part for FDM printing. Prints JSON.")
     common = argparse.ArgumentParser(add_help=False)
@@ -139,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("warping", cmd_warping, "warping simulation"),
         ("report", cmd_report, "Markdown report (to stdout as JSON, or -o file)"),
         ("export", cmd_export, "3MF with the settings for your slicer (-o file)"),
+        ("render", cmd_render, "PNG picture of the part (-o file, --view)"),
     ]:
         p = sub.add_parser(name, parents=[common], help=text)
         p.set_defaults(fn=fn)
@@ -155,8 +167,17 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--zones-too", action="store_true", help="also try stronger zones only where needed")
         if name == "design":
             p.add_argument("--params", help='edit sizes, e.g. {"chamfer_mm": 2}')
-        if name in ("report", "export"):
-            p.add_argument("-o", "--output", required=name == "export")
+        if name in ("report", "export", "render"):
+            p.add_argument("-o", "--output", required=name != "report")
+        if name == "render":
+            from .render import VIEWS
+
+            p.add_argument("--view", default="bed", choices=VIEWS,
+                           help="overhangs: from below; problem: --finding N from check; stress: needs --loads; compare: --other")
+            p.add_argument("--finding", type=int, default=0)
+            p.add_argument("--other", help="earlier version (STL / 3MF) for --view compare")
+            p.add_argument("--width", type=int, default=800)
+            p.add_argument("--height", type=int, default=600)
         if name == "export":
             p.add_argument("--settings", help='slicer setting overrides, e.g. {"wall_loops": "4"}')
             p.add_argument("--slicer", default="orca", choices=["orca", "prusa"])
