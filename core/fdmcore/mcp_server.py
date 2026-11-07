@@ -460,12 +460,14 @@ def heat_curve(material: str = "pla", use_temp_c: float | None = None) -> dict:
 
 
 @server.tool()
-def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", printer: str = "bambu_p1s",
-             material: str = "pla", nozzle: str = "0.4") -> dict:
+def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", point: list[float] | None = None,
+             face: int | None = None, printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
     """The loaded part as a box for electronics using ``power_w`` watts in a room at ``ambient_c``: the air
     temperature inside and whether the plastic stays below where it goes soft. ``cooling``: "closed" or
-    "fan" (vents land in between)."""
-    return _clean(api.box_heat(power_w, ambient_c, cooling, _profile(printer, material, nozzle)))
+    "fan" (vents land in between). Where the electronics sit: ``point`` (part coordinates, mm) or
+    ``face`` (a triangle index; they sit just inside it); default the middle. ``wall_max_c`` and
+    ``hottest_point`` say which wall gets warmest."""
+    return _clean(api.box_heat(power_w, ambient_c, cooling, _profile(printer, material, nozzle), point, face))
 
 
 @server.tool()

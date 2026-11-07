@@ -68,7 +68,10 @@ def test_more_tools(tmp_path):
     assert "lift_ratio" in m.check_warping(up, material="abs")
     assert len(m.compare_nozzles(up)) >= 2
     assert m.heat_curve("petg", 70)["temps_c"]
-    assert m.box_heat(3.0)["verdict"] in {"fine", "warm", "too hot"}
+    heat = m.box_heat(3.0)
+    assert heat["verdict"] in {"fine", "warm", "too hot"} and "face_temp_c" not in heat
+    corner = m.box_heat(3.0, point=heat["hottest_point"])
+    assert corner["source"] != heat["source"] and corner["wall_max_c"] >= heat["inside_c"]
     cal = m.calibration_part("fit", str(tmp_path / "fit.stl"))
     assert (tmp_path / "fit.stl").stat().st_size > 0 and "peg" in cal["how"]
     assert m.expert_settings()["sections"]
