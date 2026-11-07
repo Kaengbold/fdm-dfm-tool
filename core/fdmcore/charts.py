@@ -138,6 +138,40 @@ def heat(result: dict) -> str:
                       note="Blue: brittle in the cold. Red: soft, it bends and creeps.")
 
 
+CHARTS = ("orientations", "nozzles", "warping", "heat")
+
+
+def for_part(kind: str, up, profile: dict | None = None, loads: list[dict] | None = None) -> list[str]:
+    """Charts (SVG) for the loaded part (api session) printed with ``up``: "orientations" (safety per
+    orientation with ``loads``, else support), "nozzles" (print time and filament, two charts),
+    "warping", "heat" (strength vs. temperature of the material)."""
+    from . import api
+    from .profile import Profile
+    from .service import required_safety
+
+    if kind == "orientations":
+        return [orientations(api.orientations(profile, top=5, loads=loads), required_safety(Profile.from_dict(profile)))]
+    if kind == "nozzles":
+        return list(nozzles(api.compare_nozzles(up, profile)))
+    if kind == "warping":
+        return [warping(api.warping(up, profile))]
+    if kind == "heat":
+        return [heat(api.heat_curve(profile))]
+    raise ValueError(f"kind must be one of {', '.join(CHARTS)}")
+
+
+def write(kind: str, path: str, up, profile: dict | None = None, loads: list[dict] | None = None) -> list[str]:
+    """Save ``for_part`` charts as SVG at ``path`` (the second nozzle chart gets ``_filament`` added)."""
+    from pathlib import Path
+
+    svgs = for_part(kind, up, profile, loads)
+    out = Path(path).expanduser()
+    paths = [out, out.with_name(f"{out.stem}_filament{out.suffix}")][: len(svgs)]
+    for p, svg in zip(paths, svgs):
+        p.write_text(svg, encoding="utf-8")
+    return [str(p) for p in paths]
+
+
 def sweep(xs: list[float], safety: list[float], setting: str, target: float = 2.0) -> str:
     """Safety factor as one setting changes (e.g. infill %), with the target line."""
     return line_chart(xs, safety, f"Safety factor vs. {setting}", setting, "Safety factor (×)",

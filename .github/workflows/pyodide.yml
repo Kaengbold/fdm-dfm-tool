@@ -1,0 +1,34 @@
+name: Engine in Pyodide
+
+# Pyodide's GEOS is older than pip's and fails differently: only the engine and its samples matter here.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "core/fdmcore/**"
+      - "web/samples/**"
+      - "tools/pyodide_check.mjs"
+      - ".github/workflows/pyodide.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pyodide:
+    name: Engine in Pyodide (browser runtime)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/cache@v4  # the Pyodide package (~200 MB unpacked), same version as web/worker.js
+        with:
+          path: tools/node_modules
+          key: pyodide-0.27.2
+      - run: npm install --no-save --prefix tools pyodide@0.27.2
+      - run: node tools/pyodide_check.mjs

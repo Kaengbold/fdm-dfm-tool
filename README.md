@@ -19,7 +19,7 @@ browser, no install, your files never leave your computer.
 | **Strength** | Click a face → "held here" or "2 kg pulling". Voxel FEA with weaker layer bonds (material + enclosure dependent) with your walls, top/bottom layers and infill gives a traffic light, a heat map and a plain explanation; "Find the lightest settings that hold" searches walls, layers, infill and orientation for your load; "A lighter shape" (topology optimisation) shows where the plastic carries the load, as a blocky guide to redesign in CAD |
 | **Detailed check** | Load the G-code you sliced from the exported 3MF (OrcaSlicer, Bambu Studio incl. `.gcode.3mf`, PrusaSlicer, Cura): strength then uses the plastic really printed in each spot and which way the lines run (lines pulled apart sideways are weak), and the heat check uses the real layer times. Locally, the MCP tool `detailed_strength` slices with the installed OrcaSlicer itself |
 | **Design fixes** | Detects holes and round posts and asks when unsure ("is this a hole?"); suggests teardrop holes, corner chamfers, 45° fills under ledges, sacrificial layers over holes that start in mid-air and thicker walls; previews them (red = cut, green = added), applies them and re-checks; STEP parts are written back as STEP with only the edited spots changed |
-| **AI agents** | No AI inside the app. Your own agent (Claude Code, Codex, Claude Desktop) operates the tool through the MCP server with *your own* subscription; reports, pictures and charts for agents are being built (see PLAN section 6). Or copy the report into any AI chat |
+| **AI agents** | No AI inside the app. Your own agent (Claude Code, Codex, Claude Desktop) operates the tool through the MCP server with *your own* subscription; it can write the report as HTML or Markdown with pictures and charts (`write_report`, `render_image`, `make_chart`, or the `fdmdfm` command line). Or copy the report into any AI chat |
 
 Add your own printer or filament (or import an OrcaSlicer filament profile) and measure it with small test prints: layer strength, warping, fits (snug / sliding gaps), overhang angle and bridge length.
 
@@ -68,6 +68,8 @@ Then give the agent the guide (how to use the tools, the units, how to explain t
 - Claude Code: copy `agents/fdm-check/` to `~/.claude/skills/` (or to `.claude/skills/` in your project).
 - Codex and others: paste `agents/AGENTS-snippet.md` into your project's `AGENTS.md`.
 
+Project files: the agent saves its work (`save_project`: part, orientation, loads, zones, boxes, settings) as a `.json` you drop into the web app to see it in 3D; "Save project" in the app writes the same file for the agent (`open_project`, or `fdmdfm check project.json`).
+
 With OrcaSlicer installed, the agent can also slice for real (`slice_with_orcaslicer`: OrcaSlicer's own print time and filament use).
 
 This is the supported way to use a Claude, ChatGPT or Gemini *subscription* with the tool:
@@ -81,6 +83,8 @@ fdmdfm check part.stl --material petg          # findings + settings, best orien
 fdmdfm faces part.stl                          # face ids for loads
 fdmdfm strength part.stl --loads loads.json    # safety factor
 fdmdfm export part.stl -o part.3mf             # 3MF for your slicer
+fdmdfm report part.stl -o report.html          # report with pictures and charts (.md works too)
+fdmdfm chart part.stl --kind nozzles -o t.svg  # chart: orientations, nozzles, warping, heat
 fdmdfm render part.stl --view overhangs -o under.png   # picture (bed, overhangs, problem, stress, warp, compare)
 ```
 

@@ -1,0 +1,35 @@
+name: Engine tests
+
+# Runs only when something the tests read changes (Actions minutes are limited on a private repo).
+# A merge to main isn't tested again: the pull request was. Run it by hand from the Actions tab.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "core/**"
+      - "fusion/FDMDFM/bridge.py"
+      - "web/samples/**"
+      - "tools/make_manifest.py"
+      - ".github/workflows/engine.yml"
+  workflow_dispatch:
+
+concurrency:  # a new push stops the run for the old one
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: Engine tests (pytest)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: core/pyproject.toml
+      - run: pip install -e "core[dev]"
+      - run: python -m pytest -q
+        working-directory: core
