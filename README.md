@@ -19,7 +19,7 @@ browser, no install, your files never leave your computer.
 | **Strength** | Click a face → "held here" or "2 kg pulling". Voxel FEA with weaker layer bonds (material + enclosure dependent) with your walls, top/bottom layers and infill gives a traffic light, a heat map and a plain explanation; "Find the lightest settings that hold" searches walls, layers, infill and orientation for your load |
 | **Detailed check** | Load the G-code you sliced from the exported 3MF (OrcaSlicer, Bambu Studio incl. `.gcode.3mf`, PrusaSlicer, Cura): strength then uses the plastic really printed in each spot and which way the lines run (lines pulled apart sideways are weak), and the heat check uses the real layer times. Locally, the MCP tool `detailed_strength` slices with the installed OrcaSlicer itself |
 | **Design fixes** | Detects holes and round posts and asks when unsure ("is this a hole?"); suggests teardrop holes, corner chamfers, 45° fills under ledges, sacrificial layers over holes that start in mid-air and thicker walls; previews them (red = cut, green = added), applies them and re-checks; STEP parts are written back as STEP with only the edited spots changed |
-| **AI agents** | No AI inside the app. Your own agent (Claude Code, Codex, Claude Desktop) operates the tool through the MCP server with *your own* subscription; reports, pictures and charts for agents are being built (see PLAN section 6). Or copy the report into any AI chat |
+| **AI agents** | No AI inside the app. Your own agent (Claude Code, Codex, Claude Desktop) operates the tool through the MCP server with *your own* subscription; it can write the report as HTML or Markdown with pictures and charts (`write_report`, `render_image`, `make_chart`, or the `fdmdfm` command line). Or copy the report into any AI chat |
 
 Add your own printer or filament (or import an OrcaSlicer filament profile) and measure it with small test prints: layer strength, warping, fits (snug / sliding gaps), overhang angle and bridge length.
 
@@ -76,6 +76,8 @@ fdmdfm check part.stl --material petg          # findings + settings, best orien
 fdmdfm faces part.stl                          # face ids for loads
 fdmdfm strength part.stl --loads loads.json    # safety factor
 fdmdfm export part.stl -o part.3mf             # 3MF for your slicer
+fdmdfm report part.stl -o report.html          # report with pictures and charts (.md works too)
+fdmdfm chart part.stl --kind nozzles -o t.svg  # chart: orientations, nozzles, warping, heat
 ```
 
 Then ask e.g. *"Load ~/parts/bracket.stl, find the best orientation for PETG on my P1S,

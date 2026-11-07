@@ -27,9 +27,7 @@ def test_check_faces_strength_report_export(capsys, tmp_path):
     s = run(capsys, "strength", PART, "--up", "0,0,1", "--loads", str(loads))
     assert s["safety_factor"] > 0 and s["verdict"]
 
-    md = tmp_path / "r.md"
-    assert run(capsys, "report", PART, "-o", str(md))["saved"] == str(md)
-    assert md.read_text(encoding="utf-8").startswith("# Print check")
+    assert run(capsys, "report", PART)["markdown"].startswith("# Print check")  # files with pictures: test_reports
     out = run(capsys, "export", PART, "-o", str(tmp_path / "p.3mf"), "--settings", '{"wall_loops": "5"}')
     assert out["settings"]["wall_loops"] == "5" and (tmp_path / "p.3mf").stat().st_size > 0
 
