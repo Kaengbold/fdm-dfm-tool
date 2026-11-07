@@ -23,6 +23,7 @@
  "refine.py",
  "regions.py",
  "render.py",
+ "reports.py",
  "service.py",
  "slicer.py",
  "strength.py",

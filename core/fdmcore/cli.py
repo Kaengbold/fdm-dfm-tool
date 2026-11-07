@@ -5,7 +5,8 @@ One part per call, JSON on stdout (files where a command makes one), so an agent
     fdmdfm check part.stl --material petg
     fdmdfm faces part.stl
     fdmdfm strength part.stl --loads '[{"region": 3, "kind": "fixed"}, {"region": 7, "kind": "force", "kg": 5}]'
-    fdmdfm report part.stl -o report.md
+    fdmdfm report part.stl -o report.html
+    fdmdfm chart part.stl --kind nozzles -o time.svg
     fdmdfm export part.stl -o part.3mf
     fdmdfm render part.stl --view overhangs -o under.png
 
@@ -98,11 +99,17 @@ def cmd_warping(a, profile, up):
 
 
 def cmd_report(a, profile, up):
-    md = api.report(up, profile, a.mode)
     if not a.output:
-        return {"up": up, "markdown": md}
-    Path(a.output).expanduser().write_text(md, encoding="utf-8")
-    return {"up": up, "saved": str(Path(a.output).expanduser())}
+        return {"up": up, "markdown": api.report(up, profile, a.mode)}
+    from .reports import write
+
+    return {"up": up, **write(a.output, up, profile, _json_arg(a.loads), a.mode)}
+
+
+def cmd_chart(a, profile, up):
+    from .charts import write
+
+    return {"up": up, "saved": write(a.kind, a.output, up, profile, _json_arg(a.loads))}
 
 
 def cmd_export(a, profile, up):
@@ -148,7 +155,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("optimise", cmd_optimise, "lightest settings that hold the loads"),
         ("design", cmd_design, "suggested design changes"),
         ("warping", cmd_warping, "warping simulation"),
-        ("report", cmd_report, "Markdown report (to stdout as JSON, or -o file)"),
+        ("report", cmd_report, "report: text as JSON, or -o report.html / report.md with pictures and charts"),
+        ("chart", cmd_chart, "SVG chart (-o file, --kind)"),
         ("export", cmd_export, "3MF with the settings for your slicer (-o file)"),
         ("render", cmd_render, "PNG picture of the part (-o file, --view)"),
     ]:
@@ -167,8 +175,12 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--zones-too", action="store_true", help="also try stronger zones only where needed")
         if name == "design":
             p.add_argument("--params", help='edit sizes, e.g. {"chamfer_mm": 2}')
-        if name in ("report", "export", "render"):
+        if name in ("report", "export", "render", "chart"):
             p.add_argument("-o", "--output", required=name != "report")
+        if name == "chart":
+            from .charts import CHARTS
+
+            p.add_argument("--kind", required=True, choices=CHARTS)
         if name == "render":
             from .render import VIEWS
 

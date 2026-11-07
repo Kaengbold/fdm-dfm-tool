@@ -389,6 +389,29 @@ def get_report(up: list[float], printer: str = "bambu_p1s", material: str = "pla
 
 
 @server.tool()
+def write_report(output_path: str, up: list[float], loads: list[dict] | None = None, printer: str = "bambu_p1s",
+                 material: str = "pla", nozzle: str = "0.4", mode: str = "both") -> dict:
+    """The report a person reads, with pictures and charts: ``output_path`` ending in .html (one file that
+    opens in any browser and prints to PDF) or .md (pictures saved next to it). With ``loads`` (like
+    check_strength) it says whether the part holds. Give the user the path. Takes 30–60 s."""
+    from . import reports
+
+    return reports.write(output_path, up, _profile(printer, material, nozzle), loads, mode)
+
+
+@server.tool()
+def make_chart(kind: str, output_path: str, up: list[float], loads: list[dict] | None = None, printer: str = "bambu_p1s",
+               material: str = "pla", nozzle: str = "0.4", use_temp_c: float | None = None) -> dict:
+    """Chart as an SVG file for the user: "orientations" (safety factor per orientation with ``loads``, else
+    the support each needs), "nozzles" (print time and filament per nozzle: two files, ``_filament`` added
+    to the second name), "warping" (how hard the base curls against the longest bar that stays flat),
+    "heat" (strength left vs. temperature, ``use_temp_c`` marked)."""
+    from . import charts
+
+    return {"saved": charts.write(kind, output_path, up, _profile(printer, material, nozzle, use_temp_c=use_temp_c), loads)}
+
+
+@server.tool()
 def set_custom_presets(printers: dict | None = None, materials: dict | None = None) -> dict:
     """Add the user's own printers and materials (same fields as presets.yaml; a material can say
     ``based_on`` a built-in one and change only some values). Replaces earlier custom ones; their ids
