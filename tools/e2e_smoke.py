@@ -748,6 +748,8 @@ def main():
             dl.value.save_as(out)
             run.act(lambda: page.click("[data-sample=mushroom]"))
             run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
+            # Several engine calls in a row (load, orient, check, the project's orientation): wait for the last step.
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
             got = page.evaluate("() => ({ label: fdm.state.options[0].label, up: fdm.state.options[0].up, loads: fdm.state.loads.length,"
                                 " walls: fdm.state.overrides.wall_loops, name: fdm.state.name })")
             assert got["label"] == "From the project" and got["loads"] == 2 and got["walls"] == "5", got

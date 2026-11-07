@@ -156,34 +156,34 @@
                 <div id="calibration" class="calibration" hidden>
                   <h3>Measure it on your printer</h3>
                   <p class="hint"><button type="button" data-calibration="layer_strength">Layer strength test (STL)</button>
-                    Print one bar lying flat and one standing on its end. Hang each by one hole, add weight at the other until it breaks.</p>
+                    <span data-calibration-how="layer_strength"></span></p>
                   <div class="row">
                     <label>Flat broke at <input id="cal-flat" type="number" step="0.1" min="0" /> kg</label>
                     <label>Standing at <input id="cal-upright" type="number" step="0.1" min="0" /> kg</label>
                     <button type="button" id="cal-z">Use</button>
                   </div>
                   <p class="hint"><button type="button" data-calibration="warping">Warping test (STL)</button>
-                    Print the four bars without a brim, in an enclosure if you have one.</p>
+                    <span data-calibration-how="warping"></span></p>
                   <div class="row">
                     <label>Longest bar that stayed flat
                       <select id="cal-warp"><option value="">pick one</option><option value="40">40 mm</option><option value="80">80 mm</option><option value="120">120 mm</option><option value="160">160 mm (all)</option></select></label>
                     <button type="button" id="cal-warp-use">Use</button>
                   </div>
                   <p class="hint"><button type="button" data-calibration="fit">Fit test (STL)</button>
-                    A 6 mm peg and holes 6.0 … 6.5 mm (the notched end is 6.0). Try the peg in each hole.</p>
+                    <span data-calibration-how="fit"></span></p>
                   <div class="row">
                     <label>Pushes in snugly at <select id="cal-fit-snug"><option value="">pick one</option></select></label>
                     <label>Slides and turns at <select id="cal-fit-slide"><option value="">pick one</option></select></label>
                     <button type="button" id="cal-fit-use">Use</button>
                   </div>
                   <p class="hint"><button type="button" data-calibration="overhang">Overhang test (STL)</button>
-                    Seven blocks leaning 40° … 70° (the short end is 40°), printed without support.</p>
+                    <span data-calibration-how="overhang"></span></p>
                   <div class="row">
                     <label>Steepest one that's still clean <select id="cal-overhang"><option value="">pick one</option></select></label>
                     <button type="button" id="cal-overhang-use">Use</button>
                   </div>
                   <p class="hint"><button type="button" data-calibration="bridge">Bridge test (STL)</button>
-                    Bridges 10 … 50 mm long between pillars, printed without support.</p>
+                    <span data-calibration-how="bridge"></span></p>
                   <div class="row">
                     <label>Longest one that doesn't sag <select id="cal-bridge"><option value="">pick one</option></select></label>
                     <button type="button" id="cal-bridge-use">Use</button>

@@ -38,3 +38,9 @@ def test_errors_are_one_line(capsys):
     assert cli.main(["strength", PART]) == 1
     err = capsys.readouterr().err
     assert err.startswith("error: --loads is required") and err.count("\n") == 1
+
+
+def test_render(capsys, tmp_path):
+    out = tmp_path / "under.png"
+    r = run(capsys, "render", PART, "--up", "0,0,1", "--view", "overhangs", "--width", "160", "--height", "120", "-o", str(out))
+    assert r["view"] == "overhangs" and out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

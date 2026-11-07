@@ -130,7 +130,8 @@ def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int 
         cmd = [str(orca), "--slice", "0", "--outputdir", str(work / "out"),
                "--load-settings", f"{flat['machine']};{flat['process']}", "--load-filaments", str(flat["filament"]), str(src)]
         (work / "out").mkdir()
-        run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # cwd: OrcaSlicer writes a 00000.log ("Invalid T command") into the folder it runs in.
+        run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=work)
         gcode = sorted((work / "out").glob("*.gcode"))
         if not gcode:
             code = run.returncode - 2**32 if run.returncode >= 2**31 else run.returncode

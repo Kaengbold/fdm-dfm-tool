@@ -62,7 +62,8 @@ def _require() -> Session:
 
 
 def get_presets() -> dict:
-    return presets()
+    """All presets, plus how to use each calibration print (``calibration``) for the My materials form."""
+    return {**presets(), "calibration": CALIBRATION_HOW}
 
 
 def custom_presets(printers: dict | None = None, materials: dict | None = None) -> dict:
@@ -70,7 +71,7 @@ def custom_presets(printers: dict | None = None, materials: dict | None = None) 
     from .profile import set_custom_presets
 
     set_custom_presets(printers, materials)
-    return presets()
+    return get_presets()
 
 
 # Analysis grids (Expert settings): more cubes are more exact and slower (about linear in the browser).
@@ -164,24 +165,29 @@ def set_expert(values: dict[str, float]) -> dict:
 
 
 CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge")
+# What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
+CALIBRATION_HOW = {
+    "layer_strength": "A 60 mm bar with a hole near each end. Print one lying flat and one standing on its end, hang each "
+                      "by one hole and add weight at the other until it breaks. Standing ÷ flat is your layer strength.",
+    "warping": "Bars 40, 80, 120 and 160 mm long. Print them without a brim (in your enclosure if you have one): "
+               "the longest one that stays flat on the bed is how long a part can get before its corners lift.",
+    "fit": "A 6 mm peg and holes 6.0 … 6.5 mm (the notched end is 6.0). Try the peg in each hole: "
+           "note the one it pushes into snugly and the one it slides and turns in.",
+    "overhang": "Seven blocks leaning 40° … 70° (the short end is 40°), printed without support: "
+                "the steepest one that's still clean is how far this material can lean out.",
+    "bridge": "Bridges 10 … 50 mm long between pillars, printed without support: "
+              "the longest one that doesn't sag is how far it can bridge.",
+}
 FIT_GAUGE_GAPS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)  # hole sizes of the fit gauge: 6 mm + these
 OVERHANG_TEST_DEG = (40, 45, 50, 55, 60, 65, 70)  # from vertical
 BRIDGE_TEST_MM = (10, 20, 30, 40, 50)
 
 
 def calibration_part(kind: str) -> dict:
-    """Test print for measuring the user's own material on their printer, as STL bytes.
-
-    layer_strength: a 60 × 10 × 6 mm bar with a Ø6 mm hole near each end. Print one lying flat and one
-      standing on its end, hang each by one hole and add weight at the other until it breaks:
-      upright kg / flat kg is the layer strength factor.
-    warping: bars 40, 80, 120 and 160 mm long (10 × 3 mm, sharp corners), printed without brim:
-      the longest one that stays flat on the bed is the warping length for that printer's enclosure.
-    fit: a 6 mm peg and a strip with holes 6.0, 6.1 … 6.5 mm (the notched end is 6.0): the hole the peg
-      pushes into snugly and the one it slides and turns in give the fit gaps for your printer.
-    overhang: seven blocks leaning out 40° … 70° from vertical (the short end is 40°): the steepest one
-      that prints clean is the material's max overhang.
-    bridge: bridges 10 … 50 mm long between two pillars: the longest one that doesn't sag is the max bridge."""
+    """Test print for measuring the user's own material on their printer, as STL bytes, with ``how``
+    (``CALIBRATION_HOW``: what to print and measure). Upright / flat break weight is the layer strength
+    factor, the longest flat warping bar the warping length, the fit holes the fit gaps, the steepest
+    clean block the max overhang, the longest straight bridge the max bridge."""
     from shapely.geometry import Point, Polygon, box as sbox
 
     from .additions import extrude
@@ -197,17 +203,17 @@ def calibration_part(kind: str) -> dict:
         for i, gap in enumerate(FIT_GAUGE_GAPS):
             strip = strip.difference(Point(7 + 10 * i, 6).buffer((6 + gap) / 2, 64))
         peg = extrude(Point(0, 0).buffer(3, 64), 0, 12) + [30, 25, 0]
-        return {"stl": to_binary_stl(Mesh(np.concatenate([extrude(strip, 0, 5), peg]))), "name": "fit_test.stl"}
+        return {"stl": to_binary_stl(Mesh(np.concatenate([extrude(strip, 0, 5), peg]))), "name": "fit_test.stl", "how": CALIBRATION_HOW[kind]}
     if kind == "overhang":
         tris = [lying(Polygon([(0, 0), (8, 0), (8 + 15 * np.tan(np.radians(a)), 15), (0, 15)]), i * 12, 8)
                 for i, a in enumerate(OVERHANG_TEST_DEG)]
-        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "overhang_test.stl"}
+        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "overhang_test.stl", "how": CALIBRATION_HOW[kind]}
     if kind == "bridge":
         tris = []
         for i, span in enumerate(BRIDGE_TEST_MM):
             shape = sbox(0, 0, 5, 10).union(sbox(5 + span, 0, 10 + span, 10)).union(sbox(0, 10, 10 + span, 11.2))
             tris.append(lying(shape, i * 14, 8))
-        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "bridge_test.stl"}
+        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "bridge_test.stl", "how": CALIBRATION_HOW[kind]}
 
     if kind == "layer_strength":
         from shapely.geometry import Point, box as sbox
@@ -215,7 +221,7 @@ def calibration_part(kind: str) -> dict:
         from .additions import extrude
 
         outline = sbox(0, 0, 60, 10).difference(Point(6, 5).buffer(3, 32)).difference(Point(54, 5).buffer(3, 32))
-        return {"stl": to_binary_stl(Mesh(extrude(outline, 0, 6))), "name": "layer_strength_test.stl"}
+        return {"stl": to_binary_stl(Mesh(extrude(outline, 0, 6))), "name": "layer_strength_test.stl", "how": CALIBRATION_HOW[kind]}
     if kind == "warping":
         tris = []
         for i, length in enumerate((40, 80, 120, 160)):
@@ -223,7 +229,7 @@ def calibration_part(kind: str) -> dict:
             v += [0, i * 20, 0]
             f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
             tris.append(v[np.array(f)])
-        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "warping_test.stl"}
+        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "warping_test.stl", "how": CALIBRATION_HOW[kind]}
     raise ValueError(f"kind must be one of {CALIBRATION}")
 
 

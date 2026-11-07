@@ -98,7 +98,7 @@ def slice_with(name: str, cfg: dict, model: Path, out: Path) -> Path:
         p = cfg["profiles"]
         cmd = [str(cfg["exe"]), "--slice", "0", "--outputdir", str(out),
                "--load-settings", f"{p / BBL_MACHINE};{p / BBL_PROCESS}", "--load-filaments", str(p / BBL_FILAMENT), str(model)]
-    subprocess.run(cmd, capture_output=True, timeout=600)
+    subprocess.run(cmd, capture_output=True, timeout=600, cwd=out)  # the slicer leaves a 00000.log where it runs
     found = sorted(out.glob("*.gcode"))
     if not found:
         raise RuntimeError(f"{name} produced no G-code ({' '.join(cmd)})")
