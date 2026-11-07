@@ -5,7 +5,8 @@
 
 Wheels are picked for Fusion's Python version and platform, so the Python running this script
 doesn't have to match. The engine (core/fdmcore) is copied too, so the add-in folder works on
-its own after it is moved to Fusion's AddIns folder.
+its own after it is moved to Fusion's AddIns folder. Run it again after updating the repo: inside
+the repo the add-in uses core/fdmcore directly, but a moved add-in only has this copy.
 """
 
 from __future__ import annotations
@@ -36,8 +37,10 @@ def main(argv: list[str]) -> None:
     subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "--target", lib,
                     "--python-version", version, "--platform", platform, "--only-binary=:all:", *PACKAGES], check=True)
     if os.path.isdir(ENGINE):
-        shutil.copytree(ENGINE, os.path.join(lib, "fdmcore"), dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        # A fresh copy each run: copying over the old one would keep files the engine no longer has.
+        copy = os.path.join(lib, "fdmcore")
+        shutil.rmtree(copy, ignore_errors=True)
+        shutil.copytree(ENGINE, copy, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     print(f"Installed {', '.join(PACKAGES)} for Python {version} ({platform}) into {lib}")
 
 
