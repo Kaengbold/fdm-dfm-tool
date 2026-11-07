@@ -735,6 +735,28 @@ def main():
             return f"{len(report)} characters"
         run.step("copy the report", copy_report)
 
+        def project_round_trip():
+            # Hook is loaded (copy_report): second orientation, a load, a slicer setting -> Save project -> reopen.
+            run.act(lambda: page.locator("#options > li").nth(1).click())
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            page.evaluate("async () => { const r = await fdm.call('regions'); const flat = r.regions.filter((x) => x.kind === 'flat');"
+                          " fdm.state.loads = [{ region: flat[0].id, kind: 'fixed' }, { region: flat[1].id, kind: 'force', kg: 2 }];"
+                          " fdm.state.overrides = { wall_loops: '5' }; }")
+            with page.expect_download(timeout=120_000) as dl:
+                page.evaluate("() => document.getElementById('dl-project').click()")
+            out = OUT / "project.json"
+            dl.value.save_as(out)
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
+            # Several engine calls in a row (load, orient, check, the project's orientation): wait for the last step.
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            got = page.evaluate("() => ({ label: fdm.state.options[0].label, up: fdm.state.options[0].up, loads: fdm.state.loads.length,"
+                                " walls: fdm.state.overrides.wall_loops, name: fdm.state.name })")
+            assert got["label"] == "From the project" and got["loads"] == 2 and got["walls"] == "5", got
+            assert all(abs(a - b) < 1e-6 for a, b in zip(got["up"], up)) and got["name"].startswith("hook"), (got, up)
+            return f"{out.stat().st_size // 1024} kB, {got}"
+        run.step("save and reopen a project", project_round_trip)
+
         def bodies_and_units():
             plate, tiny = test_files()
             run.act(lambda: page.set_input_files("#file", str(plate)))

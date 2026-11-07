@@ -70,8 +70,8 @@
           <h2>Your part</h2>
           <div id="blk-part">
             <label id="drop" class="drop">
-              <input id="file" type="file" accept=".stl,.3mf,.step,.stp" hidden />
-              <strong>Drop an STL, 3MF or STEP file here</strong>
+              <input id="file" type="file" accept=".stl,.3mf,.step,.stp,.json" hidden />
+              <strong>Drop an STL, 3MF or STEP file (or a saved project) here</strong>
               <span>or click to choose one. It stays on your computer.</span>
             </label>
             <label id="body-pick" class="field" hidden>This file has several bodies. Check <select id="body"></select></label>
@@ -512,6 +512,7 @@
               <button id="dl-stl">STL, turned for printing</button>
               <button id="dl-stl-model">STL as modelled (with design changes)</button>
               <button id="dl-step" hidden>STEP: your CAD file with the design changes</button>
+              <button id="dl-project" title="The part with everything set on it (orientation, loads, zones, settings): open it here again later, or give it to your AI agent">Save project</button>
               <button id="copy-report" title="A text summary of the part, its problems and the settings, for an AI chat or a forum post">Copy for your AI chat</button>
             </div>
           </div>

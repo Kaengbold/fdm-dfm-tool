@@ -68,6 +68,8 @@ Then give the agent the guide (how to use the tools, the units, how to explain t
 - Claude Code: copy `agents/fdm-check/` to `~/.claude/skills/` (or to `.claude/skills/` in your project).
 - Codex and others: paste `agents/AGENTS-snippet.md` into your project's `AGENTS.md`.
 
+Project files: the agent saves its work (`save_project`: part, orientation, loads, zones, boxes, settings) as a `.json` you drop into the web app to see it in 3D; "Save project" in the app writes the same file for the agent (`open_project`, or `fdmdfm check project.json`).
+
 With OrcaSlicer installed, the agent can also slice for real (`slice_with_orcaslicer`: OrcaSlicer's own print time and filament use).
 
 This is the supported way to use a Claude, ChatGPT or Gemini *subscription* with the tool:

@@ -22,7 +22,7 @@ may work here in parallel; these rules keep their work from colliding.
 | `core/fdmcore/` | Python engine. Runs natively **and in the browser via Pyodide** |
 | `core/fdmcore/data/` | `presets.yaml`, `rules.yaml` (knowledge base) |
 | `core/tests/` | pytest suite |
-| `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `mypresets.js` user presets, `report.js` HTML report |
+| `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `mypresets.js` user presets, `report.js` HTML report, `project.js` project files (same format as `core/fdmcore/project.py`) |
 | `fusion/FDMDFM/` | Fusion add-in: `bridge.py` (no `adsk`, tested in `core/tests`), `FDMDFM.py` UI, `install_deps.py` |
 | `agents/` | Guide for the user's own agent: `fdm-check/SKILL.md` (Claude Code skill), `AGENTS-snippet.md` (Codex) |
 | `tools/` | `make_samples.py`, `make_manifest.py`, `e2e_smoke.py` |

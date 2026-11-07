@@ -30,6 +30,8 @@ same (`fdmdfm --help`; JSON on stdout, errors as one line on stderr).
    Studio (`slicer: "orca"`) or PrusaSlicer (`slicer: "prusa"`).
 9. Show it: `write_report(path.html, up, loads)` for the user to open, `render_image` to see the part
    yourself (bed, overhangs, problem close-up, stress, warp, compare) and `make_chart` for one chart.
+10. `save_project(path.json, up, loads, …)` so the user can open your work in the web app and see it
+    in 3D. A project the user saved there opens with `open_project` (it returns `up`, `loads`, … to reuse).
 
 ## Units and what the numbers mean
 
