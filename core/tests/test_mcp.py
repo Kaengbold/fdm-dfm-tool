@@ -72,6 +72,8 @@ def test_more_tools(tmp_path):
     cal = m.calibration_part("fit", str(tmp_path / "fit.stl"))
     assert (tmp_path / "fit.stl").stat().st_size > 0 and "peg" in cal["how"]
     assert m.expert_settings()["sections"]
+    saved, image = m.render_image("bed", up, str(tmp_path / "bed.png"), width=160, height=120)
+    assert (tmp_path / "bed.png").read_bytes() == image.data and "bed.png" in saved
 
     faces = sorted((f for f in m.list_faces() if f["kind"] == "flat"), key=lambda f: -f["area_mm2"])
     held, pushed = faces[0], next(f for f in faces[1:] if abs(f["normal"][2]) < 0.5)

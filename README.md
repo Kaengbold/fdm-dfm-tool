@@ -76,6 +76,7 @@ fdmdfm check part.stl --material petg          # findings + settings, best orien
 fdmdfm faces part.stl                          # face ids for loads
 fdmdfm strength part.stl --loads loads.json    # safety factor
 fdmdfm export part.stl -o part.3mf             # 3MF for your slicer
+fdmdfm render part.stl --view overhangs -o under.png   # picture (bed, overhangs, problem, stress, warp, compare)
 ```
 
 Then ask e.g. *"Load ~/parts/bracket.stl, find the best orientation for PETG on my P1S,
