@@ -64,6 +64,10 @@ python -m http.server 8000                     # then open http://localhost:8000
 Run both pytest and the e2e smoke test before marking a task done if you touched `web/`
 or `core/fdmcore/api.py`.
 
+CI (`.github/workflows/`) runs each check only on pull requests that change its files, and not again
+on `main` after the merge, to save Actions minutes: run the checks locally as above, or start one by
+hand from the Actions tab ("Run workflow").
+
 ## Style
 
 - Match the surrounding code: small functions, docstrings that say *why*, no dead code.

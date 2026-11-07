@@ -5,6 +5,12 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    paths:  # only what ends up on the site (a merge of docs or tests doesn't redeploy)
+      - "web/**"
+      - "core/fdmcore/**"
+      - "tools/vendor.py"
+      - "LICENSE"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -19,6 +25,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -31,11 +38,16 @@ jobs:
           rsync -a --exclude '__pycache__' core/fdmcore/ _site/core/fdmcore/
           cp LICENSE _site/
           printf '<!doctype html><meta http-equiv="refresh" content="0; url=web/"><a href="web/">FDM DFM Tool</a>\n' > _site/index.html
+      - uses: actions/cache@v4  # the pinned libraries only change with tools/vendor.py
+        with:
+          path: _vendor
+          key: vendor-${{ hashFiles('tools/vendor.py') }}
       - name: Serve the libraries ourselves (no CDN at run time)
         # Pinned three.js, manifold, OpenCascade and Pyodide (+ the engine's packages) under _site/vendor;
         # the five files that load them switch their base URL to it. The AI panel's SDK stays on the CDN.
         run: |
-          python3 tools/vendor.py _site/vendor
+          [ -d _vendor ] || python3 tools/vendor.py _vendor
+          cp -r _vendor _site/vendor
           cd _site/web
           sed -i 's#https://cdn.jsdelivr.net#../vendor#g' index.html worker.js geometry.js step.js stepwrite.js
           ! grep -n "cdn.jsdelivr.net" index.html worker.js geometry.js step.js stepwrite.js
