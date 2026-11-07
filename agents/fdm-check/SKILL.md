@@ -25,7 +25,9 @@ same (`fdmdfm --help`; JSON on stdout, errors as one line on stderr).
 6. Loads (only if it carries something): `list_faces` → face ids, then `check_strength(up, loads)`.
    Not happy? `strength_options` (what helps most) or `optimise_strength` (lightest settings that hold).
 7. Design changes (only if the user can change the model): `suggest_design_changes` →
-   `apply_design_changes` saves a new STL and loads it; check again.
+   `apply_design_changes` saves a new STL and loads it; check again. For a redesign,
+   `suggest_lighter_shape(up, loads, path.stl, keep=0.4)` saves a blocky shape that keeps the plastic only
+   where the load runs: a guide for the user to rebuild in CAD, not a part to print as it is.
 8. `export_3mf(up, path)` → a 3MF with the part turned and the settings set, for OrcaSlicer / Bambu
    Studio (`slicer: "orca"`) or PrusaSlicer (`slicer: "prusa"`).
 9. Show it: `write_report(path.html, up, loads)` for the user to open, `render_image` to see the part

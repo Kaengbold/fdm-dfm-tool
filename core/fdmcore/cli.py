@@ -123,6 +123,13 @@ def cmd_render(a, profile, up):
     return {"up": up, "view": a.view, "saved": str(out)}
 
 
+def cmd_topology(a, profile, up):
+    out = Path(a.output).expanduser()
+    r = api.topology(up, _need_loads(a), profile, a.keep, a.fine)
+    out.write_bytes(r["stl"])
+    return {"up": up, "saved": str(out), **_clean(r)}
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="fdmdfm", description="Check a part for FDM printing. Prints JSON.")
     common = argparse.ArgumentParser(add_help=False)
@@ -147,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("strength", cmd_strength, "rough strength check (needs --loads)"),
         ("optimise", cmd_optimise, "lightest settings that hold the loads"),
         ("design", cmd_design, "suggested design changes"),
+        ("topology", cmd_topology, "suggested lighter shape as a blocky STL (needs --loads, -o file)"),
         ("warping", cmd_warping, "warping simulation"),
         ("report", cmd_report, "Markdown report (to stdout as JSON, or -o file)"),
         ("export", cmd_export, "3MF with the settings for your slicer (-o file)"),
@@ -165,6 +173,10 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "optimise":
             p.add_argument("--target", type=float, help="safety factor to reach (default ×2, ×3 for --goal strength)")
             p.add_argument("--zones-too", action="store_true", help="also try stronger zones only where needed")
+        if name == "topology":
+            p.add_argument("--keep", type=float, default=0.4, help="share of the plastic to keep, 0.15–0.9")
+            p.add_argument("--fine", action="store_true", help="finer grid, about 4× slower")
+            p.add_argument("-o", "--output", required=True)
         if name == "design":
             p.add_argument("--params", help='edit sizes, e.g. {"chamfer_mm": 2}')
         if name in ("report", "export", "render"):

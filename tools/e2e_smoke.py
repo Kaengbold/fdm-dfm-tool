@@ -723,6 +723,21 @@ def main():
             return f"{status} | after restart: {after} options, {len(findings(page))} findings"
         run.step("progress + cancel", cancel)
 
+        def lighter_shape():
+            run.act(lambda: page.click("[data-sample=hook]"))
+            page.evaluate("async () => { const r = await fdm.call('regions'); const flat = r.regions.filter((x) => x.kind === 'flat');"
+                          " fdm.state.loads = [{ region: flat[0].id, kind: 'fixed' }, { region: flat[1].id, kind: 'force', kg: 2 }]; }")
+            page.evaluate("() => { const k = document.getElementById('topo-keep'); k.value = '50'; k.oninput(); }")
+            # Loads set directly (not by clicking faces), so the button isn't refreshed: enable it as renderLoads would.
+            run.act(lambda: page.evaluate("() => { const b = document.getElementById('run-topology'); b.disabled = false; b.click(); }"), 900_000)
+            text = page.locator("#topology-result").inner_text()
+            assert " g instead of " in text and "CAD" in text, text
+            versions = page.evaluate("() => fdm.state.versions.length")
+            run.act(lambda: page.evaluate("() => [...document.querySelectorAll('#topology-result button')].find((b) => b.textContent === 'Show it in 3D').click()"), 300_000)
+            assert page.evaluate("() => fdm.state.versions.length") == versions + 1 and "lighter_50" in page.evaluate("() => fdm.state.name")
+            return text.splitlines()[0]
+        run.step("suggest a lighter shape", lighter_shape)
+
         def copy_report():
             run.act(lambda: page.click("[data-sample=hook]"))
             page.context.grant_permissions(["clipboard-read", "clipboard-write"])

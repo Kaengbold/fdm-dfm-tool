@@ -22,7 +22,7 @@ import numpy as np
 from .checks import orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
-from .mesh import Mesh
+from .mesh import Mesh, to_binary_stl
 from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z
 from .placement import print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
@@ -1243,6 +1243,42 @@ def _load_case(loads: list[dict], voxels: int | None = None):
     return s.load_case[1]
 
 
+TOPOLOGY_VOXELS = {False: 3_000, True: 12_000}  # Quick (~1 min in the browser) / Fine (~3 min)
+
+
+def topology(up, loads: list[dict], profile: dict | None = None, keep: float = 0.4, fine: bool = False) -> dict:
+    """A suggested lighter shape (topopt.py): where the plastic carries ``loads`` when only ``keep`` (0.15–0.9)
+    of the part's volume may stay. Only removes plastic; cubes at loads and held faces stay. ``fine``: a
+    finer grid (12 000 cubes instead of 3 000, about 4× slower). Returns the blocky shape as ``stl`` and
+    ``triangles`` (float32, part coordinates), its plastic against the part's, and the safety factor of
+    both printed solid on the same grid (a fair comparison, not the real print's)."""
+    from . import topopt
+    from .progress import stage
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    cases = _load_case(loads, TOPOLOGY_VOXELS[bool(fine)])
+    model = cases[0].model
+    with stage(0.0, 0.9):
+        r = topopt.optimise(cases, up, p, float(keep))
+    solid = topopt.keep_connected(model, r["density"] > topopt.SOLID, r["passive"])
+    tris = topopt.voxel_surface(model.grid, model.elems[solid])
+    with stage(0.9, 1.0):
+        before = min(topopt.safety_solid(c, up, p, np.ones(len(solid), bool)) for c in cases)
+        after = min(topopt.safety_solid(c, up, p, solid) for c in cases)
+    grams = p.material["density_g_cm3"] / 1000
+    part_g, shape_g = abs(s.mesh.volume()) * grams, abs(Mesh(tris).volume()) * grams
+    need = required_safety(p)
+    text = (f"A lighter shape that keeps the plastic where the load runs: about {shape_g:.0f} g instead of {part_g:.0f} g "
+            f"({100 * shape_g / part_g:.0f} %). Printed solid it holds about ×{after:.1f} the load (the whole part solid: ×{before:.1f}). ")
+    text += ("That's still enough. " if after >= need else
+             f"That's below ×{need:g}: keep more plastic, or thicken the thinnest struts when you redesign it. ")
+    text += "It's blocky and not a finished part: use it as a guide to redesign the part in CAD."
+    return {"keep": float(keep), "rounds": r["rounds"], "cubes": int(len(solid)), "part_g": round(part_g, 1),
+            "shape_g": round(shape_g, 1), "safety_solid_part": before, "safety_solid_shape": after, "enough": after >= need,
+            "explanation": text, "stl": to_binary_stl(Mesh(tris)), "triangles": tris.astype(np.float32).tobytes()}
+
+
 def _evaluate(cases, up, p: Profile, sh) -> dict:
     """``strength.evaluate_cases`` for the cached load cases, remembered once: "Will it hold?", the
     knock check, the stronger options and the material advisor solve the same thing one after another."""
@@ -2394,6 +2430,7 @@ METHODS = {
     "strength_options": strength_options,
     "design": design,
     "compare_nozzles": compare_nozzles,
+    "topology": topology,
 }
 
 

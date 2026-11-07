@@ -107,10 +107,11 @@ def build_model(grid: VoxelGrid) -> Model:
 
 
 def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fixed: np.ndarray, rtol: float = 1e-4,
-          springs: tuple | None = None):
+          springs: tuple | None = None, x0: np.ndarray | None = None):
     """Displacements for nodal ``forces`` (n_nodes, 3) with ``fixed`` node mask (n_nodes,).
     ``springs`` (nodes, directions (m, 3), stiffness (m,) N/mm): supports that only hold along a
-    direction, e.g. the face normal of a part resting on a surface."""
+    direction, e.g. the face normal of a part resting on a surface. ``x0``: displacements to start
+    from (n_nodes, 3), e.g. the last solve's when only the stiffness changed a little (topopt)."""
     k = stiffness(model, c, scale, springs)
     n = model.n_nodes * 3
     free = np.repeat(~fixed, 3)
@@ -124,7 +125,8 @@ def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fi
         if its[0] % 10 == 0:  # iteration count is unknown up front; creep towards the end
             report(1 - 30 / (30 + its[0]), "Simulating")
 
-    uf, info = spla.cg(kf, f, rtol=rtol, maxiter=2000, M=m, callback=tick)
+    start = None if x0 is None else x0.ravel()[free]
+    uf, info = spla.cg(kf, f, x0=start, rtol=rtol, maxiter=2000, M=m, callback=tick)
     u = np.zeros(n)
     u[free] = uf
     return u.reshape(-1, 3), info
