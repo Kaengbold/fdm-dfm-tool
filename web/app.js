@@ -2486,6 +2486,7 @@ async function initPresets() {
 async function applyMine(mine, select = {}) {
   const p = await call("custom_presets", mine);
   state.presets = p;
+  document.querySelectorAll("[data-calibration-how]").forEach((s) => (s.textContent = p.calibration[s.dataset.calibrationHow]));
   const fill = (sel, entries, value) =>
     $(sel).replaceChildren(...entries.map(([k, label]) => el("option", { value: k, textContent: label, selected: k === value })));
   const keep = { printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value, ...select };

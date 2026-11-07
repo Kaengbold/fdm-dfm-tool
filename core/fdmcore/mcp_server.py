@@ -405,18 +405,7 @@ def calibration_part(kind: str, output_path: str) -> dict:
     r = api.calibration_part(kind)
     out = Path(output_path).expanduser()
     out.write_bytes(r["stl"])
-    return {"saved": str(out), "how": _doc_entry(api.calibration_part, kind)}
-
-
-def _doc_entry(fn, key: str) -> str:
-    """The ``key: …`` paragraph of a docstring that lists its options (calibration_part keeps the how-to there)."""
-    lines, out = (fn.__doc__ or "").splitlines(), []
-    for line in lines:
-        if out and (not line.startswith("      ") or not line.strip()):
-            break
-        if out or line.strip().startswith(f"{key}:"):
-            out.append(line.strip())
-    return " ".join(out).removeprefix(f"{key}:").strip()
+    return {"saved": str(out), "how": r["how"]}
 
 
 @server.tool()
