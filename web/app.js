@@ -5,6 +5,7 @@ import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, 
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
 import { Steps, STEP_NAMES } from "./steps.js";
 import { reportHtml } from "./report.js";
+import { readProject, writeProject } from "./project.js";
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -234,6 +235,7 @@ function showProgress(fraction) {
 /** ``as``: "new" starts over (a new part), "version" adds it as a version to compare (see versions). */
 async function openFile(name, bytes, as = "new") {
   $("body-pick").hidden = true;
+  if (/\.json$/i.test(name)) return openProject(bytes);
   if (as === "version") addVersion(name.replace(/\.(stl|3mf|step|stp)$/i, ""));
   if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes, null, null, as);
   const bodies = await busy("Reading STEP file (first time downloads ~8 MB)…", () => readStep(bytes));
@@ -247,6 +249,46 @@ async function openFile(name, bytes, as = "new") {
     showBodyPicker(bodies.map((b) => ({ name: b.name, volume_mm3: b.volume })), 0, pick);
   }
   await pick(0);
+}
+
+/** A project file (web/project.js, from "Save project" or an agent): the part, then what was set on it. */
+async function openProject(bytes) {
+  let p;
+  try {
+    p = readProject(new TextDecoder().decode(bytes));
+  } catch (err) {
+    return setStatus(err.message, true);
+  }
+  const pr = p.profile ?? {};
+  for (const key of ["printer", "material", "nozzle"]) {
+    if (pr[key] && [...$(key).options].some((o) => o.value === pr[key])) $(key).value = pr[key];
+  }
+  const radio = (group, value) => {
+    const input = document.querySelector(`input[name=${group}][value="${value}"]`);
+    if (input) input.checked = true;
+  };
+  radio("goal", pr.goal);
+  radio("mode", p.mode);
+  await loadFile(p.name, p.stl, p.faceIds);
+  if (pr.use_temp_c != null) await setUseTemp(pr.use_temp_c);
+  if (p.up) {
+    const option = await call("orientation", { up: p.up, profile: profile(), label: "From the project" });
+    state.options.unshift(option);
+    renderOptions();
+    await selectOption(0);
+  }
+  const marks = Object.entries(p.faces ?? {}).flatMap(([kind, ids]) => ids.map((region) => ({ region, kind })));
+  if (p.loads?.length || marks.length) await ensureRegions();
+  state.loads = p.loads ?? [];
+  state.marks = marks;
+  renderLoads();
+  renderMarks();
+  setZones(p.zones ?? []);
+  setVolumes(p.volumes ?? []);
+  state.overrides = p.settings ?? {};
+  renderSettings();
+  recolor();
+  setStatus(`${state.summary} — opened the project with what was set in it.`);
 }
 
 /** Dropdown for files with several parts; ``pick(i)`` loads body i. */
@@ -2826,6 +2868,15 @@ $("dl-3mf").onclick = async () => {
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
   });
+};
+
+$("dl-project").onclick = () => {
+  const text = writeProject({
+    name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
+    up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
+  });
+  download(new TextEncoder().encode(text), `${baseName()}.json`, "application/json");
+  setStatus(`${state.summary} — project saved. Open it here again, or give it to your AI agent (open_project).`);
 };
 
 // ---------- the report for people: one HTML file with pictures ----------

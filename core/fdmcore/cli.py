@@ -44,17 +44,36 @@ def _clean(value):
     return value
 
 
+DEFAULTS = {"printer": "bambu_p1s", "material": "pla", "nozzle": "0.4", "goal": "balanced", "use_temp_c": None}
+
+
 def _setup(a) -> tuple[dict, list[float]]:
     """Load the part and return the profile and the build direction (``--up`` or the best one)."""
     if a.presets:
         p = _json_arg(a.presets)
         api.custom_presets(p.get("printers"), p.get("materials"))
     path = Path(a.part).expanduser()
-    api.load(path.read_bytes(), path.name)
+    saved = {}
+    if path.suffix.lower() == ".json":  # a project file: its part and settings, flags given win
+        from . import project
+
+        saved = project.read(path.read_bytes())
+        api.load(saved["stl"], saved["name"], saved["face_ids"])
+        boxes = saved.get("zones", []) + saved.get("volumes", [])  # export takes zones and design boxes together
+        for key, value in (("loads", saved.get("loads")), ("zones", boxes), ("faces", saved.get("faces"))):
+            if getattr(a, key) is None and value:
+                setattr(a, key, json.dumps(value))
+    else:
+        api.load(path.read_bytes(), path.name)
+    a.saved_settings = saved.get("settings", {})
     if a.scale != 1:
         api.scale(a.scale)
-    profile = {"printer": a.printer, "material": a.material, "nozzle": a.nozzle, "goal": a.goal, "use_temp_c": a.use_temp}
-    up = [float(v) for v in a.up.split(",")] if a.up else api.orientations(profile, top=1)["orientations"][0]["up"]
+    given = {"printer": a.printer, "material": a.material, "nozzle": a.nozzle, "goal": a.goal, "use_temp_c": a.use_temp}
+    profile = {**DEFAULTS, **saved.get("profile", {}), **{k: v for k, v in given.items() if v is not None}}
+    if a.up:
+        up = [float(v) for v in a.up.split(",")]
+    else:
+        up = saved.get("up") or api.orientations(profile, top=1)["orientations"][0]["up"]
     return profile, up
 
 
@@ -106,7 +125,7 @@ def cmd_report(a, profile, up):
 
 def cmd_export(a, profile, up):
     settings = {r["key"]: r["value"] for r in api.check(up, profile)["settings"]}
-    settings.update(_json_arg(a.settings) or {})
+    settings.update({**a.saved_settings, **(_json_arg(a.settings) or {})})
     out = Path(a.output).expanduser()
     out.write_bytes(api.export(up, profile, settings, _json_arg(a.zones), a.slicer))
     return {"up": up, "saved": str(out), "settings": settings}
@@ -115,12 +134,12 @@ def cmd_export(a, profile, up):
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="fdmdfm", description="Check a part for FDM printing. Prints JSON.")
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("part", help="STL or 3MF file (millimetres)")
-    common.add_argument("--printer", default="bambu_p1s", help="printer id (see `fdmdfm presets`)")
-    common.add_argument("--material", default="pla")
-    common.add_argument("--nozzle", default="0.4")
-    common.add_argument("--goal", default="balanced", choices=["balanced", "strength", "speed", "material"])
-    common.add_argument("--up", help="build direction x,y,z in part coordinates (default: the best orientation)")
+    common.add_argument("part", help="STL or 3MF file (millimetres), or a project file (.json) from the web app or save_project")
+    common.add_argument("--printer", help="printer id (see `fdmdfm presets`; default bambu_p1s or the project's)")
+    common.add_argument("--material", help="default pla or the project's")
+    common.add_argument("--nozzle", help="default 0.4 or the project's")
+    common.add_argument("--goal", choices=["balanced", "strength", "speed", "material"])
+    common.add_argument("--up", help="build direction x,y,z in part coordinates (default: the project's, else the best orientation)")
     common.add_argument("--scale", type=float, default=1.0, help="e.g. 25.4 for a part exported in inches")
     common.add_argument("--use-temp", type=float, dest="use_temp", help="hottest the part gets in use, °C")
     common.add_argument("--presets", help="your own printers / materials: JSON or a .json file {printers, materials}")

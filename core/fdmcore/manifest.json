@@ -19,6 +19,7 @@
  "placement.py",
  "profile.py",
  "progress.py",
+ "project.py",
  "recommend.py",
  "refine.py",
  "regions.py",

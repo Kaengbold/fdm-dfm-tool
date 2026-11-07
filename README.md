@@ -63,6 +63,8 @@ For Gemini CLI, add to `~/.gemini/settings.json`:
 { "mcpServers": { "fdm-dfm": { "command": "python", "args": ["-m", "fdmcore.mcp_server"] } } }
 ```
 
+Project files: the agent saves its work (`save_project`: part, orientation, loads, zones, boxes, settings) as a `.json` you drop into the web app to see it in 3D; "Save project" in the app writes the same file for the agent (`open_project`, or `fdmdfm check project.json`).
+
 With OrcaSlicer installed, the agent can also slice for real (`slice_with_orcaslicer`: OrcaSlicer's own print time and filament use).
 
 This is the supported way to use a Claude, ChatGPT or Gemini *subscription* with the tool:
