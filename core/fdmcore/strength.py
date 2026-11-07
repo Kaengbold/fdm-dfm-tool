@@ -246,11 +246,11 @@ def _node_normals(model: Model, nodes: np.ndarray, tris: np.ndarray, normals: np
     return normals[src[i]]
 
 
-def _solve(case: LoadCase, c: np.ndarray, scale: np.ndarray, e: float):
+def _solve(case: LoadCase, c: np.ndarray, scale: np.ndarray, e: float, x0: np.ndarray | None = None, rtol: float = 1e-4):
     """``solve`` with the case's supports. Resting faces and screw holes only push: springs where the
-    part pulls away are released and the solve repeated until nothing changes."""
+    part pulls away are released and the solve repeated until nothing changes. ``x0`` / ``rtol`` as in solve."""
     if case.contact is None or not len(case.contact[0]):
-        return solve(case.model, c, scale, case.forces, case.fixed)
+        return solve(case.model, c, scale, case.forces, case.fixed, rtol, x0=x0)
     nodes, n = case.contact
     k = CONTACT_STIFFNESS * e * case.model.grid.h
     active = np.ones(len(nodes), dtype=bool)
@@ -258,12 +258,13 @@ def _solve(case: LoadCase, c: np.ndarray, scale: np.ndarray, e: float):
         m = int(active.sum())
         if m == 0:
             if case.fixed.any():  # lifts off the rest, the clamp alone holds it
-                return solve(case.model, c, scale, case.forces, case.fixed)
+                return solve(case.model, c, scale, case.forces, case.fixed, rtol, x0=x0)
             raise ValueError("The part lifts off everywhere it rests: hold it somewhere too (clamped or a screw)")
         sel = nodes[active]
         springs = (np.concatenate([sel] + [sel] * 3), np.concatenate([n[active]] + [np.tile(np.eye(3)[i], (m, 1)) for i in range(3)]),
                    np.concatenate([np.full(m, k * (1 - FRICTION))] + [np.full(m, k * FRICTION)] * 3))
-        u, info = solve(case.model, c, scale, case.forces, case.fixed, springs=springs)
+        u, info = solve(case.model, c, scale, case.forces, case.fixed, rtol, springs=springs, x0=x0)
+        x0 = u
         pressed = np.einsum("ij,ij->i", u[nodes], n) >= 0  # moving into the support: it pushes back
         if np.array_equal(pressed, active):
             break

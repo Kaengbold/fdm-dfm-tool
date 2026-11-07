@@ -28,6 +28,7 @@
  "service.py",
  "slicer.py",
  "strength.py",
+ "topopt.py",
  "voxel.py",
  "warp.py"
 ]

@@ -977,6 +977,7 @@ function renderLoads() {
   );
   $("run-strength").disabled = !readyForStrength();
   $("run-optimise").disabled = !readyForStrength();
+  $("run-topology").disabled = !readyForStrength();
   $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
   $("dynamics-need").hidden = readyForStrength();
   $("pick-hint").hidden = state.loads.length > 1;
@@ -1067,7 +1068,7 @@ function renderGcodeResult() {
 // The strength grid has about the same number of cubes for every part, so one strength check takes
 // about the same time on a given computer; the others are a steady multiple of it (measured on the
 // samples in the browser: fine grid 2.6–5.4×, warping 1.8–2.9×, shaking 2.5–5.2×, optimiser 3.6–5.1×).
-const RUN_RATIO = { strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3, trials: 8.5, trials_few: 4.3 };
+const RUN_RATIO = { topology: 6, topology_fine: 25, strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3, trials: 8.5, trials_few: 4.3 };
 const ASK_ABOVE_S = 30;
 let strengthSeconds = Number(localStorage.getItem("fdm-strength-s")) || 8; // this computer, once measured
 
@@ -1655,6 +1656,29 @@ async function runOptimise() {
   });
 }
 $("run-optimise").onclick = runOptimise;
+
+// ---------- topology optimisation: a suggested lighter shape (topopt.py) ----------
+$("topo-keep").oninput = () => ($("topo-keep-out").textContent = `${$("topo-keep").value} %`);
+$("run-topology").onclick = async () => {
+  const how = await askLong("A lighter shape", "topology", [
+    { value: "quick", kind: "topology", label: "Quick (coarse cubes)" },
+    { value: "fine", kind: "topology_fine", label: "Fine (smaller cubes, slower)" }]);
+  if (!how) return;
+  const kind = how === "fine" ? "topology_fine" : "topology";
+  const keep = Number($("topo-keep").value) / 100;
+  return busy(`Finding where the load runs through the part (about ${fmtSeconds(estimate(kind))})…`, async () => {
+    const r = await timed(kind, () => call("topology", { up: activeOption().up, loads: state.loads, profile: profile(), keep, fine: how === "fine" }));
+    const name = `${baseName()}_lighter_${Math.round(keep * 100)}.stl`;
+    $("topology-result").replaceChildren(
+      el("div", { className: `verdict ${r.enough ? "fine" : "borderline"}` },
+        el("strong", { textContent: `About ${r.shape_g.toFixed(0)} g instead of ${r.part_g.toFixed(0)} g` }),
+        el("p", { textContent: r.explanation })),
+      el("div", { className: "row" },
+        el("button", { textContent: "Show it in 3D", title: "Adds the shape as a new version to compare; your part stays in the version list",
+          onclick: () => openFile(name, r.stl, "version") }),
+        el("button", { textContent: "Download STL", onclick: () => download(r.stl, name, "model/stl") })));
+  });
+};
 
 // ---------- material advisor ----------
 const RATING_CLASS = { good: "fine", "with care": "borderline", "not suitable": "likely-to-break" };

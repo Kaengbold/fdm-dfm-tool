@@ -619,6 +619,19 @@ def open_project(path: str) -> dict:
     return {**p, "part": info}
 
 
+@server.tool()
+def suggest_lighter_shape(up: list[float], loads: list[dict], output_path: str, keep: float = 0.4, fine: bool = False,
+                          printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Topology optimisation: a lighter shape that keeps only ``keep`` (0.15–0.9, default 0.4) of the plastic,
+    where ``loads`` (as in check_strength) run through the part. Saves it as a blocky STL at ``output_path``
+    for the user to redesign the part from in CAD (not a finished part; it only removes plastic). Compares
+    the plastic and the safety factor (both printed solid) with the whole part. ~10–30 s, ``fine`` ~4× longer."""
+    r = api.topology(up, loads, _profile(printer, material, nozzle), keep, fine)
+    out = Path(output_path).expanduser()
+    out.write_bytes(r["stl"])
+    return {"saved": str(out), **_clean(r)}
+
+
 def _save_and_load(mesh, output_path: str) -> dict:
     out = Path(output_path).expanduser()
     out.write_bytes(to_binary_stl(mesh))
@@ -660,6 +673,7 @@ API_TOOLS = {
     "strength_options": "strength_options",
     "design": "suggest_design_changes",
     "compare_nozzles": "compare_nozzles",
+    "topology": "suggest_lighter_shape",
 }
 
 
