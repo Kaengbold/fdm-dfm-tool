@@ -90,3 +90,17 @@ def test_3mf_components_in_other_file():
         z.writestr("3D/Objects/object_1.model", sub)
     (name, mesh), = read_3mf(buf.getvalue())
     assert name == "bracket" and mesh.bounds()[0].tolist() == [0, 0, 3]
+
+
+def test_split_bodies_drops_crumbs_and_handles_inverted_shells():
+    big, crumb = box([0, 0, 0], 20), box([30, 0, 0], 0.5)
+    (body,) = split_bodies(Mesh(np.concatenate([big, crumb])))
+    assert len(body.triangles) == len(big)  # the crumb is gone, not just ignored
+    inverted = np.concatenate([box([0, 0, 0], 10), box([20, 0, 0], 10)])[:, [0, 2, 1]]
+    assert len(split_bodies(Mesh(inverted))) == 2
+
+
+def test_unit_hint_large_inches_and_centimetres():
+    hint = unit_hint([10, 5, 2])  # 10 in = 254 mm, or a 100 mm part in centimetres
+    assert hint["factor"] == 25.4 and hint["also"]["factor"] == 10
+    assert unit_hint([1, 1, 1])["also"] is None

@@ -65,26 +65,108 @@ def _profiles(resources: Path) -> dict[str, dict]:
     return {n: {"path": p["path"], "kind": p["kind"], "data": full(n), "own": p["own"]} for n, p in raw.items()}
 
 
-def _condition(expr: str, machine: dict) -> bool:
-    """Evaluate a profile's ``compatible_printers_condition`` (``key=~/regex/``, ``==``, and/or)
-    against a machine profile. Anything we can't read counts as not compatible."""
-    def regex(value, pattern):
-        return re.search(pattern, value if isinstance(value, str) else " ".join(map(str, value))) is not None
+_TOKEN = re.compile(r"""\s*(?:
+    (?P<regex>/(?:\\.|[^/\\])*/) |
+    (?P<str>"(?:\\.|[^"\\])*") |
+    (?P<num>\d+(?:\.\d+)?) |
+    (?P<word>[A-Za-z_]\w*) |
+    (?P<op>==|!=|<=|>=|=~|!~|&&|\|\||[<>!()\[\]]))""", re.X)
 
-    py = re.sub(r"(\w+)\s*!~\s*/(.*?)/", lambda m: f"(not _re({m.group(1)}, {m.group(2)!r}))", expr)
-    py = re.sub(r"(\w+)\s*=~\s*/(.*?)/", lambda m: f"_re({m.group(1)}, {m.group(2)!r})", py)
-    env = {"_re": regex}
-    for k, v in machine.items():
-        if isinstance(v, list):
-            env[k] = [float(x) if re.fullmatch(r"[\d.]+", str(x)) else x for x in v]
-        elif isinstance(v, str) and re.fullmatch(r"[\d.]+", v):
-            env[k] = float(v)
-        else:
-            env[k] = v
+
+def _condition(expr: str, machine: dict) -> bool:
+    """Evaluate a profile's ``compatible_printers_condition`` against a machine profile: comparisons,
+    ``key=~/regex/`` / ``!~``, ``and`` / ``or`` / ``not`` (or ``&&`` / ``||`` / ``!``), ``key[i]``.
+    A small parser, not ``eval``: profile files are data. Anything we can't read counts as not compatible."""
+    tokens, pos = [], 0
+    while pos < len(expr):
+        m = _TOKEN.match(expr, pos)
+        if not m or m.end() == pos:
+            if expr[pos:].strip():
+                return False
+            break
+        tokens.append((m.lastgroup, m.group(m.lastgroup)))
+        pos = m.end()
     try:
-        return bool(eval(py, {"__builtins__": {}}, env))  # noqa: S307 - installed slicer profiles, no builtins
-    except Exception:
+        value, i = _or(tokens, 0, machine)
+        return bool(value) if i == len(tokens) else False
+    except (IndexError, ValueError, TypeError, re.error):
         return False
+
+
+def _value(v):
+    """Profile values are strings: numbers compare as numbers, lists stay lists."""
+    if isinstance(v, list):
+        return [_value(x) for x in v]
+    if isinstance(v, str) and re.fullmatch(r"\d+(?:\.\d+)?", v):
+        return float(v)
+    return v
+
+
+def _or(t, i, env):
+    a, i = _and(t, i, env)
+    while i < len(t) and t[i][1] in ("or", "||"):
+        b, i = _and(t, i + 1, env)
+        a = bool(a) or bool(b)
+    return a, i
+
+
+def _and(t, i, env):
+    a, i = _not(t, i, env)
+    while i < len(t) and t[i][1] in ("and", "&&"):
+        b, i = _not(t, i + 1, env)
+        a = bool(a) and bool(b)
+    return a, i
+
+
+def _not(t, i, env):
+    if t[i][1] in ("not", "!"):
+        a, i = _not(t, i + 1, env)
+        return not a, i
+    return _compare(t, i, env)
+
+
+def _compare(t, i, env):
+    a, i = _atom(t, i, env)
+    if i < len(t) and t[i][1] in ("=~", "!~"):
+        op, (kind, pattern) = t[i][1], t[i + 1]
+        if kind != "regex":
+            raise ValueError(pattern)
+        text = a if isinstance(a, str) else " ".join(map(str, a))
+        found = re.search(pattern[1:-1], text) is not None
+        return found == (op == "=~"), i + 2
+    if i < len(t) and t[i][1] in ("==", "!=", "<", ">", "<=", ">="):
+        op = t[i][1]
+        b, i = _atom(t, i + 1, env)
+        if op in ("==", "!="):
+            return (a == b) == (op == "=="), i
+        return {"<": a < b, ">": a > b, "<=": a <= b, ">=": a >= b}[op], i
+    return a, i
+
+
+def _atom(t, i, env):
+    kind, text = t[i]
+    if text == "(":
+        a, i = _or(t, i + 1, env)
+        if t[i][1] != ")":
+            raise ValueError(text)
+        return a, i + 1
+    if kind == "num":
+        return float(text), i + 1
+    if kind == "str":
+        return re.sub(r"\\(.)", r"\1", text[1:-1]), i + 1
+    if kind == "word":
+        if text in ("true", "false"):
+            return text == "true", i + 1
+        if text not in env:
+            raise ValueError(text)
+        a, i = _value(env[text]), i + 1
+        if i < len(t) and t[i][1] == "[":
+            index, i = _atom(t, i + 1, env)
+            if t[i][1] != "]":
+                raise ValueError(text)
+            a, i = a[int(index)], i + 1
+        return a, i
+    raise ValueError(text)
 
 
 def match_profiles(resources: Path, printer_name: str, nozzle: str, material: str, layer_height: float) -> dict[str, Path]:

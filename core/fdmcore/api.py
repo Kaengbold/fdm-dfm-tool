@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .checks import orient, run_checks, slice_mesh
+from .checks import RULE_IMPACT, orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh, to_binary_stl
@@ -1115,8 +1115,8 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     sh = _shells(p)
     warm = _warm_layers(up, p) if detailed else None
     r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm)
-    model = r["model"]
-    s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"]}  # set_fit / set_gap use it
+    model, turn = r["model"], r["rotation"]  # model in the print frame; turn: part -> print
+    s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"] @ turn, "turn": turn}  # set_fit / set_gap use it
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
     if key not in _warp_reference:
         _warp_reference[key] = warp.reference(p, model.grid.h, sh)
@@ -1125,10 +1125,10 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     ratio = float(np.sqrt(curl / ref)) if ref else None
     verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
     # Shape for the view: the part's own movement without the rigid shift and tilt it gets off the bed.
-    pos = model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h
-    u = _without_rigid_motion(pos, r["u"])
+    pos = (model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h) @ turn  # part frame
+    u = _without_rigid_motion(pos, r["u"] @ turn)
     fine = refine(s.mesh.triangles, model.grid.h)
-    disp = sample_nodes(model, u, fine.reshape(-1, 3))
+    disp = sample_nodes(model, u, fine.reshape(-1, 3) @ turn.T)
     size = np.linalg.norm(disp, axis=1)
     rot = print_rotation(s.mesh, up, p.printer["bed"])[0]
     pull = r["pull"]
@@ -1145,7 +1145,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
            "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
            "from_gcode": warm is not None}
     vm = warp.residual_stress(r)
-    out["stress_value"] = surface_values(model, vm, fine).astype(np.float32).tobytes()
+    out["stress_value"] = surface_values(model, vm, fine @ turn.T).astype(np.float32).tobytes()
     out["stress_max"] = round(float(np.percentile(vm, 99)), 2) if len(vm) else 0.0
     out["stress_share"] = round(out["stress_max"] / r["material"].strength_z, 2)
     out["explanation"] = _warp_story(out, p)
@@ -1566,7 +1566,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
     at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest
-    first, a lighter load always last."""
+    first, a lighter load always last. ``base_safety`` on each: today's safety with the same shell model,
+    so the +/- % compares like with like (the G-code strength check gives its own, different number)."""
     from dataclasses import replace
 
     from .strength import cases_safety, material_volume, verdict
@@ -1611,6 +1612,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "may need more support or take longer", up=axes[best].tolist())
 
     out += _beyond_settings(base, p, profile, loads)
+    for o in out:
+        o["base_safety"] = float(base["safety_factor"])
     return _strongest_first(out)
 
 
@@ -1992,7 +1995,7 @@ def _warp_points(up):
         return None
     from .strength import sample_nodes
 
-    return lambda pts: sample_nodes(w["model"], w["u"], np.asarray(pts, float))
+    return lambda pts: sample_nodes(w["model"], w["u"], np.asarray(pts, float) @ w["turn"].T)
 
 
 def _warp_closing_pair(pair: dict, a: int, b: int, up) -> float:
@@ -2111,6 +2114,8 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
     elif fit["turned_deg"]:
         result["findings"].append({"rule": "turned_to_fit", "severity": "info", "bbox": None, "metrics": fit,
                                    "detail": f"Turned {fit['turned_deg']:.0f}° on the bed so it fits the {p.printer['name']}"})
+    for f in result["findings"]:  # findings built here, outside run_checks, need one too
+        f.setdefault("impact", RULE_IMPACT.get(f["rule"], "info"))
     findings = [explain_finding(f, mode) for f in result["findings"]]
     findings = emphasize_for_goal(findings, p.goal)
     return {
