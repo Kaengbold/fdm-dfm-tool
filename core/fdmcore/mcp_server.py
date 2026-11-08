@@ -632,6 +632,31 @@ def suggest_lighter_shape(up: list[float], loads: list[dict], output_path: str, 
     return {"saved": str(out), **_clean(r)}
 
 
+@server.tool()
+def split_part(output_folder: str, printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Cut a part that is too big for the printer flat into pieces that fit, with holes for alignment pins.
+    Saves piece_1.stl, piece_2.stl, … and pin.stl (print that many pins, standing up) into ``output_folder``
+    and says where it cut and how to glue the pieces together. The loaded part stays as it was."""
+    from .booleans import apply_edits
+    from .mesh import Mesh
+    import numpy as np
+
+    plan = api.split(_profile(printer, material, nozzle))
+    folder = Path(output_folder).expanduser()
+    folder.mkdir(parents=True, exist_ok=True)
+    part = api._require().mesh
+    saved = []
+    for i, piece in enumerate(plan["pieces"], 1):
+        edits = [{**e, "mesh": np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)} for e in piece["edits"]]
+        out = folder / f"piece_{i}.stl"
+        out.write_bytes(to_binary_stl(apply_edits(part, edits)))
+        saved.append(str(out))
+    pin = folder / "pin.stl"
+    pin.write_bytes(to_binary_stl(Mesh(np.frombuffer(plan["pin"]["stl_triangles"], "<f4").reshape(-1, 3, 3))))
+    saved.append(str(pin))
+    return {"saved": saved, "cuts_mm": plan["cuts"], "pins": plan["pin"]["count"], "explanation": plan["explanation"]}
+
+
 def _save_and_load(mesh, output_path: str) -> dict:
     out = Path(output_path).expanduser()
     out.write_bytes(to_binary_stl(mesh))
@@ -647,6 +672,7 @@ API_TOOLS = {
     "load_gcode": "load_gcode",
     "warping": "check_warping",
     "set_fit": "set_fit",
+    "split": "split_part",
     "set_gap": "set_gap",
     "volume_solid": "apply_blocks",
     "snap_model": "snap_model",

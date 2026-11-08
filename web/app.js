@@ -365,6 +365,7 @@ async function partLoaded(info) {
   // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
   state.options = [];
   state.check = null;
+  $("dl-split").hidden = true;
   renderOptions();
   $("view-empty").hidden = true;
   $("view-key").hidden = false;
@@ -443,6 +444,7 @@ async function runCheck() {
     if (!result?.findings) throw new Error("The analysis returned no result — please try again");
     state.check = result;
     renderCheck();
+    $("dl-split").hidden = !result.findings.some((f) => f.rule === "exceeds_build_volume");
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
     steps.render();
@@ -2909,6 +2911,19 @@ function download(bytes, filename, type) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
+// A part too big for the printer: the pieces that fit (split.py), each the part with the rest cut away
+// and pin holes, and the pins, as STLs.
+$("dl-split").onclick = () => busy("Cutting the part into pieces that fit…", async () => {
+  const plan = await call("split", { profile: profile() });
+  const floats = (e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) });
+  for (const [i, piece] of plan.pieces.entries()) {
+    const soup = await applyDesignEdits(state.triangles, piece.edits.map(floats));
+    download(stlBytes(soup), `${baseName()}_piece_${i + 1}.stl`, "model/stl");
+  }
+  if (plan.pin.count) download(stlBytes(new Float32Array(plan.pin.stl_triangles.slice().buffer)), `${baseName()}_pin.stl`, "model/stl");
+  setStatus(plan.explanation);
+});
 
 $("dl-3mf").onclick = async () => {
   await busy("Exporting 3MF for OrcaSlicer / Bambu Studio…", async () => {

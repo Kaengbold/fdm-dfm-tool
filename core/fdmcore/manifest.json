@@ -27,6 +27,7 @@
  "reports.py",
  "service.py",
  "slicer.py",
+ "split.py",
  "strength.py",
  "topopt.py",
  "voxel.py",

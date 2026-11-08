@@ -1963,6 +1963,19 @@ def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "slidin
             "warp_mm": round(squeeze, 3)}
 
 
+def split(profile: dict | None = None) -> dict:
+    """A part too big for the printer, cut flat into pieces that fit, with alignment pins (split.py):
+    each piece's ``edits`` (cut the rest away, then the pin holes) to apply to the part, the pin as
+    triangles (``pin.stl_triangles``, float32) and how many, and a plain explanation. Keeps the cut away
+    from the weak spot of the last strength check, and uses the snug gap from the fit test print."""
+    from .split import split_plan
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    gap = (p.material.get("fit_gap_mm") or {}).get("snug")
+    return split_plan(s.mesh, p.printer["bed"], s.weak_spot[0] if s.weak_spot else None, gap)
+
+
 def set_gap(face_a: int, face_b: int, up, partner_mm: float | None = None, fit: str = "sliding", profile: dict | None = None) -> dict:
     """A slot or tab between two flat faces the user picked: their distance and which it is (slot:
     empty between them, tab: plastic between). With ``partner_mm`` (thickness of what goes in, or of
@@ -2409,6 +2422,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "warping": warping,
     "set_fit": set_fit,
+    "split": split,
     "set_gap": set_gap,
     "volume_solid": volume_solid,
     "snap_model": snap_model,

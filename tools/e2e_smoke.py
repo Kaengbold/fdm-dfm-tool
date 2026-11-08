@@ -87,12 +87,13 @@ class Run:
 
 
 def _box_stl(boxes) -> bytes:
-    """Binary STL of axis-aligned boxes [(lo, size), ...] — enough for input tests."""
+    """Binary STL of axis-aligned boxes [(lo, size or (x, y, z)), ...] — enough for input tests."""
     import struct
 
     v = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
     f = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
-    tris = [[[lo[k] + size * v[i][k] for k in range(3)] for i in face] for lo, size in boxes for face in f]
+    dims = lambda size: size if isinstance(size, (tuple, list)) else (size, size, size)  # noqa: E731
+    tris = [[[lo[k] + dims(size)[k] * v[i][k] for k in range(3)] for i in face] for lo, size in boxes for face in f]
     out = bytes(80) + struct.pack("<I", len(tris))
     for t in tris:
         out += struct.pack("<12fH", 0, 0, 0, *t[0], *t[1], *t[2], 0)
@@ -962,6 +963,20 @@ def main():
             assert page.evaluate("() => fdm.state.versions.length") == after + 1, page.locator("#status").inner_text()
             return page.locator("#status").inner_text()[:120]
         run.step("advanced design changes: add plastic, snap a model on", solids_and_snap)
+
+        def split_too_big():
+            bar = OUT / "long_bar.stl"
+            bar.write_bytes(_box_stl([((0, 0, 0), (400, 40, 20))]))
+            run.act(lambda: page.set_input_files("#file", str(bar)), 300_000)
+            assert page.evaluate("() => !document.getElementById('dl-split').hidden"), "no split offered for a 400 mm part"
+            got = []
+            page.on("download", lambda d: got.append(d.suggested_filename))
+            run.act(lambda: page.evaluate("() => document.getElementById('dl-split').click()"), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('pins')", timeout=300_000)
+            page.wait_for_timeout(1000)
+            assert sorted(got) == ["long_bar_piece_1.stl", "long_bar_piece_2.stl", "long_bar_pin.stl"], got
+            return page.locator("#status").inner_text()[:140]
+        run.step("too big: split into pieces with pins", split_too_big)
 
         for part in args.parts:
             def load_part(part=part):
