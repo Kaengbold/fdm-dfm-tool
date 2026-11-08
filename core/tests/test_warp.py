@@ -66,3 +66,14 @@ def test_residual_stress_in_the_result():
     assert len(stress) == len(np.frombuffer(r["vertex_value"], np.float32))
     assert 0 < r["stress_max"] < 100 and r["stress_share"] > 0
     assert "stress" in r["explanation"]
+
+
+def test_tilted_part_curls_like_the_flat_one():
+    """A bar stored tilted but printed flat (``up`` along its own bottom normal) must warp like the
+    flat bar: voxelised in the print frame it sits on the bed, not on one stair-step corner."""
+    p = Profile.from_dict(ABS_OPEN)
+    flat = warp.curl(warp.simulate(bar(45), [0, 0, 1], p, h=1.0))
+    a = np.radians(30)
+    turn = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
+    tilted = Mesh(bar(45).triangles @ turn.T)
+    assert warp.curl(warp.simulate(tilted, turn @ [0, 0, 1], p, h=1.0)) == pytest.approx(flat, rel=0.25)
