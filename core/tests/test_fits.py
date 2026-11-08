@@ -116,3 +116,21 @@ def test_flat_gap_across_layers_and_warping_tightens():
     api.warping([0, 0, 1], {"material": "abs", "printer": "prusa_mk4s"})
     r = api.set_gap(a, b, [0, 0, 1], 4.0, "sliding")
     assert r["warp_mm"] >= 0 and r["suggested_mm"] == pytest.approx(4.35 + r["warp_mm"], abs=0.005)
+
+
+def test_session_state_survives_an_engine_restart():
+    """Cancel restarts the engine: the app keeps session_state and gives it back after loading the
+    part again, so the fit and the hole answer still count (JSON round trip, as through the worker)."""
+    import json
+
+    hole = plate_with_hole()
+    api.set_fit(hole["region"], [0, 0, 1], 6.0, "press")
+    api.tag_feature(hole["region"], "hole")
+    edits = lambda: sorted(e["id"] for e in api.design([0, 0, 1], {})["edits"])  # noqa: E731
+    before = edits()
+    saved = json.loads(json.dumps(api.dispatch("session_state")))
+    plate_with_hole()  # the fresh engine loads the same part: nothing remembered yet
+    assert api.session_state()["fits"] == {}
+    api.dispatch("restore_state", json.dumps({"state": saved}))
+    assert api.session_state() == saved
+    assert edits() == before  # the resize for the fit is offered again
