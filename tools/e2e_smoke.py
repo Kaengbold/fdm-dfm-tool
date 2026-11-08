@@ -710,6 +710,14 @@ def main():
         def cancel():
             run.act(lambda: page.click("[data-sample=enclosure]"))
             before = page.evaluate("() => fdm.state.options.length")
+            # A hole answer and a fit: the restarted engine must still know them (T-300).
+            told = page.evaluate("""async () => {
+                const { features } = await fdm.call('tag_feature', { region: 0, tag: 'none' });
+                const round = features.find((f) => f.type === 'hole' || f.type === 'boss');
+                if (round) await fdm.call('set_fit', { region: round.region, up: fdm.state.options[0].up, partner_mm: round.diameter, fit: 'sliding' });
+                return fdm.call('session_state');
+            }""")
+            assert told["tags"] and told["fits"], f"enclosure sample: no hole or post to fit ({told})"
             page.click("input[name=goal][value=strength] >> xpath=..")  # slow: checks several orientations
             page.wait_for_selector("#progress:not([hidden])", timeout=30_000)
             page.wait_for_function("() => document.getElementById('progress-bar').value > 0", timeout=30_000)
@@ -720,7 +728,9 @@ def main():
             run.act(lambda: page.click("input[name=goal][value=balanced] >> xpath=.."))
             after = page.evaluate("() => fdm.state.options.length")
             assert after == before, f"{before} options before, {after} after restart"
-            return f"{status} | after restart: {after} options, {len(findings(page))} findings"
+            kept = page.evaluate("() => fdm.call('session_state')")
+            assert kept["tags"] == told["tags"] and kept["fits"] == told["fits"], f"lost on cancel: {told} -> {kept}"
+            return f"{status} | kept {len(kept['tags'])} answer(s), {len(kept['fits'])} fit(s) | after restart: {after} options, {len(findings(page))} findings"
         run.step("progress + cancel", cancel)
 
         def lighter_shape():

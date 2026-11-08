@@ -54,9 +54,16 @@ function post(method, args = {}, data = null) {
   });
 }
 
+// Calls that change what the engine remembers about the part (hole answers, fits, gaps, the weak
+// spot): afterwards the app keeps a copy (session_state), so a Cancel can give it back.
+const KEEPS_STATE = new Set(["tag_feature", "set_fit", "set_gap", "strength"]);
+
 async function call(method, args = {}, data = null) {
   await restoring;
-  return post(method, args, data);
+  if (method === "load" || method === "select_body") state.engineState = null; // a new part forgets it
+  const result = await post(method, args, data);
+  if (KEEPS_STATE.has(method)) state.engineState = await post("session_state");
+  return result;
 }
 
 function cancelEngine() {
@@ -76,6 +83,8 @@ function cancelEngine() {
       if (src.body) await post("select_body", { index: src.body });
       if (src.scale !== 1) await post("scale", { factor: src.scale });
       if (state.gcode) await post("load_gcode", { up: state.gcode.up, profile: profile() }, state.gcode.bytes);
+      if (state.engineState) await post("restore_state", { state: state.engineState });
+      if (state.warp) clearWarp(); // too big to keep: run it again
     }).catch((err) => setStatus(`Could not restart the engine: ${err.message}`, true));
   }
 }
@@ -93,6 +102,7 @@ const state = {
   check: null,
   placed: null,
   presets: null,
+  engineState: null, // the engine's session_state, given back after a Cancel
   // strength
   faceRegions: null, // Uint32Array: region id per triangle
   regionInfo: [],
@@ -269,25 +279,28 @@ async function openProject(bytes) {
   };
   radio("goal", pr.goal);
   radio("mode", p.mode);
+  $("constant-load").checked = Boolean(pr.constant_load);
   await loadFile(p.name, p.stl, p.faceIds);
   if (pr.use_temp_c != null) await setUseTemp(pr.use_temp_c);
+  // Marks and settings first: the check for the project's orientation should already use them.
+  const marks = Object.entries(p.faces ?? {}).flatMap(([kind, ids]) => ids.map((region) => ({ region, kind })));
+  if (p.loads?.length || marks.length) await ensureRegions();
+  state.marks = marks;
+  renderMarks();
+  state.overrides = p.settings ?? {};
+  renderSettings();
   if (p.up) {
     const option = await call("orientation", { up: p.up, profile: profile(), label: "From the project" });
     state.options.unshift(option);
     renderOptions();
     await selectOption(0);
-  }
-  const marks = Object.entries(p.faces ?? {}).flatMap(([kind, ids]) => ids.map((region) => ({ region, kind })));
-  if (p.loads?.length || marks.length) await ensureRegions();
-  state.loads = p.loads ?? [];
-  state.marks = marks;
+  } else if (marks.length) await runCheck();
+  state.loads = p.loads ?? []; // after the check: with loads it would start a strength run first
   renderLoads();
-  renderMarks();
-  setZones(p.zones ?? []);
+  setZones(p.zones ?? []); // after selectOption: it clears zones and boxes of the old orientation
   setVolumes(p.volumes ?? []);
-  state.overrides = p.settings ?? {};
-  renderSettings();
   recolor();
+  await state.nozzleCompare?.catch(() => {}); // it would overwrite the message below when it ends
   setStatus(`${state.summary} — opened the project with what was set in it.`);
 }
 
@@ -302,13 +315,16 @@ function showBodyPicker(bodies, active, pick) {
 
 /** ``step``: the STEP file this part came from (and the edits applied so far), or null. ``as``: "new"
  * starts the version list over; otherwise the model is the current version (see versions). */
-async function loadFile(name, bytes, faceIds = null, step = null, as = "new") {
+async function loadFile(name, bytes, faceIds = null, step = null, as = "new", keep = { body: 0, scale: 1 }) {
   await busy("Reading the part…", async () => {
     await engineReady;
-    const info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
+    let info = await call("load", { name, face_ids: faceIds ? Array.from(faceIds) : undefined }, bytes);
+    // A version shown again keeps the body picked and the unit rescale (inches, metres) it had.
+    if (keep.body) info = await call("select_body", { index: keep.body });
+    if (keep.scale !== 1) info = await call("scale", { factor: keep.scale });
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
-    state.source = { name, bytes, faceIds, body: 0, scale: 1 }; // to restore the part after a cancel
+    state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
     if (as === "new" || !state.versions.length) {
       state.versions = [{ label: "Original" }];
       state.version = 0;
@@ -398,13 +414,18 @@ async function selectOption(i) {
   renderGcode();
   setZones([]); // zones belong to one orientation
   setVolumes([]);
-  state.warp = null;
-  state.showWarp = false;
-  $("warp-result").replaceChildren();
+  clearWarp();
   clearEdits();
   recolor();
   await runCheck();
-  if ($("nozzle-block").open) compareNozzles(); // orientation-specific: refresh, don't collapse
+  // Orientation-specific: refresh, don't collapse. Not awaited; openProject waits for it before its own status.
+  state.nozzleCompare = $("nozzle-block").open ? compareNozzles() : null;
+}
+
+function clearWarp() {
+  state.warp = null;
+  state.showWarp = false;
+  $("warp-result").replaceChildren();
 }
 
 let checkToken = 0;
@@ -2443,8 +2464,8 @@ async function showVersion(i, carry = true) {
   if (!v?.source || i === state.version) return renderVersions();
   const loads = carry ? carryLoads() : [];
   state.version = i;
-  await loadFile(v.source.name, v.source.bytes, v.source.faceIds, v.step, "version");
-  if (v.source.body) await busy("Switching part…", async () => partLoaded(await call("select_body", { index: v.source.body })));
+  const { name, bytes, faceIds, body, scale } = v.source;
+  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale });
   await restoreLoads(loads);
   setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
 }
