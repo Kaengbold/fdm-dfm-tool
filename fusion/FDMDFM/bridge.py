@@ -48,14 +48,18 @@ def analyse(stl: bytes, printer: str, material: str, goal: str = "balanced", nam
     }
 
 
-def teardrop_boxes(hole: dict, up) -> tuple[dict, dict]:
+def teardrop_boxes(hole: dict, up) -> tuple[dict, dict] | None:
     """Two oriented boxes whose intersection is the 45° roof that turns a sideways hole into a
     teardrop: a square turned 45° around the hole axis (its sides touch the circle at 45°, its top
     corner is the tip), cut to the part above the two touching points. Each box is
     {"center", "length_dir", "width_dir", "length", "width", "height"} (mm), as for
-    adsk.core.OrientedBoundingBox3D.create (height runs along length_dir × width_dir)."""
+    adsk.core.OrientedBoundingBox3D.create (height runs along length_dir × width_dir). None for a hole
+    that runs along ``up``: it prints round without a teardrop (and has no "up" across it)."""
     axis = _unit(hole["axis"])
-    u = _unit(_sub(up, _scale(axis, _dot(up, axis))))  # "up" across the hole
+    across = _sub(up, _scale(axis, _dot(up, axis)))
+    if _dot(across, across) < 1e-12:
+        return None
+    u = _unit(across)  # "up" across the hole
     s = _cross(axis, u)
     r, c, length = hole["radius"], hole["center"], hole["length"] + 2.0  # a little past both ends
     diag = _unit(_add(u, s))
