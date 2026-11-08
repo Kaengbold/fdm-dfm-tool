@@ -165,6 +165,20 @@ def main():
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
 
+        def blocked_storage():
+            """Private mode / strict cookie settings: every storage call throws. The app must still start."""
+            other = browser.new_page()
+            errors = []
+            other.on("pageerror", lambda e: errors.append(str(e)))
+            other.add_init_script("Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });")
+            other.goto(f"http://127.0.0.1:{port}/web/")
+            other.wait_for_function("() => document.getElementById('status').textContent.startsWith('Ready')", timeout=180_000)
+            other.close()
+            assert not errors, errors
+            return "starts with storage blocked"
+
+        run.step("starts when browser storage is blocked", blocked_storage)
+
         def levels_and_guide():
             page.click("#show-guide")
             page.click("[data-guide=settings]")
