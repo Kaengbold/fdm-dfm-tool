@@ -780,33 +780,36 @@ def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
     normals, _ = mesh.normals_and_areas()
     verts, inv = np.unique(np.round(tris.reshape(-1, 3), 4), axis=0, return_inverse=True)
     ids = inv.reshape(-1, 3)
-    owner: dict = {}
-    pairs = []
-    for f, (i, j, k) in enumerate(ids):
-        for a, b in ((i, j), (j, k), (k, i)):
-            key = (min(a, b), max(a, b))
-            if key in owner:
-                pairs.append((key, owner.pop(key), f))
-            else:
-                owner[key] = f
-    cos = np.cos(np.radians(min_angle_deg))
+    # Faces sharing an edge, vectorised (a Python loop over every half-edge is slow on big parts).
+    # Sorting is stable, so equal edges keep face order; like a slicer's edge map, the 1st and 2nd
+    # face on an edge pair up, then the 3rd and 4th (a non-manifold edge).
+    edges = np.sort(np.stack([ids[:, [0, 1]], ids[:, [1, 2]], ids[:, [2, 0]]], axis=1).reshape(-1, 2), axis=1)
+    order = np.lexsort((edges[:, 1], edges[:, 0]))
+    e = edges[order]
+    pos = np.arange(len(e))
+    new = np.r_[True, np.any(e[1:] != e[:-1], axis=1)]
+    run_start = np.maximum.accumulate(np.where(new, pos, 0))
+    k = np.flatnonzero(~new & ((pos - run_start) % 2 == 1))
+    second, first = order[k], order[k - 1]
+    by_second = np.argsort(second)  # the order the edges complete in, face by face
+    second, first = second[by_second], first[by_second]
+    f1, f2 = first // 3, second // 3
+    a, b = edges[second, 0], edges[second, 1]
+
     centroids = tris.mean(axis=1)
-    out = []
-    for (a, b), f1, f2 in pairs:
-        if a == b:  # a sliver triangle (common after a boolean) whose corners round to one point
-            continue
-        n1, n2 = normals[f1], normals[f2]
-        if n1 @ n2 > cos:
-            continue
-        pa, pb = verts[a], verts[b]
-        if (centroids[f2] - pa) @ n1 <= 1e-6:  # second face behind the first: an outside (convex) edge
-            continue
-        e = (pb - pa) / np.linalg.norm(pb - pa)
-        t1, t2 = np.cross(n1, e), np.cross(n2, e)
-        t1 = t1 if (centroids[f1] - pa) @ t1 > 0 else -t1
-        t2 = t2 if (centroids[f2] - pa) @ t2 > 0 else -t2
-        out.append({"a": pa, "b": pb, "va": int(a), "vb": int(b), "n1": n1, "n2": n2, "t1": t1, "t2": t2})
-    return out
+    n1, n2 = normals[f1], normals[f2]
+    pa = verts[a]
+    keep = ((a != b)  # a != b: drops sliver triangles (common after a boolean) whose corners round to one point
+            & (np.einsum("ij,ij->i", n1, n2) <= np.cos(np.radians(min_angle_deg)))
+            & (np.einsum("ij,ij->i", centroids[f2] - pa, n1) > 1e-6))  # second face behind the first: a convex edge
+    a, b, f1, f2, n1, n2, pa = a[keep], b[keep], f1[keep], f2[keep], n1[keep], n2[keep], pa[keep]
+    pb = verts[b]
+    d = (pb - pa) / np.linalg.norm(pb - pa, axis=1, keepdims=True)
+    t1, t2 = np.cross(n1, d), np.cross(n2, d)
+    t1 *= np.where(np.einsum("ij,ij->i", centroids[f1] - pa, t1) > 0, 1.0, -1.0)[:, None]
+    t2 *= np.where(np.einsum("ij,ij->i", centroids[f2] - pa, t2) > 0, 1.0, -1.0)[:, None]
+    return [{"a": pa[i], "b": pb[i], "va": int(a[i]), "vb": int(b[i]), "n1": n1[i], "n2": n2[i], "t1": t1[i], "t2": t2[i]}
+            for i in range(len(a))]
 
 
 def _connected(edges: list[dict], seeds) -> list[int]:

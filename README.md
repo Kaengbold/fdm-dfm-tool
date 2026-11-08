@@ -63,6 +63,10 @@ For Gemini CLI, add to `~/.gemini/settings.json`:
 { "mcpServers": { "fdm-dfm": { "command": "python", "args": ["-m", "fdmcore.mcp_server"] } } }
 ```
 
+By default the agent may read and write files anywhere you can. To keep it inside one folder, add
+`--folder C:\path\to\parts` after `fdmcore.mcp_server` (or set `FDM_DFM_FOLDER`). It never replaces a
+file it didn't write itself in that session; set `FDM_DFM_OVERWRITE=1` to allow that.
+
 Then give the agent the guide (how to use the tools, the units, how to explain the results):
 
 - Claude Code: copy `agents/fdm-check/` to `~/.claude/skills/` (or to `.claude/skills/` in your project).

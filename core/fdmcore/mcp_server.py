@@ -7,6 +7,10 @@ web app uses, and every API method has a tool (``API_TOOLS``), so an agent can d
     pip install -e "core[local]"
     claude mcp add fdm-dfm -- python -m fdmcore.mcp_server
 
+Files: by default the agent may read and write anywhere the user can. Start the server with
+``--folder DIR`` (or set ``FDM_DFM_FOLDER``) to keep it inside one folder. It never replaces an
+existing file it didn't write itself in this session (set ``FDM_DFM_OVERWRITE=1`` to allow that).
+
 Typical agent flow: load_part -> find_orientations -> check_print -> (list_faces ->
 check_strength -> strength_options) -> suggest_design_changes -> apply_design_changes
 -> export_3mf (-> slice_with_orcaslicer to confirm with the real slicer).
@@ -43,6 +47,45 @@ def _profile(printer: str, material: str, nozzle: str, goal: str = "balanced", u
     return {"printer": printer, "material": material, "nozzle": nozzle, "goal": goal, "use_temp_c": use_temp_c, "constant_load": constant_load}
 
 
+# ---------- file access ----------
+# The agent passes paths; these keep it to part / G-code / project files and, when the user asks
+# for it, to one folder, and stop it from silently replacing a file the user already had.
+PARTS = (".stl", ".3mf")
+GCODE = (".gcode", ".gco", ".g", ".3mf")
+PROJECT = (".json",)
+_written: set[Path] = set()  # files this server wrote: replacing those again is the normal loop
+
+
+def _folder() -> Path | None:
+    value = os.environ.get("FDM_DFM_FOLDER")
+    return Path(value).expanduser().resolve() if value else None
+
+
+def _path(path: str, kinds: tuple[str, ...], what: str) -> Path:
+    p = Path(path).expanduser().resolve()
+    if p.suffix.lower() not in kinds:
+        raise ValueError(f"The {what} must end in {' or '.join(kinds)}: {p.name}")
+    root = _folder()
+    if root and not p.is_relative_to(root):
+        raise ValueError(f"This server may only use files inside {root} (set with --folder / FDM_DFM_FOLDER)")
+    return p
+
+
+def _in(path: str, kinds: tuple[str, ...], what: str = "file") -> Path:
+    """A file to read: right kind, inside the allowed folder."""
+    return _path(path, kinds, what)
+
+
+def _out(path: str, kinds: tuple[str, ...], what: str = "output file") -> Path:
+    """A file to write: right kind, inside the allowed folder, and not someone's existing file."""
+    p = _path(path, kinds, what)
+    if p.exists() and p not in _written and os.environ.get("FDM_DFM_OVERWRITE") != "1":
+        raise ValueError(f"{p} already exists: pick another name (or ask the user, who can allow "
+                         "replacing files with FDM_DFM_OVERWRITE=1)")
+    _written.add(p)
+    return p
+
+
 def _clean(value):
     """Drop binary payloads (meant for the 3D viewer) from results."""
     if isinstance(value, dict):
@@ -68,7 +111,7 @@ def load_part(path: str) -> dict:
     """Load an STL or 3MF file (millimetres). Files with several bodies load the largest; the result lists
     them all (``bodies``) and ``unit_hint`` warns about parts exported in inches or metres.
     Replaces any previously loaded part."""
-    p = Path(path).expanduser()
+    p = _in(path, PARTS, "part file")
     return _clean(api.load(p.read_bytes(), p.name))
 
 
@@ -192,7 +235,7 @@ def detailed_strength(
     (our recommended settings, or ``settings`` overrides; tens of seconds). loads as in check_strength."""
     prof = _profile(printer, material, nozzle)
     if gcode_path:
-        text = Path(gcode_path).expanduser().read_text(errors="replace")
+        text = _in(gcode_path, GCODE, "G-code file").read_text(errors="replace")
         sliced = None
     else:
         sliced = _slice(up, printer, material, nozzle, settings, keep_gcode=True)
@@ -335,7 +378,7 @@ def export_3mf(
     prof = _profile(printer, material, nozzle)
     merged = {r["key"]: r["value"] for r in api.check(up, prof)["settings"]}
     merged.update(settings or {})
-    out = Path(output_path).expanduser()
+    out = _out(output_path, (".3mf",), "3MF path")
     out.write_bytes(api.export(up, prof, merged, zones, slicer))
     return str(out)
 
@@ -396,7 +439,7 @@ def write_report(output_path: str, up: list[float], loads: list[dict] | None = N
     check_strength) it says whether the part holds. Give the user the path. Takes 30–60 s."""
     from . import reports
 
-    return reports.write(output_path, up, _profile(printer, material, nozzle), loads, mode)
+    return reports.write(str(_out(output_path, (".html", ".htm", ".md"), "report path")), up, _profile(printer, material, nozzle), loads, mode)
 
 
 @server.tool()
@@ -408,7 +451,7 @@ def make_chart(kind: str, output_path: str, up: list[float], loads: list[dict] |
     "heat" (strength left vs. temperature, ``use_temp_c`` marked)."""
     from . import charts
 
-    return {"saved": charts.write(kind, output_path, up, _profile(printer, material, nozzle, use_temp_c=use_temp_c), loads)}
+    return {"saved": charts.write(kind, str(_out(output_path, (".svg",), "chart path")), up, _profile(printer, material, nozzle, use_temp_c=use_temp_c), loads)}
 
 
 @server.tool()
@@ -426,7 +469,7 @@ def calibration_part(kind: str, output_path: str) -> dict:
     "layer_strength", "warping", "fit", "overhang" or "bridge"; ``how`` says what to print and measure.
     The measured numbers go into a custom material (set_custom_presets)."""
     r = api.calibration_part(kind)
-    out = Path(output_path).expanduser()
+    out = _out(output_path, (".stl",), "STL path")
     out.write_bytes(r["stl"])
     return {"saved": str(out), "how": r["how"]}
 
@@ -460,7 +503,7 @@ def load_gcode(path: str, up: list[float], printer: str = "bambu_p1s", material:
     """Read the G-code the part was sliced to (from our 3MF, in orientation ``up``; plain G-code or a
     ``.gcode.3mf``) and check that it is this part. Afterwards check_warping(detailed=True) uses its real
     layer times; detailed_strength does the same for strength (and can slice by itself)."""
-    return _clean(api.load_gcode(Path(path).expanduser().read_bytes(), up, _profile(printer, material, nozzle)))
+    return _clean(api.load_gcode(_in(path, GCODE, "G-code file").read_bytes(), up, _profile(printer, material, nozzle)))
 
 
 @server.tool()
@@ -524,7 +567,7 @@ def snap_model(path: str, point: list[float], normal: list[float], output_path: 
     from list_faces), centred there and turned ``spin_deg``. Joined into one part, saved as STL and loaded."""
     from .booleans import apply_edits
 
-    src = Path(path).expanduser()
+    src = _in(path, PARTS, "model file")
     edit = api.snap_model(src.read_bytes(), point, normal, spin_deg, src.stem)
     return {"placed": edit["description"], **_save_and_load(apply_edits(api._require().mesh, [edit]), output_path)}
 
@@ -546,7 +589,7 @@ def strength_variant(
     """Strength of a changed copy of the part (STL / 3MF at ``variant_path``) without replacing the loaded
     one: for comparing design ideas. Loads move to the matching faces of the copy. Returns the safety
     factor, verdict and how much plastic the change adds (``added_g``). loads as in check_strength."""
-    data = Path(variant_path).expanduser().read_bytes()
+    data = _in(variant_path, PARTS, "part file").read_bytes()
     return _clean(api.strength_variant(up, loads, data, _profile(printer, material, nozzle), walls, infill, top, bottom, zones))
 
 
@@ -578,9 +621,9 @@ def render_image(view: str, up: list[float], output_path: str, loads: list[dict]
     right). Takes 1–8 s."""
     from . import render
 
-    other = Path(other_path).expanduser().read_bytes() if other_path else None
+    other = _in(other_path, PARTS, "part file").read_bytes() if other_path else None
     data = render.picture(view, up, _profile(printer, material, nozzle), loads, finding, other, width, height)
-    out = Path(output_path).expanduser()
+    out = _out(output_path, (".png",), "picture path")
     out.write_bytes(data)
     return [f"saved {out}", Image(data=data, format="png")]
 
@@ -602,7 +645,7 @@ def save_project(output_path: str, up: list[float], loads: list[dict] | None = N
     regions = np.frombuffer(api.regions()["face_regions"], "<u4")  # same face ids after reloading
     text = project.dump(s.name, to_binary_stl(s.mesh), regions.tolist(), profile=_profile(printer, material, nozzle, goal, use_temp_c),
                         mode=mode, up=[float(v) for v in up], loads=loads, faces=faces, zones=zones, volumes=boxes, settings=settings)
-    out = Path(output_path).expanduser()
+    out = _out(output_path, PROJECT, "project path")
     out.write_text(text, encoding="utf-8")
     return {"saved": str(out)}
 
@@ -614,7 +657,7 @@ def open_project(path: str) -> dict:
     ``volumes`` (pass as boxes / keep_clear), ``settings``. Use them in the next calls."""
     from . import project
 
-    p = project.read(Path(path).expanduser().read_bytes())
+    p = project.read(_in(path, PROJECT, "project file").read_bytes())
     info = _clean(api.load(p.pop("stl"), p.pop("name"), p.pop("face_ids")))
     return {**p, "part": info}
 
@@ -627,13 +670,13 @@ def suggest_lighter_shape(up: list[float], loads: list[dict], output_path: str, 
     for the user to redesign the part from in CAD (not a finished part; it only removes plastic). Compares
     the plastic and the safety factor (both printed solid) with the whole part. ~10–30 s, ``fine`` ~4× longer."""
     r = api.topology(up, loads, _profile(printer, material, nozzle), keep, fine)
-    out = Path(output_path).expanduser()
+    out = _out(output_path, (".stl",), "STL path")
     out.write_bytes(r["stl"])
     return {"saved": str(out), **_clean(r)}
 
 
 def _save_and_load(mesh, output_path: str) -> dict:
-    out = Path(output_path).expanduser()
+    out = _out(output_path, (".stl",), "STL path")
     out.write_bytes(to_binary_stl(mesh))
     return {"saved": str(out), **_clean(api.load(out.read_bytes(), out.name))}
 
@@ -681,6 +724,13 @@ APP_ONLY = {"session_state", "restore_state"}
 
 
 def main():
+    import argparse
+
+    ap = argparse.ArgumentParser(description="FDM DFM tool for AI agents (MCP over stdio)")
+    ap.add_argument("--folder", help="only read and write files inside this folder")
+    a = ap.parse_args()
+    if a.folder:
+        os.environ["FDM_DFM_FOLDER"] = a.folder
     server.run("stdio")
 
 
