@@ -78,15 +78,16 @@ VOLUME_TYPES = {
 
 
 def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None = None, bed_center=(128.0, 128.0),
-               modifiers: list[tuple] = (), layout: str = "orca") -> bytes:
+               modifiers: list[tuple] = (), layout: str = "orca", pauses: list[dict] = ()) -> bytes:
     """``mesh`` must already be oriented (lowest point at z = 0, centred on x/y = 0). ``modifiers``:
     (triangles in the same frame, settings[, kind]) per volume, kind one of VOLUME_TYPES (default
     "stronger": a settings modifier); ``layout`` "orca" (also Bambu Studio) or "prusa", see the
-    module docstring."""
+    module docstring. ``pauses``: {"top": pocket top (mm), "layer_height", "note"} each: pause before the
+    first layer above it, to put something into the part (see pause_files)."""
     if modifiers:
         if layout not in LAYOUTS:
             raise ValueError(f"layout must be one of {LAYOUTS}")
-        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout)
+        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, pauses)
     verts, faces = _weld(mesh.triangles)
     verts = verts + [bed_center[0], bed_center[1], 0.0]
     vxml = "\n".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in verts)
@@ -138,7 +139,30 @@ def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None =
         z.writestr("3D/3dmodel.model", model)
         z.writestr("Metadata/model_settings.config", model_settings)
         z.writestr("Metadata/Slic3r_PE_model.config", prusa_model)
+        for path, text in pause_files(pauses).items():
+            z.writestr(path, text)
     return buf.getvalue()
+
+
+def pause_files(pauses: list[dict]) -> dict[str, str]:
+    """The slicers' own "pause at this layer" lists, as their project files store them: OrcaSlicer and
+    Bambu Studio read ``custom_gcode_per_layer.xml``, PrusaSlicer its ``custom_gcode_per_print_z.xml``.
+    type 1 is a pause (each uses the printer profile's own pause command, e.g. M601 / M400 U1). The pause
+    must come before the first layer over the pocket's ``top``, whatever the layer grid: PrusaSlicer pauses
+    at the next layer at or above the height given (so: just above the top), OrcaSlicer at the nearest
+    one (so: most of a layer above it). tools/slicer_check.py checks both."""
+    if not pauses:
+        return {}
+    orca = "".join(f'<layer top_z="{p["top"] + 0.6 * p["layer_height"]:.3f}" type="1" extruder="1" color="" extra={quoteattr(p.get("note", ""))} gcode="M601"/>\n'
+                   for p in pauses)
+    prusa = "".join(f'<code print_z="{p["top"] + 0.01:.3f}" type="1" extruder="1" color="" extra={quoteattr(p.get("note", ""))} gcode="M601"/>\n'
+                    for p in pauses)
+    return {
+        "Metadata/custom_gcode_per_layer.xml": ('<?xml version="1.0" encoding="utf-8"?>\n<custom_gcodes_per_layer>\n<plate>\n'
+                                                f'<plate_info id="1"/>\n{orca}<mode value="SingleExtruder"/>\n</plate>\n</custom_gcodes_per_layer>\n'),
+        "Metadata/Prusa_Slicer_custom_gcode_per_print_z.xml": ('<?xml version="1.0" encoding="utf-8"?>\n<custom_gcodes_per_print_z>\n'
+                                                               f'{prusa}<mode value="SingleExtruder"/>\n</custom_gcodes_per_print_z>\n'),
+    }
 
 
 MODEL_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
@@ -165,7 +189,7 @@ def _meta(d: dict, kind: str | None = None) -> str:
     return "\n".join(f"    <metadata {t}key={quoteattr(k)} value={quoteattr(str(v))}/>" for k, v in d.items())
 
 
-def _zip(model: str, model_settings: str | None, prusa_model: str | None) -> bytes:
+def _zip(model: str, model_settings: str | None, prusa_model: str | None, pauses: list[dict] = ()) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", CONTENT_TYPES)
@@ -175,10 +199,12 @@ def _zip(model: str, model_settings: str | None, prusa_model: str | None) -> byt
             z.writestr("Metadata/model_settings.config", model_settings)
         if prusa_model:
             z.writestr("Metadata/Slic3r_PE_model.config", prusa_model)
+        for path, text in pause_files(pauses).items():
+            z.writestr(path, text)
     return buf.getvalue()
 
 
-def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str) -> bytes:
+def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str, pauses: list[dict] = ()) -> bytes:
     shift = np.array([bed_center[0], bed_center[1], 0.0])
     pieces = [_weld(mesh.triangles)] + [_weld(m[0]) for m in modifiers]
     types = [VOLUME_TYPES[m[2] if len(m) > 2 else "stronger"] for m in modifiers]
@@ -195,7 +221,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
                  + f"\n  <object id=\"1\" name={quoteattr(name)} type=\"model\"><components>{comps}</components></object>\n" + MODEL_FOOT)
         config = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\">\n"
                   f"    <metadata key=\"name\" value={quoteattr(name)}/>\n{_meta(settings)}\n" + "\n".join(parts) + "\n </object>\n</config>")
-        return _zip(model, config, None)
+        return _zip(model, config, None, pauses)
 
     # PrusaSlicer: one mesh, the modifiers as triangle ranges after the part's.
     verts, faces, offset, bounds = [], [], 0, [0]
@@ -219,7 +245,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
     config = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\" instances_count=\"1\">\n"
               f"  <metadata type=\"object\" key=\"name\" value={quoteattr(name)}/>\n{_meta(prusa_settings(settings), 'object')}\n"
               + "\n".join(vols) + "\n </object>\n</config>")
-    return _zip(model, None, config)
+    return _zip(model, None, config, pauses)
 
 
 def _weld(triangles: np.ndarray, decimals: int = 5) -> tuple[np.ndarray, np.ndarray]:

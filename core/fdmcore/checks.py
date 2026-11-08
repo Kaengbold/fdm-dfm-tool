@@ -70,6 +70,7 @@ RULE_IMPACT = {
     "living_hinge": "weak",
     "snap_fit_upright": "weak",
     "thick_solid_block": "info",
+    "pause_to_insert": "info",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
 SEVERITY_ORDER = {"problem": 0, "warn": 1, "info": 2}
@@ -155,6 +156,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _cooling_findings(layers, heat, profile, T, sliced)
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
+    findings += pocket_findings(mesh, profile, T)
     findings += _relief_findings(mesh, profile, T)
     findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
@@ -636,6 +638,57 @@ def _fastener_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict
                             f"If the Ø{d:.1f} mm hole at {_zrange(r)} is for an {name} heat-set insert: only {wall:.1f} mm of wall "
                             f"around it — the melted plastic pushes out and can split it (aim for {F['insert_min_wall_mm']}–2 mm)",
                             r, profile, fastener=name, wall_mm=round(wall, 2)))
+    return out
+
+
+def insert_pockets(mesh: Mesh, profile: Profile, T: dict | None = None) -> list[dict]:
+    """Closed pockets inside the part (an inner shell) with a flat roof: room for a magnet, nut, bearing
+    or weight put in while printing. Each: its box (print frame), the height to pause at (the top of the
+    first roof layer, as slicers number them), that layer's number, and the roof's shortest span."""
+    from .formats import _components
+
+    P = (T or load_data("thresholds"))["pauses"]
+    t = mesh.triangles
+    labels = _components(t)
+    n = int(labels.max()) + 1
+    if n == 1:
+        return []
+    signed = np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])) / 6.0
+    vol = np.bincount(labels, signed, n)
+    if vol.sum() < 0:  # every shell inside out (inverted STL): cavities are then the positive ones
+        signed, vol = -signed, -vol
+    normals, areas = mesh.normals_and_areas()
+    lh = profile.layer_height
+    out = []
+    for c in np.flatnonzero(vol < -P["min_pocket_mm3"]):
+        tri = t[labels == c]
+        lo, hi = tri.reshape(-1, 3).min(axis=0), tri.reshape(-1, 3).max(axis=0)
+        # The roof: faces at the top of the pocket, level (an inner shell's normals point into the pocket).
+        top = (np.abs(tri[:, :, 2] - hi[2]).max(axis=1) < 0.05) & (np.abs(normals[labels == c][:, 2]) > 0.99)
+        footprint = (hi[0] - lo[0]) * (hi[1] - lo[1])
+        if areas[labels == c][top].sum() < P["roof_flat_share"] * footprint:
+            continue
+        layer = int(np.floor(hi[2] / lh + 1e-6)) + 1  # the first layer printed over the pocket
+        out.append({"lo": lo.tolist(), "hi": hi.tolist(), "pause_z": round(layer * lh, 3), "layer": layer, "top_z": round(float(hi[2]), 3),
+                    "span_mm": float(min(hi[0] - lo[0], hi[1] - lo[1])), "volume_mm3": float(-vol[c])})
+    return out
+
+
+def pocket_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
+    """A pause to put something into each closed pocket (pause_to_insert)."""
+    out = []
+    for p in insert_pockets(mesh, profile, T):
+        lo, hi = p["lo"], p["hi"]
+        size = f"{hi[0] - lo[0]:.1f} × {hi[1] - lo[1]:.1f} × {hi[2] - lo[2]:.1f} mm"
+        text = (f"Closed pocket ({size}) at {lo[2]:.1f}–{hi[2]:.1f} mm: to put a magnet, nut or weight in, pause the print "
+                f"before layer {p['layer']} (at {p['pause_z']:.2f} mm), drop it in, and carry on. The 3MF can carry the pause "
+                "for OrcaSlicer and PrusaSlicer; in Bambu Studio add it on that layer in the preview")
+        long = p["span_mm"] > profile.material["max_bridge_mm"]
+        if long:
+            text += (f". The roof spans {p['span_mm']:.0f} mm, longer than {profile.material['name']} bridges cleanly: "
+                     "it may sag onto what you put in")
+        out.append(_finding("pause_to_insert", "warn" if long else "info", text, bbox=[lo, hi],
+                            pause_z=p["pause_z"], layer=p["layer"], top_z=p["top_z"], span_mm=round(p["span_mm"], 1)))
     return out
 
 

@@ -881,6 +881,28 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
     - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
+  pause_to_insert:
+    title: Pocket for a part put in while printing
+    why: A closed pocket inside the part can hold a magnet, nut, bearing or weight that is dropped in part-way
+      through the print. The print has to pause after the last layer below the pocket's roof; the next layers then
+      close over it. Support printed inside the pocket would fill it up, and a long flat roof sags onto what is inside.
+    fixes:
+    - domain: process
+      text: Pause before the layer the check names (OrcaSlicer, PrusaSlicer, Bambu Studio - right-click that layer in
+        the preview and add a pause), drop the part in, check it sits below the top of the pocket, and resume. A
+        drop of glue keeps a magnet from jumping to the nozzle.
+    - domain: slicer
+      text: Put supports on the build plate only, so none are printed inside the pocket.
+      settings:
+        support_on_build_plate_only: '1'
+    - domain: geometry
+      text: Make the pocket 0.2-0.3 mm bigger than the part on every side and about one layer deeper, so it drops in
+        without force and nothing sticks up into the nozzle's path.
+    tags:
+    - process
+    - pause
+    sources:
+    - Prusa Knowledge Base — Insert pause or custom G-code at layer (magnets put in at a pause) — https://help.prusa3d.com/article/insert-pause-or-custom-g-code-at-layer_120490
   fibre_filled:
     title: Carbon or glass fibre filament makes it stiffer, not stronger
     why: The short fibres in PLA-CF, PETG-CF, PA-CF and similar filaments line up along each printed line. The part

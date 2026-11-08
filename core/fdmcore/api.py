@@ -2270,8 +2270,11 @@ def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
     return out
 
 
-def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca") -> bytes:
+def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca",
+           pauses: list[float] | None = None) -> bytes:
     """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio / PrusaSlicer.
+    ``pauses``: pocket tops (mm, ``top_z`` of a pause_to_insert finding): the print pauses before the first
+    layer above each, to put something into the pocket (OrcaSlicer and PrusaSlicer; Bambu Studio ignores it).
     ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes, and
     the advanced design boxes (volume_at) support enforcers, blockers and negative volumes; then the
     file is for one slicer: ``slicer`` "orca" (also Bambu Studio) or "prusa"."""
@@ -2291,7 +2294,9 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     if any(m[2] == "support" for m in modifiers) and str(settings.get("enable_support", "0")) == "0":
         # Supports only where the user put them: the slicer's own placement stays off.
         settings = {**settings, "enable_support": "1", "support_type": "tree(manual)"}
-    return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer)
+    return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer,
+                      pauses=[{"top": float(z), "layer_height": float(settings.get("layer_height") or p.layer_height),
+                               "note": "Put the part into the pocket"} for z in pauses or []])
 
 
 def _zone_box(mesh: Mesh, up, rotation: np.ndarray, zone: dict) -> np.ndarray:

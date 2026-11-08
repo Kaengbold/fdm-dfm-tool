@@ -151,6 +151,33 @@ def measure(gcode: Path) -> dict:
 ZONE = {"lo": [-1, -1, 0], "hi": [20, 21, 10], "walls": 2, "infill": 1.0}
 
 
+def pause_block(layout: str) -> bytes:
+    """20 mm cube with a closed 8 mm pocket at z 6–9, exported with a pause before the roof."""
+    import numpy as np
+
+    from fdmcore.additions import extrude
+    from shapely.geometry import box
+
+    outer = extrude(box(0, 0, 20, 20), 0, 20)
+    pocket = extrude(box(6, 6, 14, 14), 6, 9)[:, ::-1]  # inner shell: wound inward
+    api.load(to_binary_stl(Mesh(np.concatenate([outer, pocket]))), "pause_check")
+    return api.export([0, 0, 1], {}, {}, slicer=layout, pauses=[9.0])
+
+
+PAUSE = re.compile(r"^(; PAUSE_PRINTING|;PAUSE_PRINT|M601)\b")
+
+
+def measure_pause(gcode: Path) -> list[float]:
+    """Layer heights (Z of the layer being started) where the G-code pauses."""
+    z, at = None, []
+    for line in gcode.read_text(errors="replace").splitlines():
+        if (m := LAYER.match(line)) is not None:
+            z = float(m.group(2))
+        elif PAUSE.match(line) and z is not None and z not in at:
+            at.append(z)
+    return at
+
+
 def zone_block(layout: str) -> bytes:
     from fdmcore.additions import extrude
     from shapely.geometry import box
@@ -233,6 +260,14 @@ def main():
         z = measure_zone(slice_with(name, cfg, model, work / f"{name}_zone"))
         # The zone half is filled (≥ 2.5× the plastic of the 10 % half), and the part didn't grow by the zone's box.
         checks["zone_modifier"] = (z["zone"], z["rest"], z["zone"] >= 2.5 * z["rest"] and z["width"] < 20.0)
+        model = work / f"{name}_pause.3mf"
+        model.write_bytes(pause_block(layout))
+        at = measure_pause(slice_with(name, cfg, model, work / f"{name}_pause"))
+        if name == "bambu":  # Bambu Studio reads no pause from a 3MF it didn't write: the user adds it (the finding says so)
+            print(f"note {name} pause_at_layer: not read from the 3MF (pauses at {at})")
+        else:
+            # Before the first layer above the pocket (top 9 mm): 9.2 on a 0.2 mm grid, 9.05 on 0.15 mm.
+            checks["pause_at_layer"] = (at, "first layer over 9.0", len(at) == 1 and 9.0 < at[0] <= 9.21)
         for key, (va, vb, applied) in checks.items():
             ok &= applied
             print(f"{'PASS' if applied else 'FAIL'} {name} {key}: A={va} B={vb}")
