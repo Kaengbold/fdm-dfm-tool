@@ -229,6 +229,17 @@ def set_fit(region: int, up: list[float], partner_mm: float | None = None, fit: 
 
 
 @server.tool()
+def set_fastener(region: int, up: list[float], size: str | None = "M3", use: str = "screw", material: str = "pla",
+                 nozzle: str = "0.4") -> dict:
+    """Say what fastens into a round hole: size "M2"–"M6" and use: "screw" (cut straight into the plastic),
+    "insert" (heat-set insert), "nut_top" (bolt, nut in a hex pocket at the upper end), "nut_side" (nut pushed
+    in through a slot from the side) or "bolt" (clearance hole). Returns the hole size, depth, wall and pocket
+    to model, and the walls to print if the design can't change; suggest_design_changes then offers the
+    resize, a boss and the pocket or slot. size None forgets it. Region ids from list_faces."""
+    return api.set_fastener(region, up, size, use, {"material": material, "nozzle": nozzle})
+
+
+@server.tool()
 def set_gap(face_a: int, face_b: int, up: list[float], partner_mm: float | None = None, fit: str = "sliding", material: str = "pla") -> dict:
     """A slot or tab between two parallel flat faces (ids from list_faces): their distance and whether
     it is a slot (empty between) or a tab (plastic between). With partner_mm (thickness of what goes in,
@@ -647,6 +658,7 @@ API_TOOLS = {
     "load_gcode": "load_gcode",
     "warping": "check_warping",
     "set_fit": "set_fit",
+    "set_fastener": "set_fastener",
     "set_gap": "set_gap",
     "volume_solid": "apply_blocks",
     "snap_model": "snap_model",

@@ -151,12 +151,13 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
 
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
                  weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None,
-                 hot_spots=None) -> list[dict]:
+                 hot_spots=None, fasteners: dict | None = None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
     ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner,
     and at the other inside corners near ``hot_spots`` (points, share of the highest stress).
     ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
-    ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces."""
+    ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces;
+    ``fasteners`` ({region: {"size", "use"}}) holes for screws, inserts and nuts (see fastener_plan)."""
     from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
 
     up = np.asarray(up, float) / np.linalg.norm(up)
@@ -165,13 +166,16 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     edits = []
     for f in accepted(detect_features(mesh, region, tags)):
         axis = np.asarray(f["axis"])
-        if f["type"] == "hole" and f["full_circle"] and abs(axis @ up) < 0.2 and f["diameter"] >= TEARDROP_MIN_DIAMETER:
+        # Not for a screw / nut hole: it gets its own size (a teardrop at the old size would undo it).
+        if (f["type"] == "hole" and f["full_circle"] and abs(axis @ up) < 0.2 and f["diameter"] >= TEARDROP_MIN_DIAMETER
+                and f["region"] not in (fasteners or {})):
             edits.append(_edit(
                 f"teardrop-{f['region']}", "short_bridge", f"Teardrop for the horizontal Ø{f['diameter']:.1f} mm hole",
                 f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
                 [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg"))
     edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _gap_edits(mesh, region, gaps or {}, up, profile)
+    edits += _fastener_edits(mesh, accepted(detect_features(mesh, region, tags)), fasteners or {}, up, profile)
     r = rotation_to_z(up)
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
@@ -249,12 +253,19 @@ def _fit_edits(features: list[dict], fits: dict, up, profile=None) -> list[dict]
             inner, outer = (r_old - overlap, r_new) if grow_part else (r_new, r_old + overlap)
         name = "hole" if hole else "post"
         out.append(_edit(f"fit-{f['region']}", "fit_size", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm {name} for a {want['fit']} fit",
-                         why, [_ring(f, inner, outer)], op="add" if grow_part else "cut"))
+                         why, [_ring(f, inner, outer, grow_part)], op="add" if grow_part else "cut"))
     return out
 
 
-def _ring(f: dict, inner: float, outer: float) -> np.ndarray:
-    """A ring (or disc, inner = 0) along a hole / post's axis, over its length."""
+def _ends(f: dict, add: bool) -> tuple[float, float]:
+    """Where a ring along a hole starts and ends: a hair inside the hole's end faces when it adds plastic,
+    a hair past them when it cuts. Ending exactly on the part's faces leaves broken slivers there."""
+    half = f["length"] / 2 + (-OFF_CORNER if add else OFF_CORNER)
+    return -half, half
+
+
+def _ring(f: dict, inner: float, outer: float, add: bool = False) -> np.ndarray:
+    """A ring (or disc, inner = 0) along a hole / post's axis, over its length (see ``_ends``)."""
     from shapely.geometry import Point
 
     from .additions import extrude
@@ -266,7 +277,7 @@ def _ring(f: dict, inner: float, outer: float) -> np.ndarray:
     u = np.cross(axis, [1.0, 0, 0] if abs(axis[0]) < 0.9 else [0, 1.0, 0])
     u /= np.linalg.norm(u)
     s = np.cross(axis, u)
-    local = extrude(shape, -f["length"] / 2, f["length"] / 2)
+    local = extrude(shape, *_ends(f, add))
     return c + local[..., :1] * u + local[..., 1:2] * s + local[..., 2:] * axis
 
 
@@ -976,4 +987,212 @@ def _face_slab(mesh: Mesh, mask: np.ndarray, lo: float, hi: float) -> list[np.nd
         prism = extrude(poly.simplify(0.01), lo, hi)
         if prism is not None:
             out.append(origin + prism[..., :1] * u + prism[..., 1:2] * v + prism[..., 2:] * n)
+    return out
+
+
+# ---------- screws, nuts and heat-set inserts (T-320) ----------
+
+FASTENER_USES = {
+    "screw": "a screw cut straight into the plastic",
+    "insert": "a heat-set insert",
+    "nut_top": "a bolt with a nut in a pocket",
+    "nut_side": "a bolt with a nut pushed in from the side",
+    "bolt": "a bolt going through",
+}
+
+
+def _frame(f: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Centre and three unit vectors (u, s across the hole, axis along it), as ``_ring`` uses them."""
+    axis, c = np.asarray(f["axis"], float), np.asarray(f["center"], float)
+    u = np.cross(axis, [1.0, 0, 0] if abs(axis[0]) < 0.9 else [0, 1.0, 0])
+    u /= np.linalg.norm(u)
+    return c, u, np.cross(axis, u), axis
+
+
+def _axis_prism(f: dict, shape, z0: float, z1: float) -> np.ndarray:
+    """A 2D ``shape`` (hole frame: x along u, y along s) extruded from z0 to z1 along the hole axis."""
+    from .additions import extrude
+
+    c, u, s, axis = _frame(f)
+    local = extrude(shape, z0, z1)
+    return c + local[..., :1] * u + local[..., 1:2] * s + local[..., 2:] * axis
+
+
+def _section(mesh: Mesh, f: dict):
+    """The part cut across the hole at its middle, in the hole frame (the hole at the origin)."""
+    from .slicer import section
+
+    c, u, s, axis = _frame(f)
+    turned = (mesh.triangles - c) @ np.stack([u, s, axis]).T
+    return section(turned, 0.0)
+
+
+def hole_wall(mesh: Mesh, f: dict) -> float | None:
+    """Thinnest plastic around a hole at its middle (to the outside or the next hole), mm."""
+    from shapely.geometry import Point
+
+    geom = _section(mesh, f)
+    centre, r = Point(0, 0), f["radius"]
+    for piece in getattr(geom, "geoms", [geom]):
+        if piece.is_empty or piece.geom_type != "Polygon" or not piece.buffer(r + 0.3).contains(centre):
+            continue
+        rings = [piece.exterior, *piece.interiors]
+        others = [g for g in rings if abs(g.distance(centre) - r) > 0.25 * r + 0.1]  # not the hole's own wall
+        if others:
+            return float(min(g.distance(centre) for g in others) - r)
+    return None
+
+
+def _top_end(f: dict, up) -> float:
+    """+1 / -1: the end of the hole that is higher when printed (where a pocket is open to the top)."""
+    return 1.0 if float(np.asarray(f["axis"]) @ np.asarray(up, float)) >= -1e-6 else -1.0
+
+
+def _hexagon(af: float, point_up=None):
+    """Hexagon ``af`` across the flats at the origin; with ``point_up`` (2D) a corner points that way
+    (a sideways pocket then has a pointed roof, which prints without sagging)."""
+    from shapely.geometry import Polygon
+
+    r = af / np.sqrt(3)  # centre to corner
+    start = np.arctan2(point_up[1], point_up[0]) if point_up is not None else 0.0
+    a = start + np.arange(6) * np.pi / 3
+    return Polygon(np.column_stack([r * np.cos(a), r * np.sin(a)]))
+
+
+def fastener_plan(mesh: Mesh, f: dict, size: str, use: str, up, profile) -> dict:
+    """What a hole needs for ``use`` (FASTENER_USES) with a ``size`` (e.g. "M3") screw: the diameter to
+    model, depth, wall, the nut pocket, and the slicer fix when the design can't change. Plain words."""
+    T = load_data("thresholds")
+    F, fits = T["fasteners"], T["fits"]
+    if not isinstance(F.get(size), dict):
+        raise ValueError(f"size must be one of {[k for k, v in F.items() if isinstance(v, dict)]}")
+    if use not in FASTENER_USES:
+        raise ValueError(f"use must be one of {tuple(FASTENER_USES)}")
+    if f["type"] != "hole":
+        raise ValueError("Pick a round hole for a screw, insert or nut")
+    s = F[size]
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    sideways = abs(np.asarray(f["axis"]) @ up) < 0.7
+    measured = (profile.material.get("fit_gap_mm") or {}) if profile is not None else {}
+    # Holes something passes through: the printer's own shrink from the fit test print, if there is one.
+    shrink = measured["sliding"] - fits["gap_mm"]["sliding"] if measured.get("sliding") is not None else 0.0
+    passes = use in ("bolt", "nut_top", "nut_side")
+    if passes:
+        target = s["clearance_normal_mm"] + shrink + (fits["sideways_extra_mm"] if sideways else 0.0)
+    else:
+        target = s["pilot_mm"] if use == "screw" else s["insert_hole_mm"]
+    lines = [f"For {FASTENER_USES[use]} ({size}), model this hole Ø{target:.2f} mm (now Ø{f['diameter']:.2f})."]
+    if passes and shrink:
+        lines.append("That includes the gap from your fit test print.")
+    if passes and sideways:
+        lines.append("It lies on its side when printed, so it comes out a little smaller at the top: that's included.")
+    need_depth = None
+    if use == "screw":
+        need_depth = F["engage_d"] * s["d"]
+        lines.append(f"Let the screw bite at least {need_depth:g} mm deep (twice its diameter); screws made for "
+                     "plastic hold best. Don't overtighten: the thread is only plastic.")
+    elif use == "insert":
+        need_depth = s["insert_length_mm"] + F["insert_extra_depth_mm"]
+        lines.append(f"Make the hole at least {need_depth:.1f} mm deep (the {size} insert is {s['insert_length_mm']:g} mm "
+                     "long), with a small chamfer at the top to start the insert straight. Press it in with the "
+                     "soldering iron at the insert maker's temperature. Printed standing up, the insert pulls across "
+                     "the layers instead of between them, which holds best.")
+    depth = float(f["length"])
+    if need_depth is not None and depth + 0.05 < need_depth:
+        lines.append(f"The hole is only {depth:.1f} mm long here: make it deeper or the boss taller.")
+    wall = hole_wall(mesh, f)
+    need_wall = {"screw": s["d"], "insert": 2.0}.get(use, 0.0)
+    walls = None
+    if wall is not None and need_wall:
+        left = wall - (target - f["diameter"]) / 2  # the resize eats into (or adds to) the wall
+        if left < need_wall:
+            lw = profile.line_width if profile is not None else 0.45
+            walls = int(np.ceil(need_wall / lw))
+            lines.append(f"Only {max(left, 0):.1f} mm of plastic around it; aim for about {need_wall:g} mm. Add a boss "
+                         f"(offered below), or if the design can't change: print {walls} walls so it's solid plastic, "
+                         "not infill.")
+    pocket = None
+    if use == "nut_top":
+        af, t = s["nut_af_mm"] + F["nut_clearance_mm"] + 0.1, s["nut_thickness_mm"] + 0.2
+        pocket = {"kind": "top", "across_flats_mm": round(af, 2), "depth_mm": round(t, 2)}
+        lines.append(f"Nut pocket at the upper end: {af:.1f} mm across the flats, {t:.1f} mm deep (the nut is "
+                     f"{s['nut_af_mm']:g} × {s['nut_thickness_mm']:g} mm; printed pockets come out small).")
+    elif use == "nut_side":
+        af, t = s["nut_af_mm"] + F["nut_slot_extra_mm"], s["nut_thickness_mm"] + F["nut_slot_extra_mm"]
+        pocket = {"kind": "side", "across_flats_mm": round(af, 2), "depth_mm": round(t, 2)}
+        lines.append(f"Slot from the side for the nut: {af:.1f} mm wide, {t:.1f} mm high, from the outside to the "
+                     "middle of the hole. The nut slides in and lines up with the bolt.")
+    elif use == "bolt":
+        lines.append(f"Leave a flat face about Ø{s['washer_od_mm']:g} mm round the hole for the bolt head or washer.")
+    return {"size": size, "use": use, "target_mm": round(target, 2), "modelled_mm": round(f["diameter"], 2),
+            "depth_mm": round(depth, 2), "need_depth_mm": need_depth,
+            "wall_mm": None if wall is None else round(wall, 2), "need_wall_mm": need_wall or None,
+            "walls": walls, "pocket": pocket, "explanation": " ".join(lines)}
+
+
+def _side_reach(geom, d: np.ndarray, far: float) -> float:
+    """Distance from the hole centre to the part's outline along ``d`` (hole frame): where a slot comes out."""
+    if geom.is_empty:
+        return far
+    hit = LineString([(0, 0), tuple(d * far)]).intersection(geom.boundary)
+    pts = [q for q in shapely.get_parts(hit) if q.geom_type == "Point"] if not hit.is_empty else []
+    return max((float(np.hypot(q.x, q.y)) for q in pts), default=far)
+
+
+def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profile=None) -> list[dict]:
+    """The design changes for each hole the user said a fastener goes in: resize, boss, nut pocket or slot."""
+    from shapely import affinity
+    from shapely.geometry import Point, box
+
+    min_change = load_data("thresholds")["fits"]["min_change_mm"]
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    out = []
+    for f in features:
+        want = fasteners.get(f["region"])
+        if not want or f["type"] != "hole":
+            continue
+        plan = fastener_plan(mesh, f, want["size"], want["use"], up, profile)
+        size, rid, length = plan["target_mm"], f["region"], f["length"]
+        what = FASTENER_USES[plan["use"]]
+        if abs(size - f["diameter"]) >= min_change:
+            r_old, r_new = f["radius"], size / 2
+            smaller = r_new < r_old
+            ring = Point(0, 0).buffer(r_old + 0.3 if smaller else r_new, 64)  # 0.3: reach into the plastic to join
+            if smaller:
+                ring = ring.difference(Point(0, 0).buffer(r_new, 64))
+            out.append(_edit(f"fastener-{rid}", "fastener", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm hole for {what} ({plan['size']})",
+                             plan["explanation"], [_axis_prism(f, ring, *_ends(f, smaller))], op="add" if smaller else "cut"))
+        if plan["walls"]:
+            boss = Point(0, 0).buffer(size / 2 + plan["need_wall_mm"], 64).difference(Point(0, 0).buffer(size / 2, 64))
+            out.append(_edit(f"fastener-boss-{rid}", "fastener", f"Boss with {plan['need_wall_mm']:g} mm of plastic round the {plan['size']} hole",
+                             "Adds a ring of plastic round the hole where the wall is thin, so the screw or insert can't "
+                             "split it. Check that nothing else needs that space.",
+                             [_axis_prism(f, boss, *_ends(f, True))], op="add"))
+        p = plan["pocket"]
+        if p is None:
+            continue
+        _, u, s, _ = _frame(f)
+        side_up = np.array([up @ u, up @ s])
+        point_up = side_up / np.linalg.norm(side_up) if np.linalg.norm(side_up) > 0.3 else None  # lying: corner on top
+        hexa = _hexagon(p["across_flats_mm"], point_up)
+        if p["kind"] == "top":
+            end = _top_end(f, up) * length / 2
+            z0, z1 = (end - p["depth_mm"], end + 0.5) if end > 0 else (end - 0.5, end + p["depth_mm"])
+            out.append(_edit(f"fastener-nut-{rid}", "fastener", f"Nut pocket for the {plan['size']} nut",
+                             f"A hexagonal pocket {p['across_flats_mm']:.1f} mm across the flats and {p['depth_mm']:.1f} mm "
+                             "deep at the hole's upper end: the nut drops in and can't turn.", [_axis_prism(f, hexa, z0, z1)]))
+            continue
+        # A slot out to the nearest outside, along one of the four directions across the hole (not
+        # straight up: its open end would be a long bridge).
+        geom = _section(mesh, f)
+        far = float(np.ptp(mesh.triangles.reshape(-1, 3), axis=0).max())
+        dirs = [np.array([np.cos(a), np.sin(a)]) for a in np.radians([0, 90, 180, 270])]
+        dirs = [d for d in dirs if point_up is None or d @ point_up < 0.7]
+        reach, d = min((_side_reach(geom, d, far), tuple(d)) for d in dirs)
+        w = p["across_flats_mm"]
+        slot = hexa.union(affinity.rotate(box(0, -w / 2, reach + 1.0, w / 2), np.degrees(np.arctan2(d[1], d[0])), origin=(0, 0)))
+        out.append(_edit(f"fastener-nut-{rid}", "fastener", f"Nut slot for the {plan['size']} nut, from the side",
+                         f"A slot {w:.1f} mm wide and {p['depth_mm']:.1f} mm high from the outside to the middle of the hole: "
+                         "push the nut in from the side and it lines up with the bolt.",
+                         [_axis_prism(f, slot, -p["depth_mm"] / 2, p["depth_mm"] / 2)]))
     return out

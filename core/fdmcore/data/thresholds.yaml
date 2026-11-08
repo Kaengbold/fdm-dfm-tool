@@ -115,12 +115,14 @@ fasteners:
   # Metric screws. Clearance: ISO 273 close / medium series. Nuts: ISO 4032 (across flats, max height).
   # pilot: hole to screw straight into printed plastic (~0.8 × d); insert: heat-set insert hole
   # (Ruthex standard inserts). Values gathered with Gemini, checked against the standards' tables.
-  M2:   {d: 2.0, clearance_close_mm: 2.2, clearance_normal_mm: 2.4, pilot_mm: 1.6, insert_hole_mm: 3.2, nut_af_mm: 4.0, nut_thickness_mm: 1.6}
-  M2.5: {d: 2.5, clearance_close_mm: 2.7, clearance_normal_mm: 2.9, pilot_mm: 2.1, insert_hole_mm: 3.6, nut_af_mm: 5.0, nut_thickness_mm: 2.0}
-  M3:   {d: 3.0, clearance_close_mm: 3.2, clearance_normal_mm: 3.4, pilot_mm: 2.5, insert_hole_mm: 4.0, nut_af_mm: 5.5, nut_thickness_mm: 2.4}
-  M4:   {d: 4.0, clearance_close_mm: 4.3, clearance_normal_mm: 4.5, pilot_mm: 3.4, insert_hole_mm: 5.6, nut_af_mm: 7.0, nut_thickness_mm: 3.2}
-  M5:   {d: 5.0, clearance_close_mm: 5.3, clearance_normal_mm: 5.5, pilot_mm: 4.3, insert_hole_mm: 6.4, nut_af_mm: 8.0, nut_thickness_mm: 4.7}
-  M6:   {d: 6.0, clearance_close_mm: 6.4, clearance_normal_mm: 6.6, pilot_mm: 5.2, insert_hole_mm: 8.0, nut_af_mm: 10.0, nut_thickness_mm: 5.2}
+  # insert_length_mm: Ruthex standard insert length (the hole wants ~0.5–1 mm more depth,
+  # https://www.ruthex.de/pages/cad-daten); washer_od_mm: ISO 7089 washer, the flat face a bolt head needs.
+  M2:   {d: 2.0, clearance_close_mm: 2.2, clearance_normal_mm: 2.4, pilot_mm: 1.6, insert_hole_mm: 3.2, nut_af_mm: 4.0, nut_thickness_mm: 1.6, insert_length_mm: 4.0, washer_od_mm: 5.0}
+  M2.5: {d: 2.5, clearance_close_mm: 2.7, clearance_normal_mm: 2.9, pilot_mm: 2.1, insert_hole_mm: 3.6, nut_af_mm: 5.0, nut_thickness_mm: 2.0, insert_length_mm: 5.7, washer_od_mm: 6.0}
+  M3:   {d: 3.0, clearance_close_mm: 3.2, clearance_normal_mm: 3.4, pilot_mm: 2.5, insert_hole_mm: 4.0, nut_af_mm: 5.5, nut_thickness_mm: 2.4, insert_length_mm: 5.7, washer_od_mm: 7.0}
+  M4:   {d: 4.0, clearance_close_mm: 4.3, clearance_normal_mm: 4.5, pilot_mm: 3.4, insert_hole_mm: 5.6, nut_af_mm: 7.0, nut_thickness_mm: 3.2, insert_length_mm: 8.1, washer_od_mm: 9.0}
+  M5:   {d: 5.0, clearance_close_mm: 5.3, clearance_normal_mm: 5.5, pilot_mm: 4.3, insert_hole_mm: 6.4, nut_af_mm: 8.0, nut_thickness_mm: 4.7, insert_length_mm: 9.5, washer_od_mm: 10.0}
+  M6:   {d: 6.0, clearance_close_mm: 6.4, clearance_normal_mm: 6.6, pilot_mm: 5.2, insert_hole_mm: 8.0, nut_af_mm: 10.0, nut_thickness_mm: 5.2, insert_length_mm: 12.7, washer_od_mm: 12.0}
   match_tol_mm: 0.1   # a hole within this of a screw's nominal size is "modelled at screw size"
   # Nut traps: a hexagonal pocket needs ~0.2-0.3 mm more across the flats than the nut (M3: 5.7 mm to slide
   # in, 5.8 mm to press into a recess) because printed holes come out small
@@ -136,6 +138,13 @@ fasteners:
   # [Hubs, How to assemble 3D printed parts with threaded fasteners,
   # https://www.hubs.com/knowledge-base/how-assemble-3d-printed-parts-threaded-fasteners/].
   pilot_match_mm: 0.1     # a round hole this close to a screw's pilot size counts as a pilot hole
+  # Screw cut straight into plastic: at least 2× its diameter of thread (2–2.5 d for plastics, more when it
+  # pulls along the layers) [EJOT fasteners for plastics, https://www.ejot.com/fasteners-for-plastics].
+  engage_d: 2.0
+  insert_extra_depth_mm: 0.5   # hole deeper than the insert so its melted plastic has somewhere to go
+  # A nut pushed in from the side slides in a slot: ~0.2–0.4 mm over the nut's size both ways
+  # [Voron Design printed parts, https://github.com/VoronDesign/Voron-2].
+  nut_slot_extra_mm: 0.3
 
 fits:
   # Gap to add to the mating part's size (diameter, mm) when modelling a round hole, or to take off a
