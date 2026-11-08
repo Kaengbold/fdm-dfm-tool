@@ -132,6 +132,7 @@ const state = {
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
   volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
+  fastenerNotes: {}, // region -> {size, use, text}: the screw, insert or nut in a hole (set_fastener)
   fitSel: null, // the hole, post or slot selected in Tolerances & tuning: {key, regions, label}
   fitList: [], // the holes and posts listed there
   gaps: [], // slots and tabs between two flat faces (set_gap): {faces, kind, distance_mm, partner, fit, text}
@@ -367,7 +368,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -2189,7 +2190,7 @@ function renderFits(list) {
     const sideways = Math.abs(f.axis[2]) < 0.3 ? "lying" : Math.abs(f.axis[2]) > 0.95 ? "upright" : "slanted";
     return el("li", { className: state.fitSel?.key === fitKey(f) ? "picked" : "" },
       el("button", { className: "link", textContent: `Ø${f.diameter.toFixed(1)} mm ${FEATURE_NAME[f.type]} (${sideways} in the model)`, onclick: () => showFeature(f) }),
-      fitControls(f));
+      fitControls(f), f.type === "hole" ? fastenerControls(f) : "");
   }));
   renderFitSelection();
 }
@@ -2253,6 +2254,7 @@ function fitControls(f) {
     busy("Working out the size…", async () => {
       const r = await call("set_fit", { region: f.region, up: activeOption().up, partner_mm: Number(size.value), fit: kind.value, profile: profile() });
       state.fitNotes = { ...state.fitNotes, [f.region]: { partner: Number(size.value), fit: kind.value, text: r.explanation } };
+      delete state.fastenerNotes?.[f.region]; // one size per hole: the fit's
       state.fitSel = { key: fitKey(f), regions: [f.region], region: f.region }; // the one just sized
       renderFits(state.fitList);
       if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
@@ -2260,6 +2262,31 @@ function fitControls(f) {
     }) });
   return el("div", { className: "fit row" }, el("span", { className: "hint", textContent: hole ? "What goes in: Ø" : "Goes into: Ø" }), size, "mm,", kind, go,
     note ? el("p", { className: "hint", textContent: note }) : "");
+}
+
+const FASTENER_USES = { screw: "screw into the plastic", insert: "heat-set insert", nut_top: "bolt + nut in a pocket",
+  nut_side: "bolt + nut from the side", bolt: "bolt goes through" };
+
+/** "Screw, insert or nut?": the hole size, depth, wall and nut pocket for it, offered as design changes. */
+function fastenerControls(f) {
+  const saved = state.fastenerNotes?.[f.region];
+  const guess = ["M2", "M2.5", "M3", "M4", "M5", "M6"].find((m) => Math.abs(parseFloat(m.slice(1)) - f.diameter) < 0.6) ?? "M3";
+  const size = el("select", { title: "Screw size" }, ...["M2", "M2.5", "M3", "M4", "M5", "M6"].map((m) => el("option", { value: m, textContent: m })));
+  size.value = saved?.size ?? guess;
+  const use = el("select", { title: "What holds it" }, ...Object.entries(FASTENER_USES).map(([v, t]) => el("option", { value: v, textContent: t })));
+  use.value = saved?.use ?? "screw";
+  const go = el("button", { textContent: "Size for it", onclick: () =>
+    busy("Working out the screw hole…", async () => {
+      const r = await call("set_fastener", { region: f.region, up: activeOption().up, size: size.value, use: use.value, profile: profile() });
+      state.fastenerNotes = { ...state.fastenerNotes, [f.region]: { size: size.value, use: use.value, text: r.explanation } };
+      delete state.fitNotes?.[f.region]; // one size per hole: the screw's
+      state.fitSel = { key: fitKey(f), regions: [f.region], region: f.region };
+      renderFits(state.fitList);
+      if (mode() === "print") $("design-on").click();
+      await suggestDesign();
+    }) });
+  return el("div", { className: "fit fastener row" }, el("span", { className: "hint", textContent: "Or a screw:" }), size, use, go,
+    saved ? el("p", { className: "hint", textContent: saved.text }) : "");
 }
 
 // ---------- slots and flat gaps (two flat faces) ----------

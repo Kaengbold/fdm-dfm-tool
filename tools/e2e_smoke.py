@@ -291,10 +291,10 @@ def main():
 
         def fit_a_hole():
             row = page.locator("#fits li", has_text="Ø8.0 mm hole")
-            row.locator(".fit input").fill("8")
-            row.locator(".fit select").select_option("sliding")
+            row.locator(".fit:not(.fastener) input").fill("8")
+            row.locator(".fit:not(.fastener) select").select_option("sliding")
             run.act(lambda: row.get_by_role("button", name="Size it").click())
-            note = page.locator("#fits li", has_text="Ø8.0 mm hole").locator(".fit p").inner_text()
+            note = page.locator("#fits li", has_text="Ø8.0 mm hole").locator(".fit:not(.fastener) p").inner_text()
             edits = page.locator("#edits label").all_inner_texts()
             assert any("sliding fit" in e for e in edits), edits
             # The sized hole is the selection: its row marked, a line saying so, its faces coloured.
@@ -307,6 +307,20 @@ def main():
             return f"{note[:90]} | {selected.splitlines()[-1][:60]}"
 
         run.step("what fits in a hole", fit_a_hole)
+
+        def screw_in_a_hole():
+            row = page.locator("#fits li", has_text="Ø6.0 mm hole")
+            row.locator(".fastener select").first.select_option("M3")
+            row.locator(".fastener select").nth(1).select_option("nut_top")
+            run.act(lambda: row.get_by_role("button", name="Size for it").click())
+            note = page.locator("#fits li", has_text="Ø6.0 mm hole").locator(".fastener p").inner_text()
+            edits = page.locator("#edits label").all_inner_texts()
+            # Lying in this orientation: the M3 clearance hole (3.4 mm) plus the sideways allowance.
+            assert any("Nut pocket for the M3 nut" in e for e in edits) and any("→ Ø3.50 mm hole" in e for e in edits), edits
+            assert not any("Teardrop for the horizontal Ø6.0" in e for e in edits), "teardrop at the old size kept"
+            return note[:120]
+
+        run.step("screw and nut in a hole", screw_in_a_hole)
 
         def flat_gap():
             # Click a visible flat face that has a parallel face on the other side; the other side is

@@ -48,6 +48,7 @@ class Session:
     hot_spots: tuple | None = None  # (points, share of the highest stress) where it is nearly as high (features.HOT_SHARE)
     gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
     fits: dict = field(default_factory=dict)  # region id -> {"partner_mm", "fit"}: what goes into a hole / onto a post
+    fasteners: dict = field(default_factory=dict)  # region id -> {"size", "use"}: screw / insert / nut holes (set_fastener)
     gaps: dict = field(default_factory=dict)  # (face, face) -> {"partner_mm", "fit", "warp_mm"}: slots and tabs (set_gap)
     warp: dict | None = None  # the last warping simulation: up, model, displacement (part frame)
 
@@ -1936,7 +1937,7 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     return {
         "features": detect_features(s.mesh, s.regions, s.tags),
         "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
-                                                gaps=s.gaps, hot_spots=s.hot_spots), up, keep_clear),
+                                                gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners), up, keep_clear),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
@@ -1961,8 +1962,32 @@ def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "slidin
     squeeze = _warp_squeeze_hole(feats[region], up)
     size, why = fit_size(feats[region], float(partner_mm), fit, up, Profile.from_dict(profile), squeeze)
     s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit, "warp_mm": squeeze}
+    s.fasteners.pop(region, None)  # one size per hole
     return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why,
             "warp_mm": round(squeeze, 3)}
+
+
+def set_fastener(region: int, up, size: str | None = "M3", use: str = "screw", profile: dict | None = None) -> dict:
+    """Say what fastens into a round hole: ``size`` ("M2"–"M6") and ``use`` ("screw" cut straight into
+    the plastic, "insert" heat-set insert, "nut_top" bolt with a nut in a pocket at the upper end,
+    "nut_side" nut pushed in from the side, "bolt" through). Returns the hole size, depth, wall and
+    nut pocket to model, and the slicer fix; design() then offers the changes. ``size`` None forgets it."""
+    from .features import accepted, detect_features, fastener_plan
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    feats = {f["region"]: f for f in accepted(detect_features(s.mesh, s.regions, s.tags))}
+    if region not in feats or feats[region]["type"] != "hole":
+        raise ValueError(f"Face {region} is not a round hole")
+    if size is None:
+        s.fasteners.pop(region, None)
+        return {"region": region}
+    plan = fastener_plan(s.mesh, feats[region], size, use, up, Profile.from_dict(profile))
+    s.fasteners[region] = {"size": size, "use": use}
+    s.fits.pop(region, None)  # one size per hole: the fastener's
+    return {"region": region, **plan}
 
 
 def set_gap(face_a: int, face_b: int, up, partner_mm: float | None = None, fit: str = "sliding", profile: dict | None = None) -> dict:
@@ -2444,6 +2469,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "warping": warping,
     "set_fit": set_fit,
+    "set_fastener": set_fastener,
     "set_gap": set_gap,
     "volume_solid": volume_solid,
     "snap_model": snap_model,
