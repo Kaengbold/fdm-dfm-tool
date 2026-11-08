@@ -557,3 +557,7 @@ def test_too_big_counts_as_can_fail():
     api.scale(20)
     f = next(f for f in api.check([0, 0, 1], {}, "both")["findings"] if f["rule"] == "exceeds_build_volume")
     assert f["impact"] == "fails"
+
+
+def test_markdown_cells_keep_the_table_together():
+    assert api.md_cell("a | b\nc") == "a \| b c"

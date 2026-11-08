@@ -1322,11 +1322,13 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
         import io
         import zipfile
 
+        from .formats import read_zip
+
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             names = sorted(n for n in z.namelist() if n.lower().endswith(".gcode"))
             if not names:
                 raise ValueError("This 3MF has no G-code inside: slice it and use “Export plate sliced file”")
-            data = z.read(names[0])
+            data = read_zip(z, names[0])
     if isinstance(data, (bytes, bytearray)) and data[:4] == b"GCDE":
         raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
     tp = parse(data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else data)
@@ -2374,6 +2376,11 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
     return out
 
 
+def md_cell(value) -> str:
+    """Text for one Markdown table cell: a ``|`` or a line break in it would split the row."""
+    return " ".join(str(value).splitlines()).replace("|", "\\|")
+
+
 def report(up, profile: dict | None = None, mode: str = "print") -> str:
     """Markdown report for sharing or for pasting into an AI chat."""
     s = _require()
@@ -2397,7 +2404,7 @@ def report(up, profile: dict | None = None, mode: str = "print") -> str:
         lines += [f"- *{fx['domain']}*: {fx['text']}" for fx in f["fixes"]] + [""]
     if r["settings"]:
         lines += ["## Recommended slicer settings", "", "| Setting | Value | Why |", "|---|---|---|"]
-        lines += [f"| {x['label']} (`{x['key']}`) | {x['value']} | {x['reason']} |" for x in r["settings"]]
+        lines += [f"| {md_cell(x['label'])} (`{x['key']}`) | {md_cell(x['value'])} | {md_cell(x['reason'])} |" for x in r["settings"]]
     return "\n".join(lines) + "\n"
 
 
