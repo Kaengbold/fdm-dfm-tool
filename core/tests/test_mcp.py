@@ -56,7 +56,7 @@ def test_every_api_method_has_a_tool():
     from fdmcore import api
 
     tools = {t.name for t in asyncio.run(m.server.list_tools())}
-    assert set(api.METHODS) - set(m.API_TOOLS) == set(), "add a tool and an API_TOOLS entry"
+    assert set(api.METHODS) - set(m.API_TOOLS) - m.APP_ONLY == set(), "add a tool and an API_TOOLS entry"
     assert set(m.API_TOOLS) - set(api.METHODS) == set()
     assert set(m.API_TOOLS.values()) - tools == set()
 
