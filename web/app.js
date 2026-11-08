@@ -17,6 +17,23 @@ const el = (tag, props = {}, ...children) => {
 /** Show ``node`` only from this level up (Simple / Advanced / Expert, see style.css). */
 const from = (level, node) => ((node.dataset.min = level), node);
 
+/** Browser storage that never stops the app: blocked storage (private mode, strict cookie settings)
+ * or a broken saved value just means "nothing saved". */
+const store = {
+  get(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  },
+  json(key) {
+    try { return JSON.parse(store.get(key) ?? "{}") ?? {}; } catch { return {}; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, value); } catch { /* not saved: fine for one visit */ }
+  },
+  remove(key) {
+    try { localStorage.removeItem(key); } catch { /* nothing to remove */ }
+  },
+};
+
 // ---------- engine (Pyodide worker) ----------
 // Cancelling kills the worker (Python can't be interrupted mid-call); a fresh one boots and
 // gets the current part again before any other call runs.
@@ -1070,7 +1087,7 @@ function renderGcodeResult() {
 // samples in the browser: fine grid 2.6–5.4×, warping 1.8–2.9×, shaking 2.5–5.2×, optimiser 3.6–5.1×).
 const RUN_RATIO = { topology: 6, topology_fine: 25, strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3, trials: 8.5, trials_few: 4.3 };
 const ASK_ABOVE_S = 30;
-let strengthSeconds = Number(localStorage.getItem("fdm-strength-s")) || 8; // this computer, once measured
+let strengthSeconds = Number(store.get("fdm-strength-s")) || 8; // this computer, once measured
 
 /** Seconds ``kind`` will take: as measured on this part, else from this computer's strength time. */
 const estimate = (kind) => state.runTimes?.[kind] ?? RUN_RATIO[kind] * strengthSeconds;
@@ -1081,7 +1098,7 @@ async function timed(kind, fn) {
   const r = await fn();
   const s = (performance.now() - t0) / 1000;
   state.runTimes = { ...state.runTimes, [kind]: s };
-  if (kind === "strength") localStorage.setItem("fdm-strength-s", String((strengthSeconds = s)));
+  if (kind === "strength") store.set("fdm-strength-s", String((strengthSeconds = s)));
   showEstimates();
   return r;
 }
@@ -1572,7 +1589,8 @@ async function showStrengthOptions() {
     const opts = await call("strength_options", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() });
     const noMaterial = opts.some((o) => o.kind === "material") ? ""
       : el("p", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` });
-    $("strength-options").replaceChildren(...optionGroups(opts, state.strength?.safety_factor), noMaterial);
+    // Compare with the engine's own baseline: with "Use the G-code" the shown safety comes from another model.
+    $("strength-options").replaceChildren(...optionGroups(opts, opts[0]?.base_safety ?? state.strength?.safety_factor), noMaterial);
     setStatus(state.summary);
     return opts;
   });
@@ -1634,7 +1652,7 @@ async function runOptimise() {
           renderSettings();
           if (o.orientation === "strongest") await applyOption({ up: z.up }, false); // clears zones: set them after
           setZones(z.zones);
-          runStrength();
+          await runStrength();
         } }))
       : "";
     $("optimise-result").replaceChildren(
@@ -2003,7 +2021,7 @@ async function applyOption(o, recheck = true) {
     remember("slicer settings from the strength check");
     Object.assign(state.overrides, o.settings);
     renderSettings();
-    $("run-strength").click();
+    await runStrength();
   } else if (o.up) {
     const option = await call("orientation", { up: o.up, profile: profile(), label: "Strongest" });
     option.reasons.push("Strongest for your load");
@@ -2451,7 +2469,7 @@ async function showVersion(i, carry = true) {
 $("apply-edits").onclick = () => applyEdits();
 
 // ---------- Expert: all settings ----------
-const loadExpert = () => JSON.parse(localStorage.getItem("fdm-expert") ?? "{}");
+const loadExpert = () => store.json("fdm-expert");
 let expertChanged = false;
 
 /** Send the saved Expert values; ones the engine no longer knows (an update renamed them) are dropped. */
@@ -2461,7 +2479,7 @@ async function sendExpert() {
   try {
     await call("set_expert", { values });
   } catch (err) {
-    localStorage.removeItem("fdm-expert");
+    store.remove("fdm-expert");
     await call("set_expert", { values: {} });
     setStatus(`Your changed settings were reset: ${err.message}`, true);
   }
@@ -2481,7 +2499,7 @@ $("expert").onclose = async () => {
 };
 $("expert-filter").oninput = () => filterExpert();
 $("expert-reset").onclick = async () => {
-  localStorage.removeItem("fdm-expert");
+  store.remove("fdm-expert");
   expertChanged = true;
   renderExpert(await call("set_expert", { values: {} }));
 };
@@ -2500,7 +2518,7 @@ function renderExpert(r) {
         else values[v.path] = n;
         try {
           const r = await call("set_expert", { values });
-          localStorage.setItem("fdm-expert", JSON.stringify(values)); // before drawing: it marks the changed ones
+          store.set("fdm-expert", JSON.stringify(values)); // before drawing: it marks the changed ones
           expertChanged = true;
           renderExpert(r);
         } catch (err) {
@@ -2540,7 +2558,7 @@ function filterExpert() {
 async function initPresets() {
   await engineReady;
   // The printer and material you have, remembered from your last visit: Simple is then one drop.
-  const saved = JSON.parse(localStorage.getItem("fdm-setup") ?? "{}");
+  const saved = store.json("fdm-setup");
   await applyMine(loadMine(), { printer: "bambu_p1s", material: "pla", nozzle: "0.4", ...saved });
   await sendExpert();
   setStatus(saved.printer
@@ -2559,7 +2577,7 @@ async function applyMine(mine, select = {}) {
   const has = (table, id) => id && id in p[table];
   fill("printer", Object.entries(p.printers).map(([k, v]) => [k, v.name]), has("printers", keep.printer) ? keep.printer : "bambu_p1s");
   fill("material", Object.entries(p.materials).map(([k, v]) => [k, v.name]), has("materials", keep.material) ? keep.material : "pla");
-  fill("nozzle", Object.keys(p.nozzles).map((k) => [k, `${k} mm`]), keep.nozzle || "0.4");
+  fill("nozzle", Object.keys(p.nozzles).map((k) => [k, `${k} mm`]), has("nozzles", keep.nozzle) ? keep.nozzle : "0.4");
   viewer.setBed(p.printers[$("printer").value].bed);
   syncMultiMaterial();
   renderMine(mine);
@@ -2737,7 +2755,7 @@ $("nozzle-block").ontoggle = (e) => e.target.open && state.triangles && compareN
 
 for (const id of ["printer", "material", "nozzle", "multi-material"]) {
   $(id).onchange = () => {
-    localStorage.setItem("fdm-setup", JSON.stringify({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value }));
+    store.set("fdm-setup", JSON.stringify({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value }));
     viewer.setBed(state.presets.printers[$("printer").value].bed);
     syncMultiMaterial();
     $("nozzle-block").open = false; // comparison belongs to the old setup
@@ -2809,12 +2827,12 @@ function setLevel(level) {
   if (!LEVELS.includes(level)) return;
   document.body.dataset.level = level;
   document.querySelector(`input[name=level][value=${level}]`).checked = true;
-  localStorage.setItem("fdm-level", level);
+  store.set("fdm-level", level);
   steps.setLevel(level);
   setTimeout(() => viewer.resize()); // the step list comes and goes (Expert), so the 3D view changes size
 }
 for (const r of document.querySelectorAll("input[name=level]")) r.onchange = () => setLevel(r.value);
-setLevel(new URLSearchParams(location.search).get("level") ?? localStorage.getItem("fdm-level") ?? "simple");
+setLevel(new URLSearchParams(location.search).get("level") ?? store.get("fdm-level") ?? "simple");
 
 /** Set "What can you change?" like a click would (it re-checks the part). */
 function setMode(value) {
@@ -2835,7 +2853,7 @@ for (const b of document.querySelectorAll("[data-guide]")) {
     const g = GUIDE[b.dataset.guide];
     setLevel(g.level);
     setMode(g.mode);
-    localStorage.setItem("fdm-guided", "1");
+    store.set("fdm-guided", "1");
     $("guide").close();
     setStatus(g.next);
   };
@@ -2851,7 +2869,7 @@ function openGuide() {
   $("guide").showModal();
 }
 $("show-guide").onclick = openGuide;
-if (!localStorage.getItem("fdm-guided") && !new URLSearchParams(location.search).has("level")) openGuide();
+if (!store.get("fdm-guided") && !new URLSearchParams(location.search).has("level")) openGuide();
 
 // ---------- input ----------
 $("file").onchange = async (e) => {

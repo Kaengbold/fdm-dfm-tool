@@ -41,7 +41,11 @@ export function loadMine() {
 }
 
 export function saveMine(mine) {
-  localStorage.setItem(STORAGE, JSON.stringify(mine));
+  try {
+    localStorage.setItem(STORAGE, JSON.stringify(mine));
+  } catch {
+    // Storage blocked or full: the presets still work for this visit.
+  }
 }
 
 /** Form values -> engine spec (see profile.MATERIAL_FIELDS / PRINTER_FIELDS). */
