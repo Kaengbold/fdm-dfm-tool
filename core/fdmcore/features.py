@@ -1199,3 +1199,98 @@ def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profi
                          "push the nut in from the side and it lines up with the bolt.",
                          [_axis_prism(f, slot, -p["depth_mm"] / 2, p["depth_mm"] / 2)]))
     return out
+
+
+# ---------- modelled threads (T-323) ----------
+
+# ISO metric coarse pitches (ISO 261): the size a thread's outer diameter is matched to.
+METRIC_COARSE = {"M2": 0.4, "M2.5": 0.45, "M3": 0.5, "M4": 0.7, "M5": 0.8, "M6": 1.0, "M8": 1.25, "M10": 1.5,
+                 "M12": 1.75, "M16": 2.0, "M20": 2.5, "M24": 3.0}
+
+
+def find_threads(mesh: Mesh, axes=None) -> list[dict]:
+    """Threads modelled into the part. A 60° thread's flanks lean 30° off the plane across its axis, so
+    their normals sit about 30° from the axis, pointing alternately up and down it; and the flank faces
+    climb one pitch per turn round the axis. Each: axis, centre, major / minor diameter, pitch, length,
+    "external" (a bolt) or internal (a nut / tapped hole), and the ISO size it is closest to.
+    ``axes``: directions to look along (default: the model's x, y, z, where CAD puts threads)."""
+    normals, areas = mesh.normals_and_areas()
+    cents = mesh.triangles.mean(axis=1)
+    out = []
+    for a in (np.eye(3) if axes is None else np.asarray(axes, float)):
+        a = a / np.linalg.norm(a)
+        along = normals @ a
+        flank = (np.abs(along) > 0.75) & (np.abs(along) < 0.95)
+        if flank.sum() < 60:
+            continue
+        idx = np.flatnonzero(flank)
+        u = np.cross(a, [1.0, 0, 0] if abs(a[0]) < 0.9 else [0, 1.0, 0])
+        u /= np.linalg.norm(u)
+        v = np.cross(a, u)
+        p2 = np.column_stack([cents[idx] @ u, cents[idx] @ v])
+        for group in _clusters(p2):
+            t = idx[group]
+            q = p2[group]
+            centre = q.mean(axis=0)
+            rel = q - centre
+            r = np.hypot(rel[:, 0], rel[:, 1])
+            theta = np.arctan2(rel[:, 1], rel[:, 0])
+            z = cents[t] @ a
+            if np.ptp(theta) < 5.5 or r.max() - r.min() < 0.1:  # not all the way round, or no depth: not a thread
+                continue
+            radial = (normals[t] @ u) * rel[:, 0] / np.maximum(r, 1e-9) + (normals[t] @ v) * rel[:, 1] / np.maximum(r, 1e-9)
+            best = None
+            for pitch in sorted(set(METRIC_COARSE.values()) | {0.35, 0.75}):
+                for hand in (1, -1):
+                    # Upward flanks of one thread: z − hand·θ/2π·P is the same (mod P) on all of them.
+                    up_f = along[t] > 0
+                    if up_f.sum() < 20:
+                        continue
+                    phase = 2 * np.pi * (z[up_f] / pitch - hand * theta[up_f] / (2 * np.pi))
+                    w = areas[t][up_f]
+                    score = float(np.hypot((w * np.cos(phase)).sum(), (w * np.sin(phase)).sum()) / w.sum())
+                    if best is None or score > best[0]:
+                        best = (score, pitch, hand)
+            if best is None or best[0] < 0.8:
+                continue
+            _, pitch, hand = best
+            major, minor = 2 * float(np.percentile(r, 98)), 2 * float(np.percentile(r, 2))
+            depth = (major - minor) / 2
+            if not 0.3 * pitch <= depth <= 1.0 * pitch:
+                continue
+            size = min(METRIC_COARSE, key=lambda k: abs(float(k[1:]) - major))
+            external = float(np.average(radial, weights=areas[t])) > 0
+            c3 = centre[0] * u + centre[1] * v
+            out.append({"axis": a.tolist(), "center": (c3 + a * z.mean()).tolist(), "major_mm": round(major, 2),
+                        "minor_mm": round(minor, 2), "pitch_mm": pitch, "length_mm": round(float(np.ptp(z)), 1),
+                        "external": external, "left_hand": hand < 0,
+                        "size": size if abs(float(size[1:]) - major) < 0.6 else None,
+                        "lo": (mesh.triangles[t].reshape(-1, 3).min(axis=0)).tolist(),
+                        "hi": (mesh.triangles[t].reshape(-1, 3).max(axis=0)).tolist()})
+    return out
+
+
+def _clusters(p2: np.ndarray, link: float = 1.0) -> list[np.ndarray]:
+    """Groups of 2D points closer than ``link`` (grid cells, then joined neighbours): one per thread."""
+    cell = np.floor(p2 / link).astype(np.int64)
+    keys, inv = np.unique(cell, axis=0, return_inverse=True)
+    inv = inv.ravel()
+    lookup = {tuple(k): i for i, k in enumerate(keys)}
+    parent = list(range(len(keys)))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, k in enumerate(keys):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                j = lookup.get((k[0] + dx, k[1] + dy))
+                if j is not None:
+                    a, b = root(i), root(j)
+                    if a != b:
+                        parent[max(a, b)] = min(a, b)
+    roots = np.array([root(i) for i in range(len(keys))])[inv]
+    return [np.flatnonzero(roots == r) for r in np.unique(roots)]

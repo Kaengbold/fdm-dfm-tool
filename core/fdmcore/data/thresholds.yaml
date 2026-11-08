@@ -153,6 +153,18 @@ pauses:
   min_pocket_mm3: 20
   roof_flat_share: 0.5
 
+threads:
+  # Printed threads: below M5 they come out too rough to work [Hubs, How to assemble 3D printed parts with threaded
+  # fasteners: "Threads smaller than M5 printed via FDM should be avoided",
+  # https://www.hubs.com/knowledge-base/how-assemble-3d-printed-parts-threaded-fasteners/]; moving parts want
+  # ~0.3 mm clearance [Prusa KB, Modeling with 3D printing in mind,
+  # https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135]. A 60° thread's flank is a slope:
+  # with fewer than ~4 layers per pitch it prints as a staircase of 2-3 steps (geometry, our rule of thumb).
+  min_major_mm: 5.0
+  min_layers_per_pitch: 4
+  lying_ok_major_mm: 8.0   # lying on its side, smaller threads lose their shape to the layer steps
+  clearance_mm: 0.3
+
 fits:
   # Gap to add to the mating part's size (diameter, mm) when modelling a round hole, or to take off a
   # round post, for a 0.4 mm nozzle. Rule of thumb from clearance-gauge prints: ~0.2 mm pushes in

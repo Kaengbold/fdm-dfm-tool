@@ -2187,6 +2187,7 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         result["findings"] += _spot_findings(spots, p, result["findings"])
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
     result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
+    result["findings"] += _thread_findings(oriented, rotation, p)
     if not fit["fits"]:
         result["findings"].insert(0, {"rule": "exceeds_build_volume", "severity": "problem", "bbox": None, "metrics": fit,
                                       "detail": f"Doesn't fit the {p.printer['name']}: {fit['reason']}"})
@@ -2280,6 +2281,44 @@ def _face_temp(oriented: Mesh, heat: dict, spots: dict | None = None) -> bytes:
     over = temp - heat["softening_c"]
     lo, hi = HEAT_COLOUR_C
     return (np.clip((over - lo) / (hi - lo), 0, 1) * 255).astype(np.uint8).tobytes()
+
+
+def _thread_findings(oriented: Mesh, rotation: np.ndarray, p: Profile) -> list[dict]:
+    """Threads modelled into the part (features.find_threads, along the model's own axes), with what
+    this orientation and layer height do to them (modelled_thread)."""
+    from .features import find_threads
+
+    T = load_data("thresholds")["threads"]
+    lh = p.layer_height
+    out = []
+    for t in find_threads(oriented, axes=np.asarray(rotation).T):  # the model's x, y, z in the print frame (R's columns)
+        what = (f"{t['size']} " if t["size"] else f"Ø{t['major_mm']:.1f} mm ") + ("bolt thread" if t["external"] else "threaded hole")
+        upright = abs(t["axis"][2]) > 0.9
+        lying = abs(t["axis"][2]) < 0.3
+        layers = t["pitch_mm"] / lh
+        tips = []
+        bad = False
+        if t["major_mm"] < T["min_major_mm"]:
+            bad = True
+            tips.append(f"threads smaller than M{T['min_major_mm']:g} print poorly: a heat-set insert, a nut, or tapping a plain "
+                        "hole holds better")
+        if upright and layers < T["min_layers_per_pitch"]:
+            bad = True
+            tips.append(f"standing up it gets only {layers:.1f} layers per turn of the thread ({t['pitch_mm']:g} mm pitch, "
+                        f"{lh:g} mm layers): print it with layers of {t['pitch_mm'] / T['min_layers_per_pitch']:.2f} mm or "
+                        "finer there (variable layer height)")
+        if lying:
+            bad = bad or t["major_mm"] < T["lying_ok_major_mm"]
+            tips.append("it lies on its side, so its top and bottom come out as layer steps and the thread binds: stand it "
+                        "up if you can")
+        tips.append(f"leave about {T['clearance_mm']:g} mm between the printed bolt and nut, and screw it in and out a few "
+                    "times to clean the thread before use")
+        lo, hi = np.asarray(t["lo"]), np.asarray(t["hi"])
+        out.append({"rule": "modelled_thread", "severity": "warn" if bad else "info", "bbox": [lo.tolist(), hi.tolist()],
+                    "metrics": {"size": t["size"], "pitch_mm": t["pitch_mm"], "major_mm": t["major_mm"], "external": t["external"],
+                                "layers_per_pitch": round(layers, 1), "upright": upright},
+                    "detail": f"Modelled {what} ({t['pitch_mm']:g} mm pitch, {t['length_mm']:.0f} mm long): " + "; ".join(tips)})
+    return out
 
 
 def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotation: np.ndarray) -> list[dict]:
