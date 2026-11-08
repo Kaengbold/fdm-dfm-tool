@@ -50,6 +50,8 @@ jobs:
           cp -r _vendor _site/vendor
           cd _site/web
           sed -i 's#https://cdn.jsdelivr.net#../vendor#g' index.html worker.js geometry.js step.js stepwrite.js
+          # The CSP lists the CDN as a script source: not needed once it isn't used ('self' covers ../vendor).
+          sed -i "s# ../vendor 'sha256# 'sha256#" index.html
           ! grep -n "cdn.jsdelivr.net" index.html worker.js geometry.js step.js stepwrite.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

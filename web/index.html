@@ -7,14 +7,14 @@
     <link rel="icon" href="data:," />
     <link rel="preload" href="fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="style.css" />
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
-        }
-      }
-    </script>
+    <!-- Content Security Policy (T-312): scripts only from this site and the pinned CDN, WebAssembly
+         allowed, no plugins. The two hashes are the import map below (one line, so line endings can't change it), as served here and as rewritten by
+         the self-hosted build (.github/workflows/pages.yml): after editing it, recompute them (the browser
+         test fails otherwise). "integrity" in the map: the browser refuses a library file that changed.
+         'unsafe-eval': OpenCascade (STEP write-back, stepwrite.js) builds functions from strings; moving it
+         into a worker would let this go (T-327). Scripts from other sites and inline scripts stay blocked. -->
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net 'sha256-LP8xOC1AohAD2ZYV7dbClzdOlT8eP/1+Dezw4305b5s=' 'sha256-/Yv8QWwMXB7d63cCFzjrW4Mzz92vB1tJEykMIG/gP20='; object-src 'none'; base-uri 'self'" />
+    <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"},"integrity":{"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js":"sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk","https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js":"sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP","https://cdn.jsdelivr.net/npm/manifold-3d@3.5.4/manifold.js":"sha384-EOsX2khT48LC7b2eu/O0+bqGUQLkJOEKF4hEN0VViSLPW7vZzAjlfczpBJmVQoSx","https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js":"sha384-bn4+xCBX4YVTp9aJ4lTICP2hWAh2XeB7aSyDKbkS0JblHhimh0rzrg1JCm+j7nID"}}</script>
   </head>
   <body data-level="simple">
     <header class="top">
