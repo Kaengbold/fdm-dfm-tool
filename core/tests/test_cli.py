@@ -42,3 +42,21 @@ def test_render(capsys, tmp_path):
     out = tmp_path / "under.png"
     r = run(capsys, "render", PART, "--up", "0,0,1", "--view", "overhangs", "--width", "160", "--height", "120", "-o", str(out))
     assert r["view"] == "overhangs" and out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_project_mode_and_keep_clear_boxes(capsys, tmp_path, monkeypatch):
+    """A project's mode counts unless --mode is given; design() gets the project's keep-clear boxes."""
+    from fdmcore import project
+
+    proj = tmp_path / "p.json"
+    keep = {"kind": "keep_clear", "lo": [0, 0, 0], "hi": [5, 5, 5]}
+    proj.write_text(project.dump("l_bracket.stl", Path(PART).read_bytes(), mode="print", up=[0, 0, 1], volumes=[keep]))
+    assert run(capsys, "check", str(proj))["mode"] == "print"
+    assert run(capsys, "check", str(proj), "--mode", "design")["mode"] == "design"
+    assert run(capsys, "check", PART)["mode"] == "both"
+    from fdmcore import api
+
+    seen = {}
+    monkeypatch.setattr(api, "design", lambda up, profile, params, keep_clear=None: seen.setdefault("keep", keep_clear) and {})
+    run(capsys, "design", str(proj))
+    assert seen["keep"] == [keep]

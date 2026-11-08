@@ -95,20 +95,28 @@ def _selected_key(drop):
 def _export_stl(body) -> bytes:
     if body.assemblyContext:
         raise ValueError("Pick a body of the top-level component (bodies inside other components aren't supported yet).")
-    path = os.path.join(tempfile.mkdtemp(prefix="fdmdfm-"), "part.stl")
-    design = adsk.fusion.Design.cast(app.activeProduct)
-    options = design.exportManager.createSTLExportOptions(body, path)
-    options.isBinaryFormat = True
-    options.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh
-    options.unitType = adsk.fusion.DistanceUnits.MillimeterDistanceUnits
-    if not design.exportManager.execute(options):
-        raise RuntimeError("STL export failed")
-    with open(path, "rb") as f:
-        return f.read()
+    with tempfile.TemporaryDirectory(prefix="fdmdfm-") as folder:  # removed again after reading
+        path = os.path.join(folder, "part.stl")
+        design = adsk.fusion.Design.cast(app.activeProduct)
+        options = design.exportManager.createSTLExportOptions(body, path)
+        options.isBinaryFormat = True
+        options.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementHigh
+        options.unitType = adsk.fusion.DistanceUnits.MillimeterDistanceUnits
+        if not design.exportManager.execute(options):
+            raise RuntimeError("STL export failed")
+        with open(path, "rb") as f:
+            return f.read()
+
+
+_report_dir = None
 
 
 def _show_report(page: str):
-    path = os.path.join(tempfile.gettempdir(), "fdmdfm_report.html")
+    # A private folder of our own (not a fixed name in the shared temp folder another program could take over).
+    global _report_dir
+    if _report_dir is None or not os.path.isdir(_report_dir):
+        _report_dir = tempfile.mkdtemp(prefix="fdmdfm-report-")
+    path = os.path.join(_report_dir, "report.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
     palette = ui.palettes.itemById(PALETTE_ID)
@@ -124,7 +132,10 @@ def _add_teardrop(body, hole: dict, up):
     cm = 0.1  # the engine works in mm, Fusion in cm
     tbm = adsk.fusion.TemporaryBRepManager.get()
     boxes = []
-    for b in bridge.teardrop_boxes(hole, up):
+    pair = bridge.teardrop_boxes(hole, up)
+    if pair is None:  # runs along up: prints round as it is
+        return
+    for b in pair:
         boxes.append(tbm.createBox(adsk.core.OrientedBoundingBox3D.create(
             adsk.core.Point3D.create(*(v * cm for v in b["center"])),
             adsk.core.Vector3D.create(*b["length_dir"]), adsk.core.Vector3D.create(*b["width_dir"]),

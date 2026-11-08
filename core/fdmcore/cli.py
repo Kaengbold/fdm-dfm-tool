@@ -68,6 +68,8 @@ def _setup(a) -> tuple[dict, list[float]]:
     else:
         api.load(path.read_bytes(), path.name)
     a.saved_settings = saved.get("settings", {})
+    if getattr(a, "mode", "") is None:  # not given: the project's, else both
+        a.mode = saved.get("mode") or "both"
     if a.scale != 1:
         api.scale(a.scale)
     given = {"printer": a.printer, "material": a.material, "nozzle": a.nozzle, "goal": a.goal, "use_temp_c": a.use_temp}
@@ -110,7 +112,8 @@ def cmd_optimise(a, profile, up):
 
 
 def cmd_design(a, profile, up):
-    return api.design(up, profile, _json_arg(a.params))
+    keep_clear = [b for b in _json_arg(a.zones) or [] if b.get("kind") == "keep_clear"]  # from the project's boxes
+    return api.design(up, profile, _json_arg(a.params), keep_clear)
 
 
 def cmd_warping(a, profile, up):
@@ -192,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "orient":
             p.add_argument("--top", type=int, default=5)
         if name in ("check", "report"):
-            p.add_argument("--mode", default="both", choices=["print", "design", "both"])
+            p.add_argument("--mode", choices=["print", "design", "both"], help="default: the project's, else both")
         if name == "strength":
             p.add_argument("--walls", type=int)
             p.add_argument("--infill", type=float, help="0–1")
