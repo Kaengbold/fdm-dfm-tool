@@ -18,7 +18,7 @@ import numpy as np
 import shapely
 from shapely.geometry import Polygon
 
-from .checks import _bridge_span, _opening, _safe_diff
+from .checks import _bridge_span, _opening, _safe_diff, _safe_overlay
 from .mesh import Mesh
 from .profile import Profile, load_data
 from .slicer import slice_mesh
@@ -43,23 +43,26 @@ def support_stats(mesh: Mesh, profile: Profile, max_layers: int = 40) -> dict:
         elif below.geom.is_empty:
             need.append(layer.geom)
         else:
-            free = _clean(layer.geom.difference(below.geom.buffer(reach, quad_segs=QUAD)))
+            free = _clean(_safe_diff(layer.geom, below.geom.buffer(reach, quad_segs=QUAD)))
             anchor_zone = below.geom.buffer(reach + lw, quad_segs=QUAD)
             keep = [piece for piece in getattr(free, "geoms", [free]) if not piece.is_empty
                     and not _bridgeable(piece, anchor_zone, max_bridge)]
             need.append(shapely.union_all(keep) if keep else Polygon())
     support_area = sum(g.area for g in need)
-    # Carry support columns down from the top; a column stops where it meets the part.
+    # Carry support columns down from the top; a column stops where it meets the part. Robust
+    # overlays throughout: neighbouring layers' outlines nearly overlap, the case that can throw an
+    # uncatchable GEOS error in the browser (see checks._safe_diff).
     column = Polygon()
     volume = scar = 0.0
     for i in range(len(layers) - 1, 0, -1):
-        column = _clean(shapely.union(column, need[i])) if not need[i].is_empty else column
+        if not need[i].is_empty:
+            column = _clean(_safe_overlay(shapely.union, column, need[i]) if not column.is_empty else need[i])
         if column.is_empty:
             continue
         solid = layers[i - 1].geom
         if not solid.is_empty:
-            scar += column.intersection(solid).area
-            column = _clean(column.difference(solid))
+            scar += _safe_overlay(shapely.intersection, column, solid).area
+            column = _clean(_safe_diff(column, solid))
         volume += column.area * layers[i].dz
     return {
         "bed_area": float(layers[0].geom.area),

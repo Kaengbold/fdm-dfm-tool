@@ -1322,11 +1322,13 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
         import io
         import zipfile
 
+        from .formats import read_zip
+
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             names = sorted(n for n in z.namelist() if n.lower().endswith(".gcode"))
             if not names:
                 raise ValueError("This 3MF has no G-code inside: slice it and use “Export plate sliced file”")
-            data = z.read(names[0])
+            data = read_zip(z, names[0])
     if isinstance(data, (bytes, bytearray)) and data[:4] == b"GCDE":
         raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
     tp = parse(data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else data)
@@ -2052,6 +2054,34 @@ def tag_feature(region: int, tag: str | None) -> dict:
     return {"features": detect_features(s.mesh, s.regions, s.tags)}
 
 
+def session_state() -> dict:
+    """What the user told the engine about this part and what the last strength check found, as JSON:
+    the app keeps it and gives it back with ``restore_state`` when the engine restarts (Cancel), so
+    hole / post answers, fits, gaps and the weak spot don't silently vanish. The warping result is
+    too big to keep: it is simply run again."""
+    s = _require()
+    return {
+        "tags": {str(k): v for k, v in s.tags.items()},
+        "fits": {str(k): v for k, v in s.fits.items()},
+        "gaps": [[a, b, v] for (a, b), v in s.gaps.items()],
+        "weak_spot": None if s.weak_spot is None else [np.asarray(s.weak_spot[0], float).tolist(), s.weak_spot[1]],
+        "hot_spots": None if s.hot_spots is None else [np.asarray(x, float).tolist() for x in s.hot_spots],
+    }
+
+
+def restore_state(state: dict) -> dict:
+    """Put back what ``session_state`` gave (after the same part was loaded again)."""
+    s = _require()
+    s.tags = {int(k): v for k, v in state.get("tags", {}).items()}
+    s.fits = {int(k): v for k, v in state.get("fits", {}).items()}
+    s.gaps = {(int(a), int(b)): v for a, b, v in state.get("gaps", [])}
+    w = state.get("weak_spot")
+    s.weak_spot = None if w is None else (np.asarray(w[0], float), float(w[1]))
+    h = state.get("hot_spots")
+    s.hot_spots = None if h is None else tuple(np.asarray(x, float) for x in h)
+    return {"restored": True}
+
+
 HOLE_RULES = {"hole_closes", "small_hole_undersized", "insert_wall_thin", "screw_wall_thin", "sideways_hole_oval", "bridge_sag", "hole_starts_midair"}
 
 
@@ -2374,6 +2404,11 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
     return out
 
 
+def md_cell(value) -> str:
+    """Text for one Markdown table cell: a ``|`` or a line break in it would split the row."""
+    return " ".join(str(value).splitlines()).replace("|", "\\|")
+
+
 def report(up, profile: dict | None = None, mode: str = "print") -> str:
     """Markdown report for sharing or for pasting into an AI chat."""
     s = _require()
@@ -2397,7 +2432,7 @@ def report(up, profile: dict | None = None, mode: str = "print") -> str:
         lines += [f"- *{fx['domain']}*: {fx['text']}" for fx in f["fixes"]] + [""]
     if r["settings"]:
         lines += ["## Recommended slicer settings", "", "| Setting | Value | Why |", "|---|---|---|"]
-        lines += [f"| {x['label']} (`{x['key']}`) | {x['value']} | {x['reason']} |" for x in r["settings"]]
+        lines += [f"| {md_cell(x['label'])} (`{x['key']}`) | {md_cell(x['value'])} | {md_cell(x['reason'])} |" for x in r["settings"]]
     return "\n".join(lines) + "\n"
 
 
@@ -2430,6 +2465,8 @@ METHODS = {
     "zone_at": zone_at,
     "volume_at": volume_at,
     "tag_feature": tag_feature,
+    "session_state": session_state,
+    "restore_state": restore_state,
     "strength": strength,
     "strength_variant": strength_variant,
     "strength_options": strength_options,

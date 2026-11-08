@@ -56,7 +56,7 @@ def test_every_api_method_has_a_tool():
     from fdmcore import api
 
     tools = {t.name for t in asyncio.run(m.server.list_tools())}
-    assert set(api.METHODS) - set(m.API_TOOLS) == set(), "add a tool and an API_TOOLS entry"
+    assert set(api.METHODS) - set(m.API_TOOLS) - m.APP_ONLY == set(), "add a tool and an API_TOOLS entry"
     assert set(m.API_TOOLS) - set(api.METHODS) == set()
     assert set(m.API_TOOLS.values()) - tools == set()
 
@@ -95,3 +95,21 @@ def test_more_tools(tmp_path):
 
     snapped = m.snap_model(str(tmp_path / "fit.stl"), pushed["centroid"], pushed["normal"], str(tmp_path / "joined.stl"))
     assert snapped["volume_mm3"] > grown["volume_mm3"] and snapped["placed"]
+
+
+def test_file_access_limits(tmp_path, monkeypatch):
+    mine = tmp_path / "mine.stl"
+    mine.write_bytes(b"the user's own file")
+    with pytest.raises(ValueError, match="already exists"):
+        m._out(str(mine), (".stl",))
+    out = m._out(str(tmp_path / "new.stl"), (".stl",))
+    out.write_bytes(b"x")
+    assert m._out(str(out), (".stl",)) == out  # the server's own output can be replaced again
+    with pytest.raises(ValueError, match="must end in"):
+        m._in(str(tmp_path / "notes.txt"), m.PARTS)
+    monkeypatch.setenv("FDM_DFM_FOLDER", str(tmp_path / "jail"))
+    with pytest.raises(ValueError, match="only use files inside"):
+        m.load_part(str(SAMPLES / "l_bracket.stl"))
+    with pytest.raises(ValueError, match="only use files inside"):
+        m._out(str(tmp_path / "jail" / ".." / "escape.stl"), (".stl",))
+    assert m._in(str(tmp_path / "jail" / "part.stl"), m.PARTS).parent == (tmp_path / "jail").resolve()

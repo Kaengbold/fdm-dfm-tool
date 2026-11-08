@@ -49,7 +49,7 @@ may work here in parallel; these rules keep their work from colliding.
 ## Commands
 
 ```sh
-cd core && python -m pytest -q                 # engine tests (~20 s)
+cd core && python -m pytest -q                 # engine tests (~8 min; while working, run the test files you touch)
 python tools/e2e_smoke.py                      # browser test in headless Edge (pip install playwright)
 python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini screenshot review
 node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)

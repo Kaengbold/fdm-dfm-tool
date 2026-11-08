@@ -5,6 +5,28 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
+// Removing an object from the scene doesn't free its GPU buffers, shaders and textures: over a long
+// session (every check redraws the markers, every strength run a coloured copy of the part) the
+// tab's GPU memory grows until it slows down or the context is lost. Free them on the way out.
+function dispose(obj) {
+  obj?.traverse((o) => {
+    o.geometry?.dispose();
+    for (const m of [o.material].flat()) {
+      if (!m) continue;
+      for (const v of Object.values(m)) if (v?.isTexture) v.dispose();
+      m.dispose();
+    }
+    o.dispose?.(); // InstancedMesh
+  });
+  obj?.removeFromParent();
+}
+
+/** Remove and free everything in a group, keeping the group itself. */
+function empty(group) {
+  if (!group) return;
+  for (const child of [...group.children]) dispose(child);
+}
+
 const css = (v) => new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue(v).trim());
 const CLASS_COLORS = ["--ok", "--borderline", "--support", "--bed"].map(css);
 const SEVERITY_COLORS = { problem: css("--support"), warn: css("--borderline"), info: css("--accent") };
@@ -52,7 +74,7 @@ export class Viewer {
   }
 
   setBed([w, d]) {
-    this.bedGroup.clear();
+    empty(this.bedGroup);
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: "#dde3df" }));
     plate.position.z = -0.05;
     const grid = new THREE.GridHelper(Math.max(w, d), Math.round(Math.max(w, d) / 10), "#bac4bd", "#ccd4ce");
@@ -146,7 +168,7 @@ export class Viewer {
 
   /** Translucent balls for loads on a spot: [{point (part coords), radius, color}]. */
   showSpots(spots) {
-    this.spots?.clear();
+    empty(this.spots);
     if (!this.spots) this.scene.add((this.spots = new THREE.Group()));
     for (const s of spots) {
       const material = new THREE.MeshBasicMaterial({ color: s.color, transparent: true, opacity: 0.5, depthWrite: false });
@@ -181,9 +203,8 @@ export class Viewer {
 
   hideField() {
     if (!this.field) return;
-    this.scene.remove(this.field.mesh);
-    this.field.mesh.geometry.dispose();
-    this.section?.removeFromParent();
+    dispose(this.field.mesh);
+    dispose(this.section);
     this.section = null;
     this.field = null;
     if (this.part) this.part.visible = true;
@@ -206,8 +227,7 @@ export class Viewer {
    * clipped surface shows its hollow inside instead). Without values (displacement: only known on
    * the surface) the surface is clipped. ``elements``: {centers (part coords), values|null, size_mm}. */
   setSection(axis, t, elements, max) {
-    this.section?.removeFromParent();
-    this.section?.geometry.dispose();
+    dispose(this.section); // its own cubes and material, never the field's
     this.section = null;
     if (!this.field) return;
     const material = this.field.mesh.material;
@@ -257,7 +277,7 @@ export class Viewer {
   /** Symbols for the strength setup: a lock on held faces, an arrow with its weight on loads.
    * [{kind: "fixed"|"force", point, normal, dir (force direction), label}] — part coordinates. */
   showLoadSymbols(symbols) {
-    this.symbols?.clear();
+    empty(this.symbols);
     if (!this.symbols) this.scene.add((this.symbols = new THREE.Group()));
     if (!this.part) return;
     const r = this.part.geometry.boundingSphere.radius;
@@ -328,7 +348,7 @@ export class Viewer {
   /** Strengthening zones: translucent orange boxes, each given by its 8 corners (print frame, in the
    * order lo/hi per axis with z fastest). */
   showZones(zones) {
-    this.zones?.clear();
+    empty(this.zones);
     if (!this.zones) this.scene.add((this.zones = new THREE.Group()));
     for (const z of zones) { // corner arrays (zones, orange) or {corners, color, shape}
       const [c, color] = Array.isArray(z) ? [z, css("--vertical")] : [z.corners, css(z.color ?? "--vertical")];
@@ -391,7 +411,7 @@ export class Viewer {
   /** Boxes for findings; when a finding is selected, it gets a filled highlight, pin, and camera moves
    * (``focus: false``: stays, for pictures that place the camera themselves). */
   showFindings(findings, selected = -1, focus = true) {
-    this.markers.clear();
+    empty(this.markers);
     findings.forEach((f, i) => {
       if (!f.bbox) return;
       const [[x0, y0, z0], [x1, y1, z1]] = f.bbox;
@@ -504,13 +524,13 @@ export class Viewer {
   }
 
   clearMarkers() {
-    this.markers.clear();
+    empty(this.markers);
   }
 
   /** Translucent preview of design edits (part coordinates): red what is cut away, green what is added.
    * ``highlight``: one edit drawn bright and in front of the part (pointed at in the list). */
   showGhosts(edits, highlight = null) {
-    this.ghosts?.clear();
+    empty(this.ghosts);
     if (!this.ghosts) this.scene.add((this.ghosts = new THREE.Group()));
     const dim = highlight ? 0.25 : 1;
     const material = {

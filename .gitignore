@@ -10,3 +10,5 @@ node_modules/
 e2e-output/
 .impeccable/review/
 vendor/
+# OrcaSlicer's log when it is run from this folder (our own calls run it in a temp folder)
+00000.log

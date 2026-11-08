@@ -45,3 +45,7 @@ def test_analyse_finds_the_bracket_hole_and_report_html_escapes():
         assert abs(np.dot(hole["axis"], result["up"])) < 0.01 and hole["radius"] > 0  # lying sideways in the print
     page = bridge.report_html("# Title\n- **bold** <x>\n| a | b |\n|---|---|", result["up"])
     assert "<h1>Title</h1>" in page and "<li><b>bold</b> &lt;x&gt;</li>" in page and "a · b" in page
+
+
+def test_no_teardrop_for_an_upright_hole():
+    assert bridge.teardrop_boxes({"axis": [0, 0, 1], "radius": 2.0, "center": [0, 0, 0], "length": 5}, [0, 0, 1]) is None

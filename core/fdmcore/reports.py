@@ -163,7 +163,7 @@ def to_markdown(rep: dict, stem: str) -> tuple[str, dict[str, bytes]]:
         lines += ["## Print time per nozzle", "", *svg("nozzle_time", "Print time per nozzle"), *svg("nozzle_filament", "Filament per nozzle")]
     if rep["settings"]:
         lines += ["## Slicer settings", "", "| Setting | Value | Why |", "|---|---|---|"]
-        lines += [f"| {x['label']} | {x['value']} | {x['reason']} |" for x in rep["settings"]]
+        lines += [f"| {api.md_cell(x['label'])} | {api.md_cell(x['value'])} | {api.md_cell(x['reason'])} |" for x in rep["settings"]]
     return "\n".join(lines) + "\n", files
 
 

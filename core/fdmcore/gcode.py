@@ -11,6 +11,7 @@ on a G-code the user sliced themselves, and locally on one OrcaSlicer wrote for 
 from __future__ import annotations
 
 import re
+from array import array
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,6 +23,7 @@ WALL, SOLID, SPARSE, SUPPORT, OTHER = range(5)
 KIND_NAMES = ("wall", "solid", "sparse", "support", "other")
 PART_KINDS = (WALL, SOLID, SPARSE)
 ARC_STEP_MM = 0.5  # arcs (G2/G3, arc fitting) are split into chords this long
+ARC_MAX_POINTS = 720  # ... but never more: one bad line with a huge I/J would ask for millions
 MAX_SIZE_GAP_MM = 2.0  # G-code and model sizes may differ this much (elephant-foot and hole compensation)
 
 
@@ -95,7 +97,9 @@ def parse(text: str) -> Toolpath:
     feed = 1800.0  # mm/min
     kind = OTHER
     t = 0.0
-    rows = []  # (x0, y0, z0, x1, y1, z1, volume, kind, t0, t1)
+    # (x0, y0, z0, x1, y1, z1, volume, kind, t0, t1) per line, as raw doubles: a list of tuples costs
+    # ~10× the memory and a slow np.array at the end, with millions of moves in a big print.
+    rows = array("d")
 
     # Plain floats in the loop: a big print has millions of moves (and Pyodide is ~3× slower).
     for line in text.splitlines():
@@ -128,12 +132,12 @@ def parse(text: str) -> Toolpath:
                 if de > 0 and total > 1e-6:
                     ts = t + np.concatenate([[0], np.cumsum(lengths)]) / total * dt
                     for k in range(len(lengths)):
-                        rows.append((*pts[k], *pts[k + 1], de * fil_area * lengths[k] / total, kind, ts[k], ts[k + 1]))
+                        rows.extend((*pts[k], *pts[k + 1], de * fil_area * lengths[k] / total, kind, ts[k], ts[k + 1]))
             else:
                 total = ((nx - x) ** 2 + (ny - y) ** 2 + (nz - z) ** 2) ** 0.5
                 dt = (total if total > 0 else abs(de)) / feed * 60
                 if de > 0 and total > 1e-6:
-                    rows.append((x, y, z, nx, ny, nz, de * fil_area, kind, t, t + dt))
+                    rows.extend((x, y, z, nx, ny, nz, de * fil_area, kind, t, t + dt))
             t += dt
             x, y, z = nx, ny, nz
         elif cmd == "G90":
@@ -155,7 +159,7 @@ def parse(text: str) -> Toolpath:
 
     if not rows:
         raise ValueError("No printed lines found: is this a G-code file from a slicer?")
-    a = np.array(rows, dtype=float)
+    a = np.frombuffer(rows, dtype=float).reshape(-1, 10)
     p0, p1 = a[:, 0:3], a[:, 3:6]
     total_s = t
     for rx in _TIME:
@@ -191,7 +195,7 @@ def _arc(p0: np.ndarray, p1: np.ndarray, i: float, j: float, clockwise: bool) ->
         sweep = sweep - 2 * np.pi if sweep >= -1e-9 else sweep
     else:
         sweep = sweep + 2 * np.pi if sweep <= 1e-9 else sweep
-    n = max(int(np.ceil(abs(sweep) * r / ARC_STEP_MM)), 1)
+    n = int(np.clip(np.ceil(abs(sweep) * r / ARC_STEP_MM), 1, ARC_MAX_POINTS))
     a = a0 + sweep * np.linspace(0, 1, n + 1)
     pts = np.column_stack([c[0] + r * np.cos(a), c[1] + r * np.sin(a), np.linspace(p0[2], p1[2], n + 1)])
     pts[-1] = p1
