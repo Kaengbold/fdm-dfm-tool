@@ -881,6 +881,29 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
     - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
+  modelled_thread:
+    title: Thread modelled into the part
+    why: A thread printed straight from the model is a 60° slope made of layers. Small threads, or too few layers per
+      turn, come out as a rough staircase that binds or strips; lying on its side, the top and bottom of the thread
+      are only layer steps. Printed threads also come out a little fat, so a printed bolt and nut need clearance.
+    fixes:
+    - domain: slicer
+      text: Print the threaded part with finer layers (at most a quarter of the pitch, e.g. 0.12 mm for M8), using
+        variable layer height over the thread only.
+      settings:
+        layer_height: '0.12'
+    - domain: process
+      text: Screw the bolt in and out a few times to clean the thread. For threads smaller than M5, tap a plain hole,
+        or use a heat-set insert or a nut instead.
+    - domain: geometry
+      text: Stand the thread up, and model about 0.3 mm of clearance between a printed bolt and nut. For small
+        threads, model a plain hole for a tap or insert instead.
+    tags:
+    - holes
+    - fasteners
+    sources:
+    - Hubs — How to assemble 3D printed parts with threaded fasteners (avoid printed threads below M5; clean the thread) — https://www.hubs.com/knowledge-base/how-assemble-3d-printed-parts-threaded-fasteners/
+    - Prusa Knowledge Base — Modeling with 3D printing in mind (at least 0.3 mm for moving parts) — https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135
   fibre_filled:
     title: Carbon or glass fibre filament makes it stiffer, not stronger
     why: The short fibres in PLA-CF, PETG-CF, PA-CF and similar filaments line up along each printed line. The part

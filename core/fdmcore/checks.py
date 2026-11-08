@@ -70,6 +70,7 @@ RULE_IMPACT = {
     "living_hinge": "weak",
     "snap_fit_upright": "weak",
     "thick_solid_block": "info",
+    "modelled_thread": "shape",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
 SEVERITY_ORDER = {"problem": 0, "warn": 1, "info": 2}
