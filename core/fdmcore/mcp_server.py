@@ -618,7 +618,6 @@ def set_expert_settings(values: dict[str, float]) -> dict:
     return api.set_expert(values)
 
 
-
 @server.tool()
 def render_image(view: str, up: list[float], output_path: str, loads: list[dict] | None = None, finding: int = 0,
                  other_path: str | None = None, width: int = 800, height: int = 600, printer: str = "bambu_p1s",
@@ -696,16 +695,16 @@ def split_part(output_folder: str, printer: str = "bambu_p1s", material: str = "
     import numpy as np
 
     plan = api.split(_profile(printer, material, nozzle))
-    folder = Path(output_folder).expanduser()
+    folder = Path(output_folder).expanduser().resolve()
+    paths = [_out(str(folder / f"piece_{i}.stl"), (".stl",), "piece") for i in range(1, len(plan["pieces"]) + 1)]
+    pin = _out(str(folder / "pin.stl"), (".stl",), "pin")
     folder.mkdir(parents=True, exist_ok=True)
     part = api._require().mesh
     saved = []
-    for i, piece in enumerate(plan["pieces"], 1):
+    for out, piece in zip(paths, plan["pieces"]):
         edits = [{**e, "mesh": np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)} for e in piece["edits"]]
-        out = folder / f"piece_{i}.stl"
         out.write_bytes(to_binary_stl(apply_edits(part, edits)))
         saved.append(str(out))
-    pin = folder / "pin.stl"
     pin.write_bytes(to_binary_stl(Mesh(np.frombuffer(plan["pin"]["stl_triangles"], "<f4").reshape(-1, 3, 3))))
     saved.append(str(pin))
     return {"saved": saved, "cuts_mm": plan["cuts"], "pins": plan["pin"]["count"], "explanation": plan["explanation"]}
@@ -727,8 +726,6 @@ API_TOOLS = {
     "warping": "check_warping",
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",
-
-
     "split": "split_part",
     "set_gap": "set_gap",
     "volume_solid": "apply_blocks",

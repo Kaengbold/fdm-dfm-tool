@@ -385,8 +385,6 @@ async function partLoaded(info) {
   state.options = [];
   state.check = null;
   renderPauses();
-
-
   $("dl-split").hidden = true;
   renderOptions();
   $("view-empty").hidden = true;
@@ -472,8 +470,6 @@ async function runCheck() {
     state.check = result;
     renderCheck();
     renderPauses();
-
-
     $("dl-split").hidden = !result.findings.some((f) => f.rule === "exceeds_build_volume");
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
@@ -3028,7 +3024,6 @@ function renderPauses() {
   $("pause-text").textContent = `Pause to put parts into the pocket${zs.length > 1 ? "s" : ""} (just above ${zs.map((z) => `${z.toFixed(2)} mm`).join(", ")}; ` +
     "OrcaSlicer and PrusaSlicer pause there, in Bambu Studio add it on that layer)";
 }
-
 
 // A part too big for the printer: the pieces that fit (split.py), each the part with the rest cut away
 // and pin holes, and the pins, as STLs.

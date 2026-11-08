@@ -1227,8 +1227,6 @@ def regions() -> dict:
     return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
 
 
-
-
 def _load_case(loads: list[dict], voxels: int | None = None):
     """Prepared load cases (list, see strength.prepare_cases), cached per load set and grid size."""
     from .regions import find_regions
@@ -1835,8 +1833,6 @@ def heat_curve(profile: dict | None = None, use_temp_c: float | None = None) -> 
     return {"material": name, "temps_c": temps.round(1).tolist(), "share_pct": [round(x * 100, 1) for x in shares],
             "room_c": ROOM_C, "softening_c": float(p.material["softening_c"]), "soft_c": float(limit), "cold_c": COLD_C,
             "use_temp_c": at, "share_at_pct": round(k * 100, 1), "explanation": story}
-
-
 
 
 def _heat_source(mesh: Mesh, point=None, face: int | None = None) -> np.ndarray:
@@ -2551,8 +2547,6 @@ METHODS = {
     "warping": warping,
     "set_fit": set_fit,
     "set_fastener": set_fastener,
-
-
     "split": split,
     "set_gap": set_gap,
     "volume_solid": volume_solid,

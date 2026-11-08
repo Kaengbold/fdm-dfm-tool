@@ -71,8 +71,6 @@ RULE_IMPACT = {
     "snap_fit_upright": "weak",
     "thick_solid_block": "info",
     "pause_to_insert": "info",
-
-
     "modelled_thread": "shape",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
@@ -1323,7 +1321,6 @@ def _cooling_run(run, profile: Profile, C: dict, fix: tuple | int | None = None)
     elif fix == 0:
         detail += ". Slowing down alone won't cool them: print two copies at once so each layer takes longer"
     return [_finding("small_layers_cooling", sev, detail, bbox=bbox, temp_c=hottest, softening_c=soft, **extra)]
-
 
 
 def _profile_findings(layers, profile: Profile) -> list[dict]:

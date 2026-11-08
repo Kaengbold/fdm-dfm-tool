@@ -560,7 +560,7 @@ def test_too_big_counts_as_can_fail():
 
 
 def test_markdown_cells_keep_the_table_together():
-    assert api.md_cell("a | b\nc") == "a \| b c"
+    assert api.md_cell("a | b\nc") == r"a | b c"\| b c"
 
 
 def test_cost_support_and_spool():

@@ -903,8 +903,6 @@ rules:
     - pause
     sources:
     - Prusa Knowledge Base — Insert pause or custom G-code at layer (magnets put in at a pause) — https://help.prusa3d.com/article/insert-pause-or-custom-g-code-at-layer_120490
-
-
   modelled_thread:
     title: Thread modelled into the part
     why: A thread printed straight from the model is a 60° slope made of layers. Small threads, or too few layers per

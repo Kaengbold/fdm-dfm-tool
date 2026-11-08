@@ -1004,7 +1004,6 @@ def main():
             return f"restored {got}"
         run.step("autosave: continue where you left off", autosave_restore)
 
-
         def split_too_big():
             bar = OUT / "long_bar.stl"
             bar.write_bytes(_box_stl([((0, 0, 0), (400, 40, 20))]))

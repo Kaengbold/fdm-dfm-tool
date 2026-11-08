@@ -1,5 +1,7 @@
 """Split a part that is too big for the printer (T-321)."""
 
+import pathlib
+
 import numpy as np
 import pytest
 
@@ -52,3 +54,21 @@ def test_part_that_fits_is_not_split():
     api.load(to_binary_stl(Mesh(box([0, 0, 0], 50))), "cube")
     with pytest.raises(ValueError, match="already fits"):
         api.split({})
+
+
+def test_mcp_split_part_stays_in_the_allowed_folder(tmp_path, monkeypatch):
+    """The agent tool writes the pieces only inside --folder, and never over the user's own files."""
+    pytest.importorskip("manifold3d")
+    pytest.importorskip("mcp")
+    from fdmcore import mcp_server as m
+
+    api.load(to_binary_stl(Mesh(box([0, 0, 0], 1) * [400, 40, 20])), "bar")
+    monkeypatch.setenv("FDM_DFM_FOLDER", str(tmp_path / "jail"))
+    with pytest.raises(ValueError, match="only use files inside"):
+        m.split_part(str(tmp_path / "out"))
+    (tmp_path / "jail").mkdir()
+    (tmp_path / "jail" / "pin.stl").write_bytes(b"the user's own file")
+    with pytest.raises(ValueError, match="already exists"):
+        m.split_part(str(tmp_path / "jail"))
+    got = m.split_part(str(tmp_path / "jail" / "pieces"))
+    assert len(got["saved"]) == 3 and all(pathlib.Path(p).stat().st_size > 84 for p in got["saved"])
