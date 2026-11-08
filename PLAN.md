@@ -37,10 +37,10 @@ Mode toggle (every suggestion carries a domain tag `geometry` / `slicer` / `proc
 
 ```
 Browser (static site, e.g. GitHub Pages — no backend)
-├── UI: React + three.js (react-three-fiber)
+├── UI: plain ES modules (no framework, no build step) + three.js
 ├── Geometry I/O (JS/WASM): opencascade.js/replicad (STEP), manifold-3d (booleans), 3MF/STL parsers
 └── Core engine: Python package `fdmcore` running in Pyodide (Web Worker)
-      numpy · scipy · trimesh · shapely
+      numpy · scipy · shapely · pyyaml
 
 Same `fdmcore` package, also usable as:
 ├── Local mode:  `pipx install fdmdfm` → local server + same UI + MCP server + OrcaSlicer CLI
@@ -63,33 +63,33 @@ Key decisions:
 ## 5. Requirements
 
 ### Must (v1)
-- [ ] Load STL, 3MF, STEP (single body; reject/warn on multi-body)
-- [ ] Mesh repair check (non-manifold, inverted normals) with auto-fix
-- [ ] Feature graph with confidence + "please confirm" prompts
-- [ ] Printer/material/nozzle presets (simple picker: "Bambu P1S, PLA, 0.4")
-- [ ] Orientation optimizer with an explained score (supports, bed contact, critical faces, height, strength)
-- [ ] Pseudo-slice analysis: overhang map, bridges, thin walls, small bed contact, tall/thin features, small-layer-time hotspots
-- [ ] Rule engine + knowledge base (YAML), ~20 rules at launch
-- [ ] Mode toggle (print / design / both)
-- [ ] Slicer settings recommendation (walls, infill, brim, supports, cooling) with reasons
-- [ ] Export 3MF with orientation + settings for OrcaSlicer/Bambu Studio; plain STL export
-- [ ] Results are shareable as a report (Markdown/PDF)
-- [ ] Fully functional without AI, offline-capable after first load
+- [x] Load STL, 3MF, STEP (single body; reject/warn on multi-body)
+- [ ] Mesh repair check (non-manifold, inverted normals) with auto-fix — not built: holes and broken meshes are worked around (repair only invalid shapes), no auto-fix
+- [x] Feature graph with confidence + "please confirm" prompts
+- [x] Printer/material/nozzle presets (simple picker: "Bambu P1S, PLA, 0.4")
+- [x] Orientation optimizer with an explained score (supports, bed contact, critical faces, height, strength)
+- [x] Pseudo-slice analysis: overhang map, bridges, thin walls, small bed contact, tall/thin features, small-layer-time hotspots
+- [x] Rule engine + knowledge base (YAML), ~20 rules at launch
+- [x] Mode toggle (print / design / both)
+- [x] Slicer settings recommendation (walls, infill, brim, supports, cooling) with reasons
+- [x] Export 3MF with orientation + settings for OrcaSlicer/Bambu Studio; plain STL export
+- [x] Results are shareable as a report (Markdown/PDF)
+- [x] Fully functional without AI, offline-capable after first load
 
 ### Must (v2 — strength)
-- [ ] Simple load definition: click face(s) → "fixed" / "pushed/pulled with X kg" (kg, not Newtons by default)
-- [ ] Voxel FEA, transversely isotropic material with Z knockdown, shell (walls) + homogenized infill core
-- [ ] One solve → rotate stress field → score all orientations for layer-interface stress
-- [ ] Traffic-light result: "fine / borderline / likely to break" + where and why
-- [ ] Presets affect Z strength (heated chamber, enclosure, material)
-- [ ] Suggest walls/infill/orientation to reach "fine"
+- [x] Simple load definition: click face(s) → "fixed" / "pushed/pulled with X kg" (kg, not Newtons by default)
+- [x] Voxel FEA, transversely isotropic material with Z knockdown, shell (walls) + homogenized infill core
+- [x] One solve → rotate stress field → score all orientations for layer-interface stress
+- [x] Traffic-light result: "fine / borderline / likely to break" + where and why
+- [x] Presets affect Z strength (heated chamber, enclosure, material)
+- [x] Suggest walls/infill/orientation to reach "fine"
 
 ### Should
-- [ ] Ghost preview of geometry fixes (teardrop/diamond holes, chamfer bed edges, add ribs, thicken walls) using manifold-3d; export modified STL/STEP
-- [ ] A/B compare of two orientations or settings
-- [ ] Agent toolkit: Claude Code / Codex / Claude Desktop operate the tool with the user's own subscription (MCP server + command line), and get reports, charts and images back as files
+- [x] Ghost preview of geometry fixes (teardrop/diamond holes, chamfer bed edges, add ribs, thicken walls) using manifold-3d; export modified STL/STEP
+- [x] A/B compare of two orientations or settings
+- [x] Agent toolkit: Claude Code / Codex / Claude Desktop operate the tool with the user's own subscription (MCP server + command line), and get reports, charts and images back as files
 - [x] "Copy for your AI chat": a plain-text report to paste into any chat (no paste-back)
-- [ ] Local mode: real slicing via OrcaSlicer CLI + Orca profile import
+- [x] Local mode: real slicing via OrcaSlicer CLI + Orca profile import
 
 ### Later
 - [~] Fusion 360 add-in (exact features, apply fixes as real CAD features) — `fusion/`: report + teardrops; not yet run inside Fusion
@@ -171,9 +171,9 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 ## 9. Tech stack & licensing
 
 - License: **AGPL-3.0 or GPL-3.0** for the project (lets us reuse GPL/AGPL tools freely; keeps forks open). Decide before first commit.
-- Python core: numpy, scipy, trimesh, shapely (all Pyodide-compatible)
-- Browser: React, three.js/react-three-fiber, Pyodide, opencascade.js/replicad, manifold-3d
-- Local mode: FastAPI, MCP Python SDK, OrcaSlicer CLI (subprocess)
+- Python core: numpy, scipy, shapely, pyyaml (all Pyodide-compatible; trimesh and manifold3d only for tools and local-only booleans)
+- Browser: plain ES modules, three.js, Pyodide, occt-import-js / replicad-opencascadejs, manifold-3d
+- Local mode: MCP Python SDK (FastMCP-style server over stdio), command line, OrcaSlicer CLI (subprocess)
 - Tests: pytest on a corpus of reference parts (brackets, hooks, enclosures, Benchy…)
 
 ## 10. Phases

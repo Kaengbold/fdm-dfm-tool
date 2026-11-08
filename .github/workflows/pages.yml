@@ -23,7 +23,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Pull request checks run only when their files change and not again after the merge, so a broken
+  # engine could reach the site. The quickest check of what the site runs: the engine in Pyodide on
+  # the samples (a few minutes with the cached package).
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/cache@v4
+        with:
+          path: tools/node_modules
+          key: pyodide-0.27.2
+      - run: npm install --no-save --prefix tools pyodide@0.27.2
+      - run: node tools/pyodide_check.mjs
+
   deploy:
+    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -44,7 +63,7 @@ jobs:
           key: vendor-${{ hashFiles('tools/vendor.py') }}
       - name: Serve the libraries ourselves (no CDN at run time)
         # Pinned three.js, manifold, OpenCascade and Pyodide (+ the engine's packages) under _site/vendor;
-        # the five files that load them switch their base URL to it. The AI panel's SDK stays on the CDN.
+        # the five files that load them switch their base URL to it.
         run: |
           [ -d _vendor ] || python3 tools/vendor.py _vendor
           cp -r _vendor _site/vendor

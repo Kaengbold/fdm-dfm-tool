@@ -1,15 +1,17 @@
 name: Browser smoke test
 
-# The slowest check (~15 min): only when the app, the API it calls, the rules it shows or the test change
-# (AGENTS.md: e2e when web/ or api.py changed).
+# The slowest check (~15 min): only when the app, the engine files it loads, the rules it shows or the test
+# change. Local-only engine files (LOCAL_ONLY in tools/make_manifest.py) don't reach the browser.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "web/**"
-      - "core/fdmcore/api.py"
-      - "core/fdmcore/manifest.json"
-      - "core/fdmcore/data/**"
+      - "core/fdmcore/**"
+      - "!core/fdmcore/mcp_server.py"
+      - "!core/fdmcore/booleans.py"
+      - "!core/fdmcore/slicer_cli.py"
+      - "!core/fdmcore/cli.py"
       - "tools/e2e_smoke.py"
       - "tools/fixtures/**"
       - ".github/workflows/browser.yml"

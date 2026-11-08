@@ -571,7 +571,7 @@ def render_image(view: str, up: list[float], output_path: str, loads: list[dict]
                  material: str = "pla", nozzle: str = "0.4") -> list:
     """PNG picture of the loaded part printed with ``up`` as the build direction, saved to ``output_path`` and
     returned so you can see it. ``view``: "bed" (on the bed), "overhangs" (seen from below; red needs
-    support, amber borderline, green on the bed), "problem" (finding number ``finding`` from check_part,
+    support, amber borderline, green on the bed), "problem" (finding number ``finding`` from check_print,
     its area in red), "stress" (needs ``loads`` like check_strength; blue little stress, red close to
     breaking, blue faces held, purple arrows the forces), "warp" (curled shape after cooling,
     exaggerated), "compare" (``other_path``, an earlier STL / 3MF, on the left, the loaded part on the
