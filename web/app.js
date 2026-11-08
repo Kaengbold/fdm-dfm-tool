@@ -603,11 +603,21 @@ function findingCard(findings, items) {
   return card;
 }
 
+/** "About 2 h to print and 48 g of filament (+ 6 g support), about 1.30" and the spool warning. */
+function statsText(stats) {
+  const support = stats.support_g >= 1 ? ` (+ ${Math.round(stats.support_g)} g support)` : "";
+  const cost = stats.cost != null ? `, about ${stats.cost.toFixed(2)} for the filament` : "";
+  const spool = stats.spool_short
+    ? ` Your spool has ${Math.round(stats.spool_left_g)} g left: not enough for this print (with a margin), so load a fuller one.`
+    : "";
+  return `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament${support}${cost}.${spool}`;
+}
+
 function renderCheck() {
   if (!state.check) return;
   const { findings, stats } = state.check;
-  $("stats").textContent = `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament.`;
-  noteVersion({ time: stats.print_time_min, grams: stats.filament_g, problems: new Set(findings.filter((f) => f.impact !== "info").map((f) => f.rule)).size, safety: null });
+  $("stats").textContent = statsText(stats);
+  noteVersion({ time: stats.print_time_min, grams: stats.total_g ?? stats.filament_g, problems: new Set(findings.filter((f) => f.impact !== "info").map((f) => f.rule)).size, safety: null });
   $("findings").replaceChildren(
     ...(findings.length ? renderImpactGroups(findings) : [el("li", { className: "ok", textContent: "Should print as designed in this orientation." })]),
   );
@@ -3058,7 +3068,7 @@ $("dl-report").onclick = () =>
       setup: `${state.presets.printers[p.printer]?.name ?? p.printer} · ${state.presets.materials[p.material]?.name ?? p.material} · ${p.nozzle} mm nozzle`,
       verdict: verdict(),
       orientation: { label: state.active === 0 ? "Best orientation" : o.label, reasons: o.reasons },
-      stats: `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament (rough estimate).`,
+      stats: `${statsText(stats)} (Rough estimates.)`,
       settings: effectiveSettings().map((s) => ({ label: s.label, value: settingText(s.key, s.value), reason: s.reason })),
     };
     try {

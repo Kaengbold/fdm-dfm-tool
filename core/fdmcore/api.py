@@ -2143,6 +2143,29 @@ def _to_print_frame(mesh: Mesh, r: np.ndarray, point) -> list[float]:
     return (r @ np.asarray(point) + shift).tolist()
 
 
+# Support is printed sparse (~15 %) with denser interface layers under the part: about a quarter of
+# the volume under the overhangs ends up as plastic (rough, like the support volume itself).
+SUPPORT_FILL = 0.25
+SPOOL_MARGIN = (1.1, 5.0)  # a print needs × this + g on the spool: estimate error, purge line and skirt
+
+
+def _cost(oriented: Mesh, p: Profile, part_g: float) -> dict:
+    """Support grams for this orientation and, with the user's price per kg / grams left on the spool
+    (My materials), the cost and whether the spool will last."""
+    from .refine import support_stats
+
+    support_g = support_stats(oriented, p)["support_volume"] * SUPPORT_FILL / 1000 * p.material["density_g_cm3"]
+    total = part_g + support_g
+    out = {"support_g": round(support_g, 1), "total_g": round(total, 1)}
+    if p.material.get("price_per_kg"):
+        out["cost"] = round(total / 1000 * p.material["price_per_kg"], 2)
+    left = p.material.get("spool_left_g")
+    if left is not None:
+        need = total * SPOOL_MARGIN[0] + SPOOL_MARGIN[1]
+        out["spool_left_g"], out["spool_short"] = float(left), bool(need > left)
+    return out
+
+
 def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None, detailed: bool = False) -> dict:
     """Run all printability checks for one orientation, explain them and recommend settings.
     ``faces`` as in ``orientations``: support on a face marked clean becomes a problem.
@@ -2158,6 +2181,7 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         sliced = layer_times(s.gcode["toolpath"])
     result = run_checks(oriented, p, sliced=sliced)
     result["stats"]["heat_from_gcode"] = sliced is not None
+    result["stats"].update(_cost(oriented, p, result["stats"]["filament_g"]))
     spots = _spot_heat(rotation, p) if sliced is not None else None
     if spots is not None:
         result["findings"] += _spot_findings(spots, p, result["findings"])

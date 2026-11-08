@@ -101,6 +101,8 @@ MATERIAL_FIELDS = {
     "uv_resistance": (("good", "fair", "poor"), None, None),
     "fit_gap_mm": ("fits", 0.0, 2.0),  # measured with the fit test print: {"press", "snug", "sliding", "loose"}
     "fibre": (("none", "carbon", "glass"), None, None),  # chopped fibre filled (-CF / -GF)
+    "price_per_kg": (float, 0, 10000),  # what the user pays, any currency: the cost of a print
+    "spool_left_g": (float, 0, 100000),  # filament left on the spool now: warns when a print won't fit on it
 }
 ENCLOSURES = ("none", "passive", "heated")
 
