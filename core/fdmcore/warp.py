@@ -32,7 +32,7 @@ from itertools import product
 
 import numpy as np
 
-from .fea import b_matrix, build_model, element_stiffness, rotate_stiffness, solve
+from .fea import b_matrix, build_model, element_stiffness, solve
 from .heat import H_FAN, H_STILL, K_PLASTIC
 from .mesh import Mesh
 from .orientation import rotation_to_z
@@ -57,16 +57,20 @@ def warp_limit(profile: Profile) -> float | None:
 
 def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None,
              warm: tuple | None = None) -> dict:
-    """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model, displacement
-    after coming off the bed (n_nodes, 3, part frame), the bed's pull at each bed node while printing
+    """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model (voxelised in the
+    print frame: ``rotation`` turns part coordinates into it, so a tilted part sits flat on the grid's
+    bottom layer instead of touching the bed with one stair-step corner), displacement after coming off
+    the bed (n_nodes, 3, print frame), the bed's pull at each bed node while printing
     (N, positive = the part pulls away from the bed) and the bed nodes. ``warm`` (heights, °C): how warm
     each height still is when more goes on top (the layer heat model with the G-code's real layer
     times); plastic still warm then shrinks less while printing."""
-    model = build_model(voxelize(mesh, target_voxels, h))
-    up = np.asarray(up, float) / np.linalg.norm(up)
+    rotation = rotation_to_z(up)
+    # Rounded: float noise from the turn (3.0000000001 mm) would add a whole voxel layer.
+    model = build_model(voxelize(Mesh(np.round(mesh.triangles @ rotation.T, 9)), target_voxels, h))
+    up = np.array([0.0, 0.0, 1.0])
     grid = model.grid
     mat = material_for(profile)
-    c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
+    c = mat.stiffness_print_frame()
     scale = element_scale(model, up, shells, profile)
     ke = element_stiffness(c, grid.h)
     bt = sum(b_matrix(*g, grid.h).T for g in product((-1 / np.sqrt(3), 1 / np.sqrt(3)), repeat=3)) * (grid.h / 2) ** 3
@@ -121,7 +125,7 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     u_free, _ = solve(model, c, scale, -held_total, np.zeros(model.n_nodes, dtype=bool), springs=springs)
     strain += u_free.ravel()[model.edof] @ b_mid.T
     pull = -(held_total @ up)  # the bed pulling the part down = the part pulling away from the bed
-    return {"model": model, "u": u_total + u_free, "pull": pull, "bed": bed, "up": up,
+    return {"model": model, "u": u_total + u_free, "pull": pull, "bed": bed, "up": up, "rotation": rotation,
             "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat}
 
 

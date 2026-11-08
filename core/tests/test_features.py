@@ -250,6 +250,9 @@ def test_carry_less_is_always_the_last_idea():
     assert kinds[-1] == "load" and kinds.count("load") == 1
     rated = [o["safety_factor"] for o in opts if o["safety_factor"] is not None]
     assert max(rated) == opts[-1]["safety_factor"]  # the best number, still last
+    # The +/- % in the app compares with this baseline from the same model: more walls never "weaker".
+    walls = next(o for o in opts if o["kind"] == "slicer" and "walls" in o["change"])
+    assert walls["safety_factor"] >= walls["base_safety"] > 0
 
 
 def test_chamfers_at_every_weak_corner():

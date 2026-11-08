@@ -550,3 +550,10 @@ def test_thick_blocks_without_a_buffer():
         area, bounds = _thick_core(shape, 8.0)
         assert area == pytest.approx(exact, rel=0.1)
         assert bounds == pytest.approx(where, abs=1.0)
+
+
+def test_too_big_counts_as_can_fail():
+    api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
+    api.scale(20)
+    f = next(f for f in api.check([0, 0, 1], {}, "both")["findings"] if f["rule"] == "exceeds_build_volume")
+    assert f["impact"] == "fails"
