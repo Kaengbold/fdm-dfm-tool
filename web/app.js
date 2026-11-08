@@ -383,6 +383,7 @@ async function partLoaded(info) {
   // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
   state.options = [];
   state.check = null;
+  renderPauses();
   renderOptions();
   $("view-empty").hidden = true;
   $("view-key").hidden = false;
@@ -466,6 +467,7 @@ async function runCheck() {
     if (!result?.findings) throw new Error("The analysis returned no result — please try again");
     state.check = result;
     renderCheck();
+    renderPauses();
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
     steps.render();
@@ -2976,10 +2978,21 @@ function download(bytes, filename, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// Closed pockets (pause_to_insert): the 3MF can carry a pause before each roof, to drop a magnet or nut in.
+const pausesWanted = () => [...new Set((state.check?.findings ?? []).filter((f) => f.rule === "pause_to_insert").map((f) => f.metrics.top_z))];
+
+function renderPauses() {
+  const zs = pausesWanted();
+  $("pause-for").hidden = !zs.length;
+  $("pause-text").textContent = `Pause to put parts into the pocket${zs.length > 1 ? "s" : ""} (just above ${zs.map((z) => `${z.toFixed(2)} mm`).join(", ")}; ` +
+    "OrcaSlicer and PrusaSlicer pause there, in Bambu Studio add it on that layer)";
+}
+
 $("dl-3mf").onclick = async () => {
   await busy("Exporting 3MF for OrcaSlicer / Bambu Studio…", async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value });
+    const pauses = $("dl-pause").checked ? pausesWanted() : [];
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
   });
