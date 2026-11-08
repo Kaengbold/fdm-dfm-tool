@@ -333,6 +333,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new") {
       renderUndo();
     }
     Object.assign(state.versions[state.version], { source: state.source, step });
+    trimVersions();
     renderVersions();
     if (info.bodies.length) {
       showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => {
@@ -2400,6 +2401,22 @@ function addVersion(label) {
   state.version = state.versions.length - 1;
 }
 
+// Each version keeps its whole model to switch back to; a long session of design changes on a big
+// part would fill the tab's memory. Past this, the oldest in-between versions let go of their model
+// (their results stay in the table). The original and the shown version are always kept.
+const MAX_VERSIONS_MB = 300;
+
+function trimVersions() {
+  const size = (v) => v.source?.bytes?.byteLength ?? 0;
+  let total = state.versions.reduce((n, v) => n + size(v), 0);
+  for (let i = 1; i < state.versions.length && total > MAX_VERSIONS_MB * 2 ** 20; i++) {
+    const v = state.versions[i];
+    if (i === state.version || !v.source) continue;
+    total -= size(v);
+    Object.assign(v, { source: null, step: null, dropped: true });
+  }
+}
+
 /** Results of the shown version, for the comparison table. */
 function noteVersion(results) {
   const v = state.versions?.[state.version];
@@ -2413,7 +2430,7 @@ const versionName = (v, i) => (i === 0 ? v.label : `${i + 1}: ${v.label}`);
 function renderVersions() {
   const list = state.versions ?? [];
   $("version-pick").hidden = list.length < 2;
-  $("version").replaceChildren(...list.map((v, i) => el("option", { value: i, textContent: versionName(v, i), selected: i === state.version })));
+  $("version").replaceChildren(...list.map((v, i) => el("option", { value: i, textContent: versionName(v, i) + (v.dropped ? " (results only)" : ""), selected: i === state.version })));
   const fmt = (r) => [r?.time != null ? fmtTime(r.time) : "–", r?.grams != null ? `${Math.round(r.grams)} g` : "–",
     r?.problems != null ? String(r.problems) : "–", r?.safety != null ? `×${r.safety.toFixed(1)}` : "–"];
   $("versions").replaceChildren(
@@ -2464,6 +2481,7 @@ async function restoreLoads(carry) {
  * which restores its own). */
 async function showVersion(i, carry = true) {
   const v = state.versions[i];
+  if (v?.dropped) setStatus(`${versionName(v, i)} was let go to save memory: its results stay in the table, but it can't be shown again.`);
   if (!v?.source || i === state.version) return renderVersions();
   const loads = carry ? carryLoads() : [];
   state.version = i;
