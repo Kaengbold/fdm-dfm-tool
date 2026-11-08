@@ -330,6 +330,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new") {
       state.versions = [{ label: "Original" }];
       state.version = 0;
       undoStack.length = 0;
+      redoStack.length = 0;
       renderUndo();
     }
     Object.assign(state.versions[state.version], { source: state.source, step });
@@ -2354,12 +2355,17 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
 // ---------- undo and model versions ----------
 // Every applied design change keeps the model before it as a version: switch back, compare, or undo.
 const undoStack = [];
+const redoStack = []; // what Undo took back, for Redo (emptied by any new change)
+
+/** The loads, marks, settings, boxes and model version now, labelled with the change about to happen. */
+const snapshot = (label) => ({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks),
+  overrides: { ...state.overrides }, zones: structuredClone(state.zones), volumes: structuredClone(state.volumes) });
 
 /** Call before a change: Undo (and Ctrl+Z) puts the loads, marks, settings and model version back. */
 function remember(label) {
-  undoStack.push({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks), overrides: { ...state.overrides },
-    zones: structuredClone(state.zones), volumes: structuredClone(state.volumes) });
+  undoStack.push(snapshot(label));
   if (undoStack.length > 50) undoStack.shift();
+  redoStack.length = 0;
   renderUndo();
 }
 
@@ -2367,12 +2373,13 @@ function renderUndo() {
   const last = undoStack.at(-1);
   $("undo").hidden = !last;
   if (last) $("undo").title = `Undo ${last.label} (Ctrl+Z)`;
+  const next = redoStack.at(-1);
+  $("redo").hidden = !next;
+  if (next) $("redo").title = `Redo ${next.label} (Ctrl+Y)`;
 }
 
-async function undo() {
-  const u = undoStack.pop();
-  renderUndo();
-  if (!u || busyCount) return;
+/** Put a snapshot back (Undo and Redo). */
+async function restoreSnapshot(u) {
   const marksChanged = JSON.stringify(u.marks) !== JSON.stringify(state.marks);
   if (u.version !== state.version) await showVersion(u.version, false);
   Object.assign(state, { loads: u.loads, marks: u.marks, overrides: u.overrides });
@@ -2384,14 +2391,32 @@ async function undo() {
   setVolumes(u.volumes ?? []);
   recolor();
   if (marksChanged) await findOrientations(Boolean(state.strength));
+}
+
+async function undo() {
+  if (busyCount || !undoStack.length) return;
+  const u = undoStack.pop();
+  redoStack.push(snapshot(u.label));
+  renderUndo();
+  await restoreSnapshot(u);
   setStatus(`Undone: ${u.label}.`);
 }
+
+async function redo() {
+  if (busyCount || !redoStack.length) return;
+  const r = redoStack.pop();
+  undoStack.push(snapshot(r.label));
+  renderUndo();
+  await restoreSnapshot(r);
+  setStatus(`Redone: ${r.label}.`);
+}
 $("undo").onclick = undo;
+$("redo").onclick = redo;
 addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest?.("input, textarea, select")) {
-    e.preventDefault();
-    undo();
-  }
+  if (!(e.ctrlKey || e.metaKey) || e.target.closest?.("input, textarea, select")) return;
+  const key = e.key.toLowerCase();
+  if (key === "z" && !e.shiftKey) (e.preventDefault(), undo());
+  else if (key === "y" || (key === "z" && e.shiftKey)) (e.preventDefault(), redo());
 });
 
 /** A new version (the model about to be loaded) after the current ones. */
@@ -2919,12 +2944,14 @@ $("dl-3mf").onclick = async () => {
   });
 };
 
+/** The open part and what was set on it, as a project file (web/project.js). */
+const projectText = () => writeProject({
+  name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
+  up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
+});
+
 $("dl-project").onclick = () => {
-  const text = writeProject({
-    name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
-    up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
-  });
-  download(new TextEncoder().encode(text), `${baseName()}.json`, "application/json");
+  download(new TextEncoder().encode(projectText()), `${baseName()}.json`, "application/json");
   setStatus(`${state.summary} — project saved. Open it here again, or give it to your AI agent (open_project).`);
 };
 
@@ -3011,3 +3038,55 @@ $("copy-report").onclick = async () => {
 
 // Offline after the first visit (see sw.js). Not on file:// pages, where service workers don't run.
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js");
+
+
+// ---------- autosave ----------
+// The open project is kept in this browser so a refresh or a closed tab can carry on ("Continue where
+// you left off?"). IndexedDB, not localStorage: a project with a big part is several MB. Saved when the
+// tab is hidden and every minute, only when something changed. Storage blocked: no autosave, nothing breaks.
+const AUTOSAVE_KEY = "current";
+
+async function autosaveStore(mode, op) {
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open("fdm-autosave", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("projects");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return await new Promise((resolve, reject) => {
+      const req = op(db.transaction("projects", mode).objectStore("projects"));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+let autosaved = "";
+async function autosave() {
+  if (!state.triangles || !activeOption() || busyCount) return;
+  // Cheap fingerprint first: writing out the whole part every minute would be wasted work.
+  const sig = JSON.stringify([state.name, state.version, state.triangles.length, activeOption().up, state.loads, faceMarks(),
+    state.zones, state.volumes, state.overrides, profile(), mode()]);
+  if (sig === autosaved) return;
+  autosaved = sig;
+  await autosaveStore("readwrite", (s) => s.put({ text: projectText(), name: state.name, time: Date.now() }, AUTOSAVE_KEY));
+}
+setInterval(autosave, 60_000);
+globalThis.fdm.autosave = autosave; // for the browser test
+document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && autosave());
+
+/** At start: offer the project from last time, if there is one. */
+async function offerRestore() {
+  const saved = await autosaveStore("readonly", (s) => s.get(AUTOSAVE_KEY));
+  if (!saved?.text) return;
+  const when = new Date(saved.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const close = () => ($("restore").hidden = true);
+  $("restore").replaceChildren(`Continue where you left off? ${saved.name || "Your part"}, ${when}. `,
+    el("button", { textContent: "Open it", onclick: () => (close(), openProject(new TextEncoder().encode(saved.text))) }),
+    el("button", { className: "link", textContent: "No thanks", onclick: () => (close(), autosaveStore("readwrite", (s) => s.delete(AUTOSAVE_KEY))) }));
+  $("restore").hidden = false;
+}
+offerRestore();

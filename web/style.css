@@ -189,6 +189,7 @@ body[data-level="expert"] .pane + .pane { margin-top: 30px; padding-top: 24px; b
 .foot-buttons .primary { margin-left: auto; }
 .status { margin: 0; font-size: 13px; color: var(--muted); }
 .status.error { color: var(--bad); font-weight: 700; }
+.restore { margin: 0 0 6px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 h2 { margin: 0; font-size: 23px; line-height: 1.2; font-weight: 700; }
 h2 small { font-size: 14px; font-weight: 400; color: var(--muted); }

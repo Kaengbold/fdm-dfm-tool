@@ -257,6 +257,9 @@ def main():
             back = page.evaluate("() => ({ version: fdm.state.version, name: fdm.state.name })")
             assert back["version"] == 0, back
             assert any("Ø8.0" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop not suggested again on the original"
+            run.act(lambda: page.keyboard.press("Control+y"), 300_000)  # Redo: the changed model again
+            assert page.evaluate("() => fdm.state.version") == 1, "Ctrl+Y did not redo"
+            run.act(lambda: page.keyboard.press("Control+z"), 300_000)
             run.act(lambda: page.select_option("#version", "1"), 300_000)
             assert page.evaluate("() => fdm.state.version") == 1
             return f"{versions} | {table.splitlines()[1:3]} | undo -> {back['name']}"
@@ -962,6 +965,19 @@ def main():
             assert page.evaluate("() => fdm.state.versions.length") == after + 1, page.locator("#status").inner_text()
             return page.locator("#status").inner_text()[:120]
         run.step("advanced design changes: add plastic, snap a model on", solids_and_snap)
+
+        def autosave_restore():
+            name = page.evaluate("() => fdm.state.name")
+            page.evaluate("() => fdm.autosave()")  # also every minute and when the tab is hidden
+            page.reload()
+            run.booted()
+            page.wait_for_selector("#restore:not([hidden])", timeout=60_000)
+            run.act(lambda: page.locator("#restore").get_by_role("button", name="Open it").click(), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            got = page.evaluate("() => fdm.state.name")
+            assert got == name, (got, name)
+            return f"restored {got}"
+        run.step("autosave: continue where you left off", autosave_restore)
 
         for part in args.parts:
             def load_part(part=part):

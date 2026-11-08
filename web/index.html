@@ -42,6 +42,7 @@
       <div class="view-tools">
         <label id="version-pick" hidden>Model <select id="version" aria-label="Model version"></select></label>
         <button type="button" id="undo" class="small" hidden title="Ctrl+Z">Undo</button>
+        <button type="button" id="redo" class="small" hidden title="Ctrl+Y">Redo</button>
       </div>
       <ul id="view-key" class="view-key" aria-label="Colours on the part" hidden>
         <li><i style="background: var(--ok)"></i>Prints fine</li>
@@ -533,6 +534,7 @@
       </div>
 
       <footer class="pane-foot">
+        <p id="restore" class="restore" hidden></p>
         <p id="status" class="status">Starting the engine… (the first visit downloads about 15 MB)</p>
         <div class="foot-buttons">
           <button type="button" id="step-back" class="ghost">Back</button>
