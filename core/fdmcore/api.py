@@ -1566,7 +1566,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
     at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest
-    first, a lighter load always last."""
+    first, a lighter load always last. ``base_safety`` on each: today's safety with the same shell model,
+    so the +/- % compares like with like (the G-code strength check gives its own, different number)."""
     from dataclasses import replace
 
     from .strength import cases_safety, material_volume, verdict
@@ -1611,6 +1612,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "may need more support or take longer", up=axes[best].tolist())
 
     out += _beyond_settings(base, p, profile, loads)
+    for o in out:
+        o["base_safety"] = float(base["safety_factor"])
     return _strongest_first(out)
 
 
