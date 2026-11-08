@@ -159,6 +159,8 @@ def split_bodies(mesh: Mesh, min_fraction: float = 0.002) -> list[Mesh]:
     t = mesh.triangles
     signed = np.einsum("ij,ij->i", t[:, 0], np.cross(t[:, 1], t[:, 2])) / 6.0
     vol = np.bincount(labels, signed, n)
+    if vol.sum() < 0:  # every shell wound inward (inverted-normal STL): flip, so bodies count as solid
+        signed, vol = -signed, -vol
     pts = t.reshape(-1, 3)
     lab3 = np.repeat(labels, 3)
     lo = np.full((n, 3), np.inf)
@@ -176,7 +178,7 @@ def split_bodies(mesh: Mesh, min_fraction: float = 0.002) -> list[Mesh]:
     labels = owner[labels]
     total = np.bincount(labels, signed, n)
     keep = [c for c in np.argsort(-total) if total[c] > min_fraction * total.max()]
-    if len(keep) == 1:
+    if len(keep) == 1 and np.all(labels == keep[0]):
         return [mesh]
     return [Mesh(t[labels == c]) for c in keep[:MAX_BODIES]]
 
@@ -222,16 +224,19 @@ def _vertex_ids(tri: np.ndarray) -> np.ndarray:
 # ---------- units ----------
 def unit_hint(size_mm, largest_bed_mm: float = 400.0) -> dict | None:
     """Suggest a scale factor when the size looks like the wrong unit (inch, metre, micron).
-    Only a hint: small parts are real too, so the user decides."""
+    Only a hint: small parts are real too, so the user decides. Inches and centimetres (Blender,
+    SketchUp) can't be told apart by size, so an inch hint also offers ×10 in ``also``."""
     biggest = float(max(size_mm))
     if biggest <= 0:
         return None
-    for factor, unit, lo, hi in ((25.4, "inches", 0.5, 8.0), (1000.0, "metres", 0.0, 0.5), (0.001, "microns", 5000.0, np.inf)):
+    for factor, unit, lo, hi in ((25.4, "inches", 0.5, np.inf), (1000.0, "metres", 0.0, 0.5), (0.001, "microns", 5000.0, np.inf)):
         if lo <= biggest < hi and 3.0 <= biggest * factor <= largest_bed_mm:
             return {
                 "factor": factor,
                 "unit": unit,
                 "text": f"Only {biggest:.3g} mm big" if factor > 1 else f"{biggest:.0f} mm big",
                 "scaled_mm": round(biggest * factor, 1),
+                "also": {"factor": 10.0, "unit": "centimetres", "scaled_mm": round(biggest * 10, 1)}
+                if factor == 25.4 and biggest * 10 >= 20 else None,
             }
     return None

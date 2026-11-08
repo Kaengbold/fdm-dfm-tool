@@ -373,18 +373,24 @@ async function partLoaded(info) {
   await findOrientations();
 }
 
-/** Parts exported in inches or metres arrive 25.4× / 1000× off; offer a one-click fix. */
+/** Parts exported in inches, centimetres or metres arrive 25.4× / 10× / 1000× off; offer a one-click fix. */
 function showUnitHint(hint) {
   $("unit-hint").hidden = !hint;
   if (!hint) return;
-  $("unit-text").textContent = `${hint.text} — was it exported in ${hint.unit}?`;
-  $("unit-scale").textContent = `Scale ×${hint.factor} → ${hint.scaled_mm} mm`;
-  $("unit-scale").onclick = () => busy("Rescaling…", async () => {
-    const next = await call("scale", { factor: hint.factor });
-    state.source.scale *= hint.factor;
-    state.step = null; // the CAD file keeps its own units: edits would no longer line up
-    $("dl-step").hidden = true;
-    await partLoaded(next);
+  const options = [hint, hint.also].filter(Boolean);
+  $("unit-text").textContent = `${hint.text} — was it exported in ${options.map((o) => o.unit).join(" or ")}?`;
+  [$("unit-scale"), $("unit-scale-2")].forEach((btn, i) => {
+    const o = options[i];
+    btn.hidden = !o;
+    if (!o) return;
+    btn.textContent = `Scale ×${o.factor} → ${o.scaled_mm} mm`;
+    btn.onclick = () => busy("Rescaling…", async () => {
+      const next = await call("scale", { factor: o.factor });
+      state.source.scale *= o.factor;
+      state.step = null; // the CAD file keeps its own units: edits would no longer line up
+      $("dl-step").hidden = true;
+      await partLoaded(next);
+    });
   });
 }
 
