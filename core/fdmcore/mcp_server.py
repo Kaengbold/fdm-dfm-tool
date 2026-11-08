@@ -718,6 +718,9 @@ API_TOOLS = {
     "compare_nozzles": "compare_nozzles",
     "topology": "suggest_lighter_shape",
 }
+# Only for the web app: it keeps the engine's state while restarting its worker (Cancel). The MCP
+# server's engine never restarts under the agent, so there is nothing to hand back.
+APP_ONLY = {"session_state", "restore_state"}
 
 
 def main():

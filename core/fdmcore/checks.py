@@ -325,18 +325,24 @@ def _safe_diff(a, b):
     catch in the browser (it kills the engine). Seen on a part with a fill and a chamfer crossing (T-201)."""
     if a.is_empty or b.is_empty:
         return a
+    return _safe_overlay(shapely.difference, a, b)
+
+
+def _safe_overlay(op, a, b):
+    """``op`` (shapely.difference / intersection / union) of two areas with the robust overlay, see
+    ``_safe_diff``; always an area back (empty if nothing works)."""
     try:
-        out = shapely.difference(a, b, grid_size=OVERLAY_GRID)
+        out = op(a, b, grid_size=OVERLAY_GRID)
         # Snap rounding can collapse a hair-thin piece into a line; a mixed result can't go into the next overlay.
         if out.geom_type in ("Polygon", "MultiPolygon"):
             return out
         return MultiPolygon([q for g in shapely.get_parts(out) for q in shapely.get_parts(g) if q.geom_type == "Polygon"])
     except Exception:
         try:
-            return shapely.set_precision(a, 1e-3).difference(shapely.set_precision(b, 1e-3))
+            return op(shapely.set_precision(a, 1e-3), shapely.set_precision(b, 1e-3))
         except Exception:
             try:
-                return shapely.make_valid(a).difference(shapely.make_valid(b))
+                return op(shapely.make_valid(a), shapely.make_valid(b))
             except Exception:
                 return Polygon()
 

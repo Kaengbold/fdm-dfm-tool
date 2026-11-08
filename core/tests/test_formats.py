@@ -104,3 +104,27 @@ def test_unit_hint_large_inches_and_centimetres():
     hint = unit_hint([10, 5, 2])  # 10 in = 254 mm, or a 100 mm part in centimetres
     assert hint["factor"] == 25.4 and hint["also"]["factor"] == 10
     assert unit_hint([1, 1, 1])["also"] is None
+
+
+def test_3mf_component_bomb_is_refused_before_unpacking():
+    """Each level places the one below 100 times: 12 triangles grow to 12 × 10⁸."""
+    levels = "".join(
+        f'<object id="{k}" type="model"><components>'
+        + f'<component objectid="{k - 1}"/>' * 100 + "</components></object>" for k in range(2, 6))
+    xml = model_xml({1: box([0, 0, 0], 1)}, []).replace("</resources>", levels + "</resources>")
+    xml = xml.replace("<build></build>", '<build><item objectid="5"/></build>')
+    with pytest.raises(ValueError, match="triangles"):
+        read_3mf(make_3mf(xml))
+
+
+def test_zip_entry_bigger_than_the_limit_is_refused(monkeypatch):
+    from fdmcore import formats
+    monkeypatch.setattr(formats, "MAX_UNPACKED_MB", 0)
+    with pytest.raises(ValueError, match="unpacks to more than"):
+        read_3mf(make_3mf(model_xml({1: box([0, 0, 0], 1)}, [(1, "")])))
+
+
+def test_arc_with_a_huge_radius_stays_small():
+    from fdmcore.gcode import ARC_MAX_POINTS, _arc
+    pts = _arc(np.zeros(3), np.array([1.0, 0, 0]), 1e9, 0, False)
+    assert len(pts) <= ARC_MAX_POINTS + 1

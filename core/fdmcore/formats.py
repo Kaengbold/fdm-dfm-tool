@@ -20,6 +20,29 @@ from .mesh import Mesh, load_stl
 # 3MF ``unit`` attribute -> millimetres.
 UNITS_MM = {"micron": 0.001, "millimeter": 1.0, "centimeter": 10.0, "inch": 25.4, "foot": 304.8, "meter": 1000.0}
 MAX_BODIES = 30
+# A file that unpacks to more than this (a "zip bomb", or a 3MF that places the same object
+# thousands of times) would freeze the tab or crash the local MCP server before any check runs.
+MAX_UNPACKED_MB = 400
+MAX_FACES = 4_000_000
+
+
+def too_many_faces(n: int) -> ValueError:
+    return ValueError(f"This file has {n:,} triangles, more than the {MAX_FACES:,} this tool can handle. "
+                      "Export it with a coarser resolution (fewer triangles) and try again")
+
+
+def read_zip(z: zipfile.ZipFile, name: str) -> bytes:
+    """One file from a zip, refusing anything that unpacks to more than MAX_UNPACKED_MB. The size in
+    the zip header can lie, so at most one byte past the limit is ever unpacked."""
+    limit = MAX_UNPACKED_MB * 2**20
+    info = z.getinfo(name)
+    data = b""
+    if info.file_size <= limit:
+        with z.open(info) as fh:
+            data = fh.read(limit + 1)
+    if info.file_size > limit or len(data) > limit:
+        raise ValueError(f"This file unpacks to more than {MAX_UNPACKED_MB} MB, too big to open here")
+    return data
 
 
 def read_bodies(data: bytes) -> list[tuple[str, Mesh]]:
@@ -31,6 +54,8 @@ def read_bodies(data: bytes) -> list[tuple[str, Mesh]]:
         name, mesh = objects[0]
     else:
         name, mesh = "", load_stl(data)
+    if mesh.face_count > MAX_FACES:
+        raise too_many_faces(mesh.face_count)
     bodies = split_bodies(mesh)
     if len(bodies) == 1:
         return [(name, mesh)]
@@ -74,7 +99,7 @@ def read_3mf(data: bytes) -> list[tuple[str, Mesh]]:
         path = path.lstrip("/")
         if path not in docs:
             try:
-                docs[path] = ET.fromstring(z.read(path))
+                docs[path] = ET.fromstring(read_zip(z, path))
             except KeyError as e:
                 raise ValueError(f"3MF file is missing {path}") from e
         return docs[path]
@@ -82,6 +107,24 @@ def read_3mf(data: bytes) -> list[tuple[str, Mesh]]:
     root = doc(root_path)
     scale = UNITS_MM.get(root.get("unit", "millimeter"), 1.0)
     objects: dict[tuple[str, str], ET.Element] = {}
+    counts: dict[tuple[str, str], int] = {}
+
+    def face_count(path: str, oid: str, depth: int = 0) -> int:
+        """Triangles an object expands to, counted before any are built: components that place one
+        object many times multiply it, which is how a small 3MF can unpack to billions."""
+        key = (path, oid)
+        if key not in counts:
+            if depth > 16:
+                raise ValueError("3MF components nest too deep")
+            n = 0
+            for child in find_object(path, oid):
+                kind = _local(child.tag)
+                if kind == "mesh":
+                    n += sum(len(p) for p in child if _local(p.tag) == "triangles")
+                elif kind == "components":
+                    n += sum(face_count((_attr(c, "path") or path).lstrip("/"), c.get("objectid"), depth + 1) for c in child)
+            counts[key] = n
+        return counts[key]
 
     def find_object(path: str, oid: str) -> ET.Element:
         key = (path, oid)
@@ -111,7 +154,11 @@ def read_3mf(data: bytes) -> list[tuple[str, Mesh]]:
 
     bodies = []
     build = next((el for el in root if _local(el.tag) == "build"), None)
-    for item in build if build is not None else []:
+    items = list(build) if build is not None else []
+    total = sum(face_count(root_path, item.get("objectid")) for item in items)
+    if total > MAX_FACES:
+        raise too_many_faces(total)
+    for item in items:
         oid = item.get("objectid")
         parts = triangles(root_path, oid)
         if not parts:
@@ -126,7 +173,7 @@ def read_3mf(data: bytes) -> list[tuple[str, Mesh]]:
 
 def _root_model(z: zipfile.ZipFile) -> str:
     try:
-        rels = z.read("_rels/.rels").decode("utf-8", "replace")
+        rels = read_zip(z, "_rels/.rels").decode("utf-8", "replace")
         m = re.search(r'Target="([^"]+)"[^>]*Type="[^"]*3dmodel"|Type="[^"]*3dmodel"[^>]*Target="([^"]+)"', rels)
         if m:
             return posixpath.normpath((m.group(1) or m.group(2)).lstrip("/"))
