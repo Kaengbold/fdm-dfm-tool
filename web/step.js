@@ -2,15 +2,18 @@
 const OCCT_BASE = "https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/";
 let occt = null;
 
-function loadScript(src) {
+// The browser refuses the file if it isn't the pinned version (T-312; same file as tools/vendor.py pins).
+const OCCT_INTEGRITY = "sha384-Z8pO9JEhFZF+mvDKxMuLvPT85VP7nly8CqYjBatl0bMeW9OsaKCes4gEUPL4nihc";
+
+function loadScript(src, integrity) {
   return new Promise((resolve, reject) => {
-    const s = Object.assign(document.createElement("script"), { src, onload: resolve, onerror: () => reject(new Error(`Could not load ${src}`)) });
+    const s = Object.assign(document.createElement("script"), { src, integrity, crossOrigin: "anonymous", onload: resolve, onerror: () => reject(new Error(`Could not load ${src}`)) });
     document.head.append(s);
   });
 }
 
 async function occtModule() {
-  occt ??= loadScript(OCCT_BASE + "occt-import-js.js").then(() =>
+  occt ??= loadScript(OCCT_BASE + "occt-import-js.js", OCCT_INTEGRITY).then(() =>
     // The script defines a global factory.
     globalThis.occtimportjs({ locateFile: (file) => OCCT_BASE + file }),
   );
