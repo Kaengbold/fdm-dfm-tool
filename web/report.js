@@ -1,7 +1,7 @@
 // The report a person reads: one HTML file with the pictures inside (opens in any browser, prints
 // to PDF). app.js collects the facts and the pictures; this only lays them out.
 
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 const STYLE = `
 body { font: 16px/1.5 "Segoe UI", system-ui, sans-serif; color: #1f2328; max-width: 860px; margin: 32px auto; padding: 0 20px; }

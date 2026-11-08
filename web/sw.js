@@ -1,29 +1,57 @@
 // Offline support: after a visit, the app, the Python engine and the libraries it downloaded
 // (Pyodide packages, three.js, manifold, OpenCascade) come from this cache when the network is gone.
-// CDN files are versioned in their URLs, so they are cached for good; the app's own files are
-// fetched fresh when online, so updates show up.
+// Library files have their version in the URL (on the CDN, or same-origin under /vendor/ on the
+// self-hosted build), so they are cached for good; the app's own files are fetched fresh when
+// online, so updates show up.
 const CDN = "fdm-cdn-v1";
 const APP = "fdm-app-v1";
 const CDN_HOSTS = ["cdn.jsdelivr.net"];
 
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("activate", (e) => e.waitUntil((async () => {
+  // A renamed cache (new name above) leaves the old one behind otherwise: ~100 MB each.
+  for (const name of await caches.keys()) if (![CDN, APP].includes(name)) await caches.delete(name);
+  await self.clients.claim();
+})()));
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (CDN_HOSTS.includes(url.hostname)) e.respondWith(cacheFirst(req));
-  else if (url.origin === self.location.origin) e.respondWith(networkFirst(req));
+  if (CDN_HOSTS.includes(url.hostname) || (url.origin === self.location.origin && url.pathname.includes("/vendor/"))) {
+    e.respondWith(cacheFirst(req, e));
+  } else if (url.origin === self.location.origin) e.respondWith(networkFirst(req));
 });
 
-async function cacheFirst(req) {
+// The same file of a library without its version: "npm/three/build/three.module.js",
+// "pyodide/full/pyodide.asm.wasm". null for URLs that carry no version.
+function unversioned(url) {
+  const path = new URL(url).pathname;
+  const npm = path.match(/\/npm\/((?:@[^/]+\/)?[^/@]+)@[^/]+(\/.*)$/);
+  if (npm) return "npm/" + npm[1] + npm[2];
+  const py = path.match(/\/pyodide\/v[^/]+(\/.*)$/);
+  return py ? "pyodide" + py[1] : null;
+}
+
+async function cacheFirst(req, event) {
   const cache = await caches.open(CDN);
   const hit = await cache.match(req);
   if (hit) return hit;
   const res = await fetch(req);
-  if (res.ok) cache.put(req, res.clone());
+  if (res.ok) {
+    await cache.put(req, res.clone());
+    event.waitUntil(dropOldVersions(cache, req.url));
+  }
   return res;
+}
+
+// A library update fetches its files under new URLs: drop the same files of the old version.
+async function dropOldVersions(cache, url) {
+  const file = unversioned(url);
+  if (!file) return;
+  for (const old of await cache.keys()) {
+    if (old.url !== url && unversioned(old.url) === file) await cache.delete(old);
+  }
 }
 
 async function networkFirst(req) {

@@ -22,6 +22,7 @@ WALL, SOLID, SPARSE, SUPPORT, OTHER = range(5)
 KIND_NAMES = ("wall", "solid", "sparse", "support", "other")
 PART_KINDS = (WALL, SOLID, SPARSE)
 ARC_STEP_MM = 0.5  # arcs (G2/G3, arc fitting) are split into chords this long
+ARC_MAX_POINTS = 720  # ... but never more: one bad line with a huge I/J would ask for millions
 MAX_SIZE_GAP_MM = 2.0  # G-code and model sizes may differ this much (elephant-foot and hole compensation)
 
 
@@ -191,7 +192,7 @@ def _arc(p0: np.ndarray, p1: np.ndarray, i: float, j: float, clockwise: bool) ->
         sweep = sweep - 2 * np.pi if sweep >= -1e-9 else sweep
     else:
         sweep = sweep + 2 * np.pi if sweep <= 1e-9 else sweep
-    n = max(int(np.ceil(abs(sweep) * r / ARC_STEP_MM)), 1)
+    n = int(np.clip(np.ceil(abs(sweep) * r / ARC_STEP_MM), 1, ARC_MAX_POINTS))
     a = a0 + sweep * np.linspace(0, 1, n + 1)
     pts = np.column_stack([c[0] + r * np.cos(a), c[1] + r * np.sin(a), np.linspace(p0[2], p1[2], n + 1)])
     pts[-1] = p1
