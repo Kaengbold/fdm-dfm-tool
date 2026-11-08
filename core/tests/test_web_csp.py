@@ -22,3 +22,19 @@ def test_csp_allows_the_import_map_in_both_builds():
     assert _hash(importmap) in csp
     assert _hash(importmap.replace("https://cdn.jsdelivr.net", "../vendor")) in csp
     assert "object-src 'none'" in csp
+
+
+def test_no_eval_on_the_page_and_the_step_worker_checks_its_files():
+    """Both OpenCascade builds need eval, so they run in workers (T-327); the worker checks the files it loads
+    against the same pinned hashes as tools/vendor.py."""
+    import sys
+
+    html = PAGE.read_text(encoding="utf-8")
+    assert "'unsafe-eval'" not in re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', html).group(1)
+    sys.path.insert(0, str(PAGE.parents[1] / "tools"))
+    from vendor import HASHES
+
+    for worker, wasm in (("step-worker.js", "npm/occt-import-js@0.0.23/dist/occt-import-js.wasm"),
+                         ("stepwrite-worker.js", "npm/replicad-opencascadejs@1.1.0/dist/replicad_single.wasm")):
+        text = (PAGE.parent / worker).read_text(encoding="utf-8")
+        assert "sha256-" + base64.b64encode(bytes.fromhex(HASHES[wasm])).decode() in text, worker
