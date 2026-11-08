@@ -557,3 +557,20 @@ def test_too_big_counts_as_can_fail():
     api.scale(20)
     f = next(f for f in api.check([0, 0, 1], {}, "both")["findings"] if f["rule"] == "exceeds_build_volume")
     assert f["impact"] == "fails"
+
+
+def test_cost_support_and_spool():
+    """Price per kg and grams left on the spool from My materials: cost of the print with its support,
+    and a warning when the spool won't last."""
+    try:
+        api.custom_presets(materials={"cheap": {"based_on": "pla", "name": "Cheap PLA", "price_per_kg": 20, "spool_left_g": 30}})
+        api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
+        stats = api.check([0, 0, 1], {"material": "my_cheap"}, "print")["stats"]
+        assert stats["support_g"] > 0  # the cap overhangs: support under it
+        assert stats["total_g"] == pytest.approx(stats["filament_g"] + stats["support_g"], abs=0.2)
+        assert stats["cost"] == pytest.approx(stats["total_g"] * 0.02, abs=0.01)
+        assert stats["spool_short"] == (stats["total_g"] * 1.1 + 5 > 30)
+        plain = api.check([0, 0, 1], {"material": "pla"}, "print")["stats"]
+        assert "cost" not in plain and "spool_short" not in plain
+    finally:
+        api.custom_presets()
