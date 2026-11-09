@@ -2098,6 +2098,7 @@ def session_state() -> dict:
         "tags": {str(k): v for k, v in s.tags.items()},
         "fits": {str(k): v for k, v in s.fits.items()},
         "gaps": [[a, b, v] for (a, b), v in s.gaps.items()],
+        "fasteners": {str(k): v for k, v in s.fasteners.items()},
         "weak_spot": None if s.weak_spot is None else [np.asarray(s.weak_spot[0], float).tolist(), s.weak_spot[1]],
         "hot_spots": None if s.hot_spots is None else [np.asarray(x, float).tolist() for x in s.hot_spots],
     }
@@ -2109,11 +2110,47 @@ def restore_state(state: dict) -> dict:
     s.tags = {int(k): v for k, v in state.get("tags", {}).items()}
     s.fits = {int(k): v for k, v in state.get("fits", {}).items()}
     s.gaps = {(int(a), int(b)): v for a, b, v in state.get("gaps", [])}
+    s.fasteners = {int(k): v for k, v in state.get("fasteners", {}).items()}
     w = state.get("weak_spot")
     s.weak_spot = None if w is None else (np.asarray(w[0], float), float(w[1]))
     h = state.get("hot_spots")
     s.hot_spots = None if h is None else tuple(np.asarray(x, float) for x in h)
     return {"restored": True}
+
+
+def holes_state() -> dict:
+    """What the user sized, for a project file: fits (hole / post → what goes in, set_fit), screws,
+    inserts and nuts (set_fastener) and slots (set_gap). restore_holes sizes them again."""
+    s = _require()
+    plain = lambda v: {"partner_mm": v["partner_mm"], "fit": v["fit"]}  # noqa: E731 - warp_mm is worked out again
+    return {"fits": {str(k): plain(v) for k, v in s.fits.items()},
+            "fasteners": {str(k): {"size": v["size"], "use": v["use"]} for k, v in s.fasteners.items()},
+            "gaps": [[a, b, plain(v)] for (a, b), v in s.gaps.items()]}
+
+
+def restore_holes(holes: dict, up, profile: dict | None = None) -> dict:
+    """Size again what a project file's ``holes`` (holes_state) says, for build direction ``up``:
+    the same results as set_fit / set_fastener / set_gap, by region (fits, fasteners) or in order (gaps).
+    A hole that isn't found any more (the part changed) is left out, not an error."""
+    out = {"fits": {}, "fasteners": {}, "gaps": [], "skipped": 0}
+
+    def attempt(fn, *args, **kw):
+        try:
+            return fn(*args, **kw)
+        except ValueError:
+            out["skipped"] += 1
+            return None
+
+    for k, v in (holes.get("fits") or {}).items():
+        if (r := attempt(set_fit, int(k), up, v["partner_mm"], v["fit"], profile)) is not None:
+            out["fits"][k] = r
+    for k, v in (holes.get("fasteners") or {}).items():
+        if (r := attempt(set_fastener, int(k), up, v["size"], v["use"], profile)) is not None:
+            out["fasteners"][k] = r
+    for a, b, v in holes.get("gaps") or []:
+        if (r := attempt(set_gap, int(a), int(b), up, v["partner_mm"], v["fit"], profile)) is not None:
+            out["gaps"].append({**r, "partner_mm": v["partner_mm"], "fit": v["fit"]})
+    return out
 
 
 HOLE_RULES = {"hole_closes", "small_hole_undersized", "insert_wall_thin", "screw_wall_thin", "sideways_hole_oval", "bridge_sag", "hole_starts_midair"}
@@ -2570,6 +2607,8 @@ METHODS = {
     "volume_at": volume_at,
     "tag_feature": tag_feature,
     "session_state": session_state,
+    "holes_state": holes_state,
+    "restore_holes": restore_holes,
     "restore_state": restore_state,
     "strength": strength,
     "strength_variant": strength_variant,

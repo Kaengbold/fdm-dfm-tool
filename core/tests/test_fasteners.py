@@ -81,3 +81,32 @@ def test_bolt_hole_and_forgetting():
     assert not [e for e in api.design(UP)["edits"] if e["id"].startswith("fastener")]
     with pytest.raises(ValueError, match="size must be"):
         api.set_fastener(hole, UP, "M7", "bolt")
+
+
+def test_screws_kept_through_cancel_and_in_project_files(tmp_path):
+    """A screw choice survives an engine restart (session_state) and goes into project files (holes),
+    for the app and for agents (save_project / open_project)."""
+    pytest.importorskip("mcp")
+    from fdmcore import mcp_server as m
+
+    hole = _bracket_hole()
+    api.set_fastener(hole, UP, "M3", "insert")
+    kept = api.session_state()
+    api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")  # what a Cancel does: the part again…
+    api.restore_state(kept)  # …and what the app kept
+    assert api._require().fasteners == {hole: {"size": "M3", "use": "insert"}}
+    assert api.holes_state()["fasteners"] == {str(hole): {"size": "M3", "use": "insert"}}
+
+    saved = m.save_project(str(tmp_path / "p.json"), UP)["saved"]
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "other")
+    opened = m.open_project(saved)
+    assert opened["holes_sized"] == 1 and "holes" not in opened
+    assert api._require().fasteners == {hole: {"size": "M3", "use": "insert"}}
+    assert [e for e in api.design(UP)["edits"] if e["id"].startswith("fastener")]
+
+
+def test_restore_holes_skips_holes_that_are_gone():
+    hole = _bracket_hole()
+    r = api.restore_holes({"fits": {"9999": {"partner_mm": 6, "fit": "snug"}},
+                           "fasteners": {str(hole): {"size": "M4", "use": "bolt"}}}, UP)
+    assert r["skipped"] == 1 and list(r["fasteners"]) == [str(hole)] and "Ø9 mm" in r["fasteners"][str(hole)]["explanation"]

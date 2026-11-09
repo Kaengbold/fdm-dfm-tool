@@ -646,7 +646,8 @@ def save_project(output_path: str, up: list[float], loads: list[dict] | None = N
     """Save the loaded part (as it is now, after scaling and design changes) with the build direction,
     loads, marked ``faces``, ``zones`` (add_zone / optimise_strength), ``boxes`` (place_box) and slicer
     ``settings`` as a project file (.json). The user opens it in the web app (drop it in, or "Open")
-    and sees in 3D what you did; projects saved there open with open_project."""
+    and sees in 3D what you did; projects saved there open with open_project. Holes, screws and slots sized
+    with set_fit / set_fastener / set_gap are saved with it."""
     import numpy as np
 
     from . import project
@@ -654,7 +655,8 @@ def save_project(output_path: str, up: list[float], loads: list[dict] | None = N
     s = api._require()
     regions = np.frombuffer(api.regions()["face_regions"], "<u4")  # same face ids after reloading
     text = project.dump(s.name, to_binary_stl(s.mesh), regions.tolist(), profile=_profile(printer, material, nozzle, goal, use_temp_c),
-                        mode=mode, up=[float(v) for v in up], loads=loads, faces=faces, zones=zones, volumes=boxes, settings=settings)
+                        mode=mode, up=[float(v) for v in up], loads=loads, faces=faces, zones=zones, volumes=boxes, settings=settings,
+                        holes=api.holes_state())
     out = _out(output_path, PROJECT, "project path")
     out.write_text(text, encoding="utf-8")
     return {"saved": str(out)}
@@ -664,11 +666,16 @@ def save_project(output_path: str, up: list[float], loads: list[dict] | None = N
 def open_project(path: str) -> dict:
     """Open a project file (from the web app's "Save project" or save_project): loads the part and returns
     what was set: ``profile`` (printer, material, nozzle, goal), ``up``, ``loads``, ``faces``, ``zones``,
-    ``volumes`` (pass as boxes / keep_clear), ``settings``. Use them in the next calls."""
+    ``volumes`` (pass as boxes / keep_clear), ``settings``. Use them in the next calls. Holes, screws and
+    slots sized in it are sized again (``holes_sized``: how many; design_changes then offers them)."""
     from . import project
 
     p = project.read(_in(path, PROJECT, "project file").read_bytes())
     info = _clean(api.load(p.pop("stl"), p.pop("name"), p.pop("face_ids")))
+    holes = p.pop("holes", None)
+    if holes and p.get("up"):
+        r = api.restore_holes(holes, p["up"], p.get("profile"))
+        p["holes_sized"] = len(r["fits"]) + len(r["fasteners"]) + len(r["gaps"])
     return {**p, "part": info}
 
 
@@ -757,7 +764,7 @@ API_TOOLS = {
 }
 # Only for the web app: it keeps the engine's state while restarting its worker (Cancel). The MCP
 # server's engine never restarts under the agent, so there is nothing to hand back.
-APP_ONLY = {"session_state", "restore_state"}
+APP_ONLY = {"session_state", "restore_state", "holes_state", "restore_holes"}  # agents: save_project / open_project
 
 
 def main():

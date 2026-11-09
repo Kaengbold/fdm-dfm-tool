@@ -1,5 +1,5 @@
 // Project files shared with agents (core/fdmcore/project.py writes and reads the same format): the part as
-// it is now plus the settings, loads, marks, zones and boxes, so either side can pick up the work.
+// it is now plus the settings, loads, marks, zones, boxes and sized holes, so either side can pick up the work.
 
 export const FORMAT = "fdm-check-project";
 export const VERSION = 1;

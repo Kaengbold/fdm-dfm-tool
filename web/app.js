@@ -73,7 +73,7 @@ function post(method, args = {}, data = null) {
 
 // Calls that change what the engine remembers about the part (hole answers, fits, gaps, the weak
 // spot): afterwards the app keeps a copy (session_state), so a Cancel can give it back.
-const KEEPS_STATE = new Set(["tag_feature", "set_fit", "set_gap", "strength"]);
+const KEEPS_STATE = new Set(["tag_feature", "set_fit", "set_fastener", "set_gap", "restore_holes", "strength"]);
 
 async function call(method, args = {}, data = null) {
   await restoring;
@@ -317,9 +317,33 @@ async function openProject(bytes) {
   renderLoads();
   setZones(p.zones ?? []); // after selectOption: it clears zones and boxes of the old orientation
   setVolumes(p.volumes ?? []);
+  if (p.holes && activeOption()) await restoreHoles(p.holes);
   recolor();
   await state.nozzleCompare?.catch(() => {}); // it would overwrite the message below when it ends
   setStatus(`${state.summary} — opened the project with what was set in it.`);
+}
+
+/** A project's sized holes, screws and slots (api.holes_state): sized again, with their notes. */
+async function restoreHoles(holes) {
+  const r = await call("restore_holes", { holes, up: activeOption().up, profile: profile() });
+  for (const [k, v] of Object.entries(holes.fits ?? {})) {
+    if (r.fits[k]) state.fitNotes[k] = { partner: v.partner_mm, fit: v.fit, text: r.fits[k].explanation };
+  }
+  for (const [k, v] of Object.entries(holes.fasteners ?? {})) {
+    if (r.fasteners[k]) state.fastenerNotes[k] = { size: v.size, use: v.use, text: r.fasteners[k].explanation };
+  }
+  state.gaps = r.gaps.map((g) => ({ ...g, partner: g.partner_mm, fit: g.fit, text: g.explanation }));
+  if (mode() !== "print" && (r.gaps.length || Object.keys(r.fits).length || Object.keys(r.fasteners).length)) await suggestDesign();
+}
+
+/** What the user sized, as a project's ``holes`` (the same as api.holes_state); null when nothing was. */
+function holesForProject() {
+  const holes = {
+    fits: Object.fromEntries(Object.entries(state.fitNotes ?? {}).map(([k, n]) => [k, { partner_mm: n.partner, fit: n.fit }])),
+    fasteners: Object.fromEntries(Object.entries(state.fastenerNotes ?? {}).map(([k, n]) => [k, { size: n.size, use: n.use }])),
+    gaps: state.gaps.filter((g) => g.text).map((g) => [g.faces[0], g.faces[1], { partner_mm: g.partner, fit: g.fit }]),
+  };
+  return Object.keys(holes.fits).length || Object.keys(holes.fasteners).length || holes.gaps.length ? holes : null;
 }
 
 /** Dropdown for files with several parts; ``pick(i)`` loads body i. */
@@ -3052,6 +3076,7 @@ $("dl-3mf").onclick = async () => {
 const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
   up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
+  holes: holesForProject(),
 });
 
 $("dl-project").onclick = () => {

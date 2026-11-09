@@ -1018,6 +1018,26 @@ def main():
             return page.locator("#status").inner_text()[:140]
         run.step("too big: split into pieces with pins", split_too_big)
 
+        def screws_in_project():
+            # A screw choice goes into the project file and is sized again when it opens (T-320 follow-up).
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("async () => { const up = fdm.state.options[fdm.state.active].up;"
+                          " const hole = (await fdm.call('design', { up })).features.find((f) => f.type === 'hole');"
+                          " const r = await fdm.call('set_fastener', { region: hole.region, up, size: 'M3', use: 'insert' });"
+                          " fdm.state.fastenerNotes = { [hole.region]: { size: 'M3', use: 'insert', text: r.explanation } }; }")
+            with page.expect_download(timeout=120_000) as dl:
+                page.evaluate("() => document.getElementById('dl-project').click()")
+            out = OUT / "screws_project.json"
+            dl.value.save_as(out)
+            assert '"use": "insert"' in out.read_text(encoding="utf-8").replace('":"', '": "'), "no screw in the project file"
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            notes = page.evaluate("() => Object.values(fdm.state.fastenerNotes)")
+            assert len(notes) == 1 and notes[0]["use"] == "insert" and "insert" in notes[0]["text"], notes
+            return notes[0]["text"][:120]
+        run.step("screws kept in a project", screws_in_project)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

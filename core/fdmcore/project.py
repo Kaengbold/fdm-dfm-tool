@@ -1,6 +1,7 @@
 """Project files shared by the web app and agents: the part as it is now (after scaling and design
 changes) plus everything needed to pick up where the other one left off: printer, material and nozzle,
-the build direction, loads, marked faces, stronger zones, design boxes and slicer settings.
+the build direction, loads, marked faces, stronger zones, design boxes, slicer settings and the sized
+holes, screws and slots (``holes``: api.holes_state, sized again with api.restore_holes).
 
 JSON with the part as base64 binary STL, so it opens anywhere and diffs as text. Face ids in loads and
 marks refer to the part's face regions, which come out the same when the same triangles load again
@@ -14,7 +15,7 @@ import json
 
 FORMAT = "fdm-check-project"
 VERSION = 1
-FIELDS = ("profile", "mode", "up", "loads", "faces", "zones", "volumes", "settings")
+FIELDS = ("profile", "mode", "up", "loads", "faces", "zones", "volumes", "settings", "holes")
 
 
 def dump(name: str, stl: bytes, face_ids: list[int] | None = None, **fields) -> str:
