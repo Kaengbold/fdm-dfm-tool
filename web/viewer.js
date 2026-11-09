@@ -74,6 +74,7 @@ export class Viewer {
   }
 
   setBed([w, d]) {
+    this.bedSize = [w, d];
     empty(this.bedGroup);
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: "#dde3df" }));
     plate.position.z = -0.05;
@@ -84,6 +85,7 @@ export class Viewer {
 
   /** Show triangles (float32, part coords) rotated into print orientation. */
   showPart(triangles, rotation) {
+    this.hidePieces();
     const { out: positions, shift } = placeTriangles(triangles, rotation);
     this.placement = { rotation, shift };
     const geometry = new THREE.BufferGeometry();
@@ -100,6 +102,38 @@ export class Viewer {
     geometry.computeBoundingSphere();
     if (!this.framed) this.frame(geometry.boundingSphere);
     return positions;
+  }
+
+  /** A split part's pieces (``[{triangles, rotation}]``, part coordinates), each on a bed of its own in a row,
+   * turned the way it prints; the part, its markers and edits are hidden until hidePieces / showPart. */
+  showPieces(pieces) {
+    this.hidePieces();
+    this.pieces = new THREE.Group();
+    const [w, d] = this.bedSize ?? [256, 256];
+    const colors = [css("--accent"), css("--clean")];
+    pieces.forEach(({ triangles, rotation }, i) => {
+      const x = i * (w + 20);
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: "#dde3df" }));
+      plate.position.set(x, 0, -0.05);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(placeTriangles(triangles, rotation).out, 3));
+      g.computeVertexNormals();
+      const piece = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: colors[i % 2], roughness: 0.7 }));
+      piece.position.x = x;
+      this.pieces.add(plate, piece);
+    });
+    for (const o of [this.part, this.markers, this.ghosts, this.bedGroup]) if (o) o.visible = false;
+    this.scene.add(this.pieces);
+    const sphere = new THREE.Box3().setFromObject(this.pieces).getBoundingSphere(new THREE.Sphere());
+    this.frame({ center: sphere.center, radius: sphere.radius * 0.8 });
+  }
+
+  hidePieces() {
+    if (!this.pieces) return;
+    dispose(this.pieces);
+    this.pieces = null;
+    for (const o of [this.part, this.markers, this.ghosts, this.bedGroup]) if (o) o.visible = true;
+    if (this.part) this.frame(this.part.geometry.boundingSphere);
   }
 
   /** Colour each triangle: ``colorOf(faceIndex)`` returns a THREE.Color. */

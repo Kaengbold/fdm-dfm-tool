@@ -2034,17 +2034,20 @@ def set_fastener(region: int, up, size: str | None = "M3", use: str = "screw", p
     return {"region": region, **plan}
 
 
-def split(profile: dict | None = None) -> dict:
-    """A part too big for the printer, cut flat into pieces that fit, with alignment pins (split.py):
-    each piece's ``edits`` (cut the rest away, then the pin holes) to apply to the part, the pin as
-    triangles (``pin.stl_triangles``, float32) and how many, and a plain explanation. Keeps the cut away
-    from the weak spot of the last strength check, and uses the snug gap from the fit test print."""
+def split(profile: dict | None = None, joint: str = "pins") -> dict:
+    """A part too big for the printer, cut flat into pieces that fit (split.py), joined with alignment
+    pins or (``joint`` "dovetail") a sliding dovetail: each piece's ``edits`` (cut the rest away, then
+    the pin holes) to apply to the part and its print ``rotation``, the pin as triangles
+    (``pin.stl_triangles``, float32) and how many, and a plain explanation. Keeps the cut away from the
+    weak spot of the last strength check, and uses the snug gap from the fit test print."""
     from .split import split_plan
 
     s = _require()
     p = Profile.from_dict(profile)
     gap = (p.material.get("fit_gap_mm") or {}).get("snug")
-    return split_plan(s.mesh, p.printer["bed"], s.weak_spot[0] if s.weak_spot else None, gap)
+    if joint not in ("pins", "dovetail"):
+        raise ValueError('joint is "pins" or "dovetail"')
+    return split_plan(s.mesh, p.printer["bed"], s.weak_spot[0] if s.weak_spot else None, gap, joint)
 
 
 def set_gap(face_a: int, face_b: int, up, partner_mm: float | None = None, fit: str = "sliding", profile: dict | None = None) -> dict:

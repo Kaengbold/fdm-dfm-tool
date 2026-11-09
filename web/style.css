@@ -286,6 +286,8 @@ summary::marker { color: var(--accent); }
 .tag { font-size: 12px; font-weight: 700; color: var(--good); background: var(--good-soft); padding: 1px 8px; border-radius: 999px; align-self: flex-start; white-space: nowrap; }
 .why-lower { margin-top: 4px; font-size: 13px; color: var(--muted); }
 .option-cost { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.split-panel { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.split-panel p { margin: 0; }
 
 /* ---------- problems ---------- */
 .impact-groups { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; }

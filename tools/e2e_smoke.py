@@ -1022,10 +1022,31 @@ def main():
             page.on("download", lambda d: got.append(d.suggested_filename))
             run.act(lambda: page.evaluate("() => document.getElementById('dl-split').click()"), 300_000)
             page.wait_for_function("() => document.getElementById('status').textContent.includes('pins')", timeout=300_000)
-            page.wait_for_timeout(1000)
+            # Shown on the bed first, one plate per piece (T-321): the part is hidden meanwhile.
+            shown = page.evaluate("() => ({ panel: !document.getElementById('split-panel').hidden, pieces: fdm.viewer.pieces?.children.length,"
+                                  " part: fdm.viewer.part.visible })")
+            assert shown == {"panel": True, "pieces": 4, "part": False}, shown
+            def downloads(n):  # the files arrive one by one, slowly on a busy machine
+                page.evaluate("() => document.getElementById('split-download').click()")
+                for _ in range(60):
+                    if len(got) >= n:
+                        break
+                    page.wait_for_timeout(500)
+
+            downloads(3)
             assert sorted(got) == ["long_bar_piece_1.stl", "long_bar_piece_2.stl", "long_bar_pin.stl"], got
-            return page.locator("#status").inner_text()[:140]
-        run.step("too big: split into pieces with pins", split_too_big)
+            pins = page.locator("#status").inner_text()[:100]
+            got.clear()
+            run.act(lambda: page.select_option("#split-joint", "dovetail"), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('dovetail')", timeout=300_000)
+            downloads(2)
+            page.wait_for_timeout(1000)  # no pin file after the two pieces
+            assert sorted(got) == ["long_bar_piece_1.stl", "long_bar_piece_2.stl"], got  # no pins to print
+            page.evaluate("() => document.getElementById('split-back').click()")
+            back = page.evaluate("() => [document.getElementById('split-panel').hidden, fdm.viewer.pieces, fdm.viewer.part.visible]")
+            assert back == [True, None, True], back
+            return pins + " | " + page.locator("#status").inner_text()[:140]
+        run.step("too big: split into pieces with pins or a dovetail, shown on the bed", split_too_big)
 
         def screws_in_project():
             # A screw choice goes into the project file and is sized again when it opens (T-320 follow-up).

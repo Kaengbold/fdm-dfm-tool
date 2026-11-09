@@ -72,3 +72,42 @@ def test_mcp_split_part_stays_in_the_allowed_folder(tmp_path, monkeypatch):
         m.split_part(str(tmp_path / "jail"))
     got = m.split_part(str(tmp_path / "jail" / "pieces"))
     assert len(got["saved"]) == 3 and all(pathlib.Path(p).stat().st_size > 84 for p in got["saved"])
+
+
+def test_pin_holes_cut_for_every_cut_direction():
+    """The pin holes are cut out whichever axis the part is cut across (a mirrored set of axes once
+    turned them inside out, so pieces cut across y got no holes)."""
+    pytest.importorskip("manifold3d")
+    for size in ([400, 40, 20], [40, 400, 20], [40, 30, 400]):
+        part = Mesh(box([0, 0, 0], 1) * size)
+        plan = split_plan(part, BED)
+        holes = 2 * 2 * np.pi * (plan["pin"]["hole_mm"] / 2) ** 2 * 6
+        assert sum(abs(p.volume()) for p in _pieces(part, plan)) == pytest.approx(np.prod(size) - holes, rel=1e-3), size
+
+
+def test_dovetail_joins_the_pieces():
+    """A sliding dovetail instead of pins: the piece below keeps a flared tongue (wider at its tip, so it
+    can't be pulled straight out), the piece above the groove with the fit gap; nothing else is lost, and
+    each piece says how to turn it so it fits the bed."""
+    pytest.importorskip("manifold3d")
+    from fdmcore.slicer import section
+
+    part = Mesh(box([0, 0, 0], 1) * [400, 40, 20])
+    plan = split_plan(part, BED, joint="dovetail")
+    assert plan["joint"] == "dovetail" and plan["pin"]["count"] == 0 and "dovetail" in plan["explanation"]
+    low, high = _pieces(part, plan)
+    c = plan["cuts"][0]
+    assert np.ptp(low.triangles.reshape(-1, 3)[:, 0]) > c + 2  # the tongue sticks out past the cut
+    along = low.triangles[..., [1, 2, 0]]  # cut axis (x) as height for section()
+    assert section(along, c + 0.5).area < section(along, c + 5).area  # flared: narrow at the cut, wider further out
+    lost = 400 * 40 * 20 - abs(low.volume()) - abs(high.volume())
+    assert 0 < lost < 0.002 * 400 * 40 * 20  # just the gap round the tongue
+    for p, info in zip((low, high), plan["pieces"]):
+        assert _clean(p.triangles) == (0, 0)
+        turned = np.abs(np.array(info["rotation"]) @ np.ptp(p.triangles.reshape(-1, 3), axis=0))
+        assert np.all(turned <= np.array(BED) + 1e-3) and turned[2] == pytest.approx(20, abs=0.1)  # lying flat
+
+
+def test_dovetail_needs_room():
+    plan = split_plan(Mesh(box([0, 0, 0], 1) * [400, 12, 12]), BED, joint="dovetail")
+    assert plan["joint"] == "pins" and "no room for a dovetail" in plan["explanation"]

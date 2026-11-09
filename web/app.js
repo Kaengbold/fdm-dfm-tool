@@ -410,6 +410,7 @@ async function partLoaded(info) {
   state.check = null;
   renderPauses();
   $("dl-split").hidden = true;
+  closeSplit();
   renderOptions();
   $("view-empty").hidden = true;
   $("view-key").hidden = false;
@@ -496,6 +497,7 @@ async function runCheck() {
     renderOptions(); // their cost uses this check's part grams and price
     renderPauses();
     $("dl-split").hidden = !result.findings.some((f) => f.rule === "exceeds_build_volume");
+    closeSplit(); // the pieces were for the orientation and part before
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
     steps.render();
@@ -3078,17 +3080,38 @@ $("pause-file").onchange = async (e) => {
 };
 
 // A part too big for the printer: the pieces that fit (split.py), each the part with the rest cut away
-// and pin holes, and the pins, as STLs.
-$("dl-split").onclick = () => busy("Cutting the part into pieces that fit…", async () => {
-  const plan = await call("split", { profile: profile() });
+// (and pin holes or a dovetail), shown on the bed the way they print; then the pieces and pins as STLs.
+async function showSplit() {
+  const plan = await call("split", { profile: profile(), joint: $("split-joint").value });
   const floats = (e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) });
-  for (const [i, piece] of plan.pieces.entries()) {
-    const soup = await applyDesignEdits(state.triangles, piece.edits.map(floats));
-    download(stlBytes(soup), `${baseName()}_piece_${i + 1}.stl`, "model/stl");
-  }
+  const soups = [];
+  for (const piece of plan.pieces) soups.push(await applyDesignEdits(state.triangles, piece.edits.map(floats)));
+  state.split = { plan, soups };
+  viewer.showPieces(soups.map((triangles, i) => ({ triangles, rotation: plan.pieces[i].rotation })));
+  $("split-panel").hidden = false;
+  $("split-text").textContent = plan.explanation;
+  $("view-label").textContent = `${soups.length} pieces, each on the bed the way it prints`;
+  setStatus(plan.explanation);
+}
+
+function closeSplit() {
+  state.split = null;
+  $("split-panel").hidden = true;
+  viewer.hidePieces();
+}
+
+$("dl-split").onclick = () => busy("Cutting the part into pieces that fit…", showSplit);
+$("split-joint").onchange = () => busy("Cutting the part into pieces that fit…", showSplit);
+$("split-download").onclick = () => {
+  const { plan, soups } = state.split;
+  soups.forEach((soup, i) => download(stlBytes(soup), `${baseName()}_piece_${i + 1}.stl`, "model/stl"));
   if (plan.pin.count) download(stlBytes(new Float32Array(plan.pin.stl_triangles.slice().buffer)), `${baseName()}_pin.stl`, "model/stl");
   setStatus(plan.explanation);
-});
+};
+$("split-back").onclick = () => {
+  closeSplit();
+  $("view-label").textContent = state.active === 0 ? "Best orientation" : activeOption().label;
+};
 
 $("dl-3mf").onclick = async () => {
   await busy("Exporting 3MF for OrcaSlicer / Bambu Studio…", async () => {

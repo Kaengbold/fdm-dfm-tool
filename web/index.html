@@ -517,7 +517,14 @@
             <label id="pause-sliced" class="file-button" hidden title="Bambu Studio ignores the pause in the 3MF. Slice there, export the plate's sliced file (or the G-code), choose it here and print the file you get back">Add the pause to a file sliced in Bambu Studio…<input id="pause-file" type="file" accept=".gcode,.gco,.g,.3mf" hidden /></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
             <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>
-            <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, with holes for alignment pins">Too big: download it in pieces that fit</button>
+            <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, joined with pins or a dovetail; shown on the bed first">Too big: cut it into pieces that fit</button>
+            <div id="split-panel" class="split-panel" hidden>
+              <label class="field">Join the pieces with
+                <select id="split-joint"><option value="pins">pins (printed separately, glued in)</option><option value="dovetail">a dovetail (slide together, glue)</option></select></label>
+              <p id="split-text" class="hint"></p>
+              <button id="split-download" class="primary">Download the pieces</button>
+              <button id="split-back">Back to the part</button>
+            </div>
             <button id="dl-report" title="One page to read or print: the part on the bed, a picture of every problem, the strength and warping results and the settings">Download the report (with pictures)</button>
             <div class="more-downloads" data-min="basic">
               <button id="dl-stl">STL, turned for printing</button>

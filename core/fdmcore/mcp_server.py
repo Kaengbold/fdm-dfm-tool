@@ -706,15 +706,17 @@ def suggest_lighter_shape(up: list[float], loads: list[dict], output_path: str, 
 
 
 @server.tool()
-def split_part(output_folder: str, printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
-    """Cut a part that is too big for the printer flat into pieces that fit, with holes for alignment pins.
-    Saves piece_1.stl, piece_2.stl, … and pin.stl (print that many pins, standing up) into ``output_folder``
-    and says where it cut and how to glue the pieces together. The loaded part stays as it was."""
+def split_part(output_folder: str, joint: str = "pins", printer: str = "bambu_p1s", material: str = "pla",
+               nozzle: str = "0.4") -> dict:
+    """Cut a part that is too big for the printer flat into pieces that fit, with holes for alignment pins
+    (``joint`` "pins") or a sliding dovetail ("dovetail"). Saves piece_1.stl, piece_2.stl, … (and pin.stl:
+    print that many pins, standing up) into ``output_folder`` and says where it cut and how to put the pieces
+    together. ``rotations``: how to turn each piece to print it. The loaded part stays as it was."""
     from .booleans import apply_edits
     from .mesh import Mesh
     import numpy as np
 
-    plan = api.split(_profile(printer, material, nozzle))
+    plan = api.split(_profile(printer, material, nozzle), joint)
     folder = Path(output_folder).expanduser().resolve()
     paths = [_out(str(folder / f"piece_{i}.stl"), (".stl",), "piece") for i in range(1, len(plan["pieces"]) + 1)]
     pin = _out(str(folder / "pin.stl"), (".stl",), "pin")
@@ -725,9 +727,11 @@ def split_part(output_folder: str, printer: str = "bambu_p1s", material: str = "
         edits = [{**e, "mesh": np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)} for e in piece["edits"]]
         out.write_bytes(to_binary_stl(apply_edits(part, edits)))
         saved.append(str(out))
-    pin.write_bytes(to_binary_stl(Mesh(np.frombuffer(plan["pin"]["stl_triangles"], "<f4").reshape(-1, 3, 3))))
-    saved.append(str(pin))
-    return {"saved": saved, "cuts_mm": plan["cuts"], "pins": plan["pin"]["count"], "explanation": plan["explanation"]}
+    if plan["pin"]["count"]:
+        pin.write_bytes(to_binary_stl(Mesh(np.frombuffer(plan["pin"]["stl_triangles"], "<f4").reshape(-1, 3, 3))))
+        saved.append(str(pin))
+    return {"saved": saved, "cuts_mm": plan["cuts"], "joint": plan["joint"], "pins": plan["pin"]["count"],
+            "rotations": [p["rotation"] for p in plan["pieces"]], "explanation": plan["explanation"]}
 
 
 def _save_and_load(mesh, output_path: str) -> dict:
