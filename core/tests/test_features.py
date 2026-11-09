@@ -366,3 +366,25 @@ def test_strength_of_a_variant_keeps_the_part():
     r = api.dispatch("strength_variant", json.dumps({"up": [0, 1, 0], "loads": loads, "profile": prof}), data)
     assert api._require().mesh is part
     assert r["safety_factor"] > before and 0 < r["added_g"] < 1
+
+
+def test_tall_boss_gets_ribs_at_its_foot():
+    """A Ø6 boss 25 mm tall on a plate (more than 3 × its width) gets four ribs on the plate as an edit that adds
+    plastic; a 12 mm one doesn't."""
+    m3 = pytest.importorskip("manifold3d")
+    from fdmcore import api
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    def load(height):
+        mm = (m3.Manifold.cube((40, 40, 3)) + m3.Manifold.cylinder(height, 3, 3, 64).translate((20, 20, 3))).to_mesh()
+        v, f = np.asarray(mm.vert_properties)[:, :3], np.asarray(mm.tri_verts)
+        api.load(to_binary_stl(Mesh(v[f])), "boss")
+        return [e for e in api.design([0, 0, 1])["edits"] if e["id"].startswith("boss-ribs")]
+
+    ribs = load(25)
+    assert len(ribs) == 1 and ribs[0]["op"] == "add" and ribs[0]["pieces"] == [ribs[0]["pieces"][0]] * 4
+    part = api._require().mesh
+    grown = apply_edits(part, [{**e, "mesh": np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)} for e in ribs])
+    assert 400 < abs(grown.volume()) - abs(part.volume()) < 700 and _clean(grown.triangles) == (0, 0)
+    assert not load(12)

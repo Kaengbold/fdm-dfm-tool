@@ -105,6 +105,77 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
     }
 
 
+# A boss (round post, often for a screw) much taller than it is wide snaps or wobbles at its foot: injection
+# moulding practice is ribs / gussets once it is taller than about 3 × its outside diameter
+# [Hubs boss design guide; research/cad_tricks_round2.md]. Printed, the ribs also spread the layers' load.
+BOSS_TALL_RATIO = 3.0
+BOSS_RIB_MM = 1.2  # rib thickness: about three printed lines
+BOSS_RIB_HEIGHT = 0.6  # ribs reach this share of the boss's height
+
+
+def _boss_base(mesh: Mesh, f: dict):
+    """The end of boss ``f`` that stands on the part: (end point, direction into the boss, flat base triangles
+    around it) or None when neither end has a flat face around it."""
+    normals, areas = mesh.normals_and_areas()
+    a, c, r = np.asarray(f["axis"], float), np.asarray(f["center"], float), f["radius"]
+    cent = mesh.triangles.mean(axis=1)
+    best = None
+    for sign in (1.0, -1.0):
+        end = c - sign * a * f["length"] / 2  # the boss rises from here in direction sign · a
+        along = (cent - end) @ a
+        radial = np.linalg.norm((cent - end) - np.outer(along, a), axis=1)
+        base = (np.abs(along) < 0.2) & (normals @ (sign * a) > 0.99) & (radial > r)
+        if base.any() and (best is None or areas[base].sum() > best[3]):
+            best = (end, sign * a, np.flatnonzero(base), areas[base].sum())
+    return None if best is None or best[3] < np.pi * r**2 else best[:3]
+
+
+def _covered(mesh: Mesh, tris: np.ndarray, p: np.ndarray, normal: np.ndarray) -> bool:
+    """``p`` lies on one of the flat triangles ``tris`` (all facing ``normal``)."""
+    t = mesh.triangles[tris]
+    v0, v1, v2 = t[:, 1] - t[:, 0], t[:, 2] - t[:, 0], p - t[:, 0]
+    d00, d01, d11 = np.einsum("ij,ij->i", v0, v0), np.einsum("ij,ij->i", v0, v1), np.einsum("ij,ij->i", v1, v1)
+    d20, d21 = np.einsum("ij,ij->i", v2, v0), np.einsum("ij,ij->i", v2, v1)
+    den = np.where(np.abs(d00 * d11 - d01**2) < 1e-12, 1e-12, d00 * d11 - d01**2)
+    v, w = (d11 * d20 - d01 * d21) / den, (d00 * d21 - d01 * d20) / den
+    return bool(np.any((v >= -1e-6) & (w >= -1e-6) & (v + w <= 1 + 1e-6) & (np.abs(v2 @ normal) < 0.2)))
+
+
+def _boss_ribs(mesh: Mesh, features: list[dict]) -> list[dict]:
+    """Four triangular ribs round the foot of each boss taller than BOSS_TALL_RATIO × its diameter, on the face
+    it stands on; shorter where that face ends (none where there's no room)."""
+    from shapely.geometry import Polygon
+
+    from .additions import extrude
+
+    out = []
+    for f in features:
+        if f["type"] != "boss" or not f["full_circle"] or f["length"] < BOSS_TALL_RATIO * f["diameter"]:
+            continue
+        found = _boss_base(mesh, f)
+        if found is None:
+            continue
+        end, d, base = found
+        r, h = f["radius"], BOSS_RIB_HEIGHT * f["length"]
+        w0 = np.cross(d, [1.0, 0, 0] if abs(d[0]) < 0.9 else [0, 1.0, 0])
+        w0 /= np.linalg.norm(w0)
+        pieces = []
+        for k in range(4):
+            w = w0 * np.cos(k * np.pi / 2) + np.cross(d, w0) * np.sin(k * np.pi / 2)
+            reach = next((L for L in (h, 0.75 * h, 0.5 * h, 0.3 * h) if _covered(mesh, base, end + w * (r + L), d)), None)
+            if reach is None or reach < 1.0:
+                continue
+            tri = extrude(Polygon([(r - 0.3, -0.3), (r + reach, -0.3), (r + reach, 0.0), (r - 0.3, h)]), -BOSS_RIB_MM / 2, BOSS_RIB_MM / 2)
+            v = np.cross(w, d)
+            placed = end + tri[..., :1] * w + tri[..., 1:2] * d + tri[..., 2:] * v
+            pieces.append(placed if np.linalg.det(np.stack([w, d, v])) > 0 else placed[:, ::-1])
+        if pieces:
+            out.append(_edit(f"boss-ribs-{f['region']}", "tall_boss", f"{len(pieces)} ribs for the Ø{f['diameter']:.1f} mm boss",
+                             f"The boss is {f['length']:.0f} mm tall, more than {BOSS_TALL_RATIO:g} × its width: ribs at its foot keep it "
+                             "from snapping or wobbling there (and let it take a screw's load).", pieces, op="add"))
+    return out
+
+
 # Adjustable edit sizes: default, min, max (the UI shows these as inputs).
 CORNER_ROUND_SHARE = 0.3  # low-warp materials: round corners once the footprint is this share of the warp length
 CORNER_ARC_STEPS = 8
@@ -176,6 +247,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _gap_edits(mesh, region, gaps or {}, up, profile)
     edits += _fastener_edits(mesh, accepted(detect_features(mesh, region, tags)), fasteners or {}, up, profile)
+    edits += _boss_ribs(mesh, accepted(detect_features(mesh, region, tags)))
     r = rotation_to_z(up)
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
