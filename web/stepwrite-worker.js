@@ -84,11 +84,14 @@ async function stepWithEdits(stepBytes, bodyVolume, edits) {
   if (!all.length) throw new Error("No solid in the original STEP file");
   let shape = all.reduce((best, s) => (Math.abs(volume(oc, s) - bodyVolume) < Math.abs(volume(oc, best) - bodyVolume) ? s : best));
   for (const op of ["add", "cut"]) {
-    for (const e of edits.filter((x) => x.op === op)) {
+    for (const e of edits) {
       let start = 0;
-      for (const n of e.pieces) {
-        const piece = soupToSolid(oc, e.mesh.subarray(start * 9, (start + n) * 9));
+      for (const [i, n] of e.pieces.entries()) {
+        const mine = (e.piece_ops?.[i] ?? e.op) === op; // grip fins add and cut in one edit
+        const soup = e.mesh.subarray(start * 9, (start + n) * 9);
         start += n;
+        if (!mine) continue;
+        const piece = soupToSolid(oc, soup);
         const bool = op === "add" ? new oc.BRepAlgoAPI_Fuse(shape, piece, progress(oc)) : new oc.BRepAlgoAPI_Cut(shape, piece, progress(oc));
         if (!bool.IsDone()) throw new Error(`OpenCascade could not apply "${e.title}"`);
         shape = bool.Shape();

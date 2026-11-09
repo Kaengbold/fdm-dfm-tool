@@ -1192,6 +1192,26 @@ def main():
             return "suggested for knob.stl, fuzzy skin in the 3MF, off for the next part"
         run.step("grip texture on a knob", grip_texture)
 
+        def grip_fins():
+            # A Ø6 pin pressed into a plate: grip fins offered, shown in both colours, applied (T-335).
+            run.act(lambda: page.set_input_files("#file", str(ROOT / "tools" / "fixtures" / "press_plate.stl")), 300_000)
+            row = page.locator("#fits li", has_text="Ø6.0 mm hole")
+            row.locator(".fit:not(.fastener) input").fill("6")
+            row.locator(".fit:not(.fastener) select").select_option("press")
+            run.act(lambda: row.get_by_role("button", name="Size it").click())
+            edits = page.locator("#edits label").all_inner_texts()
+            assert any("grip fins" in e for e in edits), edits
+            page.evaluate("() => { for (const e of fdm.state.edits) e.selected = e.id.startsWith('grip-fins'); fdm.steps.go('design'); }")
+            page.wait_for_timeout(800)
+            colours = set(page.evaluate("() => fdm.viewer.ghosts.children.map((c) => c.material.color.getHexString())"))
+            assert len(colours) == 2, f"fins and pocket not shown in two colours: {colours}"
+            before = page.evaluate("() => fdm.state.triangles.length")
+            run.act(lambda: page.click("#apply-edits"), 300_000)
+            after = page.evaluate("() => ({ n: fdm.state.triangles.length, v: fdm.state.version })")
+            assert after["v"] == 1 and after["n"] != before, after
+            return next(e for e in edits if "grip fins" in e)[:80]
+        run.step("grip fins for a press fit", grip_fins)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

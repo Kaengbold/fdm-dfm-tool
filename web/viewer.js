@@ -574,11 +574,24 @@ export class Viewer {
     };
     for (const e of highlight && !edits.includes(highlight) ? [...edits, highlight] : edits) {
       const { out } = placeTriangles(e.mesh, this.placement.rotation, this.placement.shift);
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(out, 3));
-      const mesh = new THREE.Mesh(g, material[e === highlight ? "now" : e.op]);
-      if (e === highlight) mesh.renderOrder = 10;
-      this.ghosts.add(mesh);
+      // An edit that adds and cuts (grip fins): each piece in its own colour.
+      const parts = { [e.op]: [] };
+      let start = 0;
+      e.pieces.forEach((n, i) => {
+        const op = e.piece_ops?.[i] ?? e.op;
+        (parts[op] ??= []).push(out.subarray(start * 9, (start + n) * 9));
+        start += n;
+      });
+      for (const [op, chunks] of Object.entries(parts)) {
+        if (!chunks.length) continue;
+        const pos = new Float32Array(chunks.reduce((k, c) => k + c.length, 0));
+        chunks.reduce((at, c) => (pos.set(c, at), at + c.length), 0);
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        const mesh = new THREE.Mesh(g, material[e === highlight ? "now" : op]);
+        if (e === highlight) mesh.renderOrder = 10;
+        this.ghosts.add(mesh);
+      }
     }
   }
 

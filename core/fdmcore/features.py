@@ -213,6 +213,8 @@ def edit_params(params: dict | None) -> dict:
 
 
 def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", param=None) -> dict:
+    """A design edit. An edit that both adds and cuts (grip fins) also gets ``piece_ops``, "add" or "cut" per
+    piece; then, as for whole edits, every addition is made before any cut."""
     return {
         "id": id_, "rule": rule, "title": title, "description": description, "op": op, "param": param,
         "mesh": np.concatenate(pieces).astype("<f4").tobytes(),
@@ -245,6 +247,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
                 f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
                 [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg"))
     edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
+    edits += _grip_fins(mesh, accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _gap_edits(mesh, region, gaps or {}, up, profile)
     edits += _fastener_edits(mesh, accepted(detect_features(mesh, region, tags)), fasteners or {}, up, profile)
     edits += _boss_ribs(mesh, accepted(detect_features(mesh, region, tags)))
@@ -329,6 +332,69 @@ def _fit_edits(features: list[dict], fits: dict, up, profile=None) -> list[dict]
         name = "hole" if hole else "post"
         out.append(_edit(f"fit-{f['region']}", "fit_size", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm {name} for a {want['fit']} fit",
                          why, [_ring(f, inner, outer, grow_part)], op="add" if grow_part else "cut"))
+    return out
+
+
+def _fin_shapes(r_tip: float, r_pocket: float, count: int, thick: float, angle_deg: float):
+    """Grip fins in the hole frame: ``count`` straight fins ``thick`` wide, from the pocket wall (r_pocket, a
+    little into it) in to r_tip, each leaning ``angle_deg`` off the radial line so it bends like a leaf spring."""
+    from shapely.geometry import LineString, Point
+
+    a = np.radians(angle_deg)
+    reach = r_pocket + 0.3
+    fins = []
+    for k in range(count):
+        phi = 2 * np.pi * k / count
+        tip = r_tip * np.array([np.cos(phi), np.sin(phi)])
+        d = np.array([np.cos(phi + a), np.sin(phi + a)])
+        s = -tip @ d + np.sqrt((tip @ d) ** 2 - tip @ tip + reach**2)  # tip + s·d lands on the circle r = reach
+        # From a little short of the tip circle (the tilted end's corner reaches in further), then trimmed at it.
+        fin = LineString([tip - d * thick, tip + s * d]).buffer(thick / 2, cap_style="flat")
+        fins.append(fin.intersection(Point(0, 0).buffer(reach, 64)).difference(Point(0, 0).buffer(r_tip, 64)))
+    return fins
+
+
+def _grip_fins(mesh: Mesh, features: list[dict], fits: dict, up, profile=None) -> list[dict]:
+    """For a hole something is pressed into: an open pocket with angled fins whose tips reach past the
+    partner's size (``grip_fins`` in thresholds.yaml). They bend as it goes in, so the grip stays when the
+    printer is off by a tenth or two, where a rigid press fit goes loose or cracks the part. Only for holes
+    printed standing (fins on their side would be overhanging plates) with room in the wall for the pocket."""
+    from shapely.geometry import Point
+    from shapely.ops import unary_union
+
+    from .additions import _triangulate
+
+    G = load_data("thresholds")["grip_fins"]
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    lw = profile.line_width if profile is not None else 0.45
+    out = []
+    for f in features:
+        want = fits.get(f["region"])
+        if not want or want["fit"] != "press" or f["type"] != "hole" or not f["full_circle"] or abs(np.asarray(f["axis"]) @ up) < 0.9:
+            continue
+        r_tip = want["partner_mm"] / 2 - G["interference_mm"]
+        thick = max(G["thickness_mm"], 2 * lw)  # two lines: the slicer prints each fin as one folded loop
+        wall = hole_wall(mesh, f)
+        room = (wall if wall is not None else 0.0) - G["min_wall_mm"]  # how far the pocket may reach past the hole
+        length = min(G["length_mm"], (f["radius"] + room - r_tip) / np.cos(np.radians(G["angle_deg"])))
+        if length < G["min_length_mm"]:
+            continue
+        r_pocket = r_tip + length * np.cos(np.radians(G["angle_deg"]))
+        count = next(n for d, n in G["count_by_diameter"] if want["partner_mm"] <= d)
+        fins = _fin_shapes(r_tip, r_pocket, count, thick, G["angle_deg"])
+        pocket = Point(0, 0).buffer(r_pocket, 64).difference(unary_union(fins))
+        add_ends, cut_ends = _ends(f, True), _ends(f, False)
+        pieces = [_axis_prism(f, fin, *add_ends) for fin in fins]
+        # The fins' arcs against the pocket's circle can stump the triangulator; evenly spaced points don't.
+        parts = [p if _triangulate(p) is not None else p.segmentize(0.5) for p in getattr(pocket, "geoms", [pocket])]
+        pieces += [_axis_prism(f, part, *cut_ends) for part in parts]
+        e = _edit(f"grip-fins-{f['region']}", "press_fit_fins", f"{count} grip fins in the Ø{f['diameter']:.2f} mm hole (instead of a rigid press fit)",
+                  f"Opens the hole to a Ø{2 * r_pocket:.1f} mm pocket with {count} angled fins, {thick:.1f} mm thick, whose tips reach "
+                  f"{G['interference_mm']:.1f} mm into the Ø{want['partner_mm']:g} mm part. The fins bend as it goes in and keep "
+                  "gripping even when your printer makes holes a tenth or two off, where a rigid press fit goes loose or cracks "
+                  "the part. Slice with Arachne walls so each fin prints as one solid loop.", pieces, op="cut")
+        e["piece_ops"] = ["add"] * len(fins) + ["cut"] * (len(pieces) - len(fins))
+        out.append(e)
     return out
 
 

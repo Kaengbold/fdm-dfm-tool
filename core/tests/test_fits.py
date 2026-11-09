@@ -156,3 +156,30 @@ def test_clearance_to_a_mating_part():
     assert got[3.0]["verdict"] == "free"
     at = np.array(got[4.0]["at"])
     assert np.hypot(at[0] - 15, at[1] - 15) == pytest.approx(4.0, abs=0.05) and 0 <= at[2] <= 10
+
+
+def test_grip_fins_for_a_press_fit():
+    """A Ø6 press fit in a plate with room around the hole: a pocket with 3 angled fins whose tips reach 0.2 mm
+    into the Ø6 pin; applied, the fins stand in the open pocket, joined to its wall. Not for a sliding fit, a hole
+    with no room around it, or one printed on its side."""
+    pytest.importorskip("manifold3d")
+    from fdmcore.booleans import apply_edits
+    from fdmcore.slicer import section
+
+    hole = plate_with_hole()  # Ø6 at (8, 10): 5 mm of wall to the nearest edge
+    api.set_fit(hole["region"], [0, 0, 1], 6.0, "press")
+    fins = next(e for e in api.design([0, 0, 1], {})["edits"] if e["id"] == f"grip-fins-{hole['region']}")
+    assert fins["piece_ops"].count("add") == 3 and "cut" in fins["piece_ops"] and "3 grip fins" in fins["title"]
+    done = apply_edits(api._require().mesh, [fins])
+    cut = section(done.triangles, 2.5).intersection(Point(8, 10).buffer(6))
+    pin = Point(8, 10).buffer(3, 64)
+    assert pin.intersection(cut).area > 0.05  # fin tips inside the pin's outline: they grip it
+    assert pin.intersection(cut).area < 0.1 * pin.area  # ... only the tips
+    assert cut.area < Point(0, 0).buffer(6).area - Point(0, 0).buffer(3.7).area  # a pocket opened round the pin
+    assert len(getattr(cut, "geoms", [cut])) == 1  # every fin joined to the wall
+    api.set_fit(hole["region"], [0, 0, 1], 6.0, "sliding")
+    assert not [e for e in api.design([0, 0, 1], {})["edits"] if e["id"].startswith("grip-fins")]
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 8, 8).difference(Point(4, 4).buffer(3, 64)), 0, 5))), "thin")  # 1 mm wall
+    thin = next(f for f in api.design([0, 0, 1], {})["features"] if f["type"] == "hole")
+    api.set_fit(thin["region"], [0, 0, 1], 6.0, "press")
+    assert not [e for e in api.design([0, 0, 1], {})["edits"] if e["id"].startswith("grip-fins")]

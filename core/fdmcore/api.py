@@ -895,7 +895,7 @@ def _keep_clear_clash(edits: list[dict], up, keep_clear: list[dict] | None) -> l
         return edits
     r0 = rotation_to_z(up)
     for e in edits:
-        if e["op"] != "add":
+        if e["op"] != "add" and "add" not in e.get("piece_ops", []):
             continue
         tris = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3).astype(float)
         pts = np.concatenate([tris.reshape(-1, 3), tris.mean(axis=1), (tris + np.roll(tris, 1, axis=1)).reshape(-1, 3) / 2]) @ r0.T

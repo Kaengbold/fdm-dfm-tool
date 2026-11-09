@@ -12,7 +12,7 @@ async function manifold() {
 }
 
 /** Apply design edits to a part soup (Float32Array, 9 floats per triangle). Each edit is
- * {op: "add"|"cut", mesh: Float32Array, pieces: [triangle count per closed piece]};
+ * {op: "add"|"cut", mesh: Float32Array, pieces: [triangle count per closed piece], piece_ops?: op per piece};
  * additions go first, then cuts, one closed piece at a time; loose leftovers are dropped. */
 export async function applyEdits(part, edits) {
   const { Manifold, Mesh } = await manifold();
@@ -26,13 +26,15 @@ export async function applyEdits(part, edits) {
   const original = toManifold(part, "The part");
   let result = original;
   for (const op of ["add", "cut"]) {
-    for (const e of edits.filter((x) => x.op === op)) {
+    for (const e of edits) {
       let start = 0;
-      for (const n of e.pieces) {
-        const piece = toManifold(e.mesh.subarray(start * 9, (start + n) * 9), `The design change "${e.title}"`);
-        result = op === "add" ? result.add(piece) : result.subtract(piece);
+      e.pieces.forEach((n, i) => {
+        if ((e.piece_ops?.[i] ?? e.op) === op) { // grip fins add and cut in one edit
+          const piece = toManifold(e.mesh.subarray(start * 9, (start + n) * 9), `The design change "${e.title}"`);
+          result = op === "add" ? result.add(piece) : result.subtract(piece);
+        }
         start += n;
-      }
+      });
     }
   }
   // Drop pieces that don't overlap the part: a bit of an addition that ends up apart from it (two

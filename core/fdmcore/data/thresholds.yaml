@@ -223,6 +223,20 @@ fits:
   sideways_extra_mm: 0.1   # holes lying on their side come out a little smaller at the top
   min_change_mm: 0.05      # smaller differences are left alone
 
+grip_fins:
+  # Instead of a rigid press fit: an open pocket with thin angled fins whose tips reach past the pressed-in
+  # part. They bend like leaf springs, so the grip survives ±0.25 mm of printer error (a rigid bore: ±0.05).
+  # Fins 0.8–1.0 mm thick, 20–35° off the radial line, 0.15–0.30 mm interference, 3–6 of them [Slant 3D, How to
+  # Design a Print with Perfect Tolerance https://www.youtube.com/watch?v=XKrDUnZCmQQ; You Don't Use Fins Enough
+  # https://www.youtube.com/watch?v=6gPPAiqSkBc; research/sourced_A2 slant3d_elastic_grip_fins_for_tolerances].
+  thickness_mm: 0.9               # at least two printed lines
+  angle_deg: 30
+  interference_mm: 0.2            # per side: fin tips this far inside the partner's surface
+  length_mm: 2.5                  # long enough to bend (stubby radial fins don't)
+  min_length_mm: 1.2              # less room than this in the wall: no fins
+  min_wall_mm: 1.2                # plastic left around the pocket
+  count_by_diameter: [[6, 3], [12, 4], [1000, 6]]   # partner up to Ø mm: fins
+
 shrinkage:
   # Parts shrink as they cool (linear %, per material in presets.yaml). Report when the longest
   # dimension comes out this much short. Rough: depends on brand, infill and part shape.

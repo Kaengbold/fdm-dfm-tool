@@ -27,13 +27,13 @@ def apply_edits(part: Mesh, edits: list[dict]) -> Mesh:
     original = result = to_manifold(part.triangles, "The part")
     for op in ("add", "cut"):
         for e in edits:
-            if e.get("op", "cut") != op:
-                continue
+            ops = e.get("piece_ops") or [e.get("op", "cut")] * len(e["pieces"])  # grip fins: both in one edit
             tris = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)
             start = 0
-            for n in e["pieces"]:
-                piece = to_manifold(tris[start:start + n], f"Design edit {e['id']}")
-                result = result + piece if op == "add" else result - piece
+            for n, piece_op in zip(e["pieces"], ops):
+                if piece_op == op:
+                    piece = to_manifold(tris[start:start + n], f"Design edit {e['id']}")
+                    result = result + piece if op == "add" else result - piece
                 start += n
     result = _drop_loose(result, original)
     out = result.to_mesh()
