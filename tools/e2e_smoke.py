@@ -1161,8 +1161,10 @@ def main():
         run.step("gap to a mating part", mating_part)
 
         def split_for_support():
-            # A part that fits but needs a lot of support: cut so each piece prints its own way without (T-347).
-            run.act(lambda: page.click("[data-sample=test_block]"))
+            # A part that fits but needs a lot of support: two plates on a 50 mm post (longer than a bridge spans), so
+            # one plate overhangs every way up. Cut so each piece prints its own way without (T-347).
+            spool = ROOT / "tools" / "fixtures" / "spool.stl"
+            run.act(lambda: page.set_input_files("#file", str(spool)), 300_000)
             assert page.evaluate("() => !document.getElementById('dl-split-support').hidden"), "no 'less support' cut offered"
             run.act(lambda: page.evaluate("() => document.getElementById('dl-split-support').click()"), 300_000)
             page.wait_for_function("() => !document.getElementById('split-panel').hidden", timeout=60_000)

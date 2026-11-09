@@ -180,20 +180,29 @@ def _half(mesh: Mesh, k: int, c: float, below: bool) -> Mesh:
     return Mesh(np.concatenate(out))
 
 
-def _least_support(mesh: Mesh, settings) -> tuple[float, list[float]]:
-    """Support (mm³, the orientation search's estimate) of the best-placed way to print ``mesh``, and that up."""
-    from .orientation import find_orientations
+def _least_support(mesh: Mesh, settings, profile=None) -> tuple[float, list[float]]:
+    """Support (mm³) of the best-placed way to print ``mesh``, and that up. The orientation search's estimate
+    counts every overhang, bridges too; with ``profile`` each candidate is measured layer by layer as the check
+    does (refine.support_stats: bridges and gentle slopes need none)."""
+    from .checks import orient
+    from .orientation import find_orientations, rotation_to_z
+    from .refine import support_stats
 
     found = [r for r in find_orientations(mesh, settings, top=5) if r.bed_area > 0] or find_orientations(mesh, settings, top=1)
-    best = min(found, key=lambda r: r.support_volume)
-    return float(best.support_volume), best.up.tolist()
+    if profile is None:
+        best = min(found, key=lambda r: r.support_volume)
+        return float(best.support_volume), best.up.tolist()
+    sliced = [(support_stats(orient(mesh, rotation_to_z(r.up)), profile)["support_volume"], r.up.tolist()) for r in found]
+    return min(sliced, key=lambda x: x[0])
 
 
-def support_cut(mesh: Mesh, settings) -> dict | None:
+def support_cut(mesh: Mesh, settings, profile=None) -> dict | None:
     """A flat cut across one of the part's axes after which both pieces, each turned its own best way, need
     much less support than the whole part (``SUPPORT_CUT_SAVING``). Tries the narrowest sections (where a part
-    usually has a natural joint). None when no cut helps enough."""
-    whole, _ = _least_support(mesh, settings)
+    usually has a natural joint). None when no cut helps enough. With ``profile`` the whole part and the
+    chosen pieces are measured layer by layer (so a part whose overhangs are all bridges isn't cut); the
+    search between cuts uses the quicker estimate."""
+    whole, _ = _least_support(mesh, settings, profile)
     if whole < max(SUPPORT_CUT_MIN_MM3, SUPPORT_CUT_MIN_SHARE * abs(mesh.volume())):
         return None
     pts = mesh.triangles.reshape(-1, 3)
@@ -214,6 +223,10 @@ def support_cut(mesh: Mesh, settings) -> dict | None:
         high, up_high = _least_support(_half(mesh, k, c, False), settings)
         if best is None or low + high < best["pieces_mm3"]:
             best = {"axis": k, "cut": c, "pieces_mm3": low + high, "ups": [up_low, up_high]}
+    if best is not None and profile is not None:
+        low, up_low = _least_support(_half(mesh, best["axis"], best["cut"], True), settings, profile)
+        high, up_high = _least_support(_half(mesh, best["axis"], best["cut"], False), settings, profile)
+        best.update(pieces_mm3=low + high, ups=[up_low, up_high])
     if best is None or best["pieces_mm3"] > SUPPORT_CUT_SAVING * whole:
         return None
     return {**best, "whole_mm3": whole}

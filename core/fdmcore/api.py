@@ -2081,7 +2081,7 @@ def split(profile: dict | None = None, joint: str = "pins", purpose: str = "fit"
         raise ValueError('purpose is "fit" or "supports"')
     from .split import _half, support_cut
 
-    cut = support_cut(s.mesh, orientation_settings(p))
+    cut = support_cut(s.mesh, orientation_settings(p), p)
     if cut is None:
         raise ValueError("No straight cut makes the pieces need much less support: print it in one piece")
     plan = split_plan(s.mesh, p.printer["bed"], weak, gap, joint, force=(cut["axis"], [cut["cut"]]))

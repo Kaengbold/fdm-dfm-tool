@@ -114,10 +114,11 @@ def test_dovetail_needs_room():
 
 
 def _spool():
-    """Two 40 × 40 plates joined by a 10 × 10 post: every way up, one plate overhangs."""
+    """Two 40 × 40 plates joined by a 10 × 10 post, 50 mm long: every way up, one plate overhangs (on its side,
+    the post spans more than a bridge can)."""
     m3 = pytest.importorskip("manifold3d")
     box_ = lambda lo, size: m3.Manifold.cube(size).translate(lo)  # noqa: E731
-    mm = (box_((0, 0, 0), (40, 40, 5)) + box_((15, 15, 5), (10, 10, 30)) + box_((0, 0, 35), (40, 40, 5))).to_mesh()
+    mm = (box_((0, 0, 0), (40, 40, 5)) + box_((15, 15, 5), (10, 10, 50)) + box_((0, 0, 55), (40, 40, 5))).to_mesh()
     v, f = np.asarray(mm.vert_properties)[:, :3], np.asarray(mm.tri_verts)
     return Mesh(v[f])
 
@@ -127,7 +128,7 @@ def test_cut_to_print_without_supports():
     (plate down) without support; the pin holes stay inside both pieces. Parts that print fine aren't cut."""
     api.load(to_binary_stl(_spool()), "spool")
     plan = api.split({}, purpose="supports")
-    assert plan["axis"] == 2 and plan["cuts"] == [pytest.approx(20, abs=3)]
+    assert plan["axis"] == 2 and plan["cuts"] == [pytest.approx(30, abs=4)]
     assert plan["support_mm3"]["pieces"] < 0.5 * plan["support_mm3"]["whole"] and "much less support" in plan["explanation"]
     ups = [np.array(p["rotation"])[2] for p in plan["pieces"]]  # each piece: its plate on the bed
     assert ups[0] @ [0, 0, 1] > 0.99 and ups[1] @ [0, 0, -1] > 0.99

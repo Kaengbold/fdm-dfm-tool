@@ -497,7 +497,9 @@ async function runCheck() {
     renderOptions(); // their cost uses this check's part grams and price
     renderPauses();
     $("dl-split").hidden = !result.findings.some((f) => f.rule === "exceeds_build_volume");
-    $("dl-split-support").hidden = !$("dl-split").hidden || !result.stats.needs_support;
+    // Same test as the support setting on the 3MF (recommend.py): an overhang, or a bridge too long to span.
+    const needsSupport = result.stats.needs_support || result.findings.some((f) => f.rule === "long_bridge");
+    $("dl-split-support").hidden = !$("dl-split").hidden || !needsSupport;
     closeSplit(); // the pieces were for the orientation and part before
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
