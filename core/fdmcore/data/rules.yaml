@@ -881,6 +881,27 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
     - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
+  shallow_slope_stairs:
+    title: Shallow slope prints as steps
+    why: A top face that slopes only a little (5-20 degrees from flat) is built from many layer edges, each set
+      in a little from the one below. At normal layer heights those edges are wide, so the slope shows as rings
+      or stairs - about 1.1 mm wide at 10 degrees and 0.2 mm layers.
+    fixes:
+    - domain: slicer
+      text: Use thinner layers only over the slope's height (a height range modifier, or variable layer height
+        in the slicer). The 3MF from this app can carry that range. Keep "ensure vertical shell thickness" on
+        so the thinner top doesn't show the infill.
+      settings:
+        ensure_vertical_shell_thickness: '1'
+    - domain: geometry
+      text: Make the slope steeper (a 45 degree chamfer instead of a shallow fillet), or turn the part so the
+        face stands up and the nozzle traces the curve.
+    tags:
+    - surface
+    - layer height
+    sources:
+    - Prusa Knowledge Base — Variable layer height function — https://help.prusa3d.com/article/variable-layer-height-function_1750
+    - Prusa Knowledge Base — Layers and perimeters (ensure vertical shell thickness on shallow slopes) — https://help.prusa3d.com/article/layers-and-perimeters_1748
   pause_to_insert:
     title: Pocket for a part put in while printing
     why: A closed pocket inside the part can hold a magnet, nut, bearing or weight that is dropped in part-way

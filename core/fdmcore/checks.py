@@ -71,6 +71,7 @@ RULE_IMPACT = {
     "snap_fit_upright": "weak",
     "thick_solid_block": "info",
     "pause_to_insert": "info",
+    "shallow_slope_stairs": "surface",
     "modelled_thread": "shape",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
@@ -158,6 +159,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _profile_findings(layers, profile)
     findings += _shrinkage_findings(mesh, profile, T)
     findings += pocket_findings(mesh, profile, T)
+    findings += slope_findings(mesh, profile, T)
     findings += _relief_findings(mesh, profile, T)
     findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
@@ -697,6 +699,57 @@ def pocket_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
                      "it may sag onto what you put in")
         out.append(_finding("pause_to_insert", "warn" if long else "info", text, bbox=[lo, hi],
                             pause_z=p["pause_z"], layer=p["layer"], top_z=p["top_z"], span_mm=round(p["span_mm"], 1)))
+    return out
+
+
+def fine_layer_ranges(mesh: Mesh, profile: Profile, T: dict | None = None) -> list[dict]:
+    """Height ranges of shallow top slopes (``slopes`` in thresholds.yaml) in the oriented ``mesh`` whose
+    layer steps show at the user's layer height: {"z0", "z1", "slope_deg", "area_mm2", "layer_height" (the
+    thinner one), "step_mm" now, "fine_step_mm" with it}. Empty when thinner layers wouldn't help."""
+    S = (T or load_data("thresholds"))["slopes"]
+    lh = goal_plan(profile)["layer_height"]
+    fine = round(max(S["fine_min_mm"], S["fine_ratio"] * float(profile.nozzle)) / 0.02) * 0.02
+    if fine > S["fine_gain"] * lh:  # not much thinner than now: the steps would hardly change
+        return []
+    normals, areas = mesh.normals_and_areas()
+    nz = normals[:, 2]
+    shallow = (nz > np.cos(np.radians(S["max_deg"]))) & (nz < np.cos(np.radians(S["min_deg"]))) & (areas > 0)
+    if not shallow.any():
+        return []
+    z = mesh.triangles[shallow][..., 2]
+    lo, hi, a, n = z.min(axis=1), z.max(axis=1), areas[shallow], nz[shallow]
+    order = np.argsort(lo)
+    ranges, cur = [], None
+    for i in order:  # faces overlapping in height (or nearly) make one range
+        if cur is not None and lo[i] <= cur[1] + S["merge_gap_mm"]:
+            cur[1] = max(cur[1], hi[i])
+            cur[2].append(i)
+        else:
+            cur = [lo[i], hi[i], [i]]
+            ranges.append(cur)
+    out = []
+    for z0, z1, idx in ranges:
+        area = float(a[idx].sum())
+        slope = float(np.degrees(np.arccos(np.clip(np.average(n[idx], weights=a[idx]), -1, 1))))
+        step = lh / np.tan(np.radians(slope))
+        if area < S["min_area_mm2"] or step < S["visible_step_mm"]:
+            continue
+        out.append({"z0": round(float(z0), 2), "z1": round(float(z1), 2), "slope_deg": round(slope, 1), "area_mm2": round(area),
+                    "layer_height": round(fine, 2), "step_mm": round(float(step), 2),
+                    "fine_step_mm": round(float(fine / np.tan(np.radians(slope))), 2)})
+    return out
+
+
+def slope_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
+    """Shallow top slopes that print as stairs, with thinner layers just there (shallow_slope_stairs)."""
+    lh = goal_plan(profile)["layer_height"]
+    out = []
+    for r in fine_layer_ranges(mesh, profile, T):
+        lo, hi = mesh.bounds()
+        text = (f"Shallow slope (about {r['slope_deg']:.0f}° from flat) at {r['z0']:.1f}–{r['z1']:.1f} mm: at {lh:.2f} mm layers it "
+                f"prints as steps about {r['step_mm']:.1f} mm wide. Thinner {r['layer_height']:.2f} mm layers just there make them "
+                f"{r['fine_step_mm']:.1f} mm; the 3MF can carry that height range")
+        out.append(_finding("shallow_slope_stairs", "info", text, bbox=[[float(lo[0]), float(lo[1]), r["z0"]], [float(hi[0]), float(hi[1]), r["z1"]]], **r))
     return out
 
 

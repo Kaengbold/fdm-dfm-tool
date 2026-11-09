@@ -1087,6 +1087,32 @@ def main():
             return page.evaluate("() => document.getElementById('status').textContent")[:120]
         run.step("pause added to a file sliced in Bambu Studio", bambu_pause)
 
+        def fine_slopes():
+            # A 10° roof prints as steps: thinner layers over just its height, in the 3MF (T-330).
+            import io
+            import struct
+            import zipfile
+
+            v = [(0, 0, 0), (40, 0, 0), (40, 40, 0), (0, 40, 0), (0, 0, 10), (40, 0, 17.05), (40, 40, 17.05), (0, 40, 10)]
+            f = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+            wedge = OUT / "sloped_roof.stl"
+            wedge.write_bytes(bytes(80) + struct.pack("<I", len(f)) + b"".join(struct.pack("<12fH", 0, 0, 0, *v[a], *v[b], *v[c], 0) for a, b, c in f))
+            run.act(lambda: page.set_input_files("#file", str(wedge)), 300_000)
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            if up[2] < 0.99:  # the roof up, as modelled
+                i = page.evaluate("() => fdm.state.options.findIndex((o) => o.up[2] > 0.99)")
+                run.act(lambda: page.locator("#options > li").nth(i).click(), 300_000)
+            assert page.evaluate("() => !document.getElementById('fine-for').hidden"), "no thinner-layers option for a 10° roof"
+            text = page.locator("#fine-text").inner_text()
+            page.evaluate("() => fdm.steps.go('download')")
+            with page.expect_download(timeout=300_000) as dl:
+                page.evaluate("() => document.getElementById('dl-3mf').click()")
+            z = zipfile.ZipFile(io.BytesIO(Path(dl.value.path()).read_bytes()))
+            ranges = z.read("Metadata/layer_config_ranges.xml").decode()
+            assert 'opt_key="layer_height">0.080' in ranges, ranges
+            return text
+        run.step("thinner layers on a shallow slope", fine_slopes)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

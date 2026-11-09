@@ -146,6 +146,18 @@ fasteners:
   # [Voron Design printed parts, https://github.com/VoronDesign/Voron-2].
   nut_slot_extra_mm: 0.3
 
+slopes:
+  # Top faces this shallow (degrees from flat) print as visible steps: each layer's edge is layer height / tan
+  # (slope) wide, ~1.1 mm at 10° and 0.2 mm layers [sourced_F mistake #22]. Steeper ones look smooth; flatter
+  # ones are flat tops (ironing). Thinner layers only over their height range make the steps narrower.
+  min_deg: 5
+  max_deg: 20
+  min_area_mm2: 30                # smaller sloped bits: nobody sees the steps
+  visible_step_mm: 0.5            # steps narrower than this hardly show
+  merge_gap_mm: 1.0               # sloped faces this close in height share one range
+  fine_ratio: 0.2                 # thinner layers: this × the nozzle (0.08 mm for 0.4 mm)
+  fine_min_mm: 0.08
+  fine_gain: 0.6                  # only worth it when the thinner layers are at most this share of the ones used
 pauses:
   # Closed pockets for parts dropped in while printing (magnets, nuts, bearings, weights): smaller than this
   # is a modelling leftover, not a pocket; the roof must be flat over this share of the pocket's footprint

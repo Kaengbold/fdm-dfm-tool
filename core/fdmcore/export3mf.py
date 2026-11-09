@@ -78,16 +78,18 @@ VOLUME_TYPES = {
 
 
 def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None = None, bed_center=(128.0, 128.0),
-               modifiers: list[tuple] = (), layout: str = "orca", pauses: list[dict] = ()) -> bytes:
+               modifiers: list[tuple] = (), layout: str = "orca", pauses: list[dict] = (), ranges: list[dict] = ()) -> bytes:
     """``mesh`` must already be oriented (lowest point at z = 0, centred on x/y = 0). ``modifiers``:
     (triangles in the same frame, settings[, kind]) per volume, kind one of VOLUME_TYPES (default
     "stronger": a settings modifier); ``layout`` "orca" (also Bambu Studio) or "prusa", see the
     module docstring. ``pauses``: {"top": pocket top (mm), "layer_height", "note"} each: pause before the
-    first layer above it, to put something into the part (see pause_files)."""
+    first layer above it, to put something into the part (see pause_files). ``ranges``: {"z0", "z1",
+    "layer_height"} each: thinner layers over that height (see range_files)."""
+    extra = {**pause_files(pauses), **range_files(ranges)}
     if modifiers:
         if layout not in LAYOUTS:
             raise ValueError(f"layout must be one of {LAYOUTS}")
-        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, pauses)
+        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, extra)
     verts, faces = _weld(mesh.triangles)
     verts = verts + [bed_center[0], bed_center[1], 0.0]
     vxml = "\n".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in verts)
@@ -139,9 +141,21 @@ def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None =
         z.writestr("3D/3dmodel.model", model)
         z.writestr("Metadata/model_settings.config", model_settings)
         z.writestr("Metadata/Slic3r_PE_model.config", prusa_model)
-        for path, text in pause_files(pauses).items():
+        for path, text in extra.items():
             z.writestr(path, text)
     return buf.getvalue()
+
+
+def range_files(ranges: list[dict]) -> dict[str, str]:
+    """Height range modifiers (another layer height between two heights), as the slicers store them in
+    their project files: OrcaSlicer / Bambu Studio ``layer_config_ranges.xml``, PrusaSlicer
+    ``Prusa_Slicer_layer_config_ranges.xml``, the same layout. tools/slicer_check.py checks them."""
+    if not ranges:
+        return {}
+    body = "".join(f' <range min_z="{r["z0"]:.3f}" max_z="{r["z1"]:.3f}">\n  <option opt_key="extruder">0</option>\n'
+                   f'  <option opt_key="layer_height">{r["layer_height"]:.3f}</option>\n </range>\n' for r in ranges)
+    text = f'<?xml version="1.0" encoding="utf-8"?>\n<objects>\n<object id="1">\n{body}</object>\n</objects>\n'
+    return {"Metadata/layer_config_ranges.xml": text, "Metadata/Prusa_Slicer_layer_config_ranges.xml": text}
 
 
 def pause_files(pauses: list[dict]) -> dict[str, str]:
@@ -189,7 +203,7 @@ def _meta(d: dict, kind: str | None = None) -> str:
     return "\n".join(f"    <metadata {t}key={quoteattr(k)} value={quoteattr(str(v))}/>" for k, v in d.items())
 
 
-def _zip(model: str, model_settings: str | None, prusa_model: str | None, pauses: list[dict] = ()) -> bytes:
+def _zip(model: str, model_settings: str | None, prusa_model: str | None, extra: dict[str, str] | None = None) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", CONTENT_TYPES)
@@ -199,12 +213,12 @@ def _zip(model: str, model_settings: str | None, prusa_model: str | None, pauses
             z.writestr("Metadata/model_settings.config", model_settings)
         if prusa_model:
             z.writestr("Metadata/Slic3r_PE_model.config", prusa_model)
-        for path, text in pause_files(pauses).items():
+        for path, text in (extra or {}).items():
             z.writestr(path, text)
     return buf.getvalue()
 
 
-def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str, pauses: list[dict] = ()) -> bytes:
+def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str, extra: dict[str, str] | None = None) -> bytes:
     shift = np.array([bed_center[0], bed_center[1], 0.0])
     pieces = [_weld(mesh.triangles)] + [_weld(m[0]) for m in modifiers]
     types = [VOLUME_TYPES[m[2] if len(m) > 2 else "stronger"] for m in modifiers]
@@ -221,7 +235,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
                  + f"\n  <object id=\"1\" name={quoteattr(name)} type=\"model\"><components>{comps}</components></object>\n" + MODEL_FOOT)
         config = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\">\n"
                   f"    <metadata key=\"name\" value={quoteattr(name)}/>\n{_meta(settings)}\n" + "\n".join(parts) + "\n </object>\n</config>")
-        return _zip(model, config, None, pauses)
+        return _zip(model, config, None, extra)
 
     # PrusaSlicer: one mesh, the modifiers as triangle ranges after the part's.
     verts, faces, offset, bounds = [], [], 0, [0]
@@ -245,7 +259,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
     config = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\" instances_count=\"1\">\n"
               f"  <metadata type=\"object\" key=\"name\" value={quoteattr(name)}/>\n{_meta(prusa_settings(settings), 'object')}\n"
               + "\n".join(vols) + "\n </object>\n</config>")
-    return _zip(model, None, config, pauses)
+    return _zip(model, None, config, extra)
 
 
 def _weld(triangles: np.ndarray, decimals: int = 5) -> tuple[np.ndarray, np.ndarray]:

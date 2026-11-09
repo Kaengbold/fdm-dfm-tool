@@ -589,3 +589,40 @@ def test_each_orientation_says_its_support_grams():
     assert r["orientations"][0]["support_g"] < r["as_loaded"]["support_g"]
     one = api.orientation([0, 0, 1], {"material": "pla"})
     assert one["support_g"] == pytest.approx(r["as_loaded"]["support_g"], rel=0.3)
+
+
+def _roof(deg: float, nozzle_lh: float | None = None):
+    """40 × 40 mm block, 10 mm high, with a roof rising ``deg`` from flat along x."""
+    from shapely.geometry import Polygon
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+
+    rise = 40 * np.tan(np.radians(deg))
+    return Mesh(extrude(Polygon([(0, 0), (40, 0), (40, 10 + rise), (0, 10)]), 0, 40)[..., [0, 2, 1]][:, ::-1])
+
+
+def test_shallow_roof_gets_thinner_layers_in_the_3mf():
+    """A 10° roof prints as ~1.1 mm wide steps at 0.2 mm layers (0.45 mm at 0.08 mm); the 3MF carries the
+    thinner layers over just the roof's height for OrcaSlicer / Bambu Studio and PrusaSlicer."""
+    from fdmcore.mesh import to_binary_stl
+
+    api.load(to_binary_stl(_roof(10)), "roof")
+    f = [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "shallow_slope_stairs"]
+    assert len(f) == 1 and f[0]["impact"] == "surface"
+    m = f[0]["metrics"]
+    assert (m["z0"], m["z1"], m["layer_height"]) == (pytest.approx(10, abs=0.1), pytest.approx(17.05, abs=0.1), 0.08)
+    assert m["step_mm"] == pytest.approx(1.13, abs=0.02) and m["fine_step_mm"] == pytest.approx(0.45, abs=0.02)
+    z = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {}, fine_layers=[m])))
+    for name in ("Metadata/layer_config_ranges.xml", "Metadata/Prusa_Slicer_layer_config_ranges.xml"):
+        assert '<range min_z="10.000" max_z="17.050">' in z.read(name).decode().replace("17.040", "17.050").replace("17.060", "17.050")
+
+
+def test_steep_flat_and_tiny_slopes_are_left_alone():
+    from fdmcore.mesh import to_binary_stl
+
+    for deg in (0, 35):  # flat top: ironing; 35°: steps narrower than 0.3 mm
+        api.load(to_binary_stl(_roof(deg)), "roof")
+        assert not [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "shallow_slope_stairs"], deg
+    api.load(to_binary_stl(_roof(10)), "roof")  # a 0.2 mm nozzle prints 0.1 mm layers: nothing thinner to gain
+    assert not [f for f in api.check([0, 0, 1], {"nozzle": "0.2"})["findings"] if f["rule"] == "shallow_slope_stairs"]

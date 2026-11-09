@@ -3056,7 +3056,14 @@ function download(bytes, filename, type) {
 // Closed pockets (pause_to_insert): the 3MF can carry a pause before each roof, to drop a magnet or nut in.
 const pausesWanted = () => [...new Set((state.check?.findings ?? []).filter((f) => f.rule === "pause_to_insert").map((f) => f.metrics.top_z))];
 
+// Shallow slopes (shallow_slope_stairs): thinner layers over just their height, as height ranges in the 3MF.
+const fineWanted = () => (state.check?.findings ?? []).filter((f) => f.rule === "shallow_slope_stairs").map((f) => f.metrics);
+
 function renderPauses() {
+  const fine = fineWanted();
+  $("fine-for").hidden = !fine.length;
+  $("fine-text").textContent = fine.length ? `Thinner ${fine[0].layer_height.toFixed(2)} mm layers on the shallow slope${fine.length > 1 ? "s" : ""} ` +
+    `(${fine.map((r) => `${r.z0.toFixed(1)}–${r.z1.toFixed(1)} mm`).join(", ")}), so they don't print as steps` : "";
   const zs = pausesWanted();
   $("pause-for").hidden = !zs.length;
   $("pause-sliced").hidden = !zs.length;
@@ -3117,7 +3124,8 @@ $("dl-3mf").onclick = async () => {
   await busy("Exporting 3MF for OrcaSlicer / Bambu Studio…", async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
     const pauses = $("dl-pause").checked ? pausesWanted() : [];
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses });
+    const fine_layers = $("dl-fine").checked ? fineWanted() : [];
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
   });

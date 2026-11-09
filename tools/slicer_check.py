@@ -164,6 +164,24 @@ def pause_block(layout: str) -> bytes:
     return api.export([0, 0, 1], {}, {}, slicer=layout, pauses=[9.0])
 
 
+def slope_block(layout: str) -> bytes:
+    """40 × 40 mm block, 10 mm high, with a roof sloping 10° (to 17 mm): exported with thinner layers over the roof."""
+    from shapely.geometry import Polygon
+
+    from fdmcore.additions import extrude
+
+    rise = 40 * np.tan(np.radians(10))
+    tri = extrude(Polygon([(0, 0), (40, 0), (40, 10 + rise), (0, 10)]), 0, 40)[..., [0, 2, 1]][:, ::-1]  # profile stands up
+    api.load(to_binary_stl(Mesh(tri)), "slope_check")
+    ranges = [f["metrics"] for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "shallow_slope_stairs"]
+    return api.export([0, 0, 1], {}, {}, slicer=layout, fine_layers=ranges)
+
+
+def measure_layers(gcode: Path) -> list[float]:
+    """Heights of the layers, in order."""
+    return [float(m.group(2)) for line in gcode.read_text(errors="replace").splitlines() if (m := LAYER.match(line))]
+
+
 PAUSE = re.compile(r"^(; PAUSE_PRINTING|;PAUSE_PRINT|M601)\b")
 
 
@@ -260,6 +278,14 @@ def main():
         z = measure_zone(slice_with(name, cfg, model, work / f"{name}_zone"))
         # The zone half is filled (≥ 2.5× the plastic of the 10 % half), and the part didn't grow by the zone's box.
         checks["zone_modifier"] = (z["zone"], z["rest"], z["zone"] >= 2.5 * z["rest"] and z["width"] < 20.0)
+        model = work / f"{name}_slope.3mf"
+        model.write_bytes(slope_block(layout))
+        zs = np.array(measure_layers(slice_with(name, cfg, model, work / f"{name}_slope")))
+        dz = np.diff(zs)
+        roof, below = dz[(zs[1:] > 11) & (zs[1:] < 16)], dz[(zs[1:] > 2) & (zs[1:] < 9)]
+        # Thinner layers over the sloped roof (10–17 mm), the normal ones below it.
+        checks["fine_layer_range"] = (round(float(np.median(roof)), 3) if len(roof) else None, round(float(np.median(below)), 3) if len(below) else None,
+                                      bool(len(roof) and len(below) and np.median(roof) < 0.11 and np.median(below) > 0.15))
         model = work / f"{name}_pause.3mf"
         model.write_bytes(pause_block(layout))
         gcode = slice_with(name, cfg, model, work / f"{name}_pause")
