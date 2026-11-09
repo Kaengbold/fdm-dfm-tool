@@ -1087,10 +1087,14 @@ def flat_gaps(mesh: Mesh, T: dict | None = None) -> list[dict]:
         return []
 
     def levels(mask):
+        # Snap-rounded union of valid triangles, as _relief_findings: the browser's older GEOS throws on (and
+        # can't recover from) a plain union of touching triangles.
+        zz, tris = np.round(z[mask], 2), mesh.triangles[mask][..., :2]
         out = {}
-        for zz, tri in zip(np.round(z[mask], 2), mesh.triangles[mask][..., :2]):
-            out.setdefault(float(zz), []).append(Polygon(tri))
-        return {k: shapely.union_all([p.buffer(1e-6) for p in v if p.area > 1e-9]) for k, v in out.items()}
+        for level in np.unique(zz):
+            polys = shapely.polygons(tris[zz == level])
+            out[float(level)] = shapely.union_all(shapely.make_valid(polys[shapely.area(polys) > 1e-9]), grid_size=1e-4)
+        return out
 
     floors, ceilings = levels(up), levels(down)
     out = []
