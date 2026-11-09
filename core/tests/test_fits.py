@@ -134,3 +134,25 @@ def test_session_state_survives_an_engine_restart():
     api.dispatch("restore_state", json.dumps({"state": saved}))
     assert api.session_state() == saved
     assert edits() == before  # the resize for the fit is offered again
+
+
+def test_clearance_to_a_mating_part():
+    """A peg in a Ø8.4 hole, both from one assembly: the closest gap per side and the fit it gives (half the
+    diameter gaps per side), an overlap as negative, and parts far apart as free."""
+    import numpy as np
+    from shapely.geometry import Point, box
+
+    from fdmcore import api
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh, to_binary_stl
+
+    plate = Mesh(extrude(box(0, 0, 30, 30).difference(Point(15, 15).buffer(4.2, quad_segs=64)), 0, 10))
+    api.load(to_binary_stl(plate), "plate")
+    peg = lambda r: to_binary_stl(Mesh(extrude(Point(15, 15).buffer(r, quad_segs=64), -5, 15)))  # noqa: E731
+    got = {r: api.clearance(peg(r)) for r in (4.3, 4.1, 4.0, 3.0)}
+    assert got[4.3]["verdict"] == "overlap" and got[4.3]["gap_mm"] == pytest.approx(-0.1, abs=0.01)
+    assert got[4.1]["verdict"] == "snug" and got[4.1]["gap_mm"] == pytest.approx(0.1, abs=0.01)
+    assert got[4.0]["verdict"] == "sliding" and "slide and turn" in got[4.0]["explanation"]
+    assert got[3.0]["verdict"] == "free"
+    at = np.array(got[4.0]["at"])
+    assert np.hypot(at[0] - 15, at[1] - 15) == pytest.approx(4.0, abs=0.05) and 0 <= at[2] <= 10

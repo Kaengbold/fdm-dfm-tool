@@ -2479,6 +2479,42 @@ def diagnose(symptom: str | None = None, up=None, profile: dict | None = None, f
                               "detail": f.get("detail", ""), "severity": f.get("severity")} for f in mine]}
 
 
+FIT_WORDS = {"press": "press together tightly", "snug": "push together snugly", "sliding": "slide and turn",
+             "loose": "move freely with some play"}
+
+
+def clearance(data: bytes, profile: dict | None = None) -> dict:
+    """The gap between the loaded part and a mating part (``data``: STL / 3MF / OBJ exported from the same CAD
+    assembly, so both keep their places): the closest place (``gap_mm``, negative when they overlap; ``at``, part
+    coordinates), the fit it gives (``verdict``: overlap, too tight, press, snug, sliding, loose, free) against the
+    fit gaps (your fit test print if measured) and a plain ``explanation``."""
+    from .clearance import clearance as measure
+    from .formats import read_bodies
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    mate = Mesh(np.concatenate([m.triangles for _, m in read_bodies(data)]))
+    gaps = {**load_data("thresholds")["fits"]["gap_mm"], **(p.material.get("fit_gap_mm") or {})}
+    r = measure(s.mesh, mate, gaps)
+    side = r["per_side_mm"]
+    g = r["gap_mm"]
+    if r["verdict"] == "overlap":
+        text = f"The parts overlap by {-g:.2f} mm: they won't go together. Leave about {side['sliding']:.2f} mm per side for a sliding fit."
+    elif r["verdict"] == "free":
+        text = "The parts don't come closer than 1 mm anywhere: no fit between them to check."
+    elif r["verdict"] == "too tight":
+        text = (f"The closest gap is {g:.2f} mm per side: printed, that fuses or needs force. Leave {side['snug']:.2f} mm to push "
+                f"together snugly, {side['sliding']:.2f} mm to slide and turn.")
+    else:
+        nxt = {"press": "snug", "snug": "sliding", "sliding": "loose"}.get(r["verdict"])
+        text = f"The closest gap is {g:.2f} mm per side: the parts will {FIT_WORDS[r['verdict']]}."
+        if nxt:
+            text += f" For them to {FIT_WORDS[nxt]}, leave {side[nxt]:.2f} mm."
+    measured = bool(p.material.get("fit_gap_mm"))
+    text += " (Gaps from your fit test print.)" if measured else " (Typical gaps: the fit test print in My materials gives your printer's.)"
+    return {**r, "explanation": text}
+
+
 def setup_check(profile: dict | None = None, settings: dict | None = None) -> dict:
     """Mistakes in the chosen printer / material / nozzle (presets the user made) and in slicer values
     they set (``settings``, slicer keys such as layer_height, support_top_z_distance, outer_wall_speed):
@@ -2694,6 +2730,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
+    "clearance": clearance,
     "diagnose": diagnose,
     "warping": warping,
     "set_fit": set_fit,

@@ -382,6 +382,13 @@
           <p id="fit-selected" class="fit-selected" aria-live="polite"></p>
           <div id="blk-fits">
             <div class="sim-card">
+              <h3>Gap to a mating part</h3>
+              <p class="hint">Export the other part from the same CAD assembly (so it keeps its place) and choose it: the closest gap
+                between the two and the fit it gives.</p>
+              <label class="file-button">Choose the mating part (STL or 3MF)<input id="mate-file" type="file" accept=".stl,.3mf" hidden /></label>
+              <p id="mate-result" aria-live="polite"></p>
+            </div>
+            <div class="sim-card">
               <h3>Holes and what goes in them</h3>
               <p class="hint">Say what goes into each hole (or which hole a post goes into) and how tight it should be. We work out the size
                 to model from your printer's usual tolerance, or from your own fit test below. The new size shows up under Design changes.</p>

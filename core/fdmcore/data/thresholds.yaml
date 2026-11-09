@@ -28,6 +28,11 @@ relief:
 
 gaps:
   fuse_below_mm: 0.2              # slots/clearances narrower than this fuse shut [slant3d_internal_micro_voids_3x_strength, mechanical_clearances_by_fit]
+  # A flat gap stacked in height (the flat top of a pin under a cap, a print-in-place hinge's knuckle faces): the
+  # ceiling is bridged right over the plastic below, sags and fuses below this; 0.4–0.6 mm works for short bridges
+  # like chain links [sourced_F mistake #29, Maker's Muse print-in-place hinges].
+  z_fuse_below_mm: 0.4
+  z_min_area_mm2: 4               # smaller facing patches: a speck, not a joint
 
 ironing:
   # A large flat top (lid, badge, nameplate, a face that gets glued) is where ironing shows: the nozzle

@@ -40,6 +40,7 @@ RULE_IMPACT = {
     "too_thin_to_print": "fails",
     "hole_closes": "fails",
     "gap_fuses": "fails",
+    "flat_gap_fuses": "fails",
     "trapped_support": "fails",
     "hardened_nozzle_required": "fails",
     "warping": "shape",
@@ -168,6 +169,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += slope_findings(mesh, profile, T)
     findings += facet_findings(mesh, T)
     findings += _relief_findings(mesh, profile, T)
+    findings += flat_gap_findings(mesh, profile, T)
     findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
 
@@ -1069,6 +1071,53 @@ def _use_heat_findings(profile: Profile, T: dict) -> list[dict]:
                          f"only about {k:.0%} of its stiffness is left, it will bend or sag", use_temp_c=t, heat_limit_c=limit)]
     return [_finding("too_hot_in_use", "warn", f"At {t:.0f} °C {name} is close to where it goes soft (~{limit:.0f} °C): "
                      f"about {k:.0%} of its strength is left, and loads that stay on make it creep", use_temp_c=t, heat_limit_c=limit)]
+
+
+def flat_gaps(mesh: Mesh, T: dict | None = None) -> list[dict]:
+    """Flat gaps stacked in height (``gaps`` in thresholds.yaml): a down-facing flat face with an up-facing one
+    under it, closer than ``z_fuse_below_mm`` and overlapping by ``z_min_area_mm2`` or more. Each: {"bbox",
+    "gap_mm", "area_mm2", "z"} (the ceiling's height)."""
+    G = (T or load_data("thresholds"))["gaps"]
+    normals, areas = mesh.normals_and_areas()
+    z = mesh.triangles[..., 2].mean(axis=1)
+    lowest = mesh.triangles[..., 2].min()
+    flat = areas > 1e-9
+    up, down = flat & (normals[:, 2] > 0.99), flat & (normals[:, 2] < -0.99) & (z > lowest + 0.05)
+    if not up.any() or not down.any() or up.sum() + down.sum() > 200_000:
+        return []
+
+    def levels(mask):
+        out = {}
+        for zz, tri in zip(np.round(z[mask], 2), mesh.triangles[mask][..., :2]):
+            out.setdefault(float(zz), []).append(Polygon(tri))
+        return {k: shapely.union_all([p.buffer(1e-6) for p in v if p.area > 1e-9]) for k, v in out.items()}
+
+    floors, ceilings = levels(up), levels(down)
+    out = []
+    for zc, ceiling in ceilings.items():
+        for zf, floor in floors.items():
+            gap = zc - zf
+            if not 0.005 < gap < G["z_fuse_below_mm"]:
+                continue
+            both = _safe_overlay(shapely.intersection, ceiling, floor)
+            if both.area < G["z_min_area_mm2"]:
+                continue
+            x0, y0, x1, y1 = both.bounds
+            out.append({"bbox": [[x0, y0, zf], [x1, y1, zc]], "gap_mm": round(gap, 2), "area_mm2": round(both.area, 1), "z": zc})
+    return out
+
+
+def flat_gap_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
+    """Print-in-place joints with a flat gap in height: bridged over the part below, it fuses (flat_gap_fuses)."""
+    out = []
+    for g in flat_gaps(mesh, T):
+        text = (f"Flat gap of {g['gap_mm']:.2f} mm in height at {g['z']:.1f} mm ({g['area_mm2']:.0f} mm²): the face above it is "
+                "printed in mid-air right over the plastic below, sags, and welds the two together. Use 45° cones with a "
+                "0.2–0.3 mm gap instead, or at least 0.4–0.6 mm for a short bridge")
+        if g["gap_mm"] < profile.layer_height:
+            text += f" — it is thinner than a layer ({profile.layer_height:.2f} mm), so it isn't even printed as a gap"
+        out.append(_finding("flat_gap_fuses", "problem", text, bbox=g["bbox"], gap_mm=g["gap_mm"], area_mm2=g["area_mm2"]))
+    return out
 
 
 def _relief_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:

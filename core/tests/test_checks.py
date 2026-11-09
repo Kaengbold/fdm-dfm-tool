@@ -764,3 +764,26 @@ def test_measured_hole_and_outer_errors_correct_the_3mf():
         assert "xy_contour_compensation" not in plain
     finally:
         api.custom_presets()
+
+
+def _clip(gap: float):
+    """A block with a pin under a cap held by a side wall: the pin's flat top is ``gap`` below the cap."""
+    from shapely.geometry import box
+    from shapely.ops import unary_union
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+
+    air = unary_union([box(4, 5, 10, 10 + gap), box(20, 5, 25, 10 + gap), box(4, 10, 25, 10 + gap)])
+    return Mesh(extrude(box(0, 0, 30, 15).difference(air), 0, 10)[..., [0, 2, 1]][:, ::-1])
+
+
+def test_flat_gap_in_a_print_in_place_joint_fuses():
+    """A flat gap stacked in height (mistake #29): 0.3 mm under a bridged cap fuses, 0.8 mm is fine."""
+    from fdmcore.mesh import to_binary_stl
+
+    api.load(to_binary_stl(_clip(0.3)), "clip")
+    f = [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "flat_gap_fuses"]
+    assert len(f) == 1 and f[0]["metrics"]["gap_mm"] == 0.3 and f[0]["metrics"]["area_mm2"] == pytest.approx(100, abs=1)
+    api.load(to_binary_stl(_clip(0.8)), "clip")
+    assert not [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "flat_gap_fuses"]

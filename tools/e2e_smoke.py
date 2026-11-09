@@ -1139,6 +1139,27 @@ def main():
             return mine[0][:100]
         run.step("my print failed: matched to the part's findings", print_failed)
 
+        def mating_part():
+            # Two parts of one assembly: a copy of the bracket 0.3 mm above it -> 0.30 mm per side, loose (T-348).
+            import struct
+
+            raw = (ROOT / "web/samples/l_bracket.stl").read_bytes()
+            n = struct.unpack_from("<I", raw, 80)[0]
+            body = bytearray(raw[84:84 + 50 * n])
+            for t in range(n):
+                for v in range(3):
+                    at = t * 50 + 12 + v * 12 + 8
+                    struct.pack_into("<f", body, at, struct.unpack_from("<f", body, at)[0] + 40.3)
+            mate = OUT / "bracket_on_top.stl"
+            mate.write_bytes(raw[:84] + bytes(body))
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('fits')")
+            run.act(lambda: page.set_input_files("#mate-file", str(mate)), 300_000)
+            text = page.locator("#mate-result").inner_text()
+            assert "0.30 mm per side" in text and "move freely" in text, text
+            return text[:120]
+        run.step("gap to a mating part", mating_part)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

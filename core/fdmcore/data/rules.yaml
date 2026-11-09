@@ -499,6 +499,22 @@ rules:
     sources:
     - Prusa Knowledge Base — dimensional accuracy and shrinkage articles (help.prusa3d.com)
     - Polymaker PolyLite ABS / ASA technical data sheets (shrinkage values)
+  flat_gap_fuses:
+    title: Flat gap in a moving joint fuses
+    why: In a print-in-place hinge or captive part, a flat gap stacked in height means the face above it is printed
+      in mid-air, only a few tenths of a millimetre over the plastic below. It sags onto it and welds the joint
+      solid, while leaving play where it doesn't.
+    fixes:
+    - domain: geometry
+      text: Shape the pin and knuckle as opposing 45 degree cones with a 0.2-0.3 mm gap, so every face prints as a
+        self-supporting slope; or make a short flat gap 0.4-0.6 mm (chain links).
+    - domain: slicer
+      text: Thinner layers and more bridge cooling make the sag smaller, but a flat gap under about 0.4 mm still fuses.
+    tags:
+    - print in place
+    - clearance
+    sources:
+    - Maker's Muse — How to design print-in-place hinges — https://www.youtube.com/watch?v=fbSQvJJjw2Q
   gap_fuses:
     title: Gap between moving parts fuses shut
     why: The CAD model shows separate moving components in a print-in-place hinge or bearing, but clearances narrower

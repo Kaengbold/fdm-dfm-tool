@@ -3069,6 +3069,21 @@ const pausesWanted = () => [...new Set((state.check?.findings ?? []).filter((f) 
 // Shallow slopes (shallow_slope_stairs): thinner layers over just their height, as height ranges in the 3MF.
 const fineWanted = () => (state.check?.findings ?? []).filter((f) => f.rule === "shallow_slope_stairs").map((f) => f.metrics);
 
+// Two parts from one assembly: the gap between the loaded part and a mating part (api.clearance), marked on the part.
+$("mate-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || !state.triangles) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  await busy("Measuring the gap to the mating part…", async () => {
+    const r = await call("clearance", { profile: profile() }, bytes);
+    $("mate-result").textContent = `${file.name}: ${r.explanation}`;
+    viewer.clearMarkers();
+    if (r.at) viewer.mark(viewer.toShown(r.at), r.verdict === "overlap" || r.verdict === "too tight" ? "--support" : "--ok");
+    setStatus(r.explanation);
+  });
+};
+
 // "My print failed": the user picks what went wrong; the usual causes and fixes, and first what this part's
 // check flagged that predicted it (api.diagnose, symptoms.yaml).
 $("failed-block").ontoggle = async () => {

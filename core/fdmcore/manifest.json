@@ -4,6 +4,7 @@
  "api.py",
  "charts.py",
  "checks.py",
+ "clearance.py",
  "data/presets.yaml",
  "data/rules.yaml",
  "data/symptoms.yaml",
