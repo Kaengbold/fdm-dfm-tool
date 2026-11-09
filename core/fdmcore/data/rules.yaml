@@ -517,6 +517,44 @@ rules:
     sources:
     - OrcaSlicer wiki, Fuzzy skin — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_fuzzy_skin
     - Slant 3D — 10 Ways to Hide Layer Lines, Design 3D Printed Textures — https://www.youtube.com/watch?v=pUabxkiJAdE
+  floor_shrink_line:
+    title: Line round the outside where a floor ends
+    why: A big solid floor inside a hollow part (a deck, a shelf, the bottom of a box raised off the bed) shrinks as
+      it cools and pulls the thin outer wall in with it. The outside shows a ridge all round at the floor's height.
+    fixes:
+    - domain: geometry
+      text: Cut a relief groove about 1 mm wide and 1-2 mm deep round the floor's edge where it meets the wall, or
+        taper the floor into the wall at 45 degrees, so its shrinking doesn't reach the outer skin. Or keep floor
+        and walls about the same thickness.
+    - domain: slicer
+      text: Use gyroid infill rather than grid or solid in the floor, turn on precise outer wall, and don't let the
+        slicer slow the outer wall down for cooling (so it cools the same as the rest).
+      settings:
+        sparse_infill_pattern: gyroid
+        precise_outer_wall: '1'
+    tags:
+    - surface
+    - shrinkage
+    sources:
+    - Slant 3D — How to Eliminate Shrink Lines — https://www.youtube.com/watch?v=d61u_lKFa-U
+  rib_sink_line:
+    title: Rib pulls a line into the outer wall
+    why: Where a rib or partition joins the outer wall, the slicer piles extra plastic into the joint, and the rib
+      pulls the wall in as it cools. On the outside that shows as a vertical sink line along the rib.
+    fixes:
+    - domain: geometry
+      text: Make the rib at most about 60 % as thick as the wall, or leave a 0.1-0.15 mm gap between the rib and the
+        outer wall so the wall prints as one clean loop (the rib still touches it).
+    - domain: slicer
+      text: Print the outer wall first and a little slower, so it is set before the joint shrinks; one more wall line
+        also hides the line.
+      settings:
+        wall_sequence: outer wall/inner wall
+    tags:
+    - surface
+    - shrinkage
+    sources:
+    - Slant 3D — Ribs and Trusses are Made Wrong in 3D Printing — https://www.youtube.com/watch?v=OcxfQeeKn-s
   flat_gap_fuses:
     title: Flat gap in a moving joint fuses
     why: In a print-in-place hinge or captive part, a flat gap stacked in height means the face above it is printed

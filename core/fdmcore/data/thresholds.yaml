@@ -232,6 +232,22 @@ magnet_slots:
   bump_radius_mm: 0.8
   bump_from_pocket_mm: 1.0        # the bumps stand this far out from the pocket
   max_length_mm: 15               # farther from a side: a long tunnel to push it through, not offered
+shrink_lines:
+  # A big solid floor partway up a hollow part shrinks as it cools and pulls the outer wall in: a ridge all
+  # round the outside at the floor's height (0.08–0.25 mm). A rib joined to the outer wall pulls a vertical line
+  # in the same way. Fixes: a relief groove 0.8–1.2 mm wide round the floor's edge, ribs at most 60 % of the
+  # wall's thickness or a 0.1–0.15 mm gap to the wall [Slant 3D, How to Eliminate Shrink Lines
+  # https://www.youtube.com/watch?v=d61u_lKFa-U; Ribs and Trusses are Made Wrong in 3D Printing
+  # https://www.youtube.com/watch?v=OcxfQeeKn-s; research/sourced_A2].
+  floor_min_mm2: 300              # smaller floors don't pull hard enough to show
+  floor_min_z_mm: 3               # below this the bed holds the walls
+  floor_min_span_mm: 15           # the floor's narrow side: short lines shrink little
+  hollow_share: 0.6               # above the floor, plastic covers less than this share of the outline
+  rib_max_mm: 3                   # thicker: a wall of its own, not a rib
+  rib_share: 0.6                  # ribs thicker than this share of the wall show
+  rib_min_height_mm: 2
+  grid_mm: 0.3
+
 grip_fins:
   # Instead of a rigid press fit: an open pocket with thin angled fins whose tips reach past the pressed-in
   # part. They bend like leaf springs, so the grip survives ±0.25 mm of printer error (a rigid bore: ±0.05).

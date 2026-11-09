@@ -820,3 +820,35 @@ def test_flat_gap_in_a_print_in_place_joint_fuses():
     assert len(f) == 1 and f[0]["metrics"]["gap_mm"] == 0.3 and f[0]["metrics"]["area_mm2"] == pytest.approx(100, abs=1)
     api.load(to_binary_stl(_clip(0.8)), "clip")
     assert not [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "flat_gap_fuses"]
+
+
+def _solid(m):
+    from fdmcore.mesh import Mesh
+
+    mm = m.to_mesh()
+    v, f = np.asarray(mm.vert_properties)[:, :3], np.asarray(mm.tri_verts)
+    return Mesh(v[f])
+
+
+def test_shrink_lines_from_a_raised_floor_and_a_thick_rib():
+    """A 60 × 40 tube with a solid deck at 10–13 mm: a line round the outside at the deck's top. A box with 2 mm
+    walls and a 2 mm partition: a sink line where it meets each wall; a 1 mm one (half the wall) and the plain box:
+    nothing (Slant 3D: ribs at most ~60 % of the wall)."""
+    m3 = pytest.importorskip("manifold3d")
+    from fdmcore.mesh import to_binary_stl
+
+    cube = lambda lo, size: m3.Manifold.cube(size).translate(lo)  # noqa: E731
+    tube = cube((0, 0, 0), (60, 40, 30)) - cube((2, 2, -1), (56, 36, 32))
+    box_ = cube((0, 0, 0), (60, 40, 30)) - cube((2, 2, 2), (56, 36, 30))
+
+    def found(m):
+        api.load(to_binary_stl(_solid(m)), "box")
+        return [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] in ("floor_shrink_line", "rib_sink_line")]
+
+    deck = found(tube + cube((1, 1, 10), (58, 38, 3)))
+    assert [f["rule"] for f in deck] == ["floor_shrink_line"] and deck[0]["metrics"]["z"] == pytest.approx(12.9, abs=0.2)
+    assert deck[0]["impact"] == "surface" and deck[0]["fixes"]
+    ribs = found(box_ + cube((29, 1, 1), (2, 38, 29)))
+    assert [f["rule"] for f in ribs] == ["rib_sink_line"] * 2  # both ends of the partition
+    assert sorted(round(f["bbox"][0][1] + 2) for f in ribs) == [-17, 17] and ribs[0]["metrics"]["rib_mm"] == pytest.approx(2.0, abs=0.35)
+    assert not found(box_ + cube((29.5, 1, 1), (1, 38, 29))) and not found(box_)

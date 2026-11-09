@@ -41,6 +41,8 @@ RULE_IMPACT = {
     "hole_closes": "fails",
     "gap_fuses": "fails",
     "flat_gap_fuses": "fails",
+    "floor_shrink_line": "surface",
+    "rib_sink_line": "surface",
     "grip_texture": "surface",
     "trapped_support": "fails",
     "hardened_nozzle_required": "fails",
@@ -171,6 +173,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += facet_findings(mesh, T)
     findings += _relief_findings(mesh, profile, T)
     findings += flat_gap_findings(mesh, profile, T)
+    findings += shrink_line_findings(layers, profile, T)
     findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
 
@@ -1122,6 +1125,104 @@ def flat_gap_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
         if g["gap_mm"] < profile.layer_height:
             text += f" — it is thinner than a layer ({profile.layer_height:.2f} mm), so it isn't even printed as a gap"
         out.append(_finding("flat_gap_fuses", "problem", text, bbox=g["bbox"], gap_mm=g["gap_mm"], area_mm2=g["area_mm2"]))
+    return out
+
+
+def _outline(geom) -> Polygon | MultiPolygon:
+    """The layer's outlines with their holes filled."""
+    return shapely.union_all([Polygon(p.exterior) for p in shapely.get_parts(geom) if p.geom_type == "Polygon"])
+
+
+def floor_shrink_lines(layers: list[Layer], T: dict | None = None) -> list[dict]:
+    """Heights where a big solid floor ends inside a hollow part whose outline goes on unchanged above it
+    (``shrink_lines`` in thresholds.yaml). Each: {"z", "area_mm2", "bbox"}."""
+    S = (T or load_data("thresholds"))["shrink_lines"]
+    out = []
+    for below, layer in zip(layers, layers[1:]):
+        if below.z < S["floor_min_z_mm"] or below.geom.is_empty or layer.geom.is_empty:
+            continue
+        outer = _outline(layer.geom)
+        if layer.geom.area > S["hollow_share"] * outer.area:
+            continue  # not hollow above
+        if _safe_overlay(shapely.symmetric_difference, _outline(below.geom), outer).area > 0.05 * outer.area:
+            continue  # the outline changes here: a step, not a floor inside the walls
+        floor = _safe_diff(below.geom, layer.geom)
+        if floor.area < S["floor_min_mm2"] or _min_width(floor.minimum_rotated_rectangle) < S["floor_min_span_mm"]:
+            continue
+        out.append({"z": round(below.z, 2), "area_mm2": round(floor.area), "bbox": _layer_bbox(outer, below.z, layer.z)})
+    return out
+
+
+def rib_sink_lines(layers: list[Layer], T: dict | None = None, max_layers: int = 40) -> list[dict]:
+    """Thin ribs (or partitions) inside a hollow part joined to its outer wall: each pulls a vertical line into
+    the outside where it meets the wall. Found on a grid of points in each layer's plastic: the wall is what
+    lies within its thickness of the outside, a rib what reaches further in and is thin. Each: {"at" (x, y),
+    "z0", "z1", "rib_mm", "wall_mm"}."""
+    S = (T or load_data("thresholds"))["shrink_lines"]
+    h = S["grid_mm"]
+    found = []
+    for layer in layers[:: max(1, len(layers) // max_layers)]:
+        for piece in shapely.get_parts(layer.geom):
+            if piece.geom_type != "Polygon" or not piece.interiors or piece.area > S["hollow_share"] * Polygon(piece.exterior).area:
+                continue
+            holes = shapely.MultiLineString([np.asarray(r.coords) for r in piece.interiors])
+            rim = shapely.get_coordinates(shapely.segmentize(holes, 1.0))
+            wall = float(np.percentile(shapely.distance(piece.exterior, shapely.points(rim)), 20))
+            x0, y0, x1, y1 = piece.bounds
+            X, Y = np.meshgrid(np.arange(x0 + h / 2, x1, h), np.arange(y0 + h / 2, y1, h))
+            keep = shapely.contains_xy(piece, X, Y)
+            pts = np.stack([X[keep], Y[keep]], axis=1)
+            if not len(pts):
+                continue
+            geoms = shapely.points(pts)
+            to_out = shapely.distance(piece.exterior, geoms)
+            inner = to_out > wall + 2 * h
+            if not inner.any():
+                continue
+            # Inner points next to each other belong to one rib (or boss, or partition).
+            idx = np.flatnonzero(inner)
+            cell = np.round((pts[idx] - [x0, y0]) / h).astype(int)
+            key = {tuple(c): i for i, c in enumerate(cell)}
+            pairs = [(i, key[(c[0] + dx, c[1] + dy)]) for i, c in enumerate(cell) for dx, dy in ((1, 0), (0, 1))
+                     if (c[0] + dx, c[1] + dy) in key]
+            label = _join(np.array(pairs, int).reshape(-1, 2), len(idx))
+            to_hole = shapely.distance(holes, geoms[idx])
+            for g in np.unique(label):
+                members = idx[label == g]
+                half = float(to_hole[label == g].max())
+                if 2 * half > S["rib_max_mm"] or to_out[members].min() > wall + 3 * h:
+                    continue  # thick (a boss, a wall of its own), or not joined to the outer wall
+                joint = members[to_out[members] <= wall + 3 * h]  # where it meets the wall (both ends of a partition)
+                picked = []
+                for at in pts[joint[np.argsort(to_out[joint])]]:
+                    if all(np.hypot(*(at - q)) > 3.0 for q in picked):
+                        picked.append(at)
+                        found.append((layer.z, at, 2 * half + h, wall))
+    # The same junction on several layers: one line, from its lowest to its highest layer.
+    out = []
+    for z, at, rib, wall in sorted(found, key=lambda f: f[0]):
+        near = next((o for o in out if np.hypot(*(o["at"] - at)) < 2.0), None)
+        if near is None:
+            out.append({"at": at, "z0": z, "z1": z, "rib_mm": rib, "wall_mm": wall})
+        else:
+            near.update(z1=z, rib_mm=max(near["rib_mm"], rib), wall_mm=min(near["wall_mm"], wall))
+    return [o for o in out if o["z1"] - o["z0"] >= S["rib_min_height_mm"] and o["rib_mm"] > S["rib_share"] * o["wall_mm"]]
+
+
+def shrink_line_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
+    """floor_shrink_line and rib_sink_line: lines the shrinking plastic inside pulls into the outer wall."""
+    out = []
+    for f in floor_shrink_lines(layers, T):
+        out.append(_finding("floor_shrink_line", "info",
+                            f"A {f['area_mm2']:.0f} mm² solid floor ends at {f['z']:.1f} mm inside the walls: as it cools it shrinks and "
+                            "pulls the outer wall in, leaving a line all round the outside at that height",
+                            bbox=f["bbox"], z=f["z"], area_mm2=f["area_mm2"]))
+    for r in rib_sink_lines(layers, T):
+        x, y = r["at"]
+        out.append(_finding("rib_sink_line", "info",
+                            f"A {r['rib_mm']:.1f} mm rib meets the {r['wall_mm']:.1f} mm outer wall at ({x:.0f}, {y:.0f}) mm, "
+                            f"{r['z0']:.1f}–{r['z1']:.1f} mm high: as it cools it pulls a vertical line into the outside there",
+                            bbox=[[x - 2, y - 2, r["z0"]], [x + 2, y + 2, r["z1"]]], rib_mm=round(r["rib_mm"], 2), wall_mm=round(r["wall_mm"], 2)))
     return out
 
 
