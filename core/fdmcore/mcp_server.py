@@ -535,6 +535,16 @@ def add_pause_to_gcode(path: str, output_path: str, pause_heights: list[float]) 
 
 
 @server.tool()
+def diagnose_failed_print(symptom: str | None = None, up: list[float] | None = None, printer: str = "bambu_p1s",
+                          material: str = "pla", nozzle: str = "0.4") -> dict:
+    """"My print failed": what went wrong (``symptom``: warped_corner, layer_split, stringing, sagging_hole,
+    elephant_foot, rough_overhang, came_loose, holes_wrong_size, missing_detail, seam_blobs, broke_in_use; None
+    lists them with labels). Returns the usual causes and fixes, and with ``up`` (the orientation it was printed
+    in) ``on_your_part``: the findings on the loaded part that predicted it - start the answer with those."""
+    return _clean(api.diagnose(symptom, up, _profile(printer, material, nozzle) if up is not None else None))
+
+
+@server.tool()
 def check_setup(printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", settings: dict[str, str] | None = None) -> dict:
     """Mistakes in a printer / material / nozzle choice and slicer values (``settings``, OrcaSlicer keys such as
     layer_height, support_top_z_distance, outer_wall_speed): layers too thick for the nozzle, support touching the
@@ -761,6 +771,7 @@ API_TOOLS = {
     "load_gcode": "load_gcode",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
+    "diagnose": "diagnose_failed_print",
     "warping": "check_warping",
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",

@@ -3062,6 +3062,24 @@ const pausesWanted = () => [...new Set((state.check?.findings ?? []).filter((f) 
 // Shallow slopes (shallow_slope_stairs): thinner layers over just their height, as height ranges in the 3MF.
 const fineWanted = () => (state.check?.findings ?? []).filter((f) => f.rule === "shallow_slope_stairs").map((f) => f.metrics);
 
+// "My print failed": the user picks what went wrong; the usual causes and fixes, and first what this part's
+// check flagged that predicted it (api.diagnose, symptoms.yaml).
+$("failed-block").ontoggle = async () => {
+  if (!$("failed-block").open || $("failed-symptom").options.length > 1) return;
+  const { symptoms } = await call("diagnose", {});
+  $("failed-symptom").append(...symptoms.map((s) => el("option", { value: s.id, textContent: s.label })));
+};
+$("failed-symptom").onchange = async () => {
+  const symptom = $("failed-symptom").value;
+  if (!symptom) return $("failed-result").replaceChildren();
+  const r = await call("diagnose", { symptom, findings: state.check?.findings ?? [] });
+  const mine = r.on_your_part.length
+    ? [el("h4", { textContent: "Flagged on your part" }), el("ul", { className: "mine" }, ...r.on_your_part.map((f) => el("li", { textContent: `${f.title}: ${f.detail}` })))]
+    : [el("p", { className: "hint", textContent: state.check ? "The check didn't flag this on your part: look at the usual causes." : "Load the part to see what the check found on it." })];
+  $("failed-result").replaceChildren(...mine, el("h4", { textContent: "Usual causes" }), el("p", { textContent: r.why }),
+    el("h4", { textContent: "What helps" }), el("ul", {}, ...r.fixes.map((f) => el("li", {}, el("span", { className: `chip ${f.domain}`, textContent: DOMAIN_LABEL[f.domain] }), " ", f.text))));
+};
+
 // Mistakes in the printer / material presets and the slicer values set here (api.setup_check), before the 3MF goes out.
 async function setupWarnings() {
   const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));

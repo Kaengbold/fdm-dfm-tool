@@ -2460,6 +2460,25 @@ def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotati
     return out
 
 
+def diagnose(symptom: str | None = None, up=None, profile: dict | None = None, findings: list[dict] | None = None) -> dict:
+    """"My print failed": for what the user saw (``symptom``, a key of symptoms.yaml; None lists them), its usual
+    causes and fixes, and ``on_your_part``: the findings that predicted it on this part - from ``findings``
+    (the last check's, as the app has them) or a check in direction ``up``. Sorted most serious first."""
+    data = load_data("symptoms")["symptoms"]
+    if symptom is None:
+        return {"symptoms": [{"id": k, "label": v["label"]} for k, v in data.items()]}
+    if symptom not in data:
+        raise ValueError(f"symptom must be one of {', '.join(data)}")
+    entry = data[symptom]
+    if findings is None and up is not None:
+        findings = check(up, profile)["findings"]
+    rank = {"problem": 0, "warn": 1, "info": 2}
+    mine = sorted((f for f in findings or [] if f.get("rule") in entry["rules"]), key=lambda f: rank.get(f.get("severity"), 3))
+    return {"symptom": symptom, "label": entry["label"], "why": entry["why"], "fixes": entry["fixes"], "sources": entry["sources"],
+            "on_your_part": [{"rule": f["rule"], "title": f.get("title") or load_data("rules")["rules"][f["rule"]]["title"],
+                              "detail": f.get("detail", ""), "severity": f.get("severity")} for f in mine]}
+
+
 def setup_check(profile: dict | None = None, settings: dict | None = None) -> dict:
     """Mistakes in the chosen printer / material / nozzle (presets the user made) and in slicer values
     they set (``settings``, slicer keys such as layer_height, support_top_z_distance, outer_wall_speed):
@@ -2675,6 +2694,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
+    "diagnose": diagnose,
     "warping": warping,
     "set_fit": set_fit,
     "set_fastener": set_fastener,

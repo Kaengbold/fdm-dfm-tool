@@ -1124,6 +1124,17 @@ def main():
             return text
         run.step("thinner layers on a shallow slope", fine_slopes)
 
+        def print_failed():
+            # "My print failed" on the sloped roof: rough top -> the shallow slope the check flagged comes first (T-344).
+            page.evaluate("() => { const d = document.getElementById('failed-block'); d.open = true; d.dispatchEvent(new Event('toggle')); }")
+            page.wait_for_function("() => document.getElementById('failed-symptom').options.length > 5", timeout=60_000)
+            page.select_option("#failed-symptom", "rough_overhang")
+            page.wait_for_function("() => document.querySelector('#failed-result .mine li')", timeout=60_000)
+            mine = page.locator("#failed-result .mine li").all_inner_texts()
+            assert any("Shallow slope" in m for m in mine), mine
+            return mine[0][:100]
+        run.step("my print failed: matched to the part's findings", print_failed)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

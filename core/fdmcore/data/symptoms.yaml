@@ -1,0 +1,165 @@
+# "My print failed": what the user saw, its usual causes and fixes, and which of our findings predict it
+# on their part (api.diagnose). Facts from research/sourced_D_print_problems.yaml and the rules' own sources.
+symptoms:
+  warped_corner:
+    label: A corner or edge lifted off the bed (warping)
+    why: As the layers cool they shrink, and the pull adds up along the part's length. It is strongest at the ends
+      and sharp corners, where it lifts the base off the plate.
+    fixes:
+    - domain: slicer
+      text: Add a brim or mouse ears, use fewer walls and less infill (or gyroid infill), and keep the fan off for
+        the first 3-4 layers.
+    - domain: process
+      text: Clean the plate with dish soap and warm water, use glue for ABS / ASA / PC / nylon, and print those in
+        an enclosure (45-60 °C inside).
+    - domain: geometry
+      text: Round the base corners (3 mm or more), or add relief slots every 40-60 mm along long thick bases.
+    rules: [warping, small_bed_contact, enclosure_recommended, setup_plate_too_sticky]
+    sources:
+    - Bambu Lab Wiki — ASA CF / PAHT CF usage guide (more infill and walls, more warping) — https://wiki.bambulab.com/en/filament/asacf_pahtcf
+    - CNC Kitchen — How to prevent warping in 3D printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y
+  layer_split:
+    label: Layers split apart or cracked between layers
+    why: Layers bond only where the hot line melts into the one below. Tall thin walls cool fast in open air (most of
+      all ABS, ASA, PC, nylon), shrink, and pull the layers apart; thick layers and wet filament bond worse too.
+    fixes:
+    - domain: slicer
+      text: Print 5-10 °C hotter, use wider lines (0.6 mm on a 0.4 nozzle), less part cooling, and layers no
+        thicker than 0.75 × the nozzle.
+    - domain: process
+      text: Print ABS / ASA / PC / nylon in an enclosure and out of drafts; dry the filament.
+    - domain: geometry
+      text: Thicken tall thin walls or add ribs; turn the part so the load runs along the layers, not across them.
+    rules: [enclosure_recommended, setup_layer_too_thick, dry_filament, weak_upright_pin, thin_neck, tall_thin_feature]
+    sources:
+    - Prusa Knowledge Base — Layer separation and splitting — https://help.prusa3d.com/article/layer-separation-and-splitting-fdm_1806
+    - CNC Kitchen — The influence of extrusion temperature on layer adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion
+  stringing:
+    label: Thin strings or cobwebs between parts of the print
+    why: Hot plastic oozes from the nozzle while it travels between separate areas, and moisture in the filament
+      boils and pushes more out.
+    fixes:
+    - domain: process
+      text: Dry the filament first - wet PETG, TPU and nylon string whatever the retraction is.
+    - domain: slicer
+      text: Turn on "avoid crossing walls", use a small Z hop (0.2-0.4 mm), print 5-10 °C cooler, or print several
+        parts one after another.
+    - domain: geometry
+      text: Fewer separate islands per layer (join posts with a rib), or turn the part so there are fewer.
+    rules: [dry_filament]
+    sources:
+    - Prusa Knowledge Base — Stringing and oozing — https://help.prusa3d.com/article/stringing-and-oozing_1804
+  sagging_hole:
+    label: The top of a sideways hole or a bridge sagged
+    why: The top half of a hole that lies on its side, and any flat ceiling, is printed in mid-air. Plastic sags
+      between its anchors, so holes come out oval and ceilings droopy.
+    fixes:
+    - domain: geometry
+      text: Use a teardrop or diamond top for sideways holes, or turn the part so the hole stands upright; keep
+        bridges short or add a support post.
+    - domain: slicer
+      text: More cooling and slower bridges help a little; supports inside the hole remove the sag but leave marks.
+    rules: [sideways_hole_oval, bridge_sag, long_bridge, hole_starts_midair]
+    sources:
+    - Maker's Muse — 7 ways to design holes for 3D printing — https://www.youtube.com/watch?v=j6508J94VsA
+    - Rahix — Design for 3D printing — https://blog.rahix.de/design-for-3d-printing/
+  elephant_foot:
+    label: The bottom layers bulge out (elephant foot)
+    why: The first layer is squashed wider to stick, and a hot bed lets the weight above press the soft bottom
+      layers outward - by 0.1-0.25 mm per side.
+    fixes:
+    - domain: slicer
+      text: Set elephant foot compensation to about 0.15 mm, and keep the bed below the material's softening point
+        after the first layer (PLA 55-60 °C).
+    - domain: process
+      text: Check the first-layer height (Z offset) - squashed too hard makes the bulge bigger.
+    - domain: geometry
+      text: Add a 0.4-0.8 mm chamfer along the bottom edges.
+    rules: [elephant_foot, first_layer_detail]
+    sources:
+    - Prusa Knowledge Base — Elephant foot compensation — https://help.prusa3d.com/article/elephant-foot-compensation_114487
+  rough_overhang:
+    label: Overhangs curled up, came out rough or droopy
+    why: An overhanging edge is held only on its inner side; as it cools it curls up, and on small layers the nozzle
+      comes back before it has set and drags over it.
+    fixes:
+    - domain: slicer
+      text: Thinner layers there and wider outer walls, slow down for overhangs and for small layers, or supports.
+    - domain: geometry
+      text: Keep overhangs at 45° or less, round sharp overhanging corners, or turn the part.
+    - domain: process
+      text: Print two copies at once when the top ends in a thin spire, so each layer has time to cool.
+    rules: [support_marks, bridge_sag, long_bridge, small_layers_cooling, shallow_slope_stairs, trapped_support]
+    sources:
+    - Prusa Knowledge Base — Variable layer height function — https://help.prusa3d.com/article/variable-layer-height-function_1750
+  came_loose:
+    label: The part came off the bed or was knocked over
+    why: A small footprint gives the nozzle a long lever on a tall part, and the first layer only holds on as much
+      area as it has.
+    fixes:
+    - domain: slicer
+      text: Add a brim, use a wider and slower first layer (0.5 mm lines, 20-30 mm/s).
+    - domain: geometry
+      text: Widen the base, or join tall pins with a thin sacrificial bridge.
+    - domain: process
+      text: Clean the plate, and turn the part so a big flat face lies on the bed.
+    rules: [small_bed_contact, tipping_risk, tall_thin_feature, warping]
+    sources:
+    - Bambu Lab Wiki — Filament drying recommendations — https://wiki.bambulab.com/en/filament-acc/filament/dry-filament
+  holes_wrong_size:
+    label: Holes too small, or parts don't fit together
+    why: Holes print smaller than modelled (each line is pressed outward into the hole, polygon outlines cut
+      corners), sideways holes come out oval, the bottom layers bulge in, and the whole part shrinks a little.
+    fixes:
+    - domain: geometry
+      text: Size holes and pegs with the fit helper in this app (it adds the gap your printer needs), or print the
+        fit test once and use its gaps.
+    - domain: slicer
+      text: Use hole compensation (xy_hole_compensation) and elephant foot compensation.
+    - domain: process
+      text: Export a finer STL or use the STEP file when curves were exported coarse.
+    rules: [small_hole_undersized, hole_closes, sideways_hole_oval, elephant_foot, coarse_facets, shrinkage_size_error, nut_trap_tight, gap_fuses]
+    sources:
+    - Nophead — Hydraraptor, polyholes — https://hydraraptor.blogspot.com/2011/02/polyholes.html
+    - OrcaSlicer Wiki — Precision settings — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision
+  missing_detail:
+    label: Thin walls, text or small details are missing or ragged
+    why: The nozzle can't print a line narrower than about its own width; anything thinner is dropped or printed as
+      a ragged single line.
+    fixes:
+    - domain: slicer
+      text: Use the Arachne wall generator, a smaller nozzle, or thinner lines for the details.
+    - domain: geometry
+      text: Make walls and text strokes at least 2 × the line width (about 0.9 mm for a 0.4 nozzle).
+    rules: [too_thin_to_print, single_line_wall, fine_detail_rough, side_detail_small, shallow_relief, first_layer_detail]
+    sources:
+    - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
+  seam_blobs:
+    label: A line of blobs or a scar running up the side
+    why: Every wall loop starts and ends somewhere, the seam. On a part with corners the slicer hides it there; on a
+      round part it shows as a line of zits.
+    fixes:
+    - domain: slicer
+      text: Use the scarf seam and wipe on loops for round parts; on parts with corners, put the seam in a corner at
+        the back.
+    - domain: process
+      text: Mark the faces people see as "keep clean" in this app - the 3MF then keeps the seam off them.
+    - domain: geometry
+      text: Add a small vertical rib or groove where the seam may go.
+    rules: []
+    sources:
+    - Prusa Knowledge Base — Seam position — https://help.prusa3d.com/article/seam-position_151069
+  broke_in_use:
+    label: It broke when used
+    why: Printed parts are weakest across the layers, at sharp inside corners and at thin necks; heat (a car, the sun)
+      and a load that stays on make PLA give way over time.
+    fixes:
+    - domain: geometry
+      text: Round inside corners, thicken necks, and turn the part so the load runs along the layers.
+    - domain: slicer
+      text: More walls (they add more strength than infill), and check the strength with your load in this app.
+    - domain: process
+      text: For heat or a constant load use PETG, ASA or PC instead of PLA.
+    rules: [weak_upright_pin, thin_neck, stress_at_inside_corner, too_hot_in_use, snap_fit_upright, living_hinge, setup_layer_too_thick]
+    sources:
+    - CNC Kitchen — The strongest hook (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition

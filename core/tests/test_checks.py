@@ -728,3 +728,23 @@ def test_open_container_can_print_in_vase_mode():
     for part in (_cup(wall=20.0), _cup(floor=0.0), _cup(wall=6.0)):
         api.load(to_binary_stl(part), "not a cup")
         assert not [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "vase_mode_possible"]
+
+
+def test_print_failed_helper_puts_the_parts_own_findings_first():
+    """"My print failed": every symptom has causes, fixes with a slicer or process one, sources and only known
+    rules; for a part, the findings that predicted it come first (an ABS hook on an open printer splitting)."""
+    import yaml
+
+    from fdmcore.profile import DATA
+
+    rules = load_data("rules")["rules"]
+    for key, s in yaml.safe_load((DATA / "symptoms.yaml").read_text(encoding="utf-8"))["symptoms"].items():
+        assert s["label"] and s["why"] and s["sources"] and set(s["rules"]) <= set(rules), key
+        assert {f["domain"] for f in s["fixes"]} & {"slicer", "process"}, key
+    assert len(api.diagnose()["symptoms"]) >= 10
+    api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
+    r = api.diagnose("layer_split", [0, 0, 1], {"material": "abs", "printer": "bambu_a1"})
+    assert [f["rule"] for f in r["on_your_part"]] == ["enclosure_recommended"] and r["fixes"]
+    assert api.diagnose("stringing", findings=[])["on_your_part"] == []
+    with pytest.raises(ValueError):
+        api.diagnose("melted")
