@@ -578,3 +578,14 @@ def test_cost_support_and_spool():
         assert "cost" not in plain and "spool_short" not in plain
     finally:
         api.custom_presets()
+
+
+def test_each_orientation_says_its_support_grams():
+    """Orientation cards show support grams (and the app the cost from them): upside down, the mushroom
+    needs no support under its cap; standing on its stem it does."""
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
+    r = api.orientations({"material": "pla"})
+    assert all(o["support_g"] >= 0 for o in [*r["orientations"], r["as_loaded"]])
+    assert r["orientations"][0]["support_g"] < r["as_loaded"]["support_g"]
+    one = api.orientation([0, 0, 1], {"material": "pla"})
+    assert one["support_g"] == pytest.approx(r["as_loaded"]["support_g"], rel=0.3)

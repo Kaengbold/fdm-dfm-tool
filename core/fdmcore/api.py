@@ -365,7 +365,7 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     candidates = candidates[:top]
 
     def pack(r, label):
-        out = _pack(s.mesh, r, label, settings, placed[id(r)][0], safety.get(id(r)))
+        out = _pack(s.mesh, r, label, settings, placed[id(r)][0], p, safety.get(id(r)))
         if candidates and r is not candidates[0]:
             out["why_lower"] = why_lower(r.terms, candidates[0].terms)
         return out
@@ -570,10 +570,15 @@ def orientation(up, profile: dict | None = None, label: str = "Custom") -> dict:
     p = Profile.from_dict(profile)
     settings = orientation_settings(p)
     r = evaluate(s.mesh, up, settings)
-    return _pack(s.mesh, r, label, settings, _placement(s.mesh, r, p)[0])
+    placed = _placement(s.mesh, r, p)
+    _refine(s.mesh, [r], {id(r): placed}, settings, p)  # sliced support, as the other options have
+    return _pack(s.mesh, r, label, settings, placed[0], p)
 
 
-def _pack(mesh: Mesh, r, label: str, settings: OrientationSettings, rotation: np.ndarray, safety: float | None = None) -> dict:
+def _pack(mesh: Mesh, r, label: str, settings: OrientationSettings, rotation: np.ndarray, p: Profile,
+          safety: float | None = None) -> dict:
+    """``support_g``: rough grams of support for this direction (as check's stats), so each option can
+    say what it costs next to the part itself."""
     return {
         "label": label,
         "up": r.up.tolist(),
@@ -583,6 +588,7 @@ def _pack(mesh: Mesh, r, label: str, settings: OrientationSettings, rotation: np
         "bed_area_mm2": r.bed_area,
         "height_mm": r.height,
         "safety_factor": safety,
+        "support_g": round(r.support_volume * SUPPORT_FILL / 1000 * p.material["density_g_cm3"], 1),
         "reasons": r.reasons,
         "score_terms": {k: round(v, 3) for k, v in r.terms.items()},
         "face_classes": classify_faces(mesh, r.up, settings).tobytes(),

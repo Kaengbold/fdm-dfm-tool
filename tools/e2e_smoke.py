@@ -210,6 +210,15 @@ def main():
             return f"{len(findings(page))} findings"
         run.step("select option 2", other_orientation)
 
+        def option_costs():
+            costs = page.locator("#options .option-cost").all_inner_texts()
+            n = page.locator("#options > li").count()
+            assert len(costs) == n and all("support" in c for c in costs), f"cards without support grams: {costs}"
+            active = page.evaluate("() => [...document.querySelectorAll('#options > li')].findIndex(li => li.classList.contains('active'))")
+            assert active == 1, f"option 2 no longer marked after the check redrew the cards ({active})"
+            return " | ".join(costs)
+        run.step("support grams on each orientation card", option_costs)
+
         def orientation_updates_findings():
             run.act(lambda: page.click("[data-sample=hook]"))
             seen = {}

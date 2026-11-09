@@ -493,6 +493,7 @@ async function runCheck() {
     if (!result?.findings) throw new Error("The analysis returned no result — please try again");
     state.check = result;
     renderCheck();
+    renderOptions(); // their cost uses this check's part grams and price
     renderPauses();
     $("dl-split").hidden = !result.findings.some((f) => f.rule === "exceeds_build_volume");
     $("design-block").hidden = mode() === "print";
@@ -508,13 +509,24 @@ function renderOptions() {
     ...state.options.map((o, i) =>
       el(
         "li",
-        { onclick: () => selectOption(i) },
+        { onclick: () => selectOption(i), className: i === state.active ? "active" : "" },
         el("strong", { textContent: o.label }, i === 0 ? el("span", { className: "tag", textContent: "Recommended" }) : ""),
         el("ul", {}, ...o.reasons.map((r) => el("li", { textContent: r }))),
+        optionCost(o) ? el("p", { className: "option-cost", textContent: optionCost(o) }) : "",
         o.why_lower ? el("p", { className: "why-lower", textContent: o.why_lower }) : "",
       ),
     ),
   );
+}
+
+/** Support and filament cost of one orientation card. The part's own grams come from the last check (they
+ * hardly change with the direction; the support does), the price from that check's cost (My materials). */
+function optionCost(o) {
+  if (o.support_g == null) return "";
+  const st = state.check?.stats;
+  const support = o.support_g >= 1 ? `≈ ${Math.round(o.support_g)} g support` : "No support";
+  if (st?.cost == null || !st.total_g) return support;
+  return `${support} · about ${((st.cost / st.total_g) * (st.filament_g + o.support_g)).toFixed(2)} for the filament`;
 }
 
 const SEVERITY_LABEL = { problem: "Problem", warn: "Warning", info: "Tip" };
