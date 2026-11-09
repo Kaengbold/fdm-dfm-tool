@@ -678,3 +678,26 @@ def test_fit_on_a_coarse_hole_says_the_size_is_uncertain():
     hole = next(f for f in api.design([0, 0, 1])["features"] if f["type"] == "hole")
     r = api.set_fit(hole["region"], [0, 0, 1], 16.0, "sliding")
     assert "few facets" in r["explanation"]
+
+
+def test_setup_check_names_preset_and_setting_mistakes():
+    """Mistakes in the user's presets and slicer values, no part needed (sourced_F #20, #24, #26, #27, #21);
+    every built-in printer / material / nozzle on its own is fine, apart from abrasive filament on brass."""
+    from fdmcore.profile import presets
+
+    try:
+        api.custom_presets(printers={"mine": {"based_on": "bambu_a1", "name": "My A1", "bed_surface": "smooth_pei"}},
+                           materials={"fast": {"based_on": "petg", "name": "Fast PETG", "max_flow_mm3s": 30}})
+        bad = api.setup_check({"printer": "my_mine", "material": "my_fast"},
+                              {"layer_height": "0.36", "support_top_z_distance": "0", "outer_wall_speed": "300"})["findings"]
+        rules = [f["rule"] for f in bad]
+        assert rules == ["setup_layer_too_thick", "setup_support_gap_zero", "setup_flow_too_high", "setup_flow_too_high", "setup_plate_too_sticky"]
+        assert all(f["fixes"] and f["title"] for f in bad)
+        assert not api.setup_check({"printer": "my_mine", "material": "pla"}, {"layer_height": "0.28"})["findings"]
+        # A support filament may touch the part.
+        assert not api.setup_check({"multi_material": True}, {"support_top_z_distance": "0"})["findings"]
+    finally:
+        api.custom_presets()
+    flagged = {(f["rule"], m) for pr in presets()["printers"] for m in presets()["materials"] for n in presets()["nozzles"]
+               for f in api.setup_check({"printer": pr, "material": m, "nozzle": n})["findings"]}
+    assert {r for r, _ in flagged} <= {"hardened_nozzle_required"}

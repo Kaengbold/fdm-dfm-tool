@@ -146,6 +146,12 @@ fasteners:
   # [Voron Design printed parts, https://github.com/VoronDesign/Voron-2].
   nut_slot_extra_mm: 0.3
 
+setup:
+  # Checks of the user's own presets and slicer values [sourced_F mistakes #20, #24, #26, #27].
+  max_layer_share: 0.75           # layer height above this × the nozzle: layers bond badly
+  min_support_gap_mm: 0.1         # support top gap below this with the same filament: support welds on
+  standard_hotend_flow_mm3s: 24   # a "max flow" above this needs a high-flow hotend (standard: about 11-22 for PLA)
+  sticky_on_smooth: [petg, tpu, pc]   # bond too hard to smooth PEI / bare glass
 facets:
   # A curve exported with too few flat facets (a hole as a 12-gon) prints as flats. Neighbouring flat strips
   # that turn by min_turn..max_turn degrees are pieces of one curve (finer: smooth; sharper: a designed edge,

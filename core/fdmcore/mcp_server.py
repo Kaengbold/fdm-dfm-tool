@@ -535,6 +535,14 @@ def add_pause_to_gcode(path: str, output_path: str, pause_heights: list[float]) 
 
 
 @server.tool()
+def check_setup(printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", settings: dict[str, str] | None = None) -> dict:
+    """Mistakes in a printer / material / nozzle choice and slicer values (``settings``, OrcaSlicer keys such as
+    layer_height, support_top_z_distance, outer_wall_speed): layers too thick for the nozzle, support touching the
+    part, faster than the hotend melts, PETG on smooth PEI, abrasive filament in a brass nozzle. No part needed."""
+    return _clean(api.setup_check(_profile(printer, material, nozzle), settings))
+
+
+@server.tool()
 def heat_curve(material: str = "pla", use_temp_c: float | None = None) -> dict:
     """How much of its strength a material keeps from −20 °C to past its heat limit (``temps_c`` with
     ``share_pct``), where it gets brittle (``cold_c``) or soft (``soft_c``), and a plain sentence for
@@ -752,6 +760,7 @@ API_TOOLS = {
     "load": "load_part",
     "load_gcode": "load_gcode",
     "pause_gcode": "add_pause_to_gcode",
+    "setup_check": "check_setup",
     "warping": "check_warping",
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",

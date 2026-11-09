@@ -950,11 +950,20 @@ def main():
             page.set_input_files("#import-orca", str(orca))
             assert page.input_value("#preset-fields [name=density_g_cm3]") == "1.27"
             run.act(lambda: page.click("#preset-form button.primary"))
+            # A printer with a smooth PEI plate while PETG is chosen: saved, with a plain warning (T-333).
+            page.click("#new-printer")
+            page.fill("#preset-fields [name=name]", "Smooth A1")
+            page.select_option("#preset-fields [name=bed_surface]", "smooth_pei")
+            run.act(lambda: page.click("#preset-form button.primary"))
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('sticks too hard')", timeout=60_000)
+            warned = page.locator("#setup-warnings li").all_inner_texts()
+            assert any("glue stick" in w for w in warned), warned
             page.reload()
             run.booted()
             names = page.locator("#material option").all_inner_texts()
             assert "My PETG" in names and "Test PETG" in names, names
-            return f"materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
+            page.select_option("#printer", "bambu_p1s")  # the later steps use the built-in printer
+            return f"{warned[0][:60]} | materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
         run.step("my presets + calibration + Orca import", my_presets)
 
         def offline():

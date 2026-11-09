@@ -73,6 +73,10 @@ RULE_IMPACT = {
     "pause_to_insert": "info",
     "shallow_slope_stairs": "surface",
     "coarse_facets": "shape",
+    "setup_layer_too_thick": "weak",
+    "setup_support_gap_zero": "surface",
+    "setup_flow_too_high": "fails",
+    "setup_plate_too_sticky": "fails",
     "modelled_thread": "shape",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
@@ -701,6 +705,52 @@ def pocket_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
                      "it may sag onto what you put in")
         out.append(_finding("pause_to_insert", "warn" if long else "info", text, bbox=[lo, hi],
                             pause_z=p["pause_z"], layer=p["layer"], top_z=p["top_z"], span_mm=round(p["span_mm"], 1)))
+    return out
+
+
+SPEED_KEYS = {"outer_wall_speed": "outer wall", "inner_wall_speed": "inner wall", "sparse_infill_speed": "infill",
+              "internal_solid_infill_speed": "solid infill", "top_surface_speed": "top surface"}
+
+
+def setup_findings(profile: Profile, settings: dict | None = None, T: dict | None = None) -> list[dict]:
+    """Mistakes in the printer / material presets and the slicer values the user set (``settings``, slicer
+    keys): no part needed, so the app can say it when a preset is saved and before the 3MF goes out."""
+    S = (T or load_data("thresholds"))["setup"]
+    settings = settings or {}
+    num = lambda k, d=None: float(settings[k]) if str(settings.get(k, "")).replace(".", "", 1).isdigit() else d  # noqa: E731
+    mat, prn = profile.material, profile.printer
+    nozzle = float(profile.nozzle)
+    lh = num("layer_height", goal_plan(profile)["layer_height"])
+    lw = num("line_width", profile.line_width)
+    out = []
+    if lh > S["max_layer_share"] * nozzle + 1e-9:
+        out.append(_finding("setup_layer_too_thick", "warn", f"Layer height {lh:.2f} mm on a {nozzle:g} mm nozzle is more than "
+                            f"{S['max_layer_share']:.0%} of it: the layers are pressed on too little and bond badly. Use at most "
+                            f"{S['max_layer_share'] * nozzle:.2f} mm, or a bigger nozzle", layer_height=lh, nozzle=nozzle))
+    gap = num("support_top_z_distance")
+    if gap is not None and gap < S["min_support_gap_mm"] and not profile.multi_material:  # a support filament may touch
+        out.append(_finding("setup_support_gap_zero", "warn", f"Support top gap {gap:.2f} mm with the same filament: the support welds "
+                            "onto the part and tears the surface when you remove it. Use 0.15–0.2 mm (PETG 0.2–0.25 mm)", gap_mm=gap))
+    flow = float(mat["max_flow_mm3s"])
+    fast = [(label, num(k)) for k, label in SPEED_KEYS.items() if num(k)]
+    for label, v in fast:
+        if v * lw * lh > flow * 1.05:
+            out.append(_finding("setup_flow_too_high", "info", f"{label.capitalize()} speed {v:.0f} mm/s needs {v * lw * lh:.0f} mm³/s of melted "
+                                f"plastic; {mat['name']} melts about {flow:.0f} mm³/s, so the slicer slows it down to "
+                                f"{flow / (lw * lh):.0f} mm/s (as long as its max volumetric speed is set)", speed=v, flow_mm3s=round(v * lw * lh, 1)))
+            break
+    if flow > S["standard_hotend_flow_mm3s"]:
+        out.append(_finding("setup_flow_too_high", "warn", f"{mat['name']} is set to melt {flow:.0f} mm³/s: more than a standard hotend does "
+                            f"(about 11–22 mm³/s for PLA). Unless the printer has a high-flow hotend, it under-extrudes and the walls "
+                            "come out thin and weak", flow_mm3s=flow))
+    sticky = any(k in " ".join([mat.get("name", ""), profile.material_id, mat.get("based_on", "")]).lower() for k in S["sticky_on_smooth"])
+    if sticky and prn.get("bed_surface") in ("smooth_pei", "glass"):
+        plate = "smooth PEI" if prn["bed_surface"] == "smooth_pei" else "bare glass"
+        out.append(_finding("setup_plate_too_sticky", "warn", f"{mat['name']} on {plate} bonds so hard it can tear pieces out of the "
+                            "plate: put glue stick on as a release layer, or use a textured plate", surface=prn["bed_surface"]))
+    if mat.get("abrasive") and not prn.get("hardened_nozzle"):
+        out.append(_finding("hardened_nozzle_required", "problem",
+                            f"{mat['name']} wears out the standard {prn['name']} nozzle — fit a hardened one first"))
     return out
 
 

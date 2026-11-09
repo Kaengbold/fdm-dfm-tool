@@ -81,6 +81,7 @@ PRINTER_FIELDS = {
     "hardened_nozzle": (bool, None, None),
     "speed": (("fast", "medium"), None, None),
     "multi_material": (("none", "optional", "builtin"), None, None),
+    "bed_surface": (("unknown", "textured_pei", "smooth_pei", "glass", "cool_plate"), None, None),
 }
 MATERIAL_FIELDS = {
     "name": (str, None, None),

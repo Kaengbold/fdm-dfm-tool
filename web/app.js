@@ -722,6 +722,7 @@ function effectiveSettings() {
 }
 
 function renderSettings() {
+  if (state.check) renderSetup(); // values set by hand may be a mistake (layer too thick, support gap 0)
   const settings = effectiveSettings();
   const value = (key) => settings.find((s) => s.key === key)?.value;
   $("hole-comp").value = Number(value("xy_hole_compensation") ?? 0);
@@ -2803,7 +2804,9 @@ $("preset-form").onsubmit = async (e) => {
   }
   saveMine(mine);
   $("preset-form").hidden = true;
-  setStatus(`Saved "${formValues().name}". It's selected now.`);
+  const warn = (await setupWarnings().catch(() => [])).map((f) => ` ${f.title}: ${f.detail}.`).join("");
+  setStatus(`Saved "${formValues().name}". It's selected now.${warn}`, Boolean(warn));
+  renderSetup();
   if (state.triangles) findOrientations();
 };
 $("import-orca").onchange = async (e) => {
@@ -3059,7 +3062,20 @@ const pausesWanted = () => [...new Set((state.check?.findings ?? []).filter((f) 
 // Shallow slopes (shallow_slope_stairs): thinner layers over just their height, as height ranges in the 3MF.
 const fineWanted = () => (state.check?.findings ?? []).filter((f) => f.rule === "shallow_slope_stairs").map((f) => f.metrics);
 
+// Mistakes in the printer / material presets and the slicer values set here (api.setup_check), before the 3MF goes out.
+async function setupWarnings() {
+  const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
+  return (await call("setup_check", { profile: profile(), settings })).findings;
+}
+
+async function renderSetup() {
+  const found = await setupWarnings().catch(() => []);
+  $("setup-warnings").hidden = !found.length;
+  $("setup-warnings").replaceChildren(...found.map((f) => el("li", { textContent: `${f.title}: ${f.detail}.` })));
+}
+
 function renderPauses() {
+  renderSetup();
   const fine = fineWanted();
   $("fine-for").hidden = !fine.length;
   $("fine-text").textContent = fine.length ? `Thinner ${fine[0].layer_height.toFixed(2)} mm layers on the shallow slope${fine.length > 1 ? "s" : ""} ` +

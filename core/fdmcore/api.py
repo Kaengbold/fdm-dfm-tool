@@ -2460,6 +2460,15 @@ def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotati
     return out
 
 
+def setup_check(profile: dict | None = None, settings: dict | None = None) -> dict:
+    """Mistakes in the chosen printer / material / nozzle (presets the user made) and in slicer values
+    they set (``settings``, slicer keys such as layer_height, support_top_z_distance, outer_wall_speed):
+    explained findings, no part needed."""
+    from .checks import setup_findings
+
+    return {"findings": [explain_finding(f) for f in setup_findings(Profile.from_dict(profile), settings)]}
+
+
 def explain_finding(finding: dict, mode: str = "both") -> dict:
     rule = load_data("rules")["rules"].get(finding["rule"], {})
     domains = MODES[mode]
@@ -2665,6 +2674,7 @@ METHODS = {
     "load": load,
     "load_gcode": load_gcode,
     "pause_gcode": pause_gcode,
+    "setup_check": setup_check,
     "warping": warping,
     "set_fit": set_fit,
     "set_fastener": set_fastener,

@@ -881,6 +881,67 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
     - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
+  setup_layer_too_thick:
+    title: Layers too thick for the nozzle
+    why: The nozzle presses each line onto the one below. With layers thicker than about three quarters of the
+      nozzle's width there is too little squeeze, the lines only touch, and the part splits between layers.
+    fixes:
+    - domain: slicer
+      text: Lower the layer height to at most 0.75 × the nozzle diameter (0.3 mm on a 0.4 mm nozzle), and keep
+        the line width at least 1.5 × the layer height.
+    - domain: process
+      text: For thick layers and fast prints, fit a bigger nozzle (0.6 mm takes up to 0.45 mm layers).
+    tags:
+    - setup
+    sources:
+    - CNC Kitchen — The influence of layer height on the strength of FDM prints — https://www.cnckitchen.com/blog/the-influence-of-layer-height-on-the-strength-of-fdm-3d-prints
+    - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
+  setup_support_gap_zero:
+    title: Support touches the part
+    why: Without a gap between support and part, the support is printed onto the part like any other layer and
+      fuses with it when it is the same filament. It then breaks off with pieces of the surface.
+    fixes:
+    - domain: slicer
+      text: Set the support top Z distance to 0.15-0.2 mm (PETG 0.2-0.25 mm), or about one layer.
+      settings:
+        support_top_z_distance: '0.2'
+    - domain: process
+      text: With a second filament that doesn't bond (a support material) the gap can be 0.
+    tags:
+    - setup
+    - support
+    sources:
+    - Prusa Knowledge Base — Support material (top contact Z distance) — https://help.prusa3d.com/article/support-material_1698
+  setup_flow_too_high:
+    title: Faster than the hotend can melt
+    why: The hotend can only melt so much plastic per second. Asked for more, the extruder skips, lines come out
+      thin and layers bond weakly. Slicers slow down to the filament's max volumetric speed - if that is set right.
+    fixes:
+    - domain: slicer
+      text: Set the filament's max volumetric speed to what your hotend really melts (standard hotends about
+        11-22 mm³/s for PLA, less for PETG and much less for TPU), and let the slicer limit the speeds by it.
+    - domain: process
+      text: Print the max flow test of your slicer once per filament to measure it.
+    tags:
+    - setup
+    - speed
+    sources:
+    - Prusa Knowledge Base — Max volumetric speed — https://help.prusa3d.com/article/max-volumetric-speed_127176
+  setup_plate_too_sticky:
+    title: Filament sticks too hard to this plate
+    why: PETG, TPU and PC bond to smooth PEI and bare glass so strongly that the part can rip pieces out of the
+      plate's surface when you take it off.
+    fixes:
+    - domain: process
+      text: Put a thin layer of glue stick on the plate as a release layer, or print on a textured PEI plate
+        (the part comes off once it has cooled below about 40 °C).
+    - domain: slicer
+      text: A slightly larger first-layer gap (Z offset) presses the first layer on less hard.
+    tags:
+    - setup
+    - adhesion
+    sources:
+    - Prusa Knowledge Base — PETG — https://help.prusa3d.com/article/petg_2059
   coarse_facets:
     title: Curves exported too coarse
     why: An STL stores curves as flat facets. Exported with too few (a hole as a 12-sided polygon), the printer
