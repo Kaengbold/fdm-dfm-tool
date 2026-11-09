@@ -1242,6 +1242,25 @@ def main():
             run.act(lambda: page.click("input[name=mode][value=print] >> xpath=.."))
             return next(e for e in edits if "grip fins" in e)[:80]
         run.step("grip fins for a press fit", grip_fins)
+        def share_file():
+            # Share: the report with the part inside; opened here again it brings the part and its settings back (T-350).
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: page.select_option("#material", "petg"), 300_000)
+            page.evaluate("() => fdm.steps.go('download')")
+            with page.expect_download(timeout=300_000) as dl:
+                page.evaluate("() => document.getElementById('dl-share').click()")
+            shared = OUT / dl.value.suggested_filename
+            dl.value.save_as(shared)
+            html = shared.read_text(encoding="utf-8")
+            assert shared.name == "l_bracket_share.html" and "The part is inside this file" in html and 'id="fdm-check-project"' in html
+            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: page.select_option("#material", "pla"), 300_000)
+            run.act(lambda: page.set_input_files("#file", str(shared)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            got = page.evaluate("() => ({ name: fdm.state.name, material: document.getElementById('material').value })")
+            assert got["name"].startswith("l_bracket") and got["material"] == "petg", got
+            return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
+        run.step("share: report with the part inside", share_file)
 
         for part in args.parts:
             def load_part(part=part):

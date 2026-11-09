@@ -4,7 +4,7 @@ import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
 import { Steps, STEP_NAMES } from "./steps.js";
-import { reportHtml } from "./report.js";
+import { projectInReport, reportHtml } from "./report.js";
 import { readProject, writeProject } from "./project.js";
 
 const $ = (id) => document.getElementById(id);
@@ -264,6 +264,10 @@ function showProgress(fraction) {
 async function openFile(name, bytes, as = "new") {
   $("body-pick").hidden = true;
   if (/\.json$/i.test(name)) return openProject(bytes);
+  if (/\.html?$/i.test(name)) { // a shared report (Share): the project inside it
+    const text = projectInReport(new TextDecoder().decode(bytes));
+    return text ? openProject(new TextEncoder().encode(text)) : setStatus("This page has no part inside: share it from FDM Check with “Share”.", true);
+  }
   if (as === "version") addVersion(name.replace(/\.(stl|3mf|step|stp)$/i, ""));
   if (!/\.(step|stp)$/i.test(name)) return loadFile(name, bytes, null, null, as);
   const bodies = await busy("Reading STEP file (first time downloads ~8 MB)…", () => readStep(bytes));
@@ -3244,7 +3248,8 @@ function pictureWith(block, fn) {
   }
 }
 
-$("dl-report").onclick = () =>
+/** The report for people (report.js), with pictures; ``project``: the part and its settings ride along (Share). */
+const makeReport = (project = false) =>
   busy("Making the report with pictures…", async () => {
     const p = profile();
     const o = activeOption();
@@ -3294,9 +3299,18 @@ $("dl-report").onclick = () =>
       Object.assign(state, keep);
       recolor();
     }
+    if (project) {
+      report.project = projectText();
+      report.appUrl = location.protocol.startsWith("http") ? location.origin + location.pathname : null;
+      download(new TextEncoder().encode(reportHtml(report)), `${baseName()}_share.html`, "text/html");
+      setStatus("Saved a file to share: anyone can read it in a browser, and it opens here (Open a part) with the part and its settings.");
+      return;
+    }
     download(new TextEncoder().encode(reportHtml(report)), `${baseName()}_report.html`, "text/html");
     setStatus("Report downloaded: open it in your browser, or print it to PDF.");
   });
+$("dl-report").onclick = () => makeReport();
+$("dl-share").onclick = () => makeReport(true);
 
 $("dl-stl").onclick = () => download(stlBytes(state.placed), `${baseName()}_oriented.stl`, "model/stl");
 $("dl-stl-model").onclick = () => download(stlBytes(state.triangles), `${baseName()}.stl`, "model/stl");

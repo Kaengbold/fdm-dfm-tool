@@ -18,7 +18,8 @@ td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e9e4; v
 
 /** ``r``: {title, date, setup, verdict:{kind, head, text}, overview, orientation:{label, reasons}, stats,
  * problems:[{title, severity, picture, details, why, fixes:[{kind, text}]}], strength?, warp?, design?,
- * settings:[{label, value, reason}]} — see app.js downloadReport. */
+ * settings:[{label, value, reason}], project?, appUrl?} — see app.js makeReport. ``project`` (project file text): the
+ * part and everything set on it ride along inside the file (Share), so the app can open it again. */
 export function reportHtml(r) {
   const section = (title, ...body) => `<h2>${esc(title)}</h2>${body.join("")}`;
   const picture = (src, alt) => (src ? `<img src="${src}" alt="${esc(alt)}">` : "");
@@ -37,6 +38,8 @@ export function reportHtml(r) {
 <h1>${esc(r.title)}</h1>
 <p class="muted">${esc(r.setup)} · ${esc(r.date)}</p>
 <div class="box ${r.verdict.kind}"><p class="verdict">${esc(r.verdict.head)}</p><p>${esc(r.verdict.text)}</p></div>
+${r.project ? `<div class="box"><p><b>The part is inside this file.</b> To turn it round in 3D and try other settings, open
+${r.appUrl ? `<a href="${esc(r.appUrl)}">FDM Check</a>` : "FDM Check"} and open this file there (“Open a part”). Nothing to install.</p></div>` : ""}
 ${section("How it lies on the bed", picture(r.overview, "The part on the bed"),
     `<p><b>${esc(r.orientation.label)}</b></p><ul>${r.orientation.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`,
     `<p>${esc(r.stats)}</p>`)}
@@ -48,5 +51,15 @@ ${r.design ? section("Design changes", picture(r.design.picture, "Design changes
 ${r.settings.length ? section("Slicer settings", "<p class=\"muted\">What to change from your slicer's defaults (already set in the 3MF download).</p>",
     `<table><tr><th>Setting</th><th>Value</th><th>Why</th></tr>${r.settings.map((s) => `<tr><td>${esc(s.label)}</td><td><b>${esc(s.value)}</b></td><td class="why">${esc(s.reason)}</td></tr>`).join("")}</table>`) : ""}
 <p class="muted" style="margin-top:36px">Made with FDM Check. Times, strength and warping are rough estimates: check the first print.</p>
+${r.project ? `<script type="application/json" id="${PROJECT_ID}">${r.project.replace(/</g, "\\u003c")}</script>` : ""}
 </body></html>`;
+}
+
+const PROJECT_ID = "fdm-check-project";
+
+/** The project file text inside a shared report, or null when the HTML has none. Every "<" in it was written
+ * as the JSON escape \u003c (JSON.parse turns it back), so a "</script>" in a name can't end the block early. */
+export function projectInReport(html) {
+  const m = html.match(new RegExp(`<script type="application/json" id="${PROJECT_ID}">([\\s\\S]*?)</script>`));
+  return m ? m[1] : null;
 }
