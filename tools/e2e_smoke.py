@@ -955,7 +955,9 @@ def main():
             page.fill("#preset-fields [name=name]", "Smooth A1")
             page.select_option("#preset-fields [name=bed_surface]", "smooth_pei")
             run.act(lambda: page.click("#preset-form button.primary"))
-            page.wait_for_function("() => document.getElementById('status').textContent.includes('sticks too hard')", timeout=60_000)
+            # Said when saved (the status line; a loaded part then gets new orientations) and kept above the 3MF button.
+            page.wait_for_function("() => [...document.querySelectorAll('#setup-warnings li')].some((li) => li.textContent.includes('glue stick'))",
+                                   timeout=120_000)
             warned = page.locator("#setup-warnings li").all_inner_texts()
             assert any("glue stick" in w for w in warned), warned
             page.reload()
