@@ -73,6 +73,7 @@ RULE_IMPACT = {
     "pause_to_insert": "info",
     "shallow_slope_stairs": "surface",
     "coarse_facets": "shape",
+    "vase_mode_possible": "info",
     "setup_layer_too_thick": "weak",
     "setup_support_gap_zero": "surface",
     "setup_flow_too_high": "fails",
@@ -174,6 +175,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
     findings.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
     del stats["layer_times"]
+    findings += vase_findings(layers, tracker, profile, T, stats)
     normals, areas = mesh.normals_and_areas()
     z = mesh.triangles[..., 2]
     top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
@@ -752,6 +754,42 @@ def setup_findings(profile: Profile, settings: dict | None = None, T: dict | Non
         out.append(_finding("hardened_nozzle_required", "problem",
                             f"{mat['name']} wears out the standard {prn['name']} nozzle — fit a hardened one first"))
     return out
+
+
+def vase_findings(layers: list[Layer], tracker: Tracker, profile: Profile, T: dict, stats: dict) -> list[dict]:
+    """An open container that could print in spiral vase mode (vase_mode_possible), with the time saved."""
+    V = T["vase"]
+    if not layers or layers[-1].z < V["min_height_mm"] or any(r.volume >= 2.0 for r in tracker.of("overhang")):
+        return []
+    pieces = [parts(layer.geom, 0.5) for layer in layers]
+    if any(len(p) != 1 for p in pieces[1:]):  # islands (several outlines) or an empty layer
+        return []
+    holes = [len(p[0].interiors) for p in pieces]
+    if holes[-1] != 1 or max(holes) > 1:  # open at the top, nothing else hollow
+        return []
+    first = holes.index(1)
+    if first == 0 or any(h != 1 for h in holes[first:]) or layers[first].z > (1 - V["min_open_share"]) * layers[-1].z:
+        return []  # open at the bottom too (a tube: vase mode would close it), or mostly solid
+    lh, lw = goal_plan(profile)["layer_height"], profile.line_width
+    v = min(profile.speeds["outer_wall"] * TIME_EFFICIENCY, profile.material["max_flow_mm3s"] / (lw * lh))
+    spiral = sum(p[0].exterior.length * layer.dz / lh for p, layer in zip(pieces[first:], layers[first:])) / v / 60
+    floor = stats["print_time_min"] * layers[first].z / layers[-1].z  # the solid bottom, roughly as now
+    vase_min = START_MIN + floor + spiral
+    if vase_min > (1 - V["min_saving"]) * stats["print_time_min"]:
+        return []
+    ring = [p[0] for p in pieces[first:]]
+    wall = float(np.median([r.area / max(r.exterior.length, 1e-9) for r in ring]))
+    if wall > V["max_wall_mm"]:  # a thick-walled part, not a container: one line would be a different part
+        return []
+    text = (f"Open container: it can print in spiral vase mode — one continuous wall with no seam, about "
+            f"{vase_min:.0f} min instead of {stats['print_time_min']:.0f}. The wall is then one line ({lw:.2f} mm"
+            + (f", your model has {wall:.1f} mm" if wall > 1.5 * lw else "") + "), with no top and no infill: weaker, "
+            "and not watertight under pressure")
+    lo = np.array(ring[0].bounds[:2])
+    hi = np.array(ring[0].bounds[2:])
+    return [_finding("vase_mode_possible", "info", text, bbox=[[*lo.tolist(), 0.0], [*hi.tolist(), float(layers[-1].z)]],
+                     vase_min=round(vase_min, 1), normal_min=round(stats["print_time_min"], 1), wall_mm=round(wall, 2),
+                     line_mm=round(lw, 2))]
 
 
 def _join(pairs: np.ndarray, n: int) -> np.ndarray:

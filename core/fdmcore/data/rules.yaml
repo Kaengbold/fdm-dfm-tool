@@ -942,6 +942,22 @@ rules:
     - adhesion
     sources:
     - Prusa Knowledge Base — PETG — https://help.prusa3d.com/article/petg_2059
+  vase_mode_possible:
+    title: Could print in vase mode
+    why: Spiral vase mode prints solid bottom layers, then the outer wall as one continuous spiral, rising all the
+      time. No seam, no infill, no top, and much faster - good for vases, cups, lampshades and open containers. The
+      wall is one line thick, so it is weaker and can leak under pressure.
+    fixes:
+    - domain: slicer
+      text: Turn on "Spiral vase" (OrcaSlicer and Bambu Studio - Others, Special mode; PrusaSlicer - Print settings,
+        Layers and perimeters). For a stronger wall use a wider line (up to about twice the nozzle) or a bigger nozzle.
+    - domain: process
+      text: Keep normal printing if it has to hold water under pressure or take a knock; vase walls are one line.
+    tags:
+    - speed
+    - surface
+    sources:
+    - OrcaSlicer Wiki — Special mode, spiral vase — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_special_mode
   coarse_facets:
     title: Curves exported too coarse
     why: An STL stores curves as flat facets. Exported with too few (a hole as a 12-sided polygon), the printer

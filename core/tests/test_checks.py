@@ -701,3 +701,30 @@ def test_setup_check_names_preset_and_setting_mistakes():
     flagged = {(f["rule"], m) for pr in presets()["printers"] for m in presets()["materials"] for n in presets()["nozzles"]
                for f in api.setup_check({"printer": pr, "material": m, "nozzle": n})["findings"]}
     assert {r for r, _ in flagged} <= {"hardened_nozzle_required"}
+
+
+def _cup(r=20.0, wall=2.0, h=60.0, floor=2.0):
+    from shapely.geometry import Point
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+
+    disc = Point(0, 0).buffer(r, quad_segs=32)
+    tris = [extrude(disc.difference(Point(0, 0).buffer(r - wall, quad_segs=32)), floor, h)]
+    if floor:
+        tris.append(extrude(disc, 0, floor))
+    return Mesh(np.concatenate(tris))
+
+
+def test_open_container_can_print_in_vase_mode():
+    """A cup (floor, one wall, open top) prints much faster as one spiral wall; a solid cylinder, a tube without a
+    floor and a thick-walled ring are not offered it (vase mode would change what they are)."""
+    from fdmcore.mesh import to_binary_stl
+
+    api.load(to_binary_stl(_cup()), "cup")
+    f = [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "vase_mode_possible"]
+    assert len(f) == 1 and f[0]["metrics"]["vase_min"] < 0.5 * f[0]["metrics"]["normal_min"]
+    assert f[0]["metrics"]["wall_mm"] == pytest.approx(1.9, abs=0.15) and "one line" in f[0]["detail"]
+    for part in (_cup(wall=20.0), _cup(floor=0.0), _cup(wall=6.0)):
+        api.load(to_binary_stl(part), "not a cup")
+        assert not [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "vase_mode_possible"]

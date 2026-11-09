@@ -161,6 +161,14 @@ facets:
   error_mm: 0.05                  # this far off the round shape: fits and hole sizes change [sourced_F mistake #17]
   warn_mm: 0.1
   min_strips: 4                   # fewer in a row is a chamfer or two, not a curve
+vase:
+  # Spiral vase mode prints one continuous outer wall over solid bottom layers: no seam, no infill, no top
+  # [OrcaSlicer wiki others_settings_special_mode]. Offered for open containers (cups, vases, lampshades):
+  # one outline per layer, the inside open to the top, no support.
+  min_height_mm: 20
+  min_open_share: 0.5             # the opening reaches down at least this share of the height
+  min_saving: 0.15                # offered only when it saves this share of the print time or more
+  max_wall_mm: 3.0                # thicker walls: not a container, one line would be a different part
 slopes:
   # Top faces this shallow (degrees from flat) print as visible steps: each layer's edge is layer height / tan
   # (slope) wide, ~1.1 mm at 10° and 0.2 mm layers [sourced_F mistake #22]. Steeper ones look smooth; flatter
