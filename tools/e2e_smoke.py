@@ -1100,11 +1100,13 @@ def main():
             assert out.name == "pocket_block_pause.gcode" and text.count("M400 U1") == 1, (out.name, text.count("M400 U1"))
             page.wait_for_function("() => document.getElementById('status').textContent.includes('pauses before')", timeout=60_000)
             status = page.evaluate("() => document.getElementById('status').textContent")[:120]
-            # Or no pause at all: a side slot the magnet slides into after printing (T-336).
+            # Or no pause at all: a side slot the magnet slides into after printing (T-336), a design change.
+            run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             assert any("Side slot" in e for e in page.locator("#edits label").all_inner_texts()), "no side slot offered"
             page.evaluate("() => { for (const e of fdm.state.edits) e.selected = e.id.startsWith('magnet-slot'); fdm.steps.go('design'); }")
             run.act(lambda: page.click("#apply-edits"), 300_000)
             assert page.evaluate("() => document.getElementById('pause-sliced').hidden"), "pause still offered after the side slot"
+            run.act(lambda: page.click("input[name=mode][value=print] >> xpath=.."))
             return status + " | side slot: no pause needed"
         run.step("pause added to a file sliced in Bambu Studio", bambu_pause)
 
