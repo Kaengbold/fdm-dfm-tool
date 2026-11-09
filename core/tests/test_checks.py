@@ -626,3 +626,19 @@ def test_steep_flat_and_tiny_slopes_are_left_alone():
         assert not [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "shallow_slope_stairs"], deg
     api.load(to_binary_stl(_roof(10)), "roof")  # a 0.2 mm nozzle prints 0.1 mm layers: nothing thinner to gain
     assert not [f for f in api.check([0, 0, 1], {"nozzle": "0.2"})["findings"] if f["rule"] == "shallow_slope_stairs"]
+
+
+def test_seam_kept_off_faces_marked_clean():
+    """Faces marked "clean" (seen) are painted as seam blockers in the 3MF, under OrcaSlicer's / Bambu Studio's
+    and PrusaSlicer's names, in both layouts (tools/slicer_check.py checks that all three keep the seam off)."""
+    from fdmcore.mesh import Mesh, to_binary_stl
+    from test_formats import box
+
+    api.load(to_binary_stl(Mesh(box([0, 0, 0], 1) * 20)), "cube")
+    regions = api.regions()["regions"]
+    side = next(r["id"] for r in regions if abs(r["normal"][0]) > 0.99)
+    for zones, model in ((None, "3D/3dmodel.model"), ([{"lo": [5, 5, 5], "hi": [10, 10, 10], "walls": 4, "infill": 0.5}], "3D/3dmodel.model")):
+        xml = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {}, zones, faces={"clean": [side]}))).read(model).decode()
+        assert xml.count('paint_seam="8" slic3rpe:custom_seam="8"') == 2 and "xmlns:slic3rpe=" in xml  # the face's two triangles
+    plain = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {}))).read("3D/3dmodel.model").decode()
+    assert "paint_seam" not in plain

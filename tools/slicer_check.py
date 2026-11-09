@@ -182,6 +182,48 @@ def measure_layers(gcode: Path) -> list[float]:
     return [float(m.group(2)) for line in gcode.read_text(errors="replace").splitlines() if (m := LAYER.match(line))]
 
 
+OUTER = re.compile(r"^;\s*(FEATURE|TYPE):\s*(Outer wall|External perimeter)\s*$")
+
+
+def seam_block(mask_of) -> bytes:
+    """20 mm cube (centred), exported with the faces ``mask_of(normals)`` painted as seam blockers."""
+    from fdmcore.checks import orient
+    from fdmcore.export3mf import export_3mf
+
+    api.load(to_binary_stl(Mesh(test_part_box())), "seam_check")
+    mesh = orient(api._require().mesh, np.eye(3))
+    paint = mask_of(mesh.normals_and_areas()[0]) if mask_of else None
+    return export_3mf(mesh, "seam_check", {}, seam_block=paint)
+
+
+def test_part_box() -> np.ndarray:
+    from shapely.geometry import box
+
+    from fdmcore.additions import extrude
+
+    return extrude(box(0, 0, 20, 20), 0, 20)
+
+
+def measure_seams(gcode: Path) -> np.ndarray:
+    """Where each outer wall loop starts (x, y), relative to the part's centre."""
+    x = y = 0.0
+    starts, waiting, outer, pts = [], False, False, []
+    for line in gcode.read_text(errors="replace").splitlines():
+        if FEATURE.match(line):
+            outer = waiting = bool(OUTER.match(line))
+            continue
+        if line.startswith(("G1", "G0", "G2", "G3")):
+            w = dict((t[0], float(t[1:])) for t in line.split(";")[0].split()[1:] if t[0] in "XYE" and len(t) > 1)
+            if waiting and w.get("E", 0) > 0 and ("X" in w or "Y" in w):
+                starts.append((x, y))
+                waiting = False
+            x, y = w.get("X", x), w.get("Y", y)
+            if outer and w.get("E", 0) > 0:  # the part's own outline (not the purge line at the bed's edge)
+                pts.append((x, y))
+    p = np.array(pts)
+    return np.array(starts) - (p.min(axis=0) + p.max(axis=0)) / 2
+
+
 PAUSE = re.compile(r"^(; PAUSE_PRINTING|;PAUSE_PRINT|M601)\b")
 
 
@@ -278,6 +320,15 @@ def main():
         z = measure_zone(slice_with(name, cfg, model, work / f"{name}_zone"))
         # The zone half is filled (≥ 2.5× the plastic of the 10 % half), and the part didn't grow by the zone's box.
         checks["zone_modifier"] = (z["zone"], z["rest"], z["zone"] >= 2.5 * z["rest"] and z["width"] < 20.0)
+        model = work / f"{name}_seam_free.3mf"
+        model.write_bytes(seam_block(None))
+        free = measure_seams(slice_with(name, cfg, model, work / f"{name}_seam_free"))
+        corner = np.sign(np.median(free, axis=0))  # where the slicer puts it by itself
+        model = work / f"{name}_seam_paint.3mf"
+        model.write_bytes(seam_block(lambda n: (n[:, :2] @ corner) > 0.5))  # block the two faces at that corner
+        painted = measure_seams(slice_with(name, cfg, model, work / f"{name}_seam_paint"))
+        on_blocked = np.mean(np.max(painted * corner, axis=1) > 9.0)  # on a blocked face (≥ 9 of 10 mm out)
+        checks["seam_blocker"] = (corner.tolist(), f"{on_blocked:.0%} on blocked faces", len(painted) > 0 and on_blocked < 0.1)
         model = work / f"{name}_slope.3mf"
         model.write_bytes(slope_block(layout))
         zs = np.array(measure_layers(slice_with(name, cfg, model, work / f"{name}_slope")))

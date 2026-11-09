@@ -9,6 +9,10 @@ Modifier volumes (zones printed with more walls / infill) need a different file 
 OrcaSlicer and Bambu Studio only read them as separate component objects, PrusaSlicer only as
 triangle ranges of one mesh (each merges the other layout into the part). Without modifiers one
 file serves all three.
+
+Seam painting (keep the seam off faces the user can see) is stored per triangle, under each slicer's
+own name: ``paint_seam`` (OrcaSlicer, Bambu Studio) and ``slic3rpe:custom_seam`` (PrusaSlicer). Both
+hold the slicers' painted-triangle code; a whole triangle painted as "blocker" is "8".
 """
 
 from __future__ import annotations
@@ -78,24 +82,26 @@ VOLUME_TYPES = {
 
 
 def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None = None, bed_center=(128.0, 128.0),
-               modifiers: list[tuple] = (), layout: str = "orca", pauses: list[dict] = (), ranges: list[dict] = ()) -> bytes:
+               modifiers: list[tuple] = (), layout: str = "orca", pauses: list[dict] = (), ranges: list[dict] = (),
+               seam_block: np.ndarray | None = None) -> bytes:
     """``mesh`` must already be oriented (lowest point at z = 0, centred on x/y = 0). ``modifiers``:
     (triangles in the same frame, settings[, kind]) per volume, kind one of VOLUME_TYPES (default
     "stronger": a settings modifier); ``layout`` "orca" (also Bambu Studio) or "prusa", see the
     module docstring. ``pauses``: {"top": pocket top (mm), "layer_height", "note"} each: pause before the
     first layer above it, to put something into the part (see pause_files). ``ranges``: {"z0", "z1",
-    "layer_height"} each: thinner layers over that height (see range_files)."""
+    "layer_height"} each: thinner layers over that height (see range_files). ``seam_block``: one bool per
+    triangle of ``mesh``: no seam there (painted as seam blocker)."""
     extra = {**pause_files(pauses), **range_files(ranges)}
     if modifiers:
         if layout not in LAYOUTS:
             raise ValueError(f"layout must be one of {LAYOUTS}")
-        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, extra)
-    verts, faces = _weld(mesh.triangles)
+        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, extra, seam_block)
+    verts, faces, paint = _weld_painted(mesh.triangles, seam_block)
     verts = verts + [bed_center[0], bed_center[1], 0.0]
     vxml = "\n".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in verts)
-    txml = "\n".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in faces)
+    txml = _triangles_xml(faces, paint)
     model = f"""<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">
  <metadata name="Application">FDM DFM Tool</metadata>
  <resources>
   <object id="1" name={quoteattr(name)} type="model">
@@ -180,7 +186,7 @@ def pause_files(pauses: list[dict]) -> dict[str, str]:
 
 
 MODEL_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">
  <metadata name="Application">FDM DFM Tool</metadata>
  <resources>
 """
@@ -191,10 +197,19 @@ MODEL_FOOT = """ </resources>
 </model>"""
 
 
-def _mesh_xml(verts: np.ndarray, faces: np.ndarray) -> str:
+SEAM_BLOCK = ' paint_seam="8" slic3rpe:custom_seam="8"'  # whole triangle painted "blocker", both slicers' names
+
+
+def _triangles_xml(faces: np.ndarray, paint: np.ndarray | None = None) -> str:
+    """Triangle lines; ``paint`` (one bool per face): painted as seam blocker."""
+    if paint is None or not paint.any():
+        return "\n".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in faces)
+    return "\n".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"{SEAM_BLOCK if p else ""}/>' for (a, b, c), p in zip(faces, paint))
+
+
+def _mesh_xml(verts: np.ndarray, faces: np.ndarray, paint: np.ndarray | None = None) -> str:
     vxml = "\n".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in verts)
-    txml = "\n".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in faces)
-    return f"<mesh>\n<vertices>\n{vxml}\n</vertices>\n<triangles>\n{txml}\n</triangles>\n</mesh>"
+    return f"<mesh>\n<vertices>\n{vxml}\n</vertices>\n<triangles>\n{_triangles_xml(faces, paint)}\n</triangles>\n</mesh>"
 
 
 def _meta(d: dict, kind: str | None = None) -> str:
@@ -218,15 +233,17 @@ def _zip(model: str, model_settings: str | None, prusa_model: str | None, extra:
     return buf.getvalue()
 
 
-def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str, extra: dict[str, str] | None = None) -> bytes:
+def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str, extra: dict[str, str] | None = None,
+                    seam_block: np.ndarray | None = None) -> bytes:
     shift = np.array([bed_center[0], bed_center[1], 0.0])
-    pieces = [_weld(mesh.triangles)] + [_weld(m[0]) for m in modifiers]
+    v0, f0, paint = _weld_painted(mesh.triangles, seam_block)
+    pieces = [(v0, f0)] + [_weld(m[0]) for m in modifiers]
     types = [VOLUME_TYPES[m[2] if len(m) > 2 else "stronger"] for m in modifiers]
     if layout == "orca":  # part and modifiers as component objects 2, 3, ...; parts listed in model_settings.config
         objects, parts = [], []
         for i, (v, f) in enumerate(pieces):
             oid, label = i + 2, name if i == 0 else f"{types[i - 1][2]} {i}"
-            objects.append(f"  <object id=\"{oid}\" name={quoteattr(label)} type=\"model\">{_mesh_xml(v + shift, f)}</object>")
+            objects.append(f"  <object id=\"{oid}\" name={quoteattr(label)} type=\"model\">{_mesh_xml(v + shift, f, paint if i == 0 else None)}</object>")
             conf = {} if i == 0 else modifiers[i - 1][1]
             sub = "normal_part" if i == 0 else types[i - 1][0]
             parts.append(f"  <part id=\"{oid}\" subtype=\"{sub}\">\n    <metadata key=\"name\" value={quoteattr(label)}/>\n{_meta(conf)}\n  </part>")
@@ -244,7 +261,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
         faces.append(f + offset)
         offset += len(v)
         bounds.append(bounds[-1] + len(f))
-    model = (MODEL_HEAD + f"  <object id=\"1\" name={quoteattr(name)} type=\"model\">{_mesh_xml(np.concatenate(verts) + shift, np.concatenate(faces))}</object>\n"
+    model = (MODEL_HEAD + f"  <object id=\"1\" name={quoteattr(name)} type=\"model\">{_mesh_xml(np.concatenate(verts) + shift, np.concatenate(faces), None if paint is None else np.concatenate([paint, np.zeros(bounds[-1] - len(paint), bool)]))}</object>\n"
              + MODEL_FOOT)
     vols = []
     for i in range(len(pieces)):
@@ -262,10 +279,16 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
     return _zip(model, None, config, extra)
 
 
-def _weld(triangles: np.ndarray, decimals: int = 5) -> tuple[np.ndarray, np.ndarray]:
+def _weld_painted(triangles: np.ndarray, paint: np.ndarray | None) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """As _weld, with ``paint`` (one value per triangle) kept for the triangles that remain."""
+    verts, faces, keep = _weld(triangles, keep=True)
+    return verts, faces, None if paint is None else np.asarray(paint, bool)[keep]
+
+
+def _weld(triangles: np.ndarray, decimals: int = 5, keep: bool = False):
     """Shared vertex list + index triangles (3MF needs an indexed mesh)."""
     pts = triangles.reshape(-1, 3)
     uniq, inverse = np.unique(np.round(pts, decimals), axis=0, return_inverse=True)
     faces = inverse.reshape(-1, 3)
-    faces = faces[(faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])]
-    return uniq, faces
+    ok = (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])  # collapsed: dropped
+    return (uniq, faces[ok], ok) if keep else (uniq, faces[ok])

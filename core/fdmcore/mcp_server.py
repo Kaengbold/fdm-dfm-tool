@@ -382,9 +382,11 @@ def export_3mf(
     zones: list[dict] | None = None,
     slicer: str = "orca",
     fine_layers: list[dict] | None = None,
+    faces: dict | None = None,
 ) -> str:
     """Write the oriented part as 3MF with slicer settings (recommended ones unless overridden).
     ``fine_layers``: the metrics (z0, z1, layer_height) of shallow_slope_stairs findings: thinner layers there.
+    ``faces`` {"clean": [region ids from list_faces]}: faces people see; the seam is kept off them.
     ``zones`` (add_zone, or optimise_strength's ``zoned``) become modifier volumes, and boxes from place_box
     (support, blocker, void) support enforcers, blockers and negative volumes; then the file is for one
     slicer: ``slicer`` "orca" (OrcaSlicer and Bambu Studio) or "prusa"."""
@@ -392,7 +394,7 @@ def export_3mf(
     merged = {r["key"]: r["value"] for r in api.check(up, prof)["settings"]}
     merged.update(settings or {})
     out = _out(output_path, (".3mf",), "3MF path")
-    out.write_bytes(api.export(up, prof, merged, zones, slicer, fine_layers=fine_layers))
+    out.write_bytes(api.export(up, prof, merged, zones, slicer, fine_layers=fine_layers, faces=faces))
     return str(out)
 
 

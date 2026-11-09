@@ -913,7 +913,7 @@ function faceMarks() {
   return { clean: of("clean"), bed: of("bed"), vertical: of("vertical") };
 }
 
-const MARK_LABEL = { clean: "Keep clean (no support marks)", bed: "On the bed", vertical: "Upright (accurate shape)" };
+const MARK_LABEL = { clean: "Keep clean (no support marks, no seam)", bed: "On the bed", vertical: "Upright (accurate shape)" };
 
 function setMark(kind) {
   remember("a marked face");
@@ -3125,9 +3125,10 @@ $("dl-3mf").onclick = async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
     const pauses = $("dl-pause").checked ? pausesWanted() : [];
     const fine_layers = $("dl-fine").checked ? fineWanted() : [];
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers });
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks() });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
-    setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.`);
+    const seam = faceMarks()?.clean?.length ? " The seam is kept off the faces you marked “keep clean”." : "";
+    setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.${seam}`);
   });
 };
 
