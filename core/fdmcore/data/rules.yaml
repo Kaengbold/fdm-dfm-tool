@@ -881,6 +881,24 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
     - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
+  coarse_facets:
+    title: Curves exported too coarse
+    why: An STL stores curves as flat facets. Exported with too few (a hole as a 12-sided polygon), the printer
+      prints exactly those flats - visible on round outsides, and a hole or peg comes out smaller or bigger
+      than designed, so fits and screws don't go in as planned. The check measures how far the flats sit
+      inside the true curve.
+    fixes:
+    - domain: process
+      text: Export the STL again with a finer setting (smaller deviation / chord height, more facets, e.g. 0.01 mm
+        or "high" quality), or load the STEP file instead - this app reads it with its exact curves.
+    - domain: slicer
+      text: Nothing in the slicer brings the curve back; the slicer's arc fitting only smooths the moves, not
+        the shape. Hole compensation can make a coarse hole a bit bigger, but not round.
+    tags:
+    - shape
+    - file
+    sources:
+    - OrcaSlicer Wiki — Quality settings, precision (arc fitting, resolution, STEP import) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision
   shallow_slope_stairs:
     title: Shallow slope prints as steps
     why: A top face that slopes only a little (5-20 degrees from flat) is built from many layer edges, each set

@@ -16,8 +16,6 @@ round inside corners each become their own face.
 from __future__ import annotations
 
 import numpy as np
-from scipy.sparse import coo_matrix
-from scipy.sparse.csgraph import connected_components
 
 from .mesh import Mesh
 
@@ -107,5 +105,8 @@ def region_info(mesh: Mesh, region: np.ndarray) -> list[dict]:
 
 
 def _components(pairs: np.ndarray, n: int):
+    from scipy.sparse import coo_matrix  # here: weld / face_adjacency are used where scipy isn't loaded (checks)
+    from scipy.sparse.csgraph import connected_components
+
     g = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(n, n))
     return connected_components(g, directed=False)

@@ -72,6 +72,7 @@ RULE_IMPACT = {
     "thick_solid_block": "info",
     "pause_to_insert": "info",
     "shallow_slope_stairs": "surface",
+    "coarse_facets": "shape",
     "modelled_thread": "shape",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
@@ -160,6 +161,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _shrinkage_findings(mesh, profile, T)
     findings += pocket_findings(mesh, profile, T)
     findings += slope_findings(mesh, profile, T)
+    findings += facet_findings(mesh, T)
     findings += _relief_findings(mesh, profile, T)
     findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
@@ -699,6 +701,98 @@ def pocket_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
                      "it may sag onto what you put in")
         out.append(_finding("pause_to_insert", "warn" if long else "info", text, bbox=[lo, hi],
                             pause_z=p["pause_z"], layer=p["layer"], top_z=p["top_z"], span_mm=round(p["span_mm"], 1)))
+    return out
+
+
+def _join(pairs: np.ndarray, n: int) -> np.ndarray:
+    """Connected groups of ``n`` items linked by ``pairs``: the smallest index in each group, per item
+    (plain numpy, so the check needs no scipy in the browser)."""
+    label = np.arange(n)
+    if not len(pairs):
+        return label
+    a, b = pairs[:, 0], pairs[:, 1]
+    while True:
+        low = np.minimum(label[a], label[b])
+        new = label.copy()
+        np.minimum.at(new, a, low)
+        np.minimum.at(new, b, low)
+        new = new[new]  # jump to the group's lowest label
+        if np.array_equal(new, label):
+            return label
+        label = new
+
+
+def coarse_surfaces(mesh: Mesh, T: dict | None = None) -> list[dict]:
+    """Curved surfaces exported with too few flat facets (``facets`` in thresholds.yaml): rows of flat
+    strips that each turn a little from the next. Each: {"bbox", "strips", "turn_deg" (per strip, so about
+    360 / turn strips per full circle), "width_mm", "error_mm" (how far a strip's middle sits inside the
+    true curve), "area_mm2"}."""
+    from .regions import face_adjacency, weld
+
+    F = (T or load_data("thresholds"))["facets"]
+    normals, areas = mesh.normals_and_areas()
+    adj = face_adjacency(weld(mesh))
+    if not len(adj):
+        return []
+    cos = np.einsum("ij,ij->i", normals[adj[:, 0]], normals[adj[:, 1]])
+    patch = _join(adj[cos > np.cos(np.radians(0.5))], mesh.face_count)  # flat strips
+    pa, pb = patch[adj[:, 0]], patch[adj[:, 1]]
+    keep = pa != pb
+    pairs = np.unique(np.sort(np.stack([pa[keep], pb[keep]], axis=1), axis=1), axis=0)
+    if not len(pairs):
+        return []
+    ids, inv = np.unique(patch, return_inverse=True)  # patches as 0..k-1
+    k = len(ids)
+    pairs = np.searchsorted(ids, pairs)
+    n = np.stack([np.bincount(inv, normals[:, d] * areas, minlength=k) for d in range(3)], axis=1)
+    n /= np.maximum(np.linalg.norm(n, axis=1), 1e-12)[:, None]
+    area = np.bincount(inv, areas, minlength=k)
+    t = mesh.triangles
+    longest = np.zeros(k)
+    np.maximum.at(longest, inv, np.linalg.norm(t - np.roll(t, 1, axis=1), axis=2).max(axis=1))
+    width = area / np.maximum(longest, 1e-12)  # a strip's width across the curve
+    turn = np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", n[pairs[:, 0]], n[pairs[:, 1]]), -1, 1)))
+    arc = pairs[(turn >= F["min_turn_deg"]) & (turn <= F["max_turn_deg"])]
+    turn = turn[(turn >= F["min_turn_deg"]) & (turn <= F["max_turn_deg"])]
+    links = np.bincount(arc.ravel(), minlength=k)
+    inner = links >= 2  # strips with a curve on both sides
+    use = inner[arc[:, 0]] | inner[arc[:, 1]]
+    arc, turn = arc[use], turn[use]
+    if not len(arc):
+        return []
+    w = np.minimum(width[arc[:, 0]], width[arc[:, 1]])
+    error = w / 2 * np.tan(np.radians(turn) / 4)
+    group = _join(arc, k)
+    in_curve = np.zeros(k, bool)
+    in_curve[arc.ravel()] = True
+    out = []
+    centres = t.mean(axis=1)
+    for g in np.unique(group[arc[:, 0]]):
+        strips = np.flatnonzero(in_curve & (group == g))
+        rows = group[arc[:, 0]] == g
+        err = float(np.median(error[rows]))
+        if len(strips) < F["min_strips"] or err < F["error_mm"]:
+            continue
+        tri = np.isin(inv, strips)
+        pts = t[tri].reshape(-1, 3)
+        out.append({"bbox": [pts.min(axis=0).round(2).tolist(), pts.max(axis=0).round(2).tolist()], "strips": int(len(strips)),
+                    "turn_deg": round(float(np.median(turn[rows])), 1), "width_mm": round(float(np.median(w[rows])), 2),
+                    "error_mm": round(err, 3), "area_mm2": round(float(area[strips].sum())),
+                    "centre": centres[tri].mean(axis=0).round(2).tolist()})
+    return sorted(out, key=lambda c: -c["error_mm"])
+
+
+def facet_findings(mesh: Mesh, T: dict) -> list[dict]:
+    """Curves made of too few facets print as flats and make holes / fits the wrong size (coarse_facets)."""
+    F = T["facets"]
+    out = []
+    for c in coarse_surfaces(mesh, T):
+        sides = 360 / max(c["turn_deg"], 1e-6)
+        text = (f"Curved surface made of flat strips about {c['width_mm']:.1f} mm wide (about {sides:.0f} per full circle): it prints "
+                f"with flats, up to {c['error_mm']:.2f} mm off the round shape, and a hole or peg there comes out the wrong size. "
+                "Export a finer STL (smaller deviation / more facets) or use the STEP file")
+        out.append(_finding("coarse_facets", "warn" if c["error_mm"] >= F["warn_mm"] else "info", text, bbox=c["bbox"],
+                            **{k: v for k, v in c.items() if k != "bbox"}))
     return out
 
 

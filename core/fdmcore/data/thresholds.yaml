@@ -146,6 +146,15 @@ fasteners:
   # [Voron Design printed parts, https://github.com/VoronDesign/Voron-2].
   nut_slot_extra_mm: 0.3
 
+facets:
+  # A curve exported with too few flat facets (a hole as a 12-gon) prints as flats. Neighbouring flat strips
+  # that turn by min_turn..max_turn degrees are pieces of one curve (finer: smooth; sharper: a designed edge,
+  # an octagon or hexagon); each strip's middle sits (width / 2) · tan(turn / 4) inside the true curve.
+  min_turn_deg: 4
+  max_turn_deg: 40
+  error_mm: 0.05                  # this far off the round shape: fits and hole sizes change [sourced_F mistake #17]
+  warn_mm: 0.1
+  min_strips: 4                   # fewer in a row is a chamfer or two, not a curve
 slopes:
   # Top faces this shallow (degrees from flat) print as visible steps: each layer's edge is layer height / tan
   # (slope) wide, ~1.1 mm at 10° and 0.2 mm layers [sourced_F mistake #22]. Steeper ones look smooth; flatter

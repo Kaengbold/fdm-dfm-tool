@@ -642,3 +642,39 @@ def test_seam_kept_off_faces_marked_clean():
         assert xml.count('paint_seam="8" slic3rpe:custom_seam="8"') == 2 and "xmlns:slic3rpe=" in xml  # the face's two triangles
     plain = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {}))).read("3D/3dmodel.model").decode()
     assert "paint_seam" not in plain
+
+
+def _plate_with_hole(sides: int, r: float = 4.0):
+    from shapely.geometry import Point, box
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+
+    return Mesh(extrude(box(0, 0, 30, 30).difference(Point(15, 15).buffer(r, quad_segs=sides // 4)), 0, 10))
+
+
+def test_coarse_stl_curves_are_named():
+    """A hole exported as a 12-gon prints with flats 0.14 mm inside the circle (r (1 - cos 15°)); 24 or more
+    facets are fine. The parts of the regression corpus have none."""
+    from fdmcore.mesh import to_binary_stl
+
+    api.load(to_binary_stl(_plate_with_hole(12)), "coarse")
+    f = [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "coarse_facets"]
+    assert len(f) == 1 and f[0]["severity"] == "warn" and f[0]["impact"] == "shape"
+    m = f[0]["metrics"]
+    assert m["strips"] == 12 and m["turn_deg"] == pytest.approx(30, abs=1) and m["error_mm"] == pytest.approx(4 * (1 - np.cos(np.radians(15))), abs=0.01)
+    assert "STEP" in f[0]["detail"]
+    for sides in (24, 128):
+        api.load(to_binary_stl(_plate_with_hole(sides)), "fine")
+        assert not [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "coarse_facets"], sides
+
+
+def test_fit_on_a_coarse_hole_says_the_size_is_uncertain():
+    """A 20-gon Ø16 hole (0.1 mm off round) is still found as a hole; its fit advice says the measured size is
+    only as good as the facets."""
+    from fdmcore.mesh import to_binary_stl
+
+    api.load(to_binary_stl(_plate_with_hole(20, 8.0)), "coarse")
+    hole = next(f for f in api.design([0, 0, 1])["features"] if f["type"] == "hole")
+    r = api.set_fit(hole["region"], [0, 0, 1], 16.0, "sliding")
+    assert "few facets" in r["explanation"]

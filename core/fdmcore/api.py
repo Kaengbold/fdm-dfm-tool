@@ -51,6 +51,7 @@ class Session:
     fasteners: dict = field(default_factory=dict)  # region id -> {"size", "use"}: screw / insert / nut holes (set_fastener)
     gaps: dict = field(default_factory=dict)  # (face, face) -> {"partner_mm", "fit", "warp_mm"}: slots and tabs (set_gap)
     warp: dict | None = None  # the last warping simulation: up, model, displacement (part frame)
+    coarse: list | None = None  # curves exported with too few facets (checks.coarse_surfaces), computed on demand
 
 
 _session: Session | None = None
@@ -2007,6 +2008,7 @@ def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "slidin
     size, why = fit_size(feats[region], float(partner_mm), fit, up, Profile.from_dict(profile), squeeze)
     s.fits[region] = {"partner_mm": float(partner_mm), "fit": fit, "warp_mm": squeeze}
     s.fasteners.pop(region, None)  # one size per hole
+    why += _coarse_note(region)
     return {"region": region, "suggested_mm": round(size, 2), "modelled_mm": round(feats[region]["diameter"], 2), "explanation": why,
             "warp_mm": round(squeeze, 3)}
 
@@ -2031,7 +2033,24 @@ def set_fastener(region: int, up, size: str | None = "M3", use: str = "screw", p
     plan = fastener_plan(s.mesh, feats[region], size, use, up, Profile.from_dict(profile))
     s.fasteners[region] = {"size": size, "use": use}
     s.fits.pop(region, None)  # one size per hole: the fastener's
-    return {"region": region, **plan}
+    return {"region": region, **plan, "explanation": plan["explanation"] + _coarse_note(region)}
+
+
+def _coarse_note(region: int) -> str:
+    """A warning to add when the hole / post ``region`` was exported with too few facets (coarse_facets):
+    its measured size, and so the advice, is off by about the facets' error."""
+    from .checks import coarse_surfaces
+
+    s = _require()
+    if s.coarse is None:
+        s.coarse = coarse_surfaces(s.mesh)
+    pts = s.mesh.triangles[s.regions == region].reshape(-1, 3)
+    for c in s.coarse:
+        lo, hi = np.array(c["bbox"]) + [[-0.01], [0.01]]
+        if len(pts) and np.all((pts >= lo) & (pts <= hi)):
+            return (f" This curve was exported with few facets (up to {c['error_mm']:.2f} mm off round), so the size measured here "
+                    "can be off by about that much: export a finer STL or use the STEP file.")
+    return ""
 
 
 def split(profile: dict | None = None, joint: str = "pins") -> dict:
