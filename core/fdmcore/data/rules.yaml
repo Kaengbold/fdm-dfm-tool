@@ -1049,10 +1049,15 @@ rules:
     - domain: geometry
       text: Make the pocket 0.2-0.3 mm bigger than the part on every side and about one layer deeper, so it drops in
         without force and nothing sticks up into the nozzle's path.
+    - domain: geometry
+      text: No pause at all - open the pocket to the side with a slot the part slides into after printing, with two
+        small bumps (about 0.3 mm) at the pocket's mouth that it clicks past (Design changes offers it). Or a pocket
+        open at the top with a thin snap lip or grip fins.
     tags:
     - process
     - pause
     sources:
+    - Slant 3D — Stop Gluing Magnets Into Your 3D Prints — https://www.youtube.com/watch?v=46zH3BI8-LQ
     - Prusa Knowledge Base — Insert pause or custom G-code at layer (magnets put in at a pause) — https://help.prusa3d.com/article/insert-pause-or-custom-g-code-at-layer_120490
   modelled_thread:
     title: Thread modelled into the part

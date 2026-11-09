@@ -231,7 +231,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
     ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces;
     ``fasteners`` ({region: {"size", "use"}}) holes for screws, inserts and nuts (see fastener_plan)."""
-    from .additions import ledge_chamfers, sacrificial_layers, thicken_walls
+    from .additions import ledge_chamfers, magnet_slots, sacrificial_layers, thicken_walls
 
     up = np.asarray(up, float) / np.linalg.norm(up)
     prm = edit_params(params)
@@ -270,6 +270,14 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             f"Closes the hole with one {profile.layer_height} mm layer where it starts in mid-air, so the layer below "
             "bridges cleanly. Poke or drill it open after printing.",
             [to_part(p) for p in s["pieces"]], op="add"))
+    for i, m in enumerate(magnet_slots(oriented, profile)):
+        x, y, z = m["size"]
+        e = _edit(f"magnet-slot-{i}", "pause_to_insert", f"Side slot for the {x:.1f} × {y:.1f} × {z:.1f} mm pocket (no pause)",
+                  f"Opens the closed pocket to the nearest side ({m['length_mm']:.1f} mm away), so the magnet or nut slides in after "
+                  "printing instead of at a pause mid-print. Two small bumps at the pocket's mouth click it in place and keep "
+                  "it there, without glue.", [to_part(p) for p in m["pieces"]], op="cut")
+        e["piece_ops"] = m["ops"]
+        edits.append(e)
     for i, w in enumerate(thicken_walls(oriented, profile, prm["wall_lines"])):
         edits.append(_edit(
             f"wall-{i}", "single_line_wall", f"Thicken the {w['width']:.2f} mm wall to {w['target']:.2f} mm",

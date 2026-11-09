@@ -232,6 +232,59 @@ def sacrificial_layers(mesh: Mesh, profile: Profile) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------- T-336 side slots for magnets
+
+
+def magnet_slots(mesh: Mesh, profile: Profile) -> list[dict]:
+    """For each closed pocket (checks.insert_pockets): a slot as wide and tall as the pocket out to the nearest
+    side of the part, so the magnet (or nut) slides in after printing instead of at a pause, and two small
+    bumps on the slot's walls just outside the pocket that it clicks past and that keep it in
+    (``magnet_slots`` in thresholds.yaml). Each: {"pieces" (bumps first, then the slot), "ops", "bumps",
+    "direction", "length_mm", "pocket"}. None where the nearest side is too far."""
+    from .checks import insert_pockets
+
+    S = load_data("thresholds")["magnet_slots"]
+    out = []
+    for p in insert_pockets(mesh, profile):
+        lo, hi = np.array(p["lo"]), np.array(p["hi"])
+        centre = (lo[:2] + hi[:2]) / 2
+        half = (hi[:2] - lo[:2]) / 2
+        cut = section(mesh.triangles, float((lo[2] + hi[2]) / 2))
+        outline = shapely.union_all([Polygon(g.exterior) for g in getattr(cut, "geoms", [cut]) if g.geom_type == "Polygon"])
+        best = None
+        for d in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            d = np.array(d, float)
+            k = 0 if d[0] else 1  # axis the slot runs along
+            ray = LineString([centre, centre + d * 1000])
+            hits = ray.intersection(outline.boundary)
+            pts = [np.array(g.coords[0]) for g in getattr(hits, "geoms", [hits]) if not g.is_empty]
+            if not pts:
+                continue
+            reach = min(float((q - centre) @ d) for q in pts)  # the first way out
+            length = reach - half[k]
+            if length > 0 and (best is None or length < best[1]):
+                best = (d, length, reach, k)
+        if best is None or best[1] > S["max_length_mm"]:
+            continue
+        d, length, reach, k = best
+        side = np.array([-d[1], d[0]])
+        w = half[1 - k]  # half the slot's width: the pocket's, across the slot
+        slot = Polygon([centre - side * w, centre + d * (reach + 1.0) - side * w,
+                        centre + d * (reach + 1.0) + side * w, centre + side * w])
+        at = centre + d * (half[k] + min(S["bump_from_pocket_mm"], length / 2))
+        r = S["bump_radius_mm"]
+        bumps = [Point(at + s * side * (w + r - S["lip_mm"])).buffer(r, quad_segs=8) for s in (-1, 1)]
+        pocket_pieces = [extrude(b, lo[2], hi[2]) for b in bumps]
+        hollow = slot.difference(shapely.union_all(bumps))
+        cuts = [extrude(g, lo[2], hi[2]) for g in getattr(hollow, "geoms", [hollow])]
+        pieces = [x for x in pocket_pieces + cuts if x is not None]
+        if len(pieces) != len(pocket_pieces) + len(cuts):
+            continue
+        out.append({"pieces": pieces, "ops": ["add"] * len(bumps) + ["cut"] * len(cuts), "direction": d.tolist(),
+                    "length_mm": round(float(length), 1), "pocket": p, "size": (hi - lo).tolist()})
+    return out
+
+
 # ---------------------------------------------------------------- T-041 thicker walls
 
 

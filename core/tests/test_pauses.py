@@ -134,3 +134,30 @@ def test_pause_errors_say_what_to_do():
         api.pause_gcode(b"G1 X1 Y1 E1\n", [7.0])
     with pytest.raises(ValueError, match="No pause"):
         api.pause_gcode(BAMBU.encode(), [])
+
+
+def test_side_slot_instead_of_a_pause():
+    """The pocket is opened to the nearest side (T-336): a slot as wide and tall as the pocket, two bumps reaching
+    0.3 mm into it at the pocket's mouth; applied, the pocket is no longer closed, so no pause is needed. A pocket
+    deep inside a big part gets no slot (a long tunnel)."""
+    pytest.importorskip("manifold3d")
+    from shapely.geometry import Point, box as sbox
+
+    from fdmcore.booleans import apply_edits
+    from fdmcore.slicer import section
+
+    pocket = box([0, 0, 0], 1, inward=True) * [10, 8, 3] + [4, 6, 2]  # 4 mm from the x = 0 side
+    api.load(to_binary_stl(Mesh(np.concatenate([box([0, 0, 0], 1) * [30, 20, 8], pocket]))), "magnet_plate")
+    slots = [e for e in api.design(UP, {})["edits"] if e["id"].startswith("magnet-slot")]
+    assert len(slots) == 1 and slots[0]["piece_ops"] == ["add", "add", "cut"] and "10.0 × 8.0 × 3.0" in slots[0]["title"]
+    done = apply_edits(api._require().mesh, slots)
+    cut = section(done.triangles, 3.5)
+    mouth = sbox(0, 6, 4, 14)  # the slot, between the pocket and the side
+    assert 32 - 1.5 < mouth.difference(cut).area < 32 - 0.2  # open, except the bumps
+    for y in (6.15, 13.85):  # a bump 1 mm out from the pocket on each slot wall, reaching 0.3 mm in
+        assert cut.contains(Point(3, y)) and not cut.contains(Point(3, 10))
+    api.load(to_binary_stl(done), "slotted")
+    assert not [f for f in api.check(UP, {})["findings"] if f["rule"] == "pause_to_insert"]
+    api.load(to_binary_stl(Mesh(np.concatenate([box([0, 0, 0], 1) * [80, 80, 10],
+                                                box([0, 0, 0], 1, inward=True) * [10, 10, 3] + [35, 35, 4]]))), "deep")
+    assert not [e for e in api.design(UP, {})["edits"] if e["id"].startswith("magnet-slot")]

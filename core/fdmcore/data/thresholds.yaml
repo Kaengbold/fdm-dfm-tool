@@ -223,6 +223,15 @@ fits:
   sideways_extra_mm: 0.1   # holes lying on their side come out a little smaller at the top
   min_change_mm: 0.05      # smaller differences are left alone
 
+magnet_slots:
+  # A magnet or nut slid in from the side after printing, instead of a pause mid-print or glue: a slot from the
+  # closed pocket to the nearest side, with a small bump on each slot wall that it clicks past (0.25–0.35 mm
+  # interference) [Slant 3D, Stop Gluing Magnets Into Your 3D Prints https://www.youtube.com/watch?v=46zH3BI8-LQ;
+  # research/sourced_A2 slant3d_glue_free_magnet_retention].
+  lip_mm: 0.3                     # each bump reaches this far into the slot
+  bump_radius_mm: 0.8
+  bump_from_pocket_mm: 1.0        # the bumps stand this far out from the pocket
+  max_length_mm: 15               # farther from a side: a long tunnel to push it through, not offered
 grip_fins:
   # Instead of a rigid press fit: an open pocket with thin angled fins whose tips reach past the pressed-in
   # part. They bend like leaf springs, so the grip survives ±0.25 mm of printer error (a rigid bore: ±0.05).
