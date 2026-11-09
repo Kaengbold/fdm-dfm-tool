@@ -211,3 +211,29 @@ def test_big_footprint_only_counts_for_warping_materials():
     pick = lambda material: api.orientations({"printer": "bambu_p1s", "material": material})["orientations"][0]["up"]
     assert pick("abs") == pytest.approx([0, 0, 1])
     assert abs(pick("pla")[1]) == pytest.approx(1)
+
+
+def test_tall_thin_part_turned_along_a_moving_bed():
+    """On a bed slinger (A1, MK4S: the bed moves along Y) a tall thin plate standing broadside to that motion
+    wobbles; it is turned so its long side runs along Y (mistake #30). Printers with a still bed, and short or
+    thick parts, are left as they are; the check and the 3MF use the same turn."""
+    import io
+    import zipfile
+
+    import numpy as np
+
+    from fdmcore import api
+    from fdmcore.mesh import Mesh, to_binary_stl
+    from test_formats import box
+
+    api.load(to_binary_stl(Mesh(box([0, 0, 0], 1) * [60, 6, 100])), "plate")
+    slinger = api.orientation([0, 0, 1], {"printer": "bambu_a1"})
+    assert np.array(slinger["rotation"]) @ [1, 0, 0] == pytest.approx([0, 1, 0], abs=1e-6)
+    assert any("as the bed moves" in r for r in slinger["reasons"])
+    still = api.orientation([0, 0, 1], {"printer": "bambu_p1s"})
+    assert np.array(still["rotation"]) @ [1, 0, 0] == pytest.approx([1, 0, 0], abs=1e-6)
+    xml = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {"printer": "bambu_a1"}, {}))).read("3D/3dmodel.model").decode()
+    ys = [float(v.split('y="')[1].split('"')[0]) for v in xml.split("<vertex ")[1:]]
+    assert max(ys) - min(ys) == pytest.approx(60, abs=0.01)  # long side along Y in the file too
+    api.load(to_binary_stl(Mesh(box([0, 0, 0], 1) * [60, 6, 30])), "short")
+    assert np.array(api.orientation([0, 0, 1], {"printer": "bambu_a1"})["rotation"]) @ [1, 0, 0] == pytest.approx([1, 0, 0], abs=1e-6)

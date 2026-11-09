@@ -5,6 +5,7 @@
 printers:
   bambu_a1:
     name: Bambu Lab A1
+    moving_bed: true         # the bed moves along Y (bed slinger): tall thin parts are turned along it
     bed: [256, 256, 256]
     enclosure: none          # none | passive | heated
     hardened_nozzle: true    # stock hardened steel nozzle
@@ -12,6 +13,7 @@ printers:
     multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   bambu_a1_mini:
     name: Bambu Lab A1 mini
+    moving_bed: true         # the bed moves along Y (bed slinger): tall thin parts are turned along it
     bed: [180, 180, 180]
     enclosure: none
     hardened_nozzle: true
@@ -40,6 +42,7 @@ printers:
     multi_material: builtin       # none | optional (AMS/MMU add-on) | builtin
   prusa_mk4s:
     name: Prusa MK4S
+    moving_bed: true         # the bed moves along Y (bed slinger): tall thin parts are turned along it
     bed: [250, 210, 220]
     enclosure: none
     hardened_nozzle: false   # depends on the nozzle fitted; with a hardened one, set it under My printers
@@ -47,6 +50,7 @@ printers:
     multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
   prusa_mini:
     name: Prusa MINI+
+    moving_bed: true         # the bed moves along Y (bed slinger): tall thin parts are turned along it
     bed: [180, 180, 180]
     enclosure: none
     hardened_nozzle: false
@@ -78,6 +82,7 @@ printers:
     multi_material: optional # CFS (sold as the Combo)
   creality_ender3_v3_se:
     name: Creality Ender-3 V3 SE
+    moving_bed: true         # the bed moves along Y (bed slinger): tall thin parts are turned along it
     bed: [220, 220, 250]
     enclosure: none
     hardened_nozzle: false
@@ -85,6 +90,7 @@ printers:
     multi_material: none
   creality_ender3_v3_ke:
     name: Creality Ender-3 V3 KE
+    moving_bed: true         # the bed moves along Y (bed slinger): tall thin parts are turned along it
     bed: [220, 220, 240]
     enclosure: none
     hardened_nozzle: false   # 300 °C bi-metal hotend, brass nozzle (Creality store, research/gemini_printer_specs.md)
@@ -99,6 +105,7 @@ printers:
     multi_material: optional # Elegoo CANVAS multi-colour add-on (elegoo.com Centauri Carbon page)
   anycubic_kobra_3:
     name: Anycubic Kobra 3
+    moving_bed: true         # the bed moves along Y (bed slinger): tall thin parts are turned along it
     bed: [250, 250, 260]
     enclosure: none
     hardened_nozzle: false

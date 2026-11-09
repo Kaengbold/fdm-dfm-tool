@@ -32,6 +32,7 @@ export const PRINTER_FIELDS = [
   ["speed", "Speed class", ["fast", "medium"]],
   ["multi_material", "Multi-material", ["none", "optional", "builtin"]],
   ["hardened_nozzle", "Hardened nozzle", "checkbox"],
+  ["moving_bed", "Bed moves back and forth (bed slinger)", "checkbox"],
   ["bed_surface", "Build plate", ["unknown", "textured_pei", "smooth_pei", "glass", "cool_plate"]],
 ];
 const ENCLOSURES = ["none", "passive", "heated"];
@@ -59,7 +60,7 @@ export function toSpec(kind, values) {
   if (kind === "printers") {
     Object.assign(spec, { name: values.name, enclosure: values.enclosure, speed: values.speed, multi_material: values.multi_material,
       hardened_nozzle: Boolean(values.hardened_nozzle), bed: [values.bed_x, values.bed_y, values.bed_z].map(Number),
-      bed_surface: values.bed_surface || "unknown" });
+      bed_surface: values.bed_surface || "unknown", moving_bed: Boolean(values.moving_bed) });
     return spec;
   }
   for (const [key] of MATERIAL_FIELDS) {

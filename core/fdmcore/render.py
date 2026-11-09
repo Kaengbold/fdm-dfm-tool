@@ -195,7 +195,7 @@ def picture(view: str, up, profile: dict | None = None, loads: list[dict] | None
         raise ValueError(f"view must be one of {', '.join(VIEWS)}")
     s = api._require()
     p = Profile.from_dict(profile)
-    rotation, _ = print_rotation(s.mesh, up, p.printer["bed"])
+    rotation, _ = print_rotation(s.mesh, up, p.printer["bed"], bool(p.printer.get("moving_bed", False)))
     part = to_print(s.mesh.triangles, rotation, s.mesh)
     colors = np.tile(rgb(GREY), (len(part), 1))
     extra: list[tuple[np.ndarray, str]] = []

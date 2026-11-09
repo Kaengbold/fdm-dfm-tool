@@ -517,13 +517,19 @@ def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettin
             r.reasons.append(f"Some supports stand on the part itself (~{st['scar_area']:.0f} mm² of rough marks)")
 
 
+def _moving(p: Profile) -> bool:
+    """The printer moves its bed back and forth (a bed slinger): tall thin parts are turned on it (placement)."""
+    return bool(p.printer.get("moving_bed", False))
+
+
 def _placement(mesh: Mesh, r, p: Profile):
     """Print rotation for a candidate; adds a reason when it doesn't fit or had to be turned."""
-    rotation, fit = print_rotation(mesh, r.up, p.printer["bed"])
+    rotation, fit = print_rotation(mesh, r.up, p.printer["bed"], _moving(p))
     if not fit["fits"]:
         r.reasons.insert(0, f"Too big for the {p.printer['name']}: {fit['reason']}")
     elif fit["turned_deg"]:
-        r.reasons.append(f"Turned {fit['turned_deg']:.0f}° on the bed so it fits")
+        r.reasons.append(f"Turned {fit['turned_deg']:.0f}° on the bed " + ("so it doesn't wobble as the bed moves" if fit.get("for_bed_motion")
+                                                                         else "so it fits"))
     return rotation, fit
 
 
@@ -553,7 +559,7 @@ def _rank_by_weak_spots(mesh: Mesh, candidates: list, p: Profile, extra: list = 
     Runs a quick check on the best few candidates (and ``extra``, e.g. as-loaded) and re-sorts them."""
     todo = [*candidates[:check_top], *extra]
     for i, r in enumerate(todo):
-        rotation, _ = print_rotation(mesh, r.up, p.printer["bed"])
+        rotation, _ = print_rotation(mesh, r.up, p.printer["bed"], _moving(p))
         with stage(i / len(todo), (i + 1) / len(todo)):
             found = run_checks(orient(mesh, rotation), p, max_layers=50)["findings"]
         weak = [f for f in found if f["impact"] == "weak"]
@@ -708,12 +714,12 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     return best
 
 
-def _zone_info(z, mesh: Mesh, up, bed) -> dict:
+def _zone_info(z, mesh: Mesh, up, bed, moving: bool = False) -> dict:
     """A zone for the UI and the export: its box (build frame), settings and corners on the bed."""
     from itertools import product
 
     r0 = rotation_to_z(up)
-    rot = print_rotation(mesh, up, bed)[0]
+    rot = print_rotation(mesh, up, bed, moving)[0]
     corners = np.array(list(product(*zip(z.lo, z.hi)))) @ r0  # build frame -> part
     return {"lo": list(z.lo), "hi": list(z.hi), "walls": z.walls, "infill": z.infill, "shape": z.shape,
             "corners_print": [_to_print_frame(mesh, rot, c) for c in corners]}
@@ -760,7 +766,7 @@ def zone_at(up, region: int | None = None, point=None, margin: float = ZONE_MARG
     z = Zone(tuple(lo.tolist()), tuple(hi.tolist()),
              int(walls if walls is not None else plan["walls"] + 2), float(infill if infill is not None else max(0.4, plan["infill"] / 100)),
              shape=shape)
-    return _zone_info(z, s.mesh, up, p.printer["bed"])
+    return _zone_info(z, s.mesh, up, p.printer["bed"], _moving(p))
 
 
 VOLUME_KINDS = {"support": "Support here", "blocker": "No support here", "void": "Hidden gap (extra walls)", "keep_clear": "Keep clear",
@@ -816,7 +822,7 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     if shape not in ZONE_SHAPES:
         raise ValueError(f"shape must be one of {ZONE_SHAPES}")
     box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0, "shape": shape}
-    corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"])["corners_print"]
+    corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"], _moving(p))["corners_print"]
     return {**box, "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
 
 
@@ -1085,7 +1091,7 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
     out = {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1),
            "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": sh.infill, "settings": settings, "steps": steps}
     if sh.zones:
-        out["zones"] = [_zone_info(replace(z, walls=max(z.walls, sh.walls), infill=max(z.infill, sh.infill)), mesh, up, p.printer["bed"])
+        out["zones"] = [_zone_info(replace(z, walls=max(z.walls, sh.walls), infill=max(z.infill, sh.infill)), mesh, up, p.printer["bed"], _moving(p))
                         for z in sh.zones]
     return out
 
@@ -1138,7 +1144,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     fine = refine(s.mesh.triangles, model.grid.h)
     disp = sample_nodes(model, u, fine.reshape(-1, 3) @ turn.T)
     size = np.linalg.norm(disp, axis=1)
-    rot = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     pull = r["pull"]
     order = np.argsort(-pull)
     spots = []
@@ -1169,7 +1175,7 @@ def _warm_layers(up, p: Profile) -> tuple | None:
     s = _require()
     if s.gcode is None or np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
         return None
-    rotation = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    rotation = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     layers = slice_mesh(orient(s.mesh, rotation), p.layer_height)
     return np.array([l.z for l in layers]), _layer_heat(layers, p, layer_times(s.gcode["toolpath"]))
 
@@ -1380,7 +1386,7 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
     if isinstance(data, (bytes, bytearray)) and data[:4] == b"GCDE":
         raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
     tp = parse(data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else data)
-    rot = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     turned = s.mesh.triangles.reshape(-1, 3) @ rot.T
     lo, hi = turned.min(axis=0), turned.max(axis=0)
     base = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])  # orient() moves the part by -base
@@ -1471,7 +1477,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     r["vm_max_mpa"] = float(vm[ok].max(initial=0))
     r["mesh"] = {"voxels": int(len(model.elems)), "voxel_mm": float(model.grid.h), "nodes": int(model.n_nodes),
                  "load_n": float(np.linalg.norm(worst.forces.sum(axis=0)))}
-    rot = print_rotation(s.mesh, up, p.printer["bed"])[0]
+    rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     r["critical_point_print"] = _to_print_frame(s.mesh, rot, r["critical_point"])
     # Where to point the "weakest spot" arrow: the surface nearest to it (the spot itself is often inside).
     # Not a face on the bed (an arrow from below the bed can't be seen): the nearest face you can see.
@@ -1535,7 +1541,7 @@ def _stress_zones(model, fi: np.ndarray, ignore: np.ndarray, up, sh, mesh: Mesh,
     from .strength import find_zones
 
     boxes = find_zones(model, fi, ignore, up, sh.walls + 2, max(0.4, sh.infill))
-    return [{**_zone_info(z, mesh, up, p.printer["bed"]), "share_pct": round(share * 100)}
+    return [{**_zone_info(z, mesh, up, p.printer["bed"], _moving(p)), "share_pct": round(share * 100)}
             for z, share in zip(boxes, _zone_shares(model, fi, ignore, up, boxes))]
 
 
@@ -2080,7 +2086,7 @@ def split(profile: dict | None = None, joint: str = "pins", purpose: str = "fit"
         raise ValueError("No straight cut makes the pieces need much less support: print it in one piece")
     plan = split_plan(s.mesh, p.printer["bed"], weak, gap, joint, force=(cut["axis"], [cut["cut"]]))
     for i, (piece, up) in enumerate(zip(plan["pieces"], cut["ups"])):
-        piece["rotation"] = print_rotation(_half(s.mesh, cut["axis"], cut["cut"], i == 0), up, p.printer["bed"])[0].tolist()
+        piece["rotation"] = print_rotation(_half(s.mesh, cut["axis"], cut["cut"], i == 0), up, p.printer["bed"], _moving(p))[0].tolist()
     note, rest = plan["explanation"].split("Cut ", 1)
     plan["explanation"] = (note + f"Cut in two so each piece prints its own best way with much less support: about "
                            f"{cut['pieces_mm3'] / 1000:.1f} cm³ of support instead of {cut['whole_mm3'] / 1000:.1f} cm³. "
@@ -2308,7 +2314,7 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
     ``detailed``: the heat check uses the real layer times of the loaded G-code (if it is for this orientation)."""
     s = _require()
     p = Profile.from_dict(profile)
-    rotation, fit = print_rotation(s.mesh, up, p.printer["bed"])
+    rotation, fit = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
     oriented = orient(s.mesh, rotation)
     sliced = None
     if detailed and s.gcode is not None and np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999:
@@ -2604,7 +2610,7 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     if settings is None:
         settings = {r["key"]: r["value"] for r in check(up, profile)["settings"]}
     bed = p.printer["bed"]
-    rotation, _ = print_rotation(s.mesh, up, bed)
+    rotation, _ = print_rotation(s.mesh, up, bed, _moving(p))
     modifiers = []
     for z in zones or []:
         kind = z.get("kind", "stronger")
@@ -2675,7 +2681,7 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
 
     s = _require()
     base = Profile.from_dict(profile)
-    rotation, _ = print_rotation(s.mesh, up, base.printer["bed"])
+    rotation, _ = print_rotation(s.mesh, up, base.printer["bed"], _moving(base))
     oriented = orient(s.mesh, rotation)
     detail_layers = slice_mesh(oriented, 0.2, 80)  # one set of layers, so only the nozzle differs
     out = []
