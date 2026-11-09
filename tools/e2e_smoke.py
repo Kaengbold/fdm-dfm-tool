@@ -1160,6 +1160,18 @@ def main():
             return text[:120]
         run.step("gap to a mating part", mating_part)
 
+        def split_for_support():
+            # A part that fits but needs a lot of support: cut so each piece prints its own way without (T-347).
+            run.act(lambda: page.click("[data-sample=test_block]"))
+            assert page.evaluate("() => !document.getElementById('dl-split-support').hidden"), "no 'less support' cut offered"
+            run.act(lambda: page.evaluate("() => document.getElementById('dl-split-support').click()"), 300_000)
+            page.wait_for_function("() => !document.getElementById('split-panel').hidden", timeout=60_000)
+            text = page.locator("#split-text").inner_text()
+            assert "much less support" in text and page.evaluate("() => fdm.viewer.pieces?.children.length") == 4, text
+            page.evaluate("() => document.getElementById('split-back').click()")
+            return text[:140]
+        run.step("less support: split into two pieces", split_for_support)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

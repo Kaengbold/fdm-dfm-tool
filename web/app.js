@@ -497,6 +497,7 @@ async function runCheck() {
     renderOptions(); // their cost uses this check's part grams and price
     renderPauses();
     $("dl-split").hidden = !result.findings.some((f) => f.rule === "exceeds_build_volume");
+    $("dl-split-support").hidden = !$("dl-split").hidden || !result.stats.needs_support;
     closeSplit(); // the pieces were for the orientation and part before
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
@@ -3144,12 +3145,12 @@ $("pause-file").onchange = async (e) => {
 
 // A part too big for the printer: the pieces that fit (split.py), each the part with the rest cut away
 // (and pin holes or a dovetail), shown on the bed the way they print; then the pieces and pins as STLs.
-async function showSplit() {
-  const plan = await call("split", { profile: profile(), joint: $("split-joint").value });
+async function showSplit(purpose = state.split?.purpose ?? "fit") {
+  const plan = await call("split", { profile: profile(), joint: $("split-joint").value, purpose });
   const floats = (e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) });
   const soups = [];
   for (const piece of plan.pieces) soups.push(await applyDesignEdits(state.triangles, piece.edits.map(floats)));
-  state.split = { plan, soups };
+  state.split = { plan, soups, purpose };
   viewer.showPieces(soups.map((triangles, i) => ({ triangles, rotation: plan.pieces[i].rotation })));
   $("split-panel").hidden = false;
   $("split-text").textContent = plan.explanation;
@@ -3163,8 +3164,9 @@ function closeSplit() {
   viewer.hidePieces();
 }
 
-$("dl-split").onclick = () => busy("Cutting the part into pieces that fit…", showSplit);
-$("split-joint").onchange = () => busy("Cutting the part into pieces that fit…", showSplit);
+$("dl-split").onclick = () => busy("Cutting the part into pieces that fit…", () => showSplit("fit"));
+$("dl-split-support").onclick = () => busy("Looking for a cut that saves support…", () => showSplit("supports"));
+$("split-joint").onchange = () => busy("Cutting the part into pieces…", () => showSplit());
 $("split-download").onclick = () => {
   const { plan, soups } = state.split;
   soups.forEach((soup, i) => download(stlBytes(soup), `${baseName()}_piece_${i + 1}.stl`, "model/stl"));

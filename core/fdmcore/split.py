@@ -142,21 +142,100 @@ def _print_turn(size, bed, run=None) -> list[list[float]]:
     return (best[1] if best is not None else np.eye(3)).tolist()
 
 
-def split_plan(mesh: Mesh, bed, weak_spot=None, fit_gap_mm: float | None = None, joint: str = "pins") -> dict:
+SUPPORT_CUT_SAVING = 0.5  # pieces must need at most this share of the whole part's support
+SUPPORT_CUT_MIN_MM3 = 200.0  # less support than this on the whole part: not worth cutting it
+SUPPORT_CUT_MIN_SHARE = 0.1  # ... or less than this share of the part's own volume
+CUT_POSITIONS = 13  # positions tried along each axis (between 15 % and 85 % of its length)
+
+
+def _half(mesh: Mesh, k: int, c: float, below: bool) -> Mesh:
+    """The part on one side of a flat cut across axis ``k`` at ``c``, closed with the cut face (for scoring
+    how it prints; the real pieces are made with cut edits)."""
+    from .additions import _triangulate
+
+    t = mesh.triangles
+    s = (t[..., k] - c) * (1 if below else -1)  # <= 0: kept
+    keep = np.all(s <= 0, axis=1)
+    out = [t[keep]]
+    for tri, d in zip(t[~keep & np.any(s < 0, axis=1)], s[~keep & np.any(s < 0, axis=1)]):
+        poly = []
+        for i in range(3):  # clip the triangle against the plane (Sutherland-Hodgman, one edge)
+            a, b, da, db = tri[i], tri[(i + 1) % 3], d[i], d[(i + 1) % 3]
+            if da <= 0:
+                poly.append(a)
+            if (da < 0) != (db < 0) and da != db:
+                poly.append(a + (b - a) * (da / (da - db)))
+        out += [np.array([poly[0], poly[j], poly[j + 1]]) [None] for j in range(1, len(poly) - 1)]
+    geom = _section(mesh, k, c)
+    u, v, a = _frame(k)
+    for poly in getattr(geom, "geoms", [geom]) if not geom.is_empty else []:
+        cap = _triangulate(poly)
+        if cap is None:
+            cap = _triangulate(poly.segmentize(1.0))
+        if cap is None:
+            continue
+        flat = np.concatenate([cap, np.full((len(cap), 3, 1), c)], axis=2)  # CCW seen from +a: faces +a
+        tris = _place(flat, u, v, a)
+        out.append(tris if below else tris[:, ::-1])
+    return Mesh(np.concatenate(out))
+
+
+def _least_support(mesh: Mesh, settings) -> tuple[float, list[float]]:
+    """Support (mm³, the orientation search's estimate) of the best-placed way to print ``mesh``, and that up."""
+    from .orientation import find_orientations
+
+    found = [r for r in find_orientations(mesh, settings, top=5) if r.bed_area > 0] or find_orientations(mesh, settings, top=1)
+    best = min(found, key=lambda r: r.support_volume)
+    return float(best.support_volume), best.up.tolist()
+
+
+def support_cut(mesh: Mesh, settings) -> dict | None:
+    """A flat cut across one of the part's axes after which both pieces, each turned its own best way, need
+    much less support than the whole part (``SUPPORT_CUT_SAVING``). Tries the narrowest sections (where a part
+    usually has a natural joint). None when no cut helps enough."""
+    whole, _ = _least_support(mesh, settings)
+    if whole < max(SUPPORT_CUT_MIN_MM3, SUPPORT_CUT_MIN_SHARE * abs(mesh.volume())):
+        return None
+    pts = mesh.triangles.reshape(-1, 3)
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    tries = []
+    for k in range(3):
+        at = lo[k] + (hi[k] - lo[k]) * np.linspace(0.15, 0.85, CUT_POSITIONS)
+        area = np.array([_section(mesh, k, c).area for c in at])
+        if not (area > 0).any():
+            continue
+        # The middle of the narrowest stretch along this axis (a post between two plates: half way up the post,
+        # so the pin holes stay inside both pieces).
+        narrow = np.flatnonzero((area > 0) & (area <= 1.05 * area[area > 0].min()))
+        tries.append((k, float(at[narrow[len(narrow) // 2]])))
+    best = None
+    for k, c in tries:
+        low, up_low = _least_support(_half(mesh, k, c, True), settings)
+        high, up_high = _least_support(_half(mesh, k, c, False), settings)
+        if best is None or low + high < best["pieces_mm3"]:
+            best = {"axis": k, "cut": c, "pieces_mm3": low + high, "ups": [up_low, up_high]}
+    if best is None or best["pieces_mm3"] > SUPPORT_CUT_SAVING * whole:
+        return None
+    return {**best, "whole_mm3": whole}
+
+
+def split_plan(mesh: Mesh, bed, weak_spot=None, fit_gap_mm: float | None = None, joint: str = "pins",
+               force: tuple[int, list[float]] | None = None) -> dict:
     """Where to cut and what each piece is. ``bed`` [x, y, z] mm; ``weak_spot`` (part coordinates)
     keeps cuts away from where the part is weakest; ``joint`` "pins" or "dovetail" (pins where a cut
     face has no room for one). Returns axis, cut positions, ``joint``, each piece's edits, size and print
     ``rotation`` (part → printer, as checks.orient), the pin (STL, count, sizes) and a plain explanation;
-    raises if the part already fits or no flat cut across its axes makes the pieces fit."""
+    raises if the part already fits or no flat cut across its axes makes the pieces fit. ``force`` (axis, cut
+    positions): cut there instead (a part that fits, cut for another reason; see support_cut)."""
     pts = mesh.triangles.reshape(-1, 3)
     lo, hi = pts.min(axis=0), pts.max(axis=0)
     size = hi - lo
     bed = np.asarray(bed, float)
-    if _fits(size, bed):
+    if force is None and _fits(size, bed):
         raise ValueError("The part already fits this printer: no need to split it")
     gap = fit_gap_mm if fit_gap_mm is not None else load_data("thresholds")["fits"]["gap_mm"]["snug"]
-    best = None
-    for k in np.argsort(-size):  # longest axis first
+    best = (int(force[0]), [float(c) for c in force[1]]) if force else None
+    for k in [] if force else np.argsort(-size):  # longest axis first
         for n in range(2, 7):
             length = size[k] / n
             piece = size.copy()

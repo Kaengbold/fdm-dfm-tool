@@ -2053,12 +2053,14 @@ def _coarse_note(region: int) -> str:
     return ""
 
 
-def split(profile: dict | None = None, joint: str = "pins") -> dict:
+def split(profile: dict | None = None, joint: str = "pins", purpose: str = "fit") -> dict:
     """A part too big for the printer, cut flat into pieces that fit (split.py), joined with alignment
     pins or (``joint`` "dovetail") a sliding dovetail: each piece's ``edits`` (cut the rest away, then
     the pin holes) to apply to the part and its print ``rotation``, the pin as triangles
     (``pin.stl_triangles``, float32) and how many, and a plain explanation. Keeps the cut away from the
-    weak spot of the last strength check, and uses the snug gap from the fit test print."""
+    weak spot of the last strength check, and uses the snug gap from the fit test print. ``purpose``
+    "supports": cut a part that fits so each piece, turned its own best way, needs much less support
+    (split.support_cut; each piece's ``rotation`` is then that way); raises when no cut helps enough."""
     from .split import split_plan
 
     s = _require()
@@ -2066,7 +2068,25 @@ def split(profile: dict | None = None, joint: str = "pins") -> dict:
     gap = (p.material.get("fit_gap_mm") or {}).get("snug")
     if joint not in ("pins", "dovetail"):
         raise ValueError('joint is "pins" or "dovetail"')
-    return split_plan(s.mesh, p.printer["bed"], s.weak_spot[0] if s.weak_spot else None, gap, joint)
+    weak = s.weak_spot[0] if s.weak_spot else None
+    if purpose == "fit":
+        return split_plan(s.mesh, p.printer["bed"], weak, gap, joint)
+    if purpose != "supports":
+        raise ValueError('purpose is "fit" or "supports"')
+    from .split import _half, support_cut
+
+    cut = support_cut(s.mesh, orientation_settings(p))
+    if cut is None:
+        raise ValueError("No straight cut makes the pieces need much less support: print it in one piece")
+    plan = split_plan(s.mesh, p.printer["bed"], weak, gap, joint, force=(cut["axis"], [cut["cut"]]))
+    for i, (piece, up) in enumerate(zip(plan["pieces"], cut["ups"])):
+        piece["rotation"] = print_rotation(_half(s.mesh, cut["axis"], cut["cut"], i == 0), up, p.printer["bed"])[0].tolist()
+    note, rest = plan["explanation"].split("Cut ", 1)
+    plan["explanation"] = (note + f"Cut in two so each piece prints its own best way with much less support: about "
+                           f"{cut['pieces_mm3'] / 1000:.1f} cm³ of support instead of {cut['whole_mm3'] / 1000:.1f} cm³. "
+                           + rest.split(" pieces that each fit the bed. ", 1)[-1])
+    plan["support_mm3"] = {"whole": round(cut["whole_mm3"]), "pieces": round(cut["pieces_mm3"])}
+    return plan
 
 
 def set_gap(face_a: int, face_b: int, up, partner_mm: float | None = None, fit: str = "sliding", profile: dict | None = None) -> dict:
