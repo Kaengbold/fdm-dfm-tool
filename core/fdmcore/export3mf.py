@@ -86,19 +86,21 @@ VOLUME_TYPES = {
 
 def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None = None, bed_center=(128.0, 128.0),
                modifiers: list[tuple] = (), layout: str = "orca", pauses: list[dict] = (), ranges: list[dict] = (),
-               seam_block: np.ndarray | None = None) -> bytes:
+               seam_block: np.ndarray | None = None, copies=((0.0, 0.0),)) -> bytes:
     """``mesh`` must already be oriented (lowest point at z = 0, centred on x/y = 0). ``modifiers``:
     (triangles in the same frame, settings[, kind]) per volume, kind one of VOLUME_TYPES (default
     "stronger": a settings modifier); ``layout`` "orca" (also Bambu Studio) or "prusa", see the
     module docstring. ``pauses``: {"top": pocket top (mm), "layer_height", "note"} each: pause before the
     first layer above it, to put something into the part (see pause_files). ``ranges``: {"z0", "z1",
     "layer_height"} each: thinner layers over that height (see range_files). ``seam_block``: one bool per
-    triangle of ``mesh``: no seam there (painted as seam blocker)."""
+    triangle of ``mesh``: no seam there (painted as seam blocker). ``copies``: (x, y) offset of each copy on the
+    plate, as build items of the one object (all three slicers print each; OrcaSlicer and Bambu Studio may
+    re-arrange them)."""
     extra = {**pause_files(pauses), **range_files(ranges)}
     if modifiers:
         if layout not in LAYOUTS:
             raise ValueError(f"layout must be one of {LAYOUTS}")
-        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, extra, seam_block)
+        return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, extra, seam_block, copies)
     verts, faces, paint = _weld_painted(mesh.triangles, seam_block)
     verts = verts + [bed_center[0], bed_center[1], 0.0]
     vxml = "\n".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in verts)
@@ -119,7 +121,7 @@ def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None =
   </object>
  </resources>
  <build>
-  <item objectid="1" printable="1"/>
+{_items(copies)}
  </build>
 </model>"""
     meta = "\n".join(f"    <metadata key={quoteattr(k)} value={quoteattr(str(v))}/>" for k, v in (settings or {}).items())
@@ -134,7 +136,7 @@ def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None =
                            for k, v in prusa_settings(settings or {}).items())
     prusa_model = f"""<?xml version="1.0" encoding="UTF-8"?>
 <config>
- <object id="1" instances_count="1">
+ <object id="1" instances_count="{len(copies)}">
   <metadata type="object" key="name" value={quoteattr(name)}/>
 {prusa_meta}
   <volume firstid="0" lastid="{len(faces) - 1}">
@@ -195,9 +197,15 @@ MODEL_HEAD = """<?xml version="1.0" encoding="UTF-8"?>
 """
 MODEL_FOOT = """ </resources>
  <build>
-  <item objectid="1" printable="1"/>
+{items}
  </build>
 </model>"""
+
+
+def _items(copies) -> str:
+    """Build items: one per copy of object 1, moved by its (x, y) offset."""
+    return "\n".join(f'  <item objectid="1" transform="1 0 0 0 1 0 0 0 1 {x:.3f} {y:.3f} 0" printable="1"/>' if (x, y) != (0, 0)
+                     else '  <item objectid="1" printable="1"/>' for x, y in copies)
 
 
 SEAM_BLOCK = ' paint_seam="8" slic3rpe:custom_seam="8"'  # whole triangle painted "blocker", both slicers' names
@@ -237,7 +245,8 @@ def _zip(model: str, model_settings: str | None, prusa_model: str | None, extra:
 
 
 def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers, layout: str, extra: dict[str, str] | None = None,
-                    seam_block: np.ndarray | None = None) -> bytes:
+                    seam_block: np.ndarray | None = None, copies=((0.0, 0.0),)) -> bytes:
+    foot = MODEL_FOOT.format(items=_items(copies))
     shift = np.array([bed_center[0], bed_center[1], 0.0])
     v0, f0, paint = _weld_painted(mesh.triangles, seam_block)
     pieces = [(v0, f0)] + [_weld(m[0]) for m in modifiers]
@@ -252,7 +261,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
             parts.append(f"  <part id=\"{oid}\" subtype=\"{sub}\">\n    <metadata key=\"name\" value={quoteattr(label)}/>\n{_meta(conf)}\n  </part>")
         comps = "".join(f'<component objectid="{i + 2}"/>' for i in range(len(pieces)))
         model = (MODEL_HEAD + "\n".join(objects)
-                 + f"\n  <object id=\"1\" name={quoteattr(name)} type=\"model\"><components>{comps}</components></object>\n" + MODEL_FOOT)
+                 + f"\n  <object id=\"1\" name={quoteattr(name)} type=\"model\"><components>{comps}</components></object>\n" + foot)
         config = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\">\n"
                   f"    <metadata key=\"name\" value={quoteattr(name)}/>\n{_meta(settings)}\n" + "\n".join(parts) + "\n </object>\n</config>")
         return _zip(model, config, None, extra)
@@ -265,7 +274,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
         offset += len(v)
         bounds.append(bounds[-1] + len(f))
     model = (MODEL_HEAD + f"  <object id=\"1\" name={quoteattr(name)} type=\"model\">{_mesh_xml(np.concatenate(verts) + shift, np.concatenate(faces), None if paint is None else np.concatenate([paint, np.zeros(bounds[-1] - len(paint), bool)]))}</object>\n"
-             + MODEL_FOOT)
+             + foot)
     vols = []
     for i in range(len(pieces)):
         if i == 0:
@@ -276,7 +285,7 @@ def _with_modifiers(mesh: Mesh, name: str, settings: dict, bed_center, modifiers
                     + (f"\n    <metadata type=\"volume\" key=\"modifier\" value=\"1\"/>\n{_meta(prusa_settings(modifiers[i - 1][1]), 'volume')}"
                        if sub == "modifier_part" else ""))
         vols.append(f"  <volume firstid=\"{bounds[i]}\" lastid=\"{bounds[i + 1] - 1}\">\n{body}\n  </volume>")
-    config = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\" instances_count=\"1\">\n"
+    config = (f"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<config>\n <object id=\"1\" instances_count=\"{len(copies)}\">\n"
               f"  <metadata type=\"object\" key=\"name\" value={quoteattr(name)}/>\n{_meta(prusa_settings(settings), 'object')}\n"
               + "\n".join(vols) + "\n </object>\n</config>")
     return _zip(model, None, config, extra)

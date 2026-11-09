@@ -30,6 +30,34 @@ def _slender(pts: np.ndarray, size: np.ndarray) -> bool:
     return size[2] >= SLINGER_SLENDER * max(thin, 1e-6)
 
 
+PLATE_GAP_MM = 10.0  # between copies: room for the nozzle and a brim, and less stringing between them
+PLATE_EDGE_MM = 5.0  # kept clear round the bed's edge
+MAX_COPIES = 100
+
+
+def plate_layout(footprint, bed, count: int | None = None, gap: float = PLATE_GAP_MM) -> tuple[int, list[list[float]]]:
+    """How many copies of a part with this ``footprint`` (x, y mm, as it prints) fit the ``bed`` in rows,
+    ``gap`` apart, and where ``count`` of them go (offsets from the bed's centre, first one in the middle row,
+    rows filled from the front). (0, []) when not even one fits."""
+    w, d = float(footprint[0]), float(footprint[1])
+    bx, by = bed[0] - 2 * PLATE_EDGE_MM, bed[1] - 2 * PLATE_EDGE_MM
+    cols, rows = int((bx + gap) // (w + gap)), int((by + gap) // (d + gap))
+    most = min(cols * rows, MAX_COPIES) if w <= bed[0] and d <= bed[1] else 0
+    if most == 0 and w <= bed[0] and d <= bed[1]:
+        most, cols, rows = 1, 1, 1  # fits alone, not with the edge margin
+    n = most if count is None else max(0, min(int(count), most))
+    if n == 0:
+        return most, []
+    use_cols = min(cols, n)
+    use_rows = -(-n // use_cols)
+    out = []
+    for k in range(n):
+        r, c = divmod(k, use_cols)
+        in_row = min(use_cols, n - r * use_cols)
+        out.append([(c - (in_row - 1) / 2) * (w + gap), (r - (use_rows - 1) / 2) * (d + gap)])
+    return most, out
+
+
 def print_rotation(mesh: Mesh, up, bed, moving_bed: bool = False) -> tuple[np.ndarray, dict]:
     """Rotation into print orientation and a fit report for a bed ``[x, y, z]`` (mm). ``moving_bed``: the bed
     moves along Y; a tall thin part is turned so its footprint's long side runs along Y (``for_bed_motion``)."""

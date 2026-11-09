@@ -237,3 +237,34 @@ def test_tall_thin_part_turned_along_a_moving_bed():
     assert max(ys) - min(ys) == pytest.approx(60, abs=0.01)  # long side along Y in the file too
     api.load(to_binary_stl(Mesh(box([0, 0, 0], 1) * [60, 6, 30])), "short")
     assert np.array(api.orientation([0, 0, 1], {"printer": "bambu_a1"})["rotation"]) @ [1, 0, 0] == pytest.approx([1, 0, 0], abs=1e-6)
+
+
+def test_copies_on_one_plate():
+    """How many fit in rows 10 mm apart inside a 5 mm edge, set out round the bed's centre without overlapping;
+    the 3MF carries them as build items of the one object (tools/slicer_check.py: all three slicers print them),
+    PrusaSlicer's config counts the instances; the notes explain all at once vs one after another."""
+    import io
+    import zipfile
+
+    from fdmcore.placement import plate_layout
+    from test_formats import box
+
+    most, spots = plate_layout((20, 20), (256, 256, 256))
+    assert most == 64 and len(spots) == 64  # (246 + 10) // 30 = 8 a row
+    xs, ys = np.array(spots).T
+    assert xs.max() + 10 <= 128 - 5 and ys.min() - 10 >= -128 + 5
+    assert min(np.hypot(*(np.array(a) - b)) for i, a in enumerate(spots) for b in spots[:i]) >= 30
+    assert plate_layout((20, 20), (256, 256, 256), 3)[1] == [[-30.0, 0.0], [0.0, 0.0], [30.0, 0.0]]
+    assert plate_layout((250, 250), (256, 256, 256)) == (1, [[0.0, 0.0]])  # fits alone, inside the edge margin or not
+    assert plate_layout((300, 20), (256, 256, 256)) == (0, [])
+
+    api.load(to_binary_stl(Mesh(box([0, 0, 0], 1) * [60, 30, 10])), "block")
+    plan = api.plate([0, 0, 1], {}, 4)
+    assert (plan["most"], plan["copies"], len(plan["offsets"])) == (18, 4, 4) and len(plan["notes"]) == 2
+    assert "one after another" in plan["notes"][1].lower() and api.plate([0, 0, 1], {}, 1)["notes"] == []
+    for slicer in ("orca", "prusa"):
+        z = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {}, slicer=slicer, copies=4)))
+        assert z.read("3D/3dmodel.model").decode().count("<item ") == 4
+        assert 'instances_count="4"' in z.read("Metadata/Slic3r_PE_model.config").decode()
+    one = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {}))).read("3D/3dmodel.model").decode()
+    assert one.count("<item ") == 1 and "transform" not in one

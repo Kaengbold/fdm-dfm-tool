@@ -24,7 +24,7 @@ from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh, to_binary_stl
 from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z
-from .placement import print_rotation
+from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
@@ -2611,12 +2611,12 @@ def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
 
 def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca",
            pauses: list[float] | None = None, fine_layers: list[dict] | None = None, faces: dict | None = None,
-           grip: bool = False) -> bytes:
+           grip: bool = False, copies: int = 1) -> bytes:
     """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio / PrusaSlicer.
     ``fine_layers``: {"z0", "z1", "layer_height"} each (the metrics of shallow_slope_stairs findings):
     thinner layers over just that height. ``faces`` as in ``orientations``: no seam on the faces marked
     "clean" (the ones people see; painted as seam blockers). ``grip``: fuzzy skin on the outer walls
-    (recommend.grip_settings; the slicer settings given win).
+    (recommend.grip_settings; the slicer settings given win). ``copies``: that many on the plate (see ``plate``).
     ``pauses``: pocket tops (mm, ``top_z`` of a pause_to_insert finding): the print pauses before the first
     layer above each, to put something into the pocket (OrcaSlicer and PrusaSlicer; Bambu Studio ignores it).
     ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes, and
@@ -2644,7 +2644,33 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
                       pauses=[{"top": float(z), "layer_height": float(settings.get("layer_height") or p.layer_height),
                                "note": "Put the part into the pocket"} for z in pauses or []],
                       ranges=[{k: float(r[k]) for k in ("z0", "z1", "layer_height")} for r in fine_layers or []],
-                      seam_block=_seam_block(faces))
+                      seam_block=_seam_block(faces), copies=plate(up, profile, copies)["offsets"] if copies > 1 else ((0.0, 0.0),))
+
+
+def plate(up, profile: dict | None = None, copies: int | None = None) -> dict:
+    """Several copies of the part on one plate, printed this way up: how many fit (``most``), where ``copies`` of
+    them go (offsets from the bed's centre, mm; all that fit when None), and what printing them all at once or
+    one after another means, in plain words (Slant 3D: a full plate fails as one, and strings between parts).
+    """
+    s = _require()
+    p = Profile.from_dict(profile)
+    rotation, fit = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
+    size = fit["size_mm"]
+    most, offsets = plate_layout(size[:2], p.printer["bed"], copies)
+    n = len(offsets)
+    notes = []
+    if n > 1:
+        notes.append(f"All {n} at once (the slicer's default): the plate takes about {n} times one part's time, and every "
+                     "part waits for the last. If one comes loose, it can knock the others over or pull plastic strings "
+                     "across them, and a stopped print loses them all. The nozzle also travels between parts on every "
+                     "layer, which leaves strings and blobs.")
+        notes.append("One after another (OrcaSlicer and Bambu Studio: plate settings, print sequence “By object”; PrusaSlicer: "
+                     "Print settings, Output options, “Complete individual objects”): each part is finished before the next "
+                     "starts, so a failure only costs that part and there are no strings between them. The slicer only allows "
+                     "it for parts lower than the printhead's carriage, and wants more room between them: it tells you, then "
+                     "arrange again (A).")
+    return {"most": most, "copies": n, "offsets": offsets, "footprint_mm": [round(v, 1) for v in size[:2]],
+            "height_mm": round(size[2], 1), "notes": notes}
 
 
 def _seam_block(faces: dict | None) -> np.ndarray | None:
@@ -2793,6 +2819,7 @@ METHODS = {
     "orientation": orientation,
     "check": check,
     "export": export,
+    "plate": plate,
     "report": report,
     "regions": regions,
     "optimise_strength": optimise_strength,

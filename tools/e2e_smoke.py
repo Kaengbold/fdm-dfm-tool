@@ -1198,6 +1198,27 @@ def main():
             return "suggested for knob.stl, fuzzy skin in the 3MF, off for the next part"
         run.step("grip texture on a knob", grip_texture)
 
+        def plate_copies():
+            # Four copies of the test block: how many fit, the plate's time, the notes, four items in the 3MF (T-349).
+            import io
+            import zipfile
+
+            run.act(lambda: page.click("[data-sample=test_block]"))
+            page.evaluate("() => fdm.steps.go('download')")
+            page.fill("#dl-copies", "4")
+            page.dispatch_event("#dl-copies", "change")
+            page.wait_for_function("() => document.getElementById('copies-text').textContent.includes('4 copies')", timeout=60_000)
+            text = page.locator("#copies-text").inner_text()
+            assert "fit on this printer's bed" in text and page.locator("#copies-notes li").count() == 2, text
+            with page.expect_download(timeout=300_000) as dl:
+                page.evaluate("() => document.getElementById('dl-3mf').click()")
+            model = zipfile.ZipFile(io.BytesIO(Path(dl.value.path()).read_bytes())).read("3D/3dmodel.model").decode()
+            assert model.count("<item ") == 4, model.count("<item ")
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            assert page.evaluate("() => document.getElementById('dl-copies').value") == "1", "copies kept for another part"
+            return text
+        run.step("copies on one plate", plate_copies)
+
         def grip_fins():
             # A Ø6 pin pressed into a plate: grip fins offered, shown in both colours, applied (T-335).
             run.act(lambda: page.set_input_files("#file", str(ROOT / "tools" / "fixtures" / "press_plate.stl")), 300_000)

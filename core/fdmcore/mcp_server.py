@@ -384,9 +384,11 @@ def export_3mf(
     fine_layers: list[dict] | None = None,
     faces: dict | None = None,
     grip: bool = False,
+    copies: int = 1,
 ) -> str:
     """Write the oriented part as 3MF with slicer settings (recommended ones unless overridden).
     ``grip``: fuzzy skin on the outer walls, a grippy surface for knobs and handles (grip_texture finding).
+    ``copies``: that many on the plate (plan_plate says how many fit).
     ``fine_layers``: the metrics (z0, z1, layer_height) of shallow_slope_stairs findings: thinner layers there.
     ``faces`` {"clean": [region ids from list_faces]}: faces people see; the seam is kept off them.
     ``zones`` (add_zone, or optimise_strength's ``zoned``) become modifier volumes, and boxes from place_box
@@ -396,7 +398,7 @@ def export_3mf(
     merged = {r["key"]: r["value"] for r in api.check(up, prof)["settings"]}
     merged.update(settings or {})
     out = _out(output_path, (".3mf",), "3MF path")
-    out.write_bytes(api.export(up, prof, merged, zones, slicer, fine_layers=fine_layers, faces=faces, grip=grip))
+    out.write_bytes(api.export(up, prof, merged, zones, slicer, fine_layers=fine_layers, faces=faces, grip=grip, copies=copies))
     return str(out)
 
 
@@ -738,6 +740,23 @@ def suggest_lighter_shape(up: list[float], loads: list[dict], output_path: str, 
 
 
 @server.tool()
+def plan_plate(up: list[float], copies: int | None = None, printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Several copies of the loaded part on one plate, printed ``up``: how many fit (``most``), where ``copies`` of
+    them go (offsets from the bed's centre; all that fit when None), the plate's print time and plastic (one
+    part's from the check, times the copies, rough), and what printing them all at once or one after another
+    means. export_3mf(copies=...) writes them into the 3MF."""
+    prof = _profile(printer, material, nozzle)
+    plan = api.plate(up, prof, copies)
+    stats = api.check(up, prof)["stats"]
+    one_min, one_g = stats.get("print_time_min"), stats.get("total_g", stats.get("filament_g"))
+    if one_min is not None:
+        plan["plate_time_min"] = round(one_min * plan["copies"])
+    if one_g is not None:
+        plan["plate_grams"] = round(one_g * plan["copies"], 1)
+    return plan
+
+
+@server.tool()
 def split_part(output_folder: str, joint: str = "pins", purpose: str = "fit", printer: str = "bambu_p1s", material: str = "pla",
                nozzle: str = "0.4") -> dict:
     """Cut a part that is too big for the printer flat into pieces that fit, with holes for alignment pins
@@ -788,6 +807,7 @@ API_TOOLS = {
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",
     "split": "split_part",
+    "plate": "plan_plate",
     "set_gap": "set_gap",
     "volume_solid": "apply_blocks",
     "snap_model": "snap_model",

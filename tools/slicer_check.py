@@ -310,6 +310,28 @@ def measure_fuzz(gcode: Path) -> float:
     return round(float(np.std(r[np.abs(r - np.median(r)) < 1])), 3)
 
 
+def copies_block(layout: str, n: int) -> bytes:
+    """20 mm cube, ``n`` copies on the plate."""
+    from fdmcore.additions import extrude
+    from shapely.geometry import box
+
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 20, 20), 0, 5))), "copies_check")
+    return api.export([0, 0, 1], {}, {}, slicer=layout, copies=n)
+
+
+def count_first_layer_parts(gcode: Path) -> int:
+    """Outer wall blocks on the first layer: one per cube."""
+    first, n = None, 0
+    for line in gcode.read_text(errors="replace").splitlines():
+        if (m := LAYER.match(line)) is not None:
+            if first is not None and float(m.group(2)) > first:
+                break
+            first = float(m.group(2))
+        elif first is not None and OUTER.match(line):
+            n += 1
+    return n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true")
@@ -384,6 +406,10 @@ def main():
         at = measure_pause(gcode)
         # Before the first layer above the pocket (top 9 mm): 9.2 on a 0.2 mm grid, 9.05 on 0.15 mm.
         checks["pause_at_layer"] = (at, "first layer over 9.0", len(at) == 1 and 9.0 < at[0] <= 9.21)
+        model = work / f"{name}_copies.3mf"
+        model.write_bytes(copies_block(layout, 3))
+        n = count_first_layer_parts(slice_with(name, cfg, model, work / f"{name}_copies"))
+        checks["copies"] = (3, n, n == 3)
         fuzz = {}
         for grip in (False, True):
             model = work / f"{name}_grip_{int(grip)}.3mf"

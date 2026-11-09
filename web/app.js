@@ -408,6 +408,8 @@ async function partLoaded(info) {
   // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
   state.options = [];
   state.check = null;
+  $("dl-copies").value = "1"; // a new part starts with one on the plate
+  state.copies = 1;
   renderPauses();
   $("dl-split").hidden = true;
   closeSplit();
@@ -3121,8 +3123,28 @@ async function renderSetup() {
   $("setup-warnings").replaceChildren(...found.map((f) => el("li", { textContent: `${f.title}: ${f.detail}.` })));
 }
 
+// Several copies on one plate (api.plate): how many fit, the plate's time and plastic, all at once vs one after another.
+async function renderCopies() {
+  const want = Math.max(1, parseInt($("dl-copies").value, 10) || 1);
+  const r = state.check && (await call("plate", { up: activeOption().up, profile: profile(), copies: want }).catch(() => null));
+  if (!r) return;
+  $("dl-copies").max = String(Math.max(1, r.most));
+  if (r.most && want > r.most) $("dl-copies").value = String(r.most);
+  state.copies = Math.max(1, r.copies);
+  const stats = state.check.stats;
+  const grams = stats.total_g ?? stats.filament_g;
+  $("copies-text").hidden = false;
+  $("copies-text").textContent = r.most <= 1 ? "Only one fits on this printer's bed." :
+    `Up to ${r.most} fit on this printer's bed.` + (state.copies > 1 ? ` ${state.copies} copies: about ${fmtTime(stats.print_time_min * state.copies)} ` +
+    `and ${Math.round(grams * state.copies)} g in all (rough).` : "");
+  $("copies-notes").hidden = !r.notes.length;
+  $("copies-notes").replaceChildren(...r.notes.map((t) => el("li", { textContent: t })));
+}
+$("dl-copies").onchange = renderCopies;
+
 function renderPauses() {
   renderSetup();
+  renderCopies();
   const fine = fineWanted();
   $("fine-for").hidden = !fine.length;
   $("fine-text").textContent = fine.length ? `Thinner ${fine[0].layer_height.toFixed(2)} mm layers on the shallow slope${fine.length > 1 ? "s" : ""} ` +
@@ -3189,11 +3211,12 @@ $("dl-3mf").onclick = async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
     const pauses = $("dl-pause").checked ? pausesWanted() : [];
     const fine_layers = $("dl-fine").checked ? fineWanted() : [];
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked });
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked, copies: state.copies ?? 1 });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     const seam = faceMarks()?.clean?.length ? " The seam is kept off the faces you marked “keep clean”." : "";
     const grip = $("dl-grip").checked ? " Fuzzy skin is on for the outside walls." : "";
-    setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.${seam}${grip}`);
+    const copies = (state.copies ?? 1) > 1 ? ` ${state.copies} copies on the plate.` : "";
+    setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.${seam}${grip}${copies}`);
   });
 };
 
