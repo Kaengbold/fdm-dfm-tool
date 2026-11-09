@@ -500,6 +500,10 @@ async function runCheck() {
     // Same test as the support setting on the 3MF (recommend.py): an overhang, or a bridge too long to span.
     const needsSupport = result.stats.needs_support || result.findings.some((f) => f.rule === "long_bridge");
     $("dl-split-support").hidden = !$("dl-split").hidden || !needsSupport;
+    if (state.gripFor !== state.name) { // a new part: ticked when it is something held (grip_texture); then the user's choice
+      state.gripFor = state.name;
+      $("dl-grip").checked = result.findings.some((f) => f.rule === "grip_texture");
+    }
     closeSplit(); // the pieces were for the orientation and part before
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
@@ -3185,10 +3189,11 @@ $("dl-3mf").onclick = async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
     const pauses = $("dl-pause").checked ? pausesWanted() : [];
     const fine_layers = $("dl-fine").checked ? fineWanted() : [];
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks() });
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     const seam = faceMarks()?.clean?.length ? " The seam is kept off the faces you marked “keep clean”." : "";
-    setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.${seam}`);
+    const grip = $("dl-grip").checked ? " Fuzzy skin is on for the outside walls." : "";
+    setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.${seam}${grip}`);
   });
 };
 

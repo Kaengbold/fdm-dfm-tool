@@ -25,6 +25,16 @@ PATTERN_REASON = {
 REF_LINE_MM, REF_LAYER_MM = 0.45, 0.2  # the 0.4 mm nozzle the plans above are written for
 
 
+def grip_settings(profile: Profile) -> dict[str, str]:
+    """Fuzzy skin on the outer walls (``grip`` in thresholds.yaml), for a part people hold. OrcaSlicer's
+    "combined" generator keeps the wall closed (plain displacement opens pores in it) and needs the Arachne
+    wall generator; Bambu Studio and PrusaSlicer don't know it and displace the wall instead."""
+    G = load_data("thresholds")["grip"]
+    thick = min(G["thickness_mm"], 0.75 * profile.line_width)
+    return {"fuzzy_skin": "external", "fuzzy_skin_thickness": f"{thick:.2f}", "fuzzy_skin_point_distance": f"{G['point_distance_mm']:g}",
+            "fuzzy_skin_mode": "combined", "wall_generator": "arachne"}
+
+
 def goal_plan(profile: Profile) -> dict:
     """Walls, infill (%), pattern, layer height and top/bottom layers for the user's goal.
     The plans are written for a 0.4 mm nozzle; other nozzles keep the same wall and top/bottom

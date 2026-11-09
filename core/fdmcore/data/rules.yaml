@@ -499,6 +499,24 @@ rules:
     sources:
     - Prusa Knowledge Base — dimensional accuracy and shrinkage articles (help.prusa3d.com)
     - Polymaker PolyLite ABS / ASA technical data sheets (shrinkage values)
+  grip_texture:
+    title: Grip texture
+    why: A knob or handle that is held gets a better grip, and hides its layer lines, with a rough outer surface.
+      The slicer can make one without changing the model ("fuzzy skin"), only on the outer walls.
+    fixes:
+    - domain: slicer
+      text: Turn on fuzzy skin for the outer walls (contour), about 0.3 mm thick, 0.8 mm point distance. In OrcaSlicer
+        use the "combined" generator with Arachne walls, it keeps the wall closed; painted-only fuzzy skin puts it on
+        just the gripped faces. The jiggling walls print slower (up to about half speed on those walls).
+    - domain: geometry
+      text: Or model the texture - knurling, flutes or ribs about 0.3-0.6 mm deep, with a 0.5-1 mm smooth border
+        around holes and mating faces - so it prints at full speed and is the same in every slicer.
+    tags:
+    - surface
+    - grip
+    sources:
+    - OrcaSlicer wiki, Fuzzy skin — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_fuzzy_skin
+    - Slant 3D — 10 Ways to Hide Layer Lines, Design 3D Printed Textures — https://www.youtube.com/watch?v=pUabxkiJAdE
   flat_gap_fuses:
     title: Flat gap in a moving joint fuses
     why: In a print-in-place hinge or captive part, a flat gap stacked in height means the face above it is printed

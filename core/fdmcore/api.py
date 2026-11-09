@@ -28,7 +28,7 @@ from .placement import print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
-from .recommend import goal_plan, recommend_settings
+from .recommend import goal_plan, grip_settings, recommend_settings
 from .service import required_safety
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
@@ -2330,6 +2330,7 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
     result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
     result["findings"] += _thread_findings(oriented, rotation, p)
+    result["findings"] += _grip_findings(s.name)
     if not fit["fits"]:
         result["findings"].insert(0, {"rule": "exceeds_build_volume", "severity": "problem", "bbox": None, "metrics": fit,
                                       "detail": f"Doesn't fit the {p.printer['name']}: {fit['reason']}"})
@@ -2350,6 +2351,20 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         "z_strength_factor": result["z_strength_factor"],
         "face_temp": _face_temp(oriented, result["stats"]["layer_heat"], spots),
     }
+
+
+def _grip_findings(name: str) -> list[dict]:
+    """grip_texture when the file name says the part is held (a knob, handle, …: ``grip`` words in
+    thresholds.yaml, at the start of a word so "radial" isn't a dial)."""
+    import re
+
+    words = load_data("thresholds")["grip"]["words"]
+    hit = re.search(r"(?<![a-z])(" + "|".join(map(re.escape, words)) + ")", (name or "").lower())
+    if not hit:
+        return []
+    return [{"rule": "grip_texture", "severity": "info", "bbox": None, "metrics": {"word": hit.group(1)},
+             "detail": f"A {hit.group(1)} is held by hand: fuzzy skin on its outer walls gives it a grippy, matte surface "
+                       "that also hides the layer lines"}]
 
 
 def _gcode_to_oriented(rotation: np.ndarray):
@@ -2595,11 +2610,13 @@ def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
 
 
 def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca",
-           pauses: list[float] | None = None, fine_layers: list[dict] | None = None, faces: dict | None = None) -> bytes:
+           pauses: list[float] | None = None, fine_layers: list[dict] | None = None, faces: dict | None = None,
+           grip: bool = False) -> bytes:
     """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio / PrusaSlicer.
     ``fine_layers``: {"z0", "z1", "layer_height"} each (the metrics of shallow_slope_stairs findings):
     thinner layers over just that height. ``faces`` as in ``orientations``: no seam on the faces marked
-    "clean" (the ones people see; painted as seam blockers).
+    "clean" (the ones people see; painted as seam blockers). ``grip``: fuzzy skin on the outer walls
+    (recommend.grip_settings; the slicer settings given win).
     ``pauses``: pocket tops (mm, ``top_z`` of a pause_to_insert finding): the print pauses before the first
     layer above each, to put something into the pocket (OrcaSlicer and PrusaSlicer; Bambu Studio ignores it).
     ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes, and
@@ -2609,6 +2626,8 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     p = Profile.from_dict(profile)
     if settings is None:
         settings = {r["key"]: r["value"] for r in check(up, profile)["settings"]}
+    if grip:
+        settings = {**settings, **grip_settings(p), **{k: v for k, v in settings.items() if k.startswith("fuzzy_skin")}}
     bed = p.printer["bed"]
     rotation, _ = print_rotation(s.mesh, up, bed, _moving(p))
     modifiers = []

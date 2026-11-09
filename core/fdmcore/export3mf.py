@@ -54,6 +54,9 @@ PRUSA_KEYS = {
     "brim_width": "brim_width",
     "wall_generator": "perimeter_generator",
     "bridge_speed": "bridge_speed",
+    "fuzzy_skin": "fuzzy_skin",  # none | external | all in both
+    "fuzzy_skin_thickness": "fuzzy_skin_thickness",
+    "fuzzy_skin_point_distance": "fuzzy_skin_point_dist",
 }
 
 

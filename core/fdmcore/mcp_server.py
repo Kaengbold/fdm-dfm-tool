@@ -383,8 +383,10 @@ def export_3mf(
     slicer: str = "orca",
     fine_layers: list[dict] | None = None,
     faces: dict | None = None,
+    grip: bool = False,
 ) -> str:
     """Write the oriented part as 3MF with slicer settings (recommended ones unless overridden).
+    ``grip``: fuzzy skin on the outer walls, a grippy surface for knobs and handles (grip_texture finding).
     ``fine_layers``: the metrics (z0, z1, layer_height) of shallow_slope_stairs findings: thinner layers there.
     ``faces`` {"clean": [region ids from list_faces]}: faces people see; the seam is kept off them.
     ``zones`` (add_zone, or optimise_strength's ``zoned``) become modifier volumes, and boxes from place_box
@@ -394,7 +396,7 @@ def export_3mf(
     merged = {r["key"]: r["value"] for r in api.check(up, prof)["settings"]}
     merged.update(settings or {})
     out = _out(output_path, (".3mf",), "3MF path")
-    out.write_bytes(api.export(up, prof, merged, zones, slicer, fine_layers=fine_layers, faces=faces))
+    out.write_bytes(api.export(up, prof, merged, zones, slicer, fine_layers=fine_layers, faces=faces, grip=grip))
     return str(out)
 
 

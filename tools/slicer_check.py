@@ -281,6 +281,35 @@ def measure_holes(gcode: Path) -> dict:
             "hole_r": round(float(np.median(r[hole])), 3), "outer_mm": round(width(mid & (r > 4.5)), 3)}
 
 
+def grip_cylinder(layout: str, grip: bool) -> bytes:
+    """Ø20 mm cylinder, 10 mm tall, exported with or without the grip texture (fuzzy skin)."""
+    from shapely.geometry import Point
+
+    from fdmcore.additions import extrude
+
+    api.load(to_binary_stl(Mesh(extrude(Point(0, 0).buffer(10, quad_segs=64), 0, 10))), "knob")
+    return api.export([0, 0, 1], {}, {}, slicer=layout, grip=grip)
+
+
+def measure_fuzz(gcode: Path) -> float:
+    """How far the outer wall's points stray from round at 4-6 mm height (mm, standard deviation of the radius)."""
+    x = y = z = 0.0
+    outer, pts = False, []
+    for line in gcode.read_text(errors="replace").splitlines():
+        if (m := LAYER.match(line)) is not None:
+            z = float(m.group(2))
+        elif FEATURE.match(line):
+            outer = bool(OUTER.match(line))
+        elif line.startswith(("G1", "G2", "G3")):
+            w = dict((t[0], float(t[1:])) for t in line.split(";")[0].split()[1:] if t[0] in "XYE" and len(t) > 1)
+            x, y = w.get("X", x), w.get("Y", y)
+            if outer and 4 < z < 6 and w.get("E", 0) > 0 and ("X" in w or "Y" in w):
+                pts.append((x, y))
+    p = np.array(pts)
+    r = np.linalg.norm(p - (p.min(axis=0) + p.max(axis=0)) / 2, axis=1)
+    return round(float(np.std(r[np.abs(r - np.median(r)) < 1])), 3)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true")
@@ -355,6 +384,13 @@ def main():
         at = measure_pause(gcode)
         # Before the first layer above the pocket (top 9 mm): 9.2 on a 0.2 mm grid, 9.05 on 0.15 mm.
         checks["pause_at_layer"] = (at, "first layer over 9.0", len(at) == 1 and 9.0 < at[0] <= 9.21)
+        fuzz = {}
+        for grip in (False, True):
+            model = work / f"{name}_grip_{int(grip)}.3mf"
+            model.write_bytes(grip_cylinder(layout, grip))
+            fuzz[grip] = measure_fuzz(slice_with(name, cfg, model, work / f"{name}_grip_{int(grip)}"))
+        # Fuzzy skin roughens the outer wall: its points stray several times further from round.
+        checks["fuzzy_skin"] = (fuzz[False], fuzz[True], fuzz[True] > 0.05 and fuzz[True] > 3 * fuzz[False])
         for key, (va, vb, applied) in checks.items():
             ok &= applied
             print(f"{'PASS' if applied else 'FAIL'} {name} {key}: A={va} B={vb}")

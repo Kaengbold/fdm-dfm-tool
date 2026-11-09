@@ -644,6 +644,39 @@ def test_seam_kept_off_faces_marked_clean():
     assert "paint_seam" not in plain
 
 
+def test_grip_texture_for_knobs_and_fuzzy_skin_in_the_3mf():
+    """A part named as something held (knob, handle, Griff…) gets the grip_texture suggestion; "radial" is no dial.
+    With grip the 3MF has fuzzy skin on the outer walls for OrcaSlicer / Bambu Studio and PrusaSlicer (tools/
+    slicer_check.py checks they apply it), thinner than the outer wall on a small nozzle."""
+    from fdmcore.mesh import Mesh, to_binary_stl
+    from test_formats import box
+
+    stl = to_binary_stl(Mesh(box([0, 0, 0], 1) * 20))
+    for name, hit in (("Drawer_Handle.stl", "handle"), ("knob-v2.stl", "knob"), ("Türgriff.stl", None), ("Griff.stl", "griff"),
+                      ("radial_fan.stl", None), ("cube.stl", None)):
+        api.load(stl, name)
+        found = [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "grip_texture"]
+        assert [f["metrics"]["word"] for f in found] == ([hit] if hit else []), name
+        assert all(f["severity"] == "info" and f["fixes"] for f in found)
+
+    def config(slicer, grip, profile=None, settings=None):
+        z = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], profile or {}, settings or {}, slicer=slicer, grip=grip)))
+        return z.read("Metadata/Slic3r_PE_model.config" if slicer == "prusa" else "Metadata/model_settings.config").decode()
+
+    orca = config("orca", True)
+    for key, value in (("fuzzy_skin", "external"), ("fuzzy_skin_thickness", "0.30"), ("fuzzy_skin_point_distance", "0.8"),
+                       ("fuzzy_skin_mode", "combined"), ("wall_generator", "arachne")):
+        assert f'key="{key}" value="{value}"' in orca, key
+    prusa = config("prusa", True)
+    assert 'key="fuzzy_skin" value="external"' in prusa and 'key="fuzzy_skin_point_dist" value="0.8"' in prusa
+    assert "fuzzy" not in config("orca", False) and "fuzzy" not in config("prusa", False)
+    import re
+
+    small = float(re.search(r'key="fuzzy_skin_thickness" value="([\d.]+)"', config("orca", True, {"nozzle": "0.2"})).group(1))
+    assert 0.1 < small < 0.22  # the 0.2 mm nozzle's outer wall line is 0.22 mm
+    assert 'key="fuzzy_skin" value="all"' in config("orca", True, settings={"fuzzy_skin": "all"})  # the user's value wins
+
+
 def _plate_with_hole(sides: int, r: float = 4.0):
     from shapely.geometry import Point, box
 

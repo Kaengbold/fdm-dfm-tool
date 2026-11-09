@@ -175,6 +175,13 @@ vase:
   min_open_share: 0.5             # the opening reaches down at least this share of the height
   min_saving: 0.15                # offered only when it saves this share of the print time or more
   max_wall_mm: 3.0                # thicker walls: not a container, one line would be a different part
+grip:
+  # Fuzzy skin: the slicer jiggles the outer wall into a rough, grippy surface that also hides layer lines
+  # [OrcaSlicer wiki others_settings_fuzzy_skin]. Thickness stays under the outer wall's line width there.
+  # Suggested when the file name says what the part is for (a knob or handle is gripped all over).
+  words: [knob, handle, grip, dial, lever, crank, knauf, griff, drehknopf, hebel, kurbel]
+  thickness_mm: 0.3
+  point_distance_mm: 0.8
 slopes:
   # Top faces this shallow (degrees from flat) print as visible steps: each layer's edge is layer height / tan
   # (slope) wide, ~1.1 mm at 10° and 0.2 mm layers [sourced_F mistake #22]. Steeper ones look smooth; flatter

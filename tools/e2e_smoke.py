@@ -1174,6 +1174,24 @@ def main():
             return text[:140]
         run.step("less support: split into two pieces", split_for_support)
 
+        def grip_texture():
+            # A part named "knob": the grip suggestion, the box ticked, fuzzy skin in the 3MF (T-340).
+            import io
+            import zipfile
+
+            run.act(lambda: page.set_input_files("#file", str(ROOT / "core" / "tests" / "corpus" / "knob.stl")), 300_000)
+            assert any("Grip texture" in t for t in findings(page)), findings(page)
+            assert page.evaluate("() => document.getElementById('dl-grip').checked"), "grip box not ticked for a knob"
+            page.evaluate("() => fdm.steps.go('download')")
+            with page.expect_download(timeout=300_000) as dl:
+                page.evaluate("() => document.getElementById('dl-3mf').click()")
+            conf = zipfile.ZipFile(io.BytesIO(Path(dl.value.path()).read_bytes())).read("Metadata/model_settings.config").decode()
+            assert 'key="fuzzy_skin" value="external"' in conf, "no fuzzy skin in the 3MF"
+            run.act(lambda: page.click("[data-sample=test_block]"))
+            assert not page.evaluate("() => document.getElementById('dl-grip').checked"), "grip box kept for another part"
+            return "suggested for knob.stl, fuzzy skin in the 3MF, off for the next part"
+        run.step("grip texture on a knob", grip_texture)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)
