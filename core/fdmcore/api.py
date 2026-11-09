@@ -1313,6 +1313,48 @@ def _shells(p: Profile, walls: int | None = None, infill: float | None = None, t
                   zones=tuple(_box_zone(z) for z in zones or () if z.get("kind", "stronger") in ("stronger", "void")))
 
 
+def pause_gcode(data: bytes | str, pauses: list[float]) -> dict:
+    """A sliced file with a pause before the first layer above each pocket top (``pauses``: mm,
+    ``top_z`` of pause_to_insert), for printers whose slicer doesn't take the pause from our 3MF
+    (Bambu Studio). Plain G-code or a ``.gcode.3mf`` (each G-code inside, and its .md5 that Bambu
+    printers check). Returns ``data`` (same kind of file) and ``pauses`` (where each went)."""
+    from .gcode import add_pauses
+
+    if not pauses:
+        raise ValueError("No pause to add: this part has no closed pocket")
+    if isinstance(data, str):
+        data = data.encode()
+    if data[:4] == b"GCDE":
+        raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
+    if data[:2] != b"PK":
+        text, where = add_pauses(data.decode("utf-8", "replace"), pauses)
+        return {"data": text.encode(), "pauses": where}
+    import hashlib
+    import io
+    import zipfile
+
+    from .formats import read_zip
+
+    src = zipfile.ZipFile(io.BytesIO(data))
+    names = [n for n in src.namelist() if n.lower().endswith(".gcode")]
+    if not names:
+        raise ValueError("This 3MF has no G-code inside: slice it and use “Export plate sliced file”")
+    files, where = {}, []
+    for n in names:
+        text, w = add_pauses(read_zip(src, n).decode("utf-8", "replace"), pauses)
+        files[n] = text.encode()
+        where += w
+        if n + ".md5" in src.namelist():  # the printer refuses a file whose checksum doesn't match
+            old = read_zip(src, n + ".md5").decode().strip()
+            md5 = hashlib.md5(files[n]).hexdigest()
+            files[n + ".md5"] = (md5.upper() if old.isupper() else md5).encode()
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        for info in src.infolist():
+            z.writestr(info, files.get(info.filename) or read_zip(src, info.filename), compress_type=info.compress_type)
+    return {"data": out.getvalue(), "pauses": where}
+
+
 def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
     """Read the G-code the part was sliced to (from our 3MF, in this orientation ``up``) for the
     detailed level: strength with the real walls, infill and line directions. Checks that it is this
@@ -2587,6 +2629,7 @@ METHODS = {
     "calibration_part": calibration_part,
     "load": load,
     "load_gcode": load_gcode,
+    "pause_gcode": pause_gcode,
     "warping": warping,
     "set_fit": set_fit,
     "set_fastener": set_fastener,

@@ -514,6 +514,7 @@
             <label id="zones-for" class="field" hidden>Your zones and boxes need a file for one slicer:
               <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio</option><option value="prusa">PrusaSlicer</option></select></label>
             <label id="pause-for" class="field" hidden><input type="checkbox" id="dl-pause" checked /> <span id="pause-text"></span></label>
+            <label id="pause-sliced" class="file-button" hidden title="Bambu Studio ignores the pause in the 3MF. Slice there, export the plate's sliced file (or the G-code), choose it here and print the file you get back">Add the pause to a file sliced in Bambu Studio…<input id="pause-file" type="file" accept=".gcode,.gco,.g,.3mf" hidden /></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
             <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>
             <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, with holes for alignment pins">Too big: download it in pieces that fit</button>

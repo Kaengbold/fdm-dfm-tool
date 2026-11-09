@@ -518,6 +518,19 @@ def load_gcode(path: str, up: list[float], printer: str = "bambu_p1s", material:
 
 
 @server.tool()
+def add_pause_to_gcode(path: str, output_path: str, pause_heights: list[float]) -> dict:
+    """Put a pause into a G-code the user sliced (plain or Bambu Studio's ``.gcode.3mf``), before the first
+    layer above each height in ``pause_heights`` (``top_z`` of the pause_to_insert findings), so they can drop
+    a magnet or nut in. For Bambu Studio, which ignores the pause in export_3mf's file; OrcaSlicer and
+    PrusaSlicer take it from there. Saves the file to ``output_path``."""
+    src = _in(path, GCODE, "G-code file")
+    out = _out(output_path, GCODE, "G-code file")
+    r = api.pause_gcode(src.read_bytes(), pause_heights)
+    out.write_bytes(r["data"])
+    return {"saved": str(out), "pauses": r["pauses"]}
+
+
+@server.tool()
 def heat_curve(material: str = "pla", use_temp_c: float | None = None) -> dict:
     """How much of its strength a material keeps from −20 °C to past its heat limit (``temps_c`` with
     ``share_pct``), where it gets brittle (``cold_c``) or soft (``soft_c``), and a plain sentence for
@@ -730,6 +743,7 @@ API_TOOLS = {
     "calibration_part": "calibration_part",
     "load": "load_part",
     "load_gcode": "load_gcode",
+    "pause_gcode": "add_pause_to_gcode",
     "warping": "check_warping",
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",

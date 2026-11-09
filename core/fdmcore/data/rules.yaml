@@ -890,7 +890,8 @@ rules:
     - domain: process
       text: Pause before the layer the check names (OrcaSlicer, PrusaSlicer, Bambu Studio - right-click that layer in
         the preview and add a pause), drop the part in, check it sits below the top of the pocket, and resume. A
-        drop of glue keeps a magnet from jumping to the nozzle.
+        drop of glue keeps a magnet from jumping to the nozzle. Bambu Studio ignores the pause in our 3MF, so slice it
+        there, then add the pause to the sliced file (Download, "Add the pause to a file sliced in Bambu Studio").
     - domain: slicer
       text: Put supports on the build plate only, so none are printed inside the pocket.
       settings:

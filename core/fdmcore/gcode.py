@@ -363,3 +363,65 @@ def spot_heat(tp: Toolpath, to_frame, profile) -> dict:
     xy = (np.stack([rest // ny, rest % ny], axis=1) + lo + 0.5) * SPOT_MM
     return {"layer": l[covered], "xy": xy[covered], "z": tp.layer_z[l[covered]], "seconds": dt[covered], "temp_c": temp[covered],
             "cell_mm": SPOT_MM}
+
+
+# Pauses added to a G-code the user sliced (T-322): Bambu Studio reads no pause from a 3MF it didn't
+# write, so for Bambu printers the pause goes into the sliced file instead.
+_LAYER_MARK = re.compile(r"^;\s*(CHANGE_LAYER|LAYER_CHANGE)\s*$")
+_LAYER_Z = re.compile(r"^;\s*(?:Z_HEIGHT|Z):\s*([\d.]+)")
+_PAUSE_SETTING = re.compile(r"^;\s*(?:machine_pause_gcode|pause_print_gcode)[ \t]*=[ \t]*(.*)$", re.M)  # an empty one: not the next line
+_Z_MOVE = re.compile(r"^G[0-3]\b[^;]*\bZ", re.I)
+_EXTRUDE = re.compile(r"^G[1-3]\b[^;]*\b[XY][^;]*\bE(?!-)[\d.]", re.I)
+BAMBU_PAUSE = "M400 U1"  # what Bambu Lab's own printer profiles pause with (machine_pause_gcode)
+PAUSE_MARK = "; PAUSE_PRINTING"  # the comment Bambu Studio / OrcaSlicer put before their own pause
+
+
+def pause_command(text: str) -> str:
+    """The printer's pause command as the slicer stored it in the file's settings (Bambu Studio and
+    OrcaSlicer ``machine_pause_gcode``, PrusaSlicer ``pause_print_gcode``). If it isn't there:
+    Bambu's for a Bambu Studio file, else M601 (Marlin, Prusa)."""
+    m = _PAUSE_SETTING.search(text)
+    cmd = m.group(1).strip().replace("\\n", "\n").strip() if m else ""
+    if cmd:
+        return cmd
+    return BAMBU_PAUSE if "BambuStudio" in text[:4000] else "M601"
+
+
+def add_pauses(text: str, tops: list[float]) -> tuple[str, list[dict]]:
+    """``text`` with a pause before the first layer above each pocket top in ``tops`` (mm, the ``top_z``
+    of pause_to_insert), placed like the slicers place their own: after the move up to that layer
+    (filament pulled back, nozzle raised), before it prints anything. Also returns where each went:
+    {"top", "z": the layer it pauses before, "command"}."""
+    cmd = pause_command(text)
+    block = [PAUSE_MARK, *cmd.split("\n")]
+    todo = sorted({round(float(t), 4) for t in tops})
+    out, done = [], []
+    nl = "\r\n" if "\r\n" in text[:20000] else "\n"  # keep the file's line endings
+    marked = seen_mark = waiting = False  # waiting: this layer pauses once it has moved up
+    for line in text.split(nl):
+        s = line.strip()
+        is_mark = bool(_LAYER_MARK.match(s))
+        if waiting and (is_mark or _EXTRUDE.match(s)):  # no move up before it prints: pause right here
+            out += block
+            waiting = False
+        out.append(line)
+        if waiting and _Z_MOVE.match(s):
+            out += block
+            waiting = False
+        if is_mark:
+            marked = seen_mark = True
+        elif marked and (m := _LAYER_Z.match(s)) is not None:
+            marked = False
+            z = float(m.group(1))
+            hit = [t for t in todo[len(done):] if z > t + 1e-4]
+            done += [{"top": t, "z": z, "command": cmd} for t in hit]
+            waiting = waiting or bool(hit)
+    if waiting:
+        out += block
+    if not seen_mark:
+        raise ValueError("This G-code has no layer marks (; CHANGE_LAYER or ;LAYER_CHANGE): slice the part in "
+                         "Bambu Studio, OrcaSlicer or PrusaSlicer")
+    if len(done) < len(todo):
+        raise ValueError(f"The print ends below {todo[len(done)]:.2f} mm, where it should pause: is this "
+                         "the G-code of this part, in this orientation?")
+    return nl.join(out), done

@@ -689,7 +689,8 @@ def pocket_findings(mesh: Mesh, profile: Profile, T: dict) -> list[dict]:
         size = f"{hi[0] - lo[0]:.1f} × {hi[1] - lo[1]:.1f} × {hi[2] - lo[2]:.1f} mm"
         text = (f"Closed pocket ({size}) at {lo[2]:.1f}–{hi[2]:.1f} mm: to put a magnet, nut or weight in, pause the print "
                 f"before layer {p['layer']} (at {p['pause_z']:.2f} mm), drop it in, and carry on. The 3MF can carry the pause "
-                "for OrcaSlicer and PrusaSlicer; in Bambu Studio add it on that layer in the preview")
+                "for OrcaSlicer and PrusaSlicer; for Bambu Studio, add it on that layer in the preview, or let this app add it to "
+                "the file you sliced")
         long = p["span_mm"] > profile.material["max_bridge_mm"]
         if long:
             text += (f". The roof spans {p['span_mm']:.0f} mm, longer than {profile.material['name']} bridges cleanly: "

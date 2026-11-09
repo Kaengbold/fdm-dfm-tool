@@ -262,12 +262,14 @@ def main():
         checks["zone_modifier"] = (z["zone"], z["rest"], z["zone"] >= 2.5 * z["rest"] and z["width"] < 20.0)
         model = work / f"{name}_pause.3mf"
         model.write_bytes(pause_block(layout))
-        at = measure_pause(slice_with(name, cfg, model, work / f"{name}_pause"))
-        if name == "bambu":  # Bambu Studio reads no pause from a 3MF it didn't write: the user adds it (the finding says so)
-            print(f"note {name} pause_at_layer: not read from the 3MF (pauses at {at})")
-        else:
-            # Before the first layer above the pocket (top 9 mm): 9.2 on a 0.2 mm grid, 9.05 on 0.15 mm.
-            checks["pause_at_layer"] = (at, "first layer over 9.0", len(at) == 1 and 9.0 < at[0] <= 9.21)
+        gcode = slice_with(name, cfg, model, work / f"{name}_pause")
+        if name == "bambu":
+            # Bambu Studio reads no pause from a 3MF it didn't write: the app adds it to the sliced file instead.
+            print(f"note {name}: pauses read from the 3MF at {measure_pause(gcode)} (none expected)")
+            gcode.write_bytes(api.pause_gcode(gcode.read_bytes(), [9.0])["data"])
+        at = measure_pause(gcode)
+        # Before the first layer above the pocket (top 9 mm): 9.2 on a 0.2 mm grid, 9.05 on 0.15 mm.
+        checks["pause_at_layer"] = (at, "first layer over 9.0", len(at) == 1 and 9.0 < at[0] <= 9.21)
         for key, (va, vb, applied) in checks.items():
             ok &= applied
             print(f"{'PASS' if applied else 'FAIL'} {name} {key}: A={va} B={vb}")

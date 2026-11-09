@@ -3057,9 +3057,25 @@ const pausesWanted = () => [...new Set((state.check?.findings ?? []).filter((f) 
 function renderPauses() {
   const zs = pausesWanted();
   $("pause-for").hidden = !zs.length;
+  $("pause-sliced").hidden = !zs.length;
   $("pause-text").textContent = `Pause to put parts into the pocket${zs.length > 1 ? "s" : ""} (just above ${zs.map((z) => `${z.toFixed(2)} mm`).join(", ")}; ` +
-    "OrcaSlicer and PrusaSlicer pause there, in Bambu Studio add it on that layer)";
+    "OrcaSlicer and PrusaSlicer pause there; for Bambu Studio use the button below)";
 }
+
+// Bambu Studio reads no pause from our 3MF: the user slices there and the pause goes into the sliced file.
+$("pause-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  await busy("Adding the pause…", async () => {
+    const r = await call("pause_gcode", { pauses: pausesWanted() }, bytes);
+    const name = file.name.replace(/(\.gcode\.3mf|\.3mf|\.gcode|\.gco|\.g)$/i, "_pause$1");
+    download(r.data, name === file.name ? `${file.name}_pause` : name, "application/octet-stream");
+    const at = r.pauses.map((p) => `${p.z.toFixed(2)} mm`).join(", ");
+    setStatus(`Saved ${name}: it pauses before the layer at ${at}. Print this file: open it in Bambu Studio and send it, or print it from the SD card.`);
+  });
+};
 
 // A part too big for the printer: the pieces that fit (split.py), each the part with the rest cut away
 // and pin holes, and the pins, as STLs.
