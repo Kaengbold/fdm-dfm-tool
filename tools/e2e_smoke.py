@@ -1195,6 +1195,9 @@ def main():
         def grip_fins():
             # A Ø6 pin pressed into a plate: grip fins offered, shown in both colours, applied (T-335).
             run.act(lambda: page.set_input_files("#file", str(ROOT / "tools" / "fixtures" / "press_plate.stl")), 300_000)
+            if not page.locator("input[name=mode][value=both]").is_checked():  # fits and design changes show for the design
+                run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
+            page.evaluate("() => fdm.steps.go('fits')")
             row = page.locator("#fits li", has_text="Ø6.0 mm hole")
             row.locator(".fit:not(.fastener) input").fill("6")
             row.locator(".fit:not(.fastener) select").select_option("press")
@@ -1209,6 +1212,7 @@ def main():
             run.act(lambda: page.click("#apply-edits"), 300_000)
             after = page.evaluate("() => ({ n: fdm.state.triangles.length, v: fdm.state.version })")
             assert after["v"] == 1 and after["n"] != before, after
+            run.act(lambda: page.click("input[name=mode][value=print] >> xpath=.."))
             return next(e for e in edits if "grip fins" in e)[:80]
         run.step("grip fins for a press fit", grip_fins)
 
