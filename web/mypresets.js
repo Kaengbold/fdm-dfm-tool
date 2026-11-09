@@ -18,6 +18,8 @@ export const MATERIAL_FIELDS = [
   ["warp_length", "Warping length on your printer (mm, from the test below)", "number", 1],
   ["fit_snug", "Gap for a snug fit (mm, from the fit test below)", "number", 0.05],
   ["fit_sliding", "Gap for a sliding fit (mm, from the fit test below)", "number", 0.05],
+  ["hole_error_mm", "Holes come out (mm, measured − modelled Ø, from a print below)", "number", 0.01],
+  ["outer_error_mm", "Outer sizes come out (mm, measured − modelled, from a print below)", "number", 0.01],
   ["price_per_kg", "Price per kg (your currency, for the cost of a print)", "number", 0.01],
   ["spool_left_g", "Grams left on the spool (warns when a print won't fit)", "number", 1],
 ];

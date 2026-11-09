@@ -177,6 +177,15 @@
                     <label>Slides and turns at <select id="cal-fit-slide"><option value="">pick one</option></select></label>
                     <button type="button" id="cal-fit-use">Use</button>
                   </div>
+                  <p class="hint">Measured a print? A hole and an outside size with calipers (any part, or the fit test): the 3MF then
+                    corrects holes and outlines for this printer and filament.</p>
+                  <div class="row">
+                    <label>Hole modelled Ø <input id="cal-hole-model" type="number" step="0.01" min="0" /></label>
+                    <label>measured <input id="cal-hole-meas" type="number" step="0.01" min="0" /></label>
+                    <label>Outside modelled <input id="cal-outer-model" type="number" step="0.01" min="0" /></label>
+                    <label>measured <input id="cal-outer-meas" type="number" step="0.01" min="0" /></label>
+                    <button type="button" id="cal-size-use">Use</button>
+                  </div>
                   <p class="hint"><button type="button" data-calibration="overhang">Overhang test (STL)</button>
                     <span data-calibration-how="overhang"></span></p>
                   <div class="row">

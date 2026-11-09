@@ -46,6 +46,7 @@ holes:
   undersize_up_to_mm: 6.0         # holes up to this size print 0.15–0.3 mm undersized [vertical_hole_shrinkage_polyholes]
   typical_undersize_mm: [0.15, 0.3]
   xy_hole_compensation_mm: 0.1    # [vertical_hole_shrinkage_polyholes]
+  measured_min_mm: 0.04           # a measured size error smaller than this is measuring noise: no compensation
   circularity_min: 0.85           # 4πA/P² above this counts as a round hole
 
 bridges:

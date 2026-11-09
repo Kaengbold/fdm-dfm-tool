@@ -44,6 +44,8 @@ SETS = {
 HOLE_SETS = {
     "A": {"hole_to_polyhole": "0", "elefant_foot_compensation": "0"},
     "B": {"hole_to_polyhole": "1", "elefant_foot_compensation": "0.3"},
+    # Measured size errors (T-345): holes 0.2 mm bigger in diameter, the outline 0.2 mm smaller.
+    "C": {"hole_to_polyhole": "0", "elefant_foot_compensation": "0", "xy_hole_compensation": "0.1", "xy_contour_compensation": "-0.1"},
 }
 PF = Path("C:/Program Files")
 SLICERS = {
@@ -275,7 +277,8 @@ def measure_holes(gcode: Path) -> dict:
     hole = mid & (r < 4.5)
     corners = len({tuple(np.round(p, 2)) for p in pts[hole & (r < r[hole].min() + 0.2), :2]})
     width = lambda sel: float(np.ptp(pts[sel, 0]))
-    return {"hole_corners": corners, "foot_mm": round((width(mid) - width(first)) / 2, 2)}
+    return {"hole_corners": corners, "foot_mm": round((width(mid) - width(first)) / 2, 2),
+            "hole_r": round(float(np.median(r[hole])), 3), "outer_mm": round(width(mid & (r > 4.5)), 3)}
 
 
 def main():
@@ -314,6 +317,11 @@ def main():
             if name == "orca":  # Bambu Studio has no polyholes (an OrcaSlicer feature): it ignores the key
                 checks["hole_to_polyhole"] = (a["hole_corners"], b["hole_corners"], b["hole_corners"] <= a["hole_corners"] * 0.6)
             checks["elefant_foot_compensation"] = (a["foot_mm"], b["foot_mm"], b["foot_mm"] - a["foot_mm"] >= 0.15)
+            c = holes["C"]
+            # OrcaSlicer opens the hole by the value; Bambu Studio 1.8 by about 2.7× it (checked): there only "it grows".
+            grow = c["hole_r"] - a["hole_r"]
+            checks["xy_hole_compensation"] = (a["hole_r"], c["hole_r"], 0.07 <= grow <= 0.13 if name == "orca" else grow > 0.05)
+            checks["xy_contour_compensation"] = (a["outer_mm"], c["outer_mm"], 0.14 <= a["outer_mm"] - c["outer_mm"] <= 0.26)
         layout = "prusa" if name == "prusa" else "orca"
         model = work / f"{name}_zone.3mf"
         model.write_bytes(zone_block(layout))

@@ -748,3 +748,19 @@ def test_print_failed_helper_puts_the_parts_own_findings_first():
     assert api.diagnose("stringing", findings=[])["on_your_part"] == []
     with pytest.raises(ValueError):
         api.diagnose("melted")
+
+
+def test_measured_hole_and_outer_errors_correct_the_3mf():
+    """A hole measured 0.3 mm small and an outline 0.1 mm big (My materials) give hole and outer size
+    compensation per side in the settings (and so the 3MF); fit advice says it relies on them."""
+    try:
+        api.custom_presets(materials={"cal": {"based_on": "pla", "name": "Cal PLA", "hole_error_mm": -0.3, "outer_error_mm": 0.1}})
+        api.load((SAMPLES / "l_bracket.stl").read_bytes(), "bracket")
+        got = {s["key"]: s["value"] for s in api.check([0, 0, 1], {"material": "my_cal"})["settings"]}
+        assert got["xy_hole_compensation"] == "0.15" and got["xy_contour_compensation"] == "-0.05"
+        hole = next(f for f in api.design([0, 0, 1])["features"] if f["type"] == "hole")
+        assert "measured hole error (-0.30 mm)" in api.set_fit(hole["region"], [0, 0, 1], 6.0, "sliding", {"material": "my_cal"})["explanation"]
+        plain = {s["key"] for s in api.check([0, 0, 1], {"material": "pla"})["settings"]}
+        assert "xy_contour_compensation" not in plain
+    finally:
+        api.custom_presets()

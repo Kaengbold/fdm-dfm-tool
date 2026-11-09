@@ -226,8 +226,11 @@ def fit_size(feature: dict, partner_mm: float, fit: str, up, profile=None, warp_
         why += " It lies on its side when printed, so it comes out a little smaller at the top: that's included."
     if warp_mm > 0.02:
         why += f" The warping simulation shows it squeezing by about {warp_mm:.2f} mm as the part curls (rough): added."
+    err = profile.material.get("hole_error_mm" if hole else "outer_error_mm") if profile is not None else None
     note = (" Using the gaps from your fit test print." if measured.get(fit) is not None
-            else " Printers differ by a tenth or two: the fit test print (My materials) gives your printer's numbers.")
+            else f" Your measured {'hole' if hole else 'outer size'} error ({err:+.2f} mm) is corrected by the "
+                 f"{'hole' if hole else 'outer size'} compensation in the 3MF: keep it on when you slice." if err
+            else " Printers differ by a tenth or two: the fit test print, or a hole you measured (My materials), gives your printer's numbers.")
     return size, what + why + note
 
 

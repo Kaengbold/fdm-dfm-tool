@@ -95,7 +95,15 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
 
     if rules & {"too_thin_to_print", "fine_detail_rough", "single_line_wall"}:
         put("wall_generator", "arachne", "Wall generator", "Arachne varies line width so thin details still print")
-    if "small_hole_undersized" in rules:
+    # Measured on the user's own prints (My materials): corrects every hole / outline, measured beats the default.
+    hole_err, outer_err = mat.get("hole_error_mm"), mat.get("outer_error_mm")
+    if hole_err is not None and abs(hole_err) >= T["holes"]["measured_min_mm"]:
+        put("xy_hole_compensation", round(-hole_err / 2, 3), "Hole compensation",
+            f"Your prints make holes {abs(hole_err):.2f} mm {'smaller' if hole_err < 0 else 'bigger'} than modelled (you measured it): this corrects them")
+    if outer_err is not None and abs(outer_err) >= T["holes"]["measured_min_mm"]:
+        put("xy_contour_compensation", round(-outer_err / 2, 3), "Outer size compensation",
+            f"Your prints come out {abs(outer_err):.2f} mm {'bigger' if outer_err > 0 else 'smaller'} outside than modelled (you measured it): this corrects it")
+    if "small_hole_undersized" in rules and not any(s["key"] == "xy_hole_compensation" for s in out):
         put("xy_hole_compensation", T["holes"]["xy_hole_compensation_mm"], "Hole compensation", "Small holes print undersized; this opens them up")
         put("hole_to_polyhole", 1, "Polyholes", "Prints round holes as polygons with fewer, longer sides: they come out much closer to size (OrcaSlicer only: Bambu Studio and PrusaSlicer ignore it)")
     if rules & {"small_layers_cooling", "tall_thin_feature"}:

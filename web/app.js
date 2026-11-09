@@ -2847,6 +2847,13 @@ $("cal-fit-use").onclick = () => {
   if (snug !== "") setField("fit_snug", snug);
   if (slide !== "") setField("fit_sliding", slide);
 };
+$("cal-size-use").onclick = () => {
+  const err = (a, b) => ($(a).value && $(b).value ? (Number($(b).value) - Number($(a).value)).toFixed(2) : "");
+  const hole = err("cal-hole-model", "cal-hole-meas"), outer = err("cal-outer-model", "cal-outer-meas");
+  if (hole === "" && outer === "") return setStatus("Enter a modelled and a measured size first.", true);
+  if (hole !== "") setField("hole_error_mm", hole);
+  if (outer !== "") setField("outer_error_mm", outer);
+};
 $("cal-overhang-use").onclick = () => $("cal-overhang").value ? setField("max_overhang_deg", $("cal-overhang").value) : setStatus("Pick the steepest clean block first.", true);
 $("cal-bridge-use").onclick = () => $("cal-bridge").value ? setField("max_bridge_mm", $("cal-bridge").value) : setStatus("Pick the longest bridge first.", true);
 $("cal-warp-use").onclick = () => {
