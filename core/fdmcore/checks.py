@@ -41,6 +41,7 @@ RULE_IMPACT = {
     "hole_closes": "fails",
     "gap_fuses": "fails",
     "flat_gap_fuses": "fails",
+    "grip_texture": "surface",
     "trapped_support": "fails",
     "hardened_nozzle_required": "fails",
     "warping": "shape",

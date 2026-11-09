@@ -657,7 +657,7 @@ def test_grip_texture_for_knobs_and_fuzzy_skin_in_the_3mf():
         api.load(stl, name)
         found = [f for f in api.check([0, 0, 1], {})["findings"] if f["rule"] == "grip_texture"]
         assert [f["metrics"]["word"] for f in found] == ([hit] if hit else []), name
-        assert all(f["severity"] == "info" and f["fixes"] for f in found)
+        assert all(f["severity"] == "info" and f["impact"] == "surface" and f["fixes"] for f in found)
 
     def config(slicer, grip, profile=None, settings=None):
         z = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], profile or {}, settings or {}, slicer=slicer, grip=grip)))
