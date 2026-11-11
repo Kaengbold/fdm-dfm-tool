@@ -360,7 +360,8 @@ function showBodyPicker(bodies, active, pick) {
 }
 
 /** ``step``: the STEP file this part came from (and the edits applied so far), or null. ``as``: "new"
- * starts the version list over; otherwise the model is the current version (see versions). */
+ * starts the version list over; otherwise the model is the current version (see versions).
+ * ``keep.up``: the build direction to stay on (another version of the same part). */
 async function loadFile(name, bytes, faceIds = null, step = null, as = "new", keep = { body: 0, scale: 1 }) {
   await busy("Reading the part…", async () => {
     await engineReady;
@@ -371,6 +372,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
+    state.keepUp = keep.up ?? null;
     if (as === "new" || !state.versions.length) {
       state.versions = [{ label: "Original" }];
       state.version = 0;
@@ -422,7 +424,9 @@ async function partLoaded(info) {
   $("view-key").hidden = false;
   if (steps.current === "part") steps.go("have");
   else steps.render();
-  await findOrientations();
+  const up = state.keepUp;
+  state.keepUp = null;
+  await findOrientations(false, up);
 }
 
 /** Parts exported in inches, centimetres or metres arrive 25.4× / 10× / 1000× off; offer a one-click fix. */
@@ -446,14 +450,15 @@ function showUnitHint(hint) {
   });
 }
 
-async function findOrientations(withLoads = false) {
+/** ``keep``: a build direction (``up``) to stay on if the user had picked it: it is always among the options. */
+async function findOrientations(withLoads = false, keep = null) {
   // With the Strength goal, known loads always count (the simulation beats the pin/neck heuristics).
   const loads = (withLoads || profile().goal === "strength") && readyForStrength() ? state.loads : undefined;
   await busy(loads ? "Finding the best orientation for printing and strength…" : "Finding the best orientation…", async () => {
-    const r = await call("orientations", { profile: profile(), loads, faces: faceMarks() });
+    const r = await call("orientations", { profile: profile(), loads, faces: faceMarks(), keep: keep ?? undefined });
     state.options = [...r.orientations, r.as_loaded];
     renderOptions();
-    await selectOption(0);
+    await selectOption(keep && r.kept != null ? r.kept : 0);
   }, ["orient", "problems", "strength", "settings", "result"]);
 }
 
@@ -2461,7 +2466,8 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     remember("design changes");
     const carry = carryLoads();
     addVersion(chosen[0].title.replace(/ \(.*\)$/, "") + (chosen.length > 1 ? ` + ${chosen.length - 1} more` : ""));
-    await loadFile(name, stlBytes(soup), null, step, "version");
+    // The edits are made in the model's own frame, so the same build direction still applies (T-353).
+    await loadFile(name, stlBytes(soup), null, step, "version", { body: 0, scale: 1, up: activeOption()?.up });
     await restoreLoads(carry);
     setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
   });
@@ -2625,7 +2631,7 @@ async function showVersion(i, carry = true) {
   const loads = carry ? carryLoads() : [];
   state.version = i;
   const { name, bytes, faceIds, body, scale } = v.source;
-  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale });
+  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale, up: activeOption()?.up });
   await restoreLoads(loads);
   setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
 }
