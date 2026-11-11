@@ -552,6 +552,26 @@ def test_thick_blocks_without_a_buffer():
         assert bounds == pytest.approx(where, abs=1.0)
 
 
+def test_sub_print_notches_dropped_when_slicing():
+    """3DBenchy has rows of 0.02 mm notches in its outlines; buffering such an outline killed the
+    engine in the browser ("depth mismatch" in Pyodide's GEOS 3.12, T-351). Slicers close gaps that
+    small anyway (slice_closing_radius 0.049 mm), so the slicer's simplification drops them."""
+    from shapely.geometry import Polygon
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+    from fdmcore.slicer import SIMPLIFY_MM
+
+    pts = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0)]
+    for x in np.arange(19.0, 1.0, -0.4):  # notches 0.02 mm deep, 0.2 mm wide along the top edge
+        pts += [(x, 20.0), (x, 19.98), (x - 0.2, 19.98), (x - 0.2, 20.0)]
+    pts.append((0.0, 20.0))
+    assert SIMPLIFY_MM > 0.02
+    layers = slice_mesh(Mesh(extrude(Polygon(pts), 0, 2)), 0.2, max_layers=3)
+    assert len(layers[0].geom.exterior.coords) <= 6
+    assert layers[0].geom.area == pytest.approx(400, abs=0.5)
+
+
 def test_too_big_counts_as_can_fail():
     api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
     api.scale(20)
