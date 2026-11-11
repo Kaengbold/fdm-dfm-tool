@@ -185,8 +185,11 @@ def main():
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
+            assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+            # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
+            assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
             return f"guide -> {simple[0]}; back to expert"
         run.step("levels and start guide", levels_and_guide)
 
