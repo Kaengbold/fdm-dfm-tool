@@ -319,6 +319,79 @@ Brainstorm (the browser slicer is already T-127):
 - [x] **T-349 P3** Several copies on one plate: how many fit, all at once vs one after another (time per piece, risk of losing the whole plate, stringing between parts; `sourced_A2` slant3d_stop_filling_build_plate); copies and print sequence in the 3MF. · files: `core/fdmcore/placement.py`, `core/fdmcore/export3mf.py` · owner: Claude (task/T-349-plate-copies) · Done: api.plate / MCP plan_plate (how many fit in rows 10 mm apart, offsets, notes on all at once vs one after another), "Copies on the plate" at download with the plate's time and grams, copies as build items in the 3MF (slicer_check copies: 3 printed in OrcaSlicer, Bambu Studio, PrusaSlicer). The print sequence is a plate setting the slicers don't read from an object (and Bambu Studio crashes on a plate entry), so the notes say where to switch it on
 - [x] **T-350 P3** Share a result: one file (project + report) or link that someone can open on a forum / Discord to show "here's what the tool says about my part", without the receiver needing anything but the web app. · files: `web/project.js`, `web/report.js`, `web/app.js` · owner: Claude (task/T-350-share) · Done: "Share: report with the part inside" at download: the picture report (readable in any browser) with the project file embedded and a link back to the app; opening that .html in the app (Open a part) brings the part and everything set on it back. A link alone isn't possible without a server (the part is too big for a URL)
 
+## User feedback round 3 (2026-11-11, from using the site)
+
+From the user's notes after a full pass through the site (screenshots in the session). "Seen in code" = the cause was confirmed when the task was written.
+
+### Bugs
+
+- [ ] **T-351 P1** Benchy: loading it while another part is open fails; loaded fresh, the check stops with `TopologyException: depth mismatch at -6.5545 -0.0799`. Same GEOS family as T-201 / T-268 (a shrinking `buffer` in Pyodide's GEOS 3.12): find the call (`_opening` in `checks.py` still buffers) and make it buffer-free like `_thick_core`; find what the old part leaves behind in the second-load case. Get a Benchy locally for testing (licence: don't commit it unless it allows). Run `node tools/pyodide_check.mjs`. · files: `core/fdmcore/checks.py`, `web/app.js` (loadFile) · owner: —
+- [ ] **T-352 P1** "Something pushes or pulls on it" opens nothing. Seen in code: `#load-optional` is an empty fold; the strength block only moves into it in Simple (`MOVED` in `steps.js`), so in the other levels it opens to nothing. Hide it when empty (and see T-374 for strength in Simple). · files: `web/steps.js`, `web/index.html` · owner: —
+- [ ] **T-353 P1** Every design change resets the print orientation. Seen in code: `applyEdits` loads the edited model as a new file, which runs the orientation search again and picks its own top. Keep the orientation the user had (same "up" on the new version) unless they ask for a new search; same for "Test it" from Make it stronger. · files: `web/app.js` (applyEdits, loadFile) · owner: —
+- [ ] **T-354 P1** Changing the material resets the orientation chosen for strength ("Use it" on a stronger orientation). Keep it. · files: `web/app.js` · owner: —
+- [ ] **T-355 P1** Switching model versions loses the load cases. `restoreLoads` matches faces by direction and distance; it fails after a design change (and after T-353 changes the orientation). Loads and held faces must stay on the part across versions and be saved in the project / autosave. Add an e2e step. · files: `web/app.js` (carryLoads, restoreLoads, showVersion), `web/project.js` · owner: —
+- [ ] **T-356 P1** Applied fillets are detected as holes ("Ø6.4 mm hole (lying in the model) — Is this a hole?" on the mushroom after rounding). A concave round edge is not a hole: skip arcs well under a full circle, and never ask about faces our own edits made. · files: `core/fdmcore/holes.py`, `core/fdmcore/features.py` · owner: —
+- [ ] **T-357 P1** "Make the weak spot thicker" isn't straight: it is built from slices that drift sideways along the stem (screenshot: skewed staircase). Build it along the stem's axis as one straight body. · files: `core/fdmcore/features.py` (`thicken-weak`), `web/geometry.js` · owner: —
+- [ ] **T-358 P1** Chamfers and fillets break at corners: a chamfer stops at a corner instead of going round it, and where two rounded edges meet the result has spikes and pieces that aren't round (screenshots: stem on a plate). Find a corner-safe way to build them (e.g. offset of the whole edge loop, or rounding the corner with a matching sphere / cone piece) and test on inside and outside corners. · files: `core/fdmcore/features.py`, `web/geometry.js` · owner: —
+- [ ] **T-359 P1** Rounds / chamfers aren't applied everywhere: "round at the 2 inside corners with the most stress" rounds 2 of the 4 sides of a stem, although its own text says fixing one only moves the weak spot. Offer "all inside corners where the stem meets the plate" (and check the bed-corner rounds reach every corner). · files: `core/fdmcore/features.py`, `core/fdmcore/api.py` · owner: —
+- [ ] **T-360 P1** Design changes step: picking a change turns the camera to a view where the feature is hidden behind the part ("wrong view" screenshot). The focus view must always show the feature unobstructed (pick the direction the faces point to, check visibility). · files: `web/viewer.js`, `web/app.js` (showFeature) · owner: —
+- [ ] **T-361 P1** Topology optimisation result is wrong: stem on a plate, plate held, 10 kg sideways on the stem → the result keeps only the plate and drops the stem that carries the load. Check how loads / held faces map to the grid and that the load path is kept; add this case as a test. · files: `core/fdmcore/topopt.py` · owner: —
+- [ ] **T-362 P2** Warping: ABS doesn't look worse than PLA. Seen in code: the verdict and map are scaled to each material's own "longest bar that stays flat" (`warp.reference`), so materials look alike. Fix: the normal view shows the warping as it would really look (true size, real lift in mm, one scale for all materials), and marks the spots likely to come off the bed where the pull is stronger than typical bed adhesion (grip values from T-390). An optional "exaggerated" view shows the bending enlarged so it's easy to see. Check the shrinkage / softening values per material against sources. · files: `core/fdmcore/warp.py`, `web/app.js`, `web/viewer.js` · owner: —
+- [ ] **T-363 P1** Advanced design changes don't work in practice: hidden gaps can't be placed or are invisible after placing; "No support here" makes a box bigger than the picked surface (it should cover that surface only). · files: `web/app.js` (advanced design changes), `core/fdmcore/api.py` (volume_at), `web/viewer.js` · owner: —
+
+### Make it stronger
+
+- [ ] **T-364 P1** Tick several suggestions and press one "Re-check" button at the bottom, instead of each button applying at once. · files: `web/app.js` (optionGroups, optionCard, applyOption) · owner: —
+- [ ] **T-365 P1** After applying settings there (or changing walls / infill / material), run Make it stronger again on the new settings and show the new list. · files: `web/app.js` · owner: —
+- [ ] **T-366 P2** Suggest slicer settings before a material change: when settings reach the target, show them first even if a material gain is bigger; material last. · files: `core/fdmcore/api.py` (strength_options) · owner: —
+- [ ] **T-367 P2** Design changes are tested in the background and shown with their result (×n), not applied; the user applies one if it's worth it. Today this is the optional "Thorough" trial (`tryDesigns`): make it the default where it makes sense, few sizes, low priority so the PC stays usable. · files: `web/app.js` (TRIALS, tryDesigns) · owner: —
+- [ ] **T-368 P2** When the strength check says it won't hold: on the first run for this part, check the orientations for a stronger one and offer it straight away ("Lie it on its side: holds ×n. Use it?"). Once per part. · files: `web/app.js`, `core/fdmcore/api.py` · owner: —
+
+### Strength analysis ("Will it hold?")
+
+- [ ] **T-369 P1** Rename to "Strength analysis" and make it a guided flow: 1 where it's held → 2 where the load goes (with angle) → 3 extra settings. Show visually what to put where (highlight, arrow / lock preview) and a short demo animation: turn to one side, tap the face, set the load. Today the panel is unclear about what is what. · files: `web/index.html`, `web/app.js`, `web/steps.js` · owner: —
+- [ ] **T-370 P2** Paint a part of a face as held or loaded (brush), instead of the toggle "Only around the tapped spot (Ø6 mm): an edge, a corner or part of a big face" (odd wording, odd place). · files: `web/app.js`, `web/viewer.js`, `core/fdmcore/api.py` · owner: —
+- [ ] **T-371 P2** Snap a load to an edge or line: shown as a load spread around it, with a switch to a point load. · files: `web/app.js`, `web/viewer.js` · owner: —
+- [ ] **T-372 P2** Load direction: drop "hanging down (−Z as modelled)" (not useful); offer "at an angle" as a choice before placing the load, with a picture that makes clear which way the angle turns. · files: `web/index.html`, `web/app.js` · owner: —
+- [ ] **T-373 P2** "Shaking and knocks": an optional part of the strength analysis, with a short animation of what it simulates. · files: `web/app.js`, `web/index.html` · owner: —
+
+### Levels and steps
+
+- [ ] **T-374 P1** Simple: show the goal (Balanced / Strong / Fast / Light; today Basic and up), a "Compute" button, and what the tool is doing while it works (the steps, one after another). Strength is a normal part of Simple and Basic, not an optional fold. · files: `web/index.html`, `web/steps.js`, `web/app.js` · owner: —
+- [ ] **T-375 P1** Simple and Basic layout: the settings are the main view, step by step; the 3D view moves to the side and shows what each step changes, so the user sees cause and effect. Builds on T-141. · files: `web/index.html`, `web/style.css`, `web/steps.js` · owner: —
+- [ ] **T-376 P1** Step order and simulations: Problems comes after the optional simulations (not right after "On the bed"). Split the simulations into two steps: **Forces on the part** (strength, shaking and knocks, temperature) and **While printing** (cooling / heat build-up — moved out of Problems, warping, deformation). · files: `web/steps.js`, `web/index.html` · owner: —
+- [ ] **T-377 P2** Shape optimisation ("A lighter shape") becomes its own step in Advanced, next to the design changes; after it runs the result is shown by default. · files: `web/steps.js`, `web/index.html`, `web/app.js` · owner: —
+- [ ] **T-378 P2** Expert works like Advanced (steps, not one long page) plus settings only experts need: grid / mesh size, where design changes are placed, …. Move to Expert: "Gap to a mating part", "Grip texture (fuzzy skin)", and "Detailed check from your sliced print" (placed before the simulations; later Expert can make the G-code in the app, T-127). Check every advanced design change is Advanced or Expert only. · files: `web/steps.js`, `web/index.html` · owner: —
+- [ ] **T-379 P3** Hide "Heat inside an electronics box" for now (not useful); keep the engine code. · files: `web/index.html`, `web/app.js` · owner: —
+- [ ] **T-380 P2** Turn the part by hand to choose an orientation yourself (optional, any level): free rotation or "this face down", then the checks run on it. · files: `web/viewer.js`, `web/app.js` · owner: —
+
+### Look and text
+
+- [ ] **T-381 P1** Layout: text sitting right after buttons looks bad; wider side panel, consistent spacing between buttons, fields and text. · files: `web/style.css`, `web/index.html` · owner: —
+- [ ] **T-382 P1** Much less text: explanations move into tooltips, plus an "Explain mode" that walks through every tool (what it is, what to do). User-friendly means less text, not more. · files: `web/index.html`, `web/app.js`, `web/style.css` · owner: —
+- [ ] **T-383 P1** Start menu with two paths: **Make my print better** (Simple / Basic / Advanced / Expert) and **Help me fix my print failures** (shows "coming soon", T-384). The current "My print failed" fold is only deactivated (hidden), not removed: its markup, app code, engine code and MCP tool stay in place for T-384. · files: `web/index.html`, `web/app.js` · owner: —
+- [-] **T-384 P3** Help me fix my print failures: a photo or a picked failure + the model or G-code → analysis and fixes by the user's own AI agent. **Parked** (2026-11-11, user): "coming soon" only (T-383). · owner: —
+
+### Tolerances and fits
+
+- [ ] **T-385 P2** Rework Tolerances & tuning: hole compensation is the *result* of the tolerance test print and the hole / slot fits, not a separate field; fewer words, more pictures. · files: `web/index.html`, `web/app.js` · owner: —
+- [ ] **T-386 P2** Slots and flat gaps: highlight what is picked while picking, an animated hint showing what to tap, check the change really gets applied, show the measured thickness on the part and two bars beside it that show the fit (the mating part with its gap). · files: `web/app.js` (flat gaps), `web/viewer.js`, `core/fdmcore/features.py` · owner: —
+
+### Test prints
+
+- [ ] **T-387 P1** Better layer strength test print: the bar with a hole near each end breaks at the holes, not between the layers. Use a shape that fails in the test zone (CNC Kitchen-style hook or similar; source in the PR). · files: `core/fdmcore/api.py` (calibration_part) · owner: —
+- [ ] **T-388 P2** Combine the test prints into one object (or one plate) to save printing, with each size / length written on it so nothing needs measuring. Builds on T-170, T-104. · files: `core/fdmcore/api.py` (calibration_part) · owner: —
+- [ ] **T-389 P2** One test part that triggers every feature of the app (holes, slots, fillets, thin walls, overhangs, text, pins, warping, …) with a list of what to check, for manual testing. · files: `tools/make_samples.py`, `web/samples/` · owner: —
+
+### Print failure risk
+
+- [ ] **T-390 P2** Bed adhesion: does the warping pull exceed what the bed holds? Researched grip values per material and bed surface (editable in Expert) → "may come loose here". · files: `core/fdmcore/warp.py`, `core/fdmcore/data/thresholds.yaml`, `rules.yaml` · owner: —
+- [ ] **T-391 P2** Print failure risk rating from the printer (enclosure, bed) and the warping / adhesion simulation, with a brim or raft suggested from it. · files: `core/fdmcore/api.py`, `core/fdmcore/data/rules.yaml` · owner: —
+
+### Advanced design changes
+
+- [ ] **T-392 P2** Move placed boxes in space (drag them), and place support / no-support boxes and hidden gaps automatically from the overhang and strength results; manual boxes alone add little over the slicer. Builds on T-251, after T-363. · files: `web/app.js`, `web/viewer.js`, `core/fdmcore/api.py` · owner: —
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
