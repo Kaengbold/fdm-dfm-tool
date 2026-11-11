@@ -388,3 +388,20 @@ def test_tall_boss_gets_ribs_at_its_foot():
     grown = apply_edits(part, [{**e, "mesh": np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)} for e in ribs])
     assert 400 < abs(grown.volume()) - abs(part.volume()) < 700 and _clean(grown.triangles) == (0, 0)
     assert not load(12)
+
+
+def test_fillet_in_an_inside_corner_is_not_a_hole():
+    """A rounded inside corner fits a circle with its faces turned to the axis, like a hole, but only
+    a quarter of it: it isn't a hole and isn't asked about (T-356). A real hole still is one."""
+    from shapely.geometry import Point, box
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import to_binary_stl
+
+    corner = box(3, 3, 6.1, 6.1).difference(Point(6.1, 6.1).buffer(3.1, 32))  # a 3.1 mm round
+    filleted = Mesh(extrude(box(0, 0, 30, 3).union(box(0, 0, 3, 30)).union(corner), 0, 20))
+    holed = Mesh(extrude(box(0, 0, 30, 30).difference(Point(15, 15).buffer(3.2, 32)), 0, 5))
+    for mesh, want in ((filleted, {"rounded_edge"}), (holed, {"hole"})):
+        api.load(to_binary_stl(mesh), "part")
+        kinds = {f["type"] for f in api.design([0, 0, 1])["features"]}
+        assert kinds == want, kinds
