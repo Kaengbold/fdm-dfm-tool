@@ -1693,31 +1693,67 @@ async function showStrengthOptions() {
 }
 
 const OPTION_GROUP = { slicer: "Slicer settings", orientation: "Orientation", design: "Design changes", material: "Material", load: "Less load" };
-const OPTION_ACTION = { slicer: "Apply", orientation: "Use it", design: "Show me", material: "Use it" };
+// Ticked and applied together with "Re-check" (T-364); one orientation and one material at a time.
+const TICKABLE = new Set(["slicer", "orientation", "material"]);
+const ONE_OF = new Set(["orientation", "material"]);
 
-/** Ways to make it stronger in one fold-out box per kind; the box with the strongest option starts open. */
+/** Ways to make it stronger in one fold-out box per kind; the box with the strongest option starts open.
+ * Settings, orientation and material are ticked and applied together by the button below them. */
 function optionGroups(opts, now) {
   const kinds = [...new Set(opts.map((o) => o.kind))];
-  return kinds.map((kind, i) => {
+  const boxes = new Map();
+  const groups = kinds.map((kind, i) => {
     const mine = opts.filter((o) => o.kind === kind);
     const top = mine.find((o) => o.safety_factor != null)?.safety_factor;
     return el("details", { className: "more-block option-group", open: i === 0 },
       el("summary", {}, OPTION_GROUP[kind], el("small", { textContent: top != null ? `up to ×${top.toFixed(1)}` : `${mine.length} idea${mine.length > 1 ? "s" : ""}` })),
-      el("ul", { className: "options strength-options" }, ...mine.map((o) => optionCard(o, now))));
+      el("ul", { className: "options strength-options" }, ...mine.map((o) => optionCard(o, now, boxes, mine))));
   });
+  if (!boxes.size) return groups;
+  const recheck = el("button", { className: "primary recheck", textContent: "Re-check with the ticked changes", disabled: true,
+    onclick: () => applyTicked(opts.filter((o) => boxes.get(o)?.checked)) });
+  for (const box of boxes.values()) box.addEventListener("change", () => (recheck.disabled = ![...boxes.values()].some((b) => b.checked)));
+  return [...groups, el("div", { className: "row recheck-row" }, recheck)];
 }
 
-function optionCard(o, now) {
+function optionCard(o, now, boxes, group) {
+  let tick = "";
+  if (TICKABLE.has(o.kind)) {
+    tick = el("input", { type: "checkbox", "aria-label": `Use: ${o.change}` });
+    boxes.set(o, tick);
+    if (ONE_OF.has(o.kind)) {
+      tick.addEventListener("change", () => tick.checked && group.forEach((other) => other !== o && boxes.get(other) && (boxes.get(other).checked = false)));
+    }
+  }
   return el("li", { className: `option ${o.kind}` },
-    el("div", { className: "option-head" },
+    el("label", { className: "option-head" }, tick,
       el("strong", { textContent: o.change }),
       el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
         : `×${o.safety_factor.toFixed(1)}${now && o.kind !== "load" ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
     el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
-    OPTION_ACTION[o.kind] || o.kind === "design" ? el("div", { className: "row" },
-      OPTION_ACTION[o.kind] ? el("button", { textContent: OPTION_ACTION[o.kind], onclick: () => applyOption(o) }) : "",
+    o.kind === "design" ? el("div", { className: "row" },
+      el("button", { textContent: "Show me", onclick: () => applyOption(o) }),
       o.edit ? el("button", { textContent: "Test it", onclick: () => testDesignEdit(o.edit),
         title: "Adds the change as a new version of your model and checks the strength again" }) : "") : "");
+}
+
+/** Apply the ticked ideas together, then check the strength once: material first (it finds the
+ * orientations again), then the orientation, then the slicer settings (the stronger one wins where
+ * two set the same thing). */
+async function applyTicked(ticked) {
+  if (!ticked.length) return;
+  remember("changes from “How can I make it stronger?”");
+  const material = ticked.find((o) => o.material);
+  if (material) {
+    $("material").value = material.material;
+    await setupChanged("material");
+  }
+  const turn = ticked.find((o) => o.up);
+  if (turn) await applyOption(turn, false);
+  const settings = ticked.filter((o) => o.settings).sort((a, b) => (a.safety_factor ?? 0) - (b.safety_factor ?? 0));
+  for (const o of settings) Object.assign(state.overrides, o.settings);
+  if (settings.length) renderSettings();
+  if (readyForStrength()) await runStrength();
 }
 
 async function runOptimise() {
@@ -2925,16 +2961,16 @@ async function compareNozzles() {
 }
 $("nozzle-block").ontoggle = (e) => e.target.open && state.triangles && compareNozzles();
 
-for (const id of ["printer", "material", "nozzle", "multi-material"]) {
-  $(id).onchange = () => {
-    store.set("fdm-setup", JSON.stringify({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value }));
-    viewer.setBed(state.presets.printers[$("printer").value].bed);
-    syncMultiMaterial();
-    $("nozzle-block").open = false; // comparison belongs to the old setup
-    if (id === "material") renderTempCurve();
-    if (state.triangles) findOrientations();
-  };
+/** Printer, material, nozzle or multi-material changed: remember it and find the orientations again. */
+function setupChanged(id) {
+  store.set("fdm-setup", JSON.stringify({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value }));
+  viewer.setBed(state.presets.printers[$("printer").value].bed);
+  syncMultiMaterial();
+  $("nozzle-block").open = false; // comparison belongs to the old setup
+  if (id === "material") renderTempCurve();
+  return state.triangles ? findOrientations() : Promise.resolve();
 }
+for (const id of ["printer", "material", "nozzle", "multi-material"]) $(id).onchange = () => setupChanged(id);
 const GOAL_NOTES = {
   balanced: "Balanced: standard walls & infill for everyday printing.",
   strength: "Strength: 4 walls, 25% infill; weak spots and thin walls are treated as high-priority problems.",
