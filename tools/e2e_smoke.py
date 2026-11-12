@@ -901,38 +901,6 @@ def main():
             return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
-        def tick_and_recheck():
-            """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
-            page.evaluate("""async () => {
-              const r = await fdm.call("regions");
-              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
-              fdm.state.regionInfo = r.regions;
-              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
-              const cap = flat[0];
-              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
-              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
-              document.getElementById("run-strength").disabled = false;
-            }""")
-            page.evaluate("() => fdm.steps.go('strength')")
-            run.act(lambda: page.click("#run-strength"), 300_000)
-            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
-            recheck = page.get_by_role("button", name="Re-check with the ticked changes")
-            assert recheck.is_disabled(), "re-check enabled with nothing ticked"
-            page.locator("#strength-options summary", has_text="Slicer settings").evaluate("s => s.parentElement.open = true")
-            ticks = page.locator("#strength-options li.slicer input[type=checkbox]")
-            assert ticks.count() >= 2, f"{ticks.count()} slicer ideas"
-            ticks.nth(0).check()
-            ticks.nth(1).check()
-            assert page.locator("#strength-options li.slicer input:checked").count() == 2 and recheck.is_enabled()
-            before = page.evaluate("() => ({ ...fdm.state.overrides })")
-            run.act(lambda: recheck.click(), 300_000)
-            after = page.evaluate("() => ({ ...fdm.state.overrides })")
-            changed = {k: v for k, v in after.items() if before.get(k) != v}
-            assert len(changed) >= 2, f"settings from two ideas not both applied: {changed}"
-            assert page.evaluate("() => !!fdm.state.strength"), "strength not checked again"
-            return f"applied together: {changed}"
-        run.step("make it stronger: tick several, re-check once", tick_and_recheck)
 
         def thorough_design_test():
             # Thorough: sizes tried on copies in the background; only the picked one becomes a version.
@@ -1296,6 +1264,39 @@ def main():
             assert got["name"].startswith("l_bracket") and got["material"] == "petg", got
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
+
+        def tick_and_recheck():
+            """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            recheck = page.get_by_role("button", name="Re-check with the ticked changes")
+            assert recheck.is_disabled(), "re-check enabled with nothing ticked"
+            page.locator("#strength-options summary", has_text="Slicer settings").evaluate("s => s.parentElement.open = true")
+            ticks = page.locator("#strength-options li.slicer input[type=checkbox]")
+            assert ticks.count() >= 2, f"{ticks.count()} slicer ideas"
+            ticks.nth(0).check()
+            ticks.nth(1).check()
+            assert page.locator("#strength-options li.slicer input:checked").count() == 2 and recheck.is_enabled()
+            before = page.evaluate("() => ({ ...fdm.state.overrides })")
+            run.act(lambda: recheck.click(), 300_000)
+            after = page.evaluate("() => ({ ...fdm.state.overrides })")
+            changed = {k: v for k, v in after.items() if before.get(k) != v}
+            assert len(changed) >= 2, f"settings from two ideas not both applied: {changed}"
+            assert page.evaluate("() => !!fdm.state.strength"), "strength not checked again"
+            return f"applied together: {changed}"
+        run.step("make it stronger: tick several, re-check once", tick_and_recheck)
 
         for part in args.parts:
             def load_part(part=part):
