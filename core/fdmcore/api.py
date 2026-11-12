@@ -1273,7 +1273,9 @@ def topology(up, loads: list[dict], profile: dict | None = None, keep: float = 0
     model = cases[0].model
     with stage(0.0, 0.9):
         r = topopt.optimise(cases, up, p, float(keep))
-    solid = topopt.keep_connected(model, r["density"] > topopt.SOLID, r["passive"])
+    solid = topopt.keep_connected(model, r["density"] > topopt.SOLID, r["loaded"], r["held"])
+    if not solid.any():
+        raise ValueError("No shape at this setting joins the load to where the part is held: keep more plastic")
     tris = topopt.voxel_surface(model.grid, model.elems[solid])
     with stage(0.9, 1.0):
         before = min(topopt.safety_solid(c, up, p, np.ones(len(solid), bool)) for c in cases)
@@ -1285,8 +1287,11 @@ def topology(up, loads: list[dict], profile: dict | None = None, keep: float = 0
             f"({100 * shape_g / part_g:.0f} %). Printed solid it holds about ×{after:.1f} the load (the whole part solid: ×{before:.1f}). ")
     text += ("That's still enough. " if after >= need else
              f"That's below ×{need:g}: keep more plastic, or thicken the thinnest struts when you redesign it. ")
+    if r["keep_used"] > float(keep) + 0.01:
+        text += (f"The held and loaded faces stay whole and already take much of the plastic, so it keeps "
+                 f"{100 * r['keep_used']:.0f} % instead of {100 * float(keep):.0f} %. ")
     text += "It's blocky and not a finished part: use it as a guide to redesign the part in CAD."
-    return {"keep": float(keep), "rounds": r["rounds"], "cubes": int(len(solid)), "part_g": round(part_g, 1),
+    return {"keep": float(keep), "keep_used": r["keep_used"], "rounds": r["rounds"], "cubes": int(len(solid)), "part_g": round(part_g, 1),
             "shape_g": round(shape_g, 1), "safety_solid_part": before, "safety_solid_shape": after, "enough": after >= need,
             "explanation": text, "stl": to_binary_stl(Mesh(tris)), "triangles": tris.astype(np.float32).tobytes()}
 
