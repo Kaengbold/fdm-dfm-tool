@@ -711,7 +711,11 @@ def main():
                 page.select_option("#use-temp", "")  # back to room temperature for the next steps
                 run.act(lambda: page.dispatch_event("#use-temp", "change"), 300_000)
             return text[:120] + " …" + text[text.index(" | walls"):]
-        run.step("heat inside an electronics box", box_heat)
+        # Switched off in the app for now (T-379): its step comes back with the card.
+        def box_heat_off():
+            assert page.locator("#box-heat").is_hidden(), "electronics box card shown"
+            return "hidden"
+        run.step("electronics box heat is switched off", box_heat_off)
 
         def report_with_pictures():
             with page.expect_download(timeout=180_000) as dl:
