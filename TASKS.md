@@ -352,7 +352,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 - [ ] **T-369 P1** Rename to "Strength analysis" and make it a guided flow: 1 where it's held → 2 where the load goes (with angle) → 3 extra settings. Show visually what to put where (highlight, arrow / lock preview) and a short demo animation: turn to one side, tap the face, set the load. Today the panel is unclear about what is what. · files: `web/index.html`, `web/app.js`, `web/steps.js` · owner: —
 - [ ] **T-370 P2** Paint a part of a face as held or loaded (brush), instead of the toggle "Only around the tapped spot (Ø6 mm): an edge, a corner or part of a big face" (odd wording, odd place). · files: `web/app.js`, `web/viewer.js`, `core/fdmcore/api.py` · owner: —
 - [ ] **T-371 P2** Snap a load to an edge or line: shown as a load spread around it, with a switch to a point load. · files: `web/app.js`, `web/viewer.js` · owner: —
-- [ ] **T-372 P2** Load direction: drop "hanging down (−Z as modelled)" (not useful); offer "at an angle" as a choice before placing the load, with a picture that makes clear which way the angle turns. · files: `web/index.html`, `web/app.js` · owner: —
+- [~] **T-372 P2** Load direction: drop "hanging down (−Z as modelled)" (not useful); offer "at an angle" as a choice before placing the load, with a picture that makes clear which way the angle turns. · files: `web/index.html`, `web/app.js` · owner: Claude (`task/T-372-load-angle`)
 - [ ] **T-373 P2** "Shaking and knocks": an optional part of the strength analysis, with a short animation of what it simulates. · files: `web/app.js`, `web/index.html` · owner: —
 
 ### Levels and steps
