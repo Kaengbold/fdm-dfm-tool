@@ -901,33 +901,6 @@ def main():
             return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
-        def offer_stronger_orientation():
-            """T-368: the first failing strength check on a part offers a stronger orientation, once."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
-            standing = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) > 0.9)")
-            if standing != page.evaluate("() => fdm.state.active"):
-                run.act(lambda: page.locator("#options > li").nth(standing).click())
-            page.evaluate("""async () => {
-              const r = await fdm.call("regions");
-              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
-              fdm.state.regionInfo = r.regions;
-              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
-              const cap = flat[0];
-              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
-              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 30, direction: "pull", case: 1 }];
-              document.getElementById("run-strength").disabled = false;
-            }""")
-            page.evaluate("() => fdm.steps.go('strength')")
-            run.act(lambda: page.click("#run-strength"), 300_000)
-            offer = page.locator("#strength-result .turn-offer")
-            assert offer.count() == 1, page.locator("#strength-result").inner_text()[:200]
-            text = offer.locator("strong").inner_text()
-            run.act(lambda: offer.get_by_role("button", name="Turn it").click(), 300_000)
-            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
-            assert abs(up[2]) < 0.01, up  # lying on its side now
-            assert page.locator("#strength-result .turn-offer").count() == 0  # once per part
-            return text
-        run.step("failing strength check offers a stronger orientation", offer_stronger_orientation)
 
         def thorough_design_test():
             # Thorough: sizes tried on copies in the background; only the picked one becomes a version.
@@ -1291,6 +1264,34 @@ def main():
             assert got["name"].startswith("l_bracket") and got["material"] == "petg", got
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
+
+        def offer_stronger_orientation():
+            """T-368: the first failing strength check on a part offers a stronger orientation, once."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            standing = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) > 0.9)")
+            if standing != page.evaluate("() => fdm.state.active"):
+                run.act(lambda: page.locator("#options > li").nth(standing).click())
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 30, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            offer = page.locator("#strength-result .turn-offer")
+            assert offer.count() == 1, page.locator("#strength-result").inner_text()[:200]
+            text = offer.locator("strong").inner_text()
+            run.act(lambda: offer.get_by_role("button", name="Turn it").click(), 300_000)
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            assert abs(up[2]) < 0.01, up  # lying on its side now
+            assert page.locator("#strength-result .turn-offer").count() == 0  # once per part
+            return text
+        run.step("failing strength check offers a stronger orientation", offer_stronger_orientation)
 
         for part in args.parts:
             def load_part(part=part):
