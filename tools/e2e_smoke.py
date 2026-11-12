@@ -901,6 +901,33 @@ def main():
             return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
+        def load_at_an_angle():
+            """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
+            to the tapped face, with the arrow shown on the part while it's set."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("() => fdm.steps.go('strength')")
+            assert "down" not in page.eval_on_selector_all("#dir option", "os => os.map((o) => o.value)")
+            xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
+              for (let f = 0; f < n; f++) { const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);
+                if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y]; } return null; }""")
+            page.mouse.click(*xy)
+            page.wait_for_selector("#pick-panel:not([hidden])", timeout=300_000)  # the first click loads the face tools
+            arrows = page.evaluate("() => fdm.viewer.symbols?.children.length ?? 0")
+            page.select_option("#dir", "angle")
+            page.dispatch_event("#dir", "input")
+            page.fill("#dir-lean", "90")
+            page.dispatch_event("#dir-lean", "input")
+            assert page.locator("#dir-angle").is_visible()
+            assert page.evaluate("() => fdm.viewer.symbols.children.length") > arrows, "no preview arrow"
+            normal = page.evaluate("() => fdm.state.regionInfo[fdm.state.selectedRegion].normal")
+            page.click("#as-load")
+            d = page.evaluate("() => fdm.state.loads.at(-1).direction")
+            assert isinstance(d, list) and abs(sum(a * b for a, b in zip(d, normal))) < 0.01, (d, normal)  # along the face
+            assert page.evaluate("() => fdm.state.previewLoad") is None
+            assert "90° lean" in page.locator("#loads").inner_text(), page.locator("#loads").inner_text()
+            return f"lean 90° on a face with normal {[round(v, 2) for v in normal]}: {d}"
+        run.step("load at an angle to the face", load_at_an_angle)
+
         def thorough_design_test():
             # Thorough: sizes tried on copies in the background; only the picked one becomes a version.
             def set_mode(value):  # a click on the mode already chosen starts no check
