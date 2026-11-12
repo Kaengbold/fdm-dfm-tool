@@ -4,13 +4,15 @@
 
 export const STEP_NAMES = {
   part: "Your part", have: "What you have", orient: "On the bed", problems: "Problems", strength: "Will it hold?",
-  sims: "Optional simulations", fits: "Tolerances & tuning", design: "Design changes", extra: "Advanced design changes", settings: "Slicer settings", download: "Download", result: "Result",
+  sims: "Forces on the part", printing: "While printing", fits: "Tolerances & tuning", design: "Design changes", extra: "Advanced design changes", settings: "Slicer settings", download: "Download", result: "Result",
 };
 
-const ALL = ["part", "have", "orient", "problems", "strength", "sims", "fits", "design", "extra", "settings", "download"];
+// Problems come after the simulations (T-376): the checks of loads and printing come first, then the list of
+// what to fix.
+const ALL = ["part", "have", "orient", "strength", "sims", "printing", "problems", "fits", "design", "extra", "settings", "download"];
 export const LEVEL_STEPS = {
   simple: ["part", "have", "result"],
-  basic: ["part", "have", "orient", "problems", "strength", "settings", "download"],
+  basic: ["part", "have", "orient", "strength", "problems", "settings", "download"],
   advanced: ALL,
   expert: ALL, // one long page: every pane at once, no step list
 };

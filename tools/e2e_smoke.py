@@ -187,6 +187,8 @@ def main():
             assert simple == ["simple", False, False], simple
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+            order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
+            assert order.index("sims") < order.index("printing") < order.index("problems"), order
             return f"guide -> {simple[0]}; back to expert"
         run.step("levels and start guide", levels_and_guide)
 
