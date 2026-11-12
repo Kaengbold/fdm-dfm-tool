@@ -852,3 +852,11 @@ def test_shrink_lines_from_a_raised_floor_and_a_thick_rib():
     assert [f["rule"] for f in ribs] == ["rib_sink_line"] * 2  # both ends of the partition
     assert sorted(round(f["bbox"][0][1] + 2) for f in ribs) == [-17, 17] and ribs[0]["metrics"]["rib_mm"] == pytest.approx(2.0, abs=0.35)
     assert not found(box_ + cube((29.5, 1, 1), (1, 38, 29))) and not found(box_)
+
+
+def test_feature_test_part_triggers_its_checks():
+    """The "Feature test" sample is for trying every check by hand (T-389, docs/feature_test.md): it must
+    keep triggering them as the checks change."""
+    found = rules_for("feature_test")
+    assert {"bridge_sag", "elephant_foot", "gap_fuses", "nut_trap_tight", "shallow_relief", "sideways_hole_oval",
+            "small_layers_cooling", "support_marks", "too_thin_to_print", "warping", "weak_upright_pin"} <= set(found), sorted(found)
