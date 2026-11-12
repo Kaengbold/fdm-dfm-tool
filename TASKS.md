@@ -363,7 +363,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 - [ ] **T-377 P2** Shape optimisation ("A lighter shape") becomes its own step in Advanced, next to the design changes; after it runs the result is shown by default. · files: `web/steps.js`, `web/index.html`, `web/app.js` · owner: —
 - [ ] **T-378 P2** Expert works like Advanced (steps, not one long page) plus settings only experts need: grid / mesh size, where design changes are placed, …. Move to Expert: "Gap to a mating part", "Grip texture (fuzzy skin)", and "Detailed check from your sliced print" (placed before the simulations; later Expert can make the G-code in the app, T-127). Check every advanced design change is Advanced or Expert only. · files: `web/steps.js`, `web/index.html` · owner: —
 - [~] **T-379 P3** Hide "Heat inside an electronics box" for now (not useful); keep the engine code. · files: `web/index.html`, `web/app.js` · owner: Claude (`task/T-379-hide-box-heat`)
-- [~] **T-380 P2** Turn the part by hand to choose an orientation yourself (optional, any level): free rotation or "this face down", then the checks run on it. · files: `web/viewer.js`, `web/app.js` · owner: Claude (`task/T-380-turn-by-hand`)
+- [x] **T-380 P2** Turn the part by hand to choose an orientation yourself (optional, any level): free rotation or "this face down", then the checks run on it. · files: `web/viewer.js`, `web/app.js` · owner: Claude (`task/T-380-turn-by-hand`) — "Turn it yourself (optional)" under the orientation cards: tip forward / sideways 90°, upside down, or any angles; the result is one "Your own" option, scored and checked like the others. e2e "turn the part by hand".
 
 ### Look and text
 

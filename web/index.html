@@ -220,7 +220,21 @@
         <section class="pane" data-pane="orient">
           <h2>How it lies on the bed</h2>
           <p class="lead">The first one is our pick. Tap another to compare.</p>
-          <div id="blk-orient"><ol id="options" class="cards"></ol></div>
+          <div id="blk-orient"><ol id="options" class="cards"></ol>
+            <details id="turn-own" class="more-block">
+              <summary>Turn it yourself <small>optional</small></summary>
+              <div class="row">
+                <button data-tip="forward">Tip forward 90°</button>
+                <button data-tip="sideways">Tip sideways 90°</button>
+                <button data-tip="flip">Upside down</button>
+              </div>
+              <div class="row">
+                <label>Forward <input id="tip-forward" type="number" step="5" value="0" /> °</label>
+                <label>Sideways <input id="tip-sideways" type="number" step="5" value="0" /> °</label>
+                <button id="tip-use">Use these angles</button>
+              </div>
+            </details>
+          </div>
         </section>
 
         <section class="pane" data-pane="problems">
