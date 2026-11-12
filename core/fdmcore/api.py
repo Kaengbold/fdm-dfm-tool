@@ -697,7 +697,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
-        best["beyond"] = _strongest_first(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target))
+        best["beyond"] = _preferred(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target), target)
     if zones:
         with stage(0.9, 1.0):
             light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
@@ -1621,8 +1621,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
-    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest
-    first, a lighter load always last. ``base_safety`` on each: today's safety with the same shell model,
+    at the weak spot (from the last strength check), other materials and a lighter load. In the order of
+    ``_preferred`` (easiest that is enough first, materials and a lighter load last). ``base_safety`` on each: today's safety with the same shell model,
     so the +/- % compares like with like (the G-code strength check gives its own, different number)."""
     from dataclasses import replace
 
@@ -1670,13 +1670,24 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
     out += _beyond_settings(base, p, profile, loads)
     for o in out:
         o["base_safety"] = float(base["safety_factor"])
-    return _strongest_first(out)
+    return _preferred(out, required_safety(p))
 
 
-def _strongest_first(options: list[dict]) -> list[dict]:
-    """Strongest first, but carrying less always last: it doesn't make the part any stronger, it's
-    the way out when nothing else is enough — so it never leads, even with the best number."""
-    return sorted(options, key=lambda o: (o["kind"] == "load", -(o["safety_factor"] or 0)))
+# How much fuss each kind of change is: the easiest one that is enough comes first (T-366).
+EFFORT = {"slicer": 0, "orientation": 1, "design": 2}
+
+
+def _preferred(options: list[dict], need: float) -> list[dict]:
+    """The easiest changes that reach ``need`` first (slicer settings before turning the part before a
+    design change), then the rest strongest first. Another material comes after all of those, even
+    when it's stronger: the user would have to buy and dry a new spool (T-366). Carrying less is
+    always last: it doesn't make the part stronger, it's the way out when nothing else is enough."""
+    def key(o):
+        sf = o["safety_factor"]
+        enough = sf is not None and sf >= need
+        return (o["kind"] == "load", o["kind"] == "material", not enough,
+                EFFORT.get(o["kind"], 3) if enough else 0, -(sf or 0))
+    return sorted(options, key=key)
 
 
 def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:
