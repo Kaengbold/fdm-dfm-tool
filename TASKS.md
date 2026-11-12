@@ -362,7 +362,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 - [ ] **T-376 P1** Step order and simulations: Problems comes after the optional simulations (not right after "On the bed"). Split the simulations into two steps: **Forces on the part** (strength, shaking and knocks, temperature) and **While printing** (cooling / heat build-up — moved out of Problems, warping, deformation). · files: `web/steps.js`, `web/index.html` · owner: —
 - [ ] **T-377 P2** Shape optimisation ("A lighter shape") becomes its own step in Advanced, next to the design changes; after it runs the result is shown by default. · files: `web/steps.js`, `web/index.html`, `web/app.js` · owner: —
 - [ ] **T-378 P2** Expert works like Advanced (steps, not one long page) plus settings only experts need: grid / mesh size, where design changes are placed, …. Move to Expert: "Gap to a mating part", "Grip texture (fuzzy skin)", and "Detailed check from your sliced print" (placed before the simulations; later Expert can make the G-code in the app, T-127). Check every advanced design change is Advanced or Expert only. · files: `web/steps.js`, `web/index.html` · owner: —
-- [ ] **T-379 P3** Hide "Heat inside an electronics box" for now (not useful); keep the engine code. · files: `web/index.html`, `web/app.js` · owner: —
+- [~] **T-379 P3** Hide "Heat inside an electronics box" for now (not useful); keep the engine code. · files: `web/index.html`, `web/app.js` · owner: Claude (`task/T-379-hide-box-heat`)
 - [ ] **T-380 P2** Turn the part by hand to choose an orientation yourself (optional, any level): free rotation or "this face down", then the checks run on it. · files: `web/viewer.js`, `web/app.js` · owner: —
 
 ### Look and text
