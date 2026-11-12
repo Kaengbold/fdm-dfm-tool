@@ -219,24 +219,6 @@ def main():
             return " | ".join(costs)
         run.step("support grams on each orientation card", option_costs)
 
-        def turn_by_hand():
-            """T-380: the user can turn the part themselves: 90° steps or any angle, as a "Your own" option."""
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
-            page.evaluate("() => fdm.steps.go('orient')")
-            page.locator("#turn-own > summary").click()
-            up = lambda: page.evaluate("() => fdm.state.options[fdm.state.active].up")  # noqa: E731
-            before = up()
-            run.act(lambda: page.click("[data-tip=flip]"))
-            flipped = up()
-            assert sum(a * b for a, b in zip(before, flipped)) < -0.99, (before, flipped)
-            assert page.evaluate("() => fdm.state.options[fdm.state.active].label") == "Your own"
-            page.fill("#tip-forward", "90")
-            run.act(lambda: page.click("#tip-use"))
-            tipped = up()
-            assert abs(sum(a * b for a, b in zip(flipped, tipped))) < 0.01, (flipped, tipped)
-            assert page.evaluate("() => fdm.state.options.filter((o) => o.label === 'Your own').length") == 1
-            return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}"
-        run.step("turn the part by hand", turn_by_hand)
 
         def orientation_updates_findings():
             run.act(lambda: page.click("[data-sample=hook]"))
@@ -1282,6 +1264,25 @@ def main():
             assert got["name"].startswith("l_bracket") and got["material"] == "petg", got
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
+
+        def turn_by_hand():
+            """T-380: the user can turn the part themselves: 90° steps or any angle, as a "Your own" option."""
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('orient')")
+            page.locator("#turn-own > summary").click()
+            up = lambda: page.evaluate("() => fdm.state.options[fdm.state.active].up")  # noqa: E731
+            before = up()
+            run.act(lambda: page.click("[data-tip=flip]"))
+            flipped = up()
+            assert sum(a * b for a, b in zip(before, flipped)) < -0.99, (before, flipped)
+            assert page.evaluate("() => fdm.state.options[fdm.state.active].label") == "Your own"
+            page.fill("#tip-forward", "90")
+            run.act(lambda: page.click("#tip-use"))
+            tipped = up()
+            assert abs(sum(a * b for a, b in zip(flipped, tipped))) < 0.01, (flipped, tipped)
+            assert page.evaluate("() => fdm.state.options.filter((o) => o.label === 'Your own').length") == 1
+            return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}"
+        run.step("turn the part by hand", turn_by_hand)
 
         for part in args.parts:
             def load_part(part=part):
