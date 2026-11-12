@@ -653,6 +653,10 @@ def main():
             text = page.locator("#warp-result").inner_text()
             assert "bar" in text, text
             assert page.locator("#legend").is_visible() and "Curls" in page.locator("#legend").inner_text()
+            # T-362: true size by default (so PLA and ABS look different), exaggerated on request.
+            assert "true size" in page.locator("#legend").inner_text(), page.locator("#legend").inner_text()
+            page.select_option("#warp-show", "exaggerated")
+            assert "exaggerated" in page.locator("#legend").inner_text()
             page.select_option("#warp-show", "stress")
             assert "Stress left inside" in page.locator("#legend").inner_text()
             page.select_option("#warp-show", "shape")

@@ -1454,21 +1454,26 @@ function stopSwing() {
 }
 
 // ---------- warping simulation ----------
-const WARP_FIELD = { title: "Curls by (mm)", note: "exaggerated shape, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+const WARP_FIELD = { title: "Curls by (mm)", note: "true size, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+const WARP_FIELD_BIG = { ...WARP_FIELD, note: "shape exaggerated so it's easy to see" };
+// One colour scale for every material (T-362): scaled to each result's own maximum, PLA and ABS looked alike
+// although ABS curls several times more.
+const WARP_SCALE_MM = 1;
 const RESIDUAL_FIELD = { title: "Stress left inside (MPa)", note: "after it cools, rough", fmt: (v) => v.toFixed(v < 10 ? 1 : 0) };
 
 /** The warping result in the 3D view: the curled shape, or the stress the shrinking leaves inside. */
 function warpView() {
   const w = state.warp;
   const stress = state.warpShow === "stress";
-  const max = Math.max(stress ? w.stress_max : w.max_mm, 1e-9);
+  const big = state.warpShow === "exaggerated";
+  const max = Math.max(stress ? w.stress_max : Math.max(w.max_mm, WARP_SCALE_MM), 1e-9);
   const key = `warp|${w.curl_mm}|${activeOption().up}|${stress}`;
   if (viewer.fieldKey !== key || !viewer.field) {
     viewer.showField({ triangles: f32(w.field_triangles), values: f32(stress ? w.stress_value : w.vertex_value), disp: f32(w.vertex_disp), max });
     viewer.fieldKey = key;
   }
-  viewer.setDeformation(stress ? 0 : (0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
-  renderLegend(stress ? RESIDUAL_FIELD : WARP_FIELD, max);
+  viewer.setDeformation(stress ? 0 : big ? (0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9) : 1);
+  renderLegend(stress ? RESIDUAL_FIELD : big ? WARP_FIELD_BIG : WARP_FIELD, max);
   return true;
 }
 
@@ -1487,7 +1492,8 @@ $("run-warp").onclick = async () => {
       recolor();
     };
     const what = el("select", { id: "warp-show" },
-      el("option", { value: "shape", textContent: "Curled shape (red dots lift first)" }),
+      el("option", { value: "shape", textContent: "Curled shape, true size (red dots lift first)" }),
+      el("option", { value: "exaggerated", textContent: "Curled shape, exaggerated" }),
       el("option", { value: "stress", textContent: "Stress left inside after cooling" }));
     what.value = state.warpShow ?? "shape";
     what.onchange = () => {

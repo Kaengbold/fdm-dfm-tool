@@ -1207,7 +1207,7 @@ def _warp_story(r: dict, p: Profile) -> str:
     }[r["verdict"]]
     fix = "" if r["verdict"] == "fine" else (" A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
                                               " or rounding the corners of the base help. Upper layers shrinking onto the warm bottom cause it.")
-    return head + fix + " The shape shown is exaggerated." + _stress_story(r)
+    return head + fix + f" Off the bed it would curl up to {r['max_mm']:.2f} mm." + _stress_story(r)
 
 
 def _stress_story(r: dict) -> str:
