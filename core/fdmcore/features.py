@@ -736,21 +736,23 @@ def _edge_heat(edges: list[dict], points: np.ndarray, share: np.ndarray, reach: 
     return heat
 
 
-THICKEN_REACH_MM = 8.0  # the added plastic tapers out over at least this length either side of the weak spot
-THICKEN_TAPER = 10.0  # ... and at least this × the thickness added, and twice the member's own thickness:
-# a short, steep taper is a new step that takes the stress instead (on a 12 mm bar, 8 mm made it weaker)
+THICKEN_REACH_MM = 8.0  # the added plastic keeps its full thickness at least this far past the stressed stretch
+# (and at least the member's own thickness), then ends in a 45° chamfer (T-357: a straight sleeve, not a
+# wedge). The end must sit where the stress has dropped: a step right at the weak spot takes the stress
+# instead (on a 12 mm bar, an 8 mm taper from the spot made it weaker).
 THICKEN_STEP_MM = 0.5  # slab height of the added plastic
 NARROW_SHARE = 1.5  # in the weak stretch, sections up to this × the narrowest one get thicker; bigger ones are the wide ends
 
 
 def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=None) -> list[dict]:
-    """Grow the part's cross-section by ``grow`` mm where it is weak, tapering to nothing either side
-    (see THICKEN_TAPER), so no new sharp step takes the stress instead. The cross-sections are cut
+    """Grow the part's cross-section by ``grow`` mm where it is weak: an even sleeve that runs past the
+    stressed stretch and ends in a 45° chamfer (see THICKEN_REACH_MM), so no new sharp step takes the
+    stress instead. The cross-sections are cut
     across the member the spot is on (its long direction nearby), so an arm gets thicker, not longer.
 
     Only where it is needed: the full thickness runs along the stretch of the member that is nearly as
-    stressed as the weak spot (``hot_spots`` from the strength check), the taper continues that
-    stretch's own shape, and a section that is already bigger than the thickened one (the wide end of
+    stressed as the weak spot (``hot_spots`` from the strength check), the sleeve past it continues that
+    stretch's narrowest shape, and a section that is already bigger than the thickened one (the wide end of
     a dog-bone) gets nothing. With ``up``, nothing grows below the bed (the part must stay flat on it)."""
     if weak_spot is None:
         return []
@@ -783,12 +785,13 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
     if narrow is not None:
         x0, y0, x1, y1 = narrow.bounds
         thickness = min(x1 - x0, y1 - y0)
-    reach = max(THICKEN_REACH_MM, THICKEN_TAPER * grow, 2 * thickness)
+    sleeve = max(THICKEN_REACH_MM, thickness)  # full thickness this far past the stretch...
+    reach = sleeve + grow  # ...then a 45° end
     around = Point(s[:2]).buffer(reach + grow, quad_segs=8)
     pieces = []
     for layer in layers:
         dz = max(lo - layer.z, layer.z - hi, 0.0)
-        g = grow * (1 - dz / reach)
+        g = grow - max(dz - sleeve, 0.0)
         if dz > reach or g < 0.1 or layer.geom.is_empty:
             continue
         piece = section(layer, max(reach, wide))
@@ -816,7 +819,7 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
         return []
     where = "where the strength check found the most stress" if hi - lo < 1 else f"along the {hi - lo:.0f} mm that carry the most stress"
     return [_edit("thicken-weak", "thin_neck", f"Make the weak spot {grow:.1f} mm thicker",
-                  f"Adds {grow:.1f} mm of plastic all round {where}, tapering out over {reach:.0f} mm either side; "
+                  f"Adds {grow:.1f} mm of plastic all round {where} and {sleeve:.0f} mm past it either side, with a 45° end; "
                   "parts that are already thicker stay as they are. More cross-section is the direct fix when the plastic "
                   "itself is the limit. Check that nothing needs to fit there.", pieces, op="add", param="thicken_mm")]
 

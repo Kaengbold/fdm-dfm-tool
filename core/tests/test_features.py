@@ -203,7 +203,7 @@ def test_all_edits_together_give_a_clean_mesh(name, material):
 
 def test_thicker_weak_spot_helps():
     """A bar clamped at one end and pulled down at the other breaks at the clamp: "make the weak spot
-    thicker" adds plastic round it (tapering out), and the strength check gets better on the result."""
+    thicker" adds plastic round it (an even sleeve), and the strength check gets better on the result."""
     import numpy as np
 
     from fdmcore import api
@@ -225,7 +225,7 @@ def test_thicker_weak_spot_helps():
     assert edit["op"] == "add" and edit["param"] == "thicken_mm" and "2.0 mm" in edit["title"]
     pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
     # All round the bar along the stretch bent hardest (stress at least 65 % of the clamp's: the first third),
-    # tapering out well before the loaded end.
+    # ending well before the loaded end.
     assert pts[:, 0].max() < 60 and pts[:, 1].max() > 13 and pts[:, 2].max() > 13
     assert any(o.get("edit") == "thicken-weak" for o in api.strength_options([0, 0, 1], loads(), prof))
     part = api._require().mesh
@@ -388,3 +388,23 @@ def test_tall_boss_gets_ribs_at_its_foot():
     grown = apply_edits(part, [{**e, "mesh": np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)} for e in ribs])
     assert 400 < abs(grown.volume()) - abs(part.volume()) < 700 and _clean(grown.triangles) == (0, 0)
     assert not load(12)
+
+
+def test_thicker_stem_is_an_even_sleeve():
+    """The mushroom on its side, cap held, 10 kg sideways on the stem: the stem gets an even sleeve with a
+    45° end, not a wedge (T-357), and the part gets stronger (the old taper from the cap made it weaker)."""
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    prof, up = {"material": "pla"}, [0, 1, 0]
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 2, "kind": "force", "kg": 10, "direction": "push"}]
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    before = api.strength(up, loads, prof)["safety_factor"]
+    edit = next(e for e in api.design(up, prof)["edits"] if e["id"] == "thicken-weak")
+    pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
+    widths = [np.abs(pts[np.abs(pts[:, 2] - z) < 0.3, :2]).max() for z in (18, 14, 10, 7)]
+    assert max(widths) - min(widths) < 0.3, widths  # the stem is 10 mm: 5 + 1.5 all along
+    assert widths[0] == pytest.approx(6.5, abs=0.3)
+    after = api.strength_variant(up, loads, to_binary_stl(apply_edits(api._require().mesh, [edit])), prof)["safety_factor"]
+    assert after > 1.1 * before
