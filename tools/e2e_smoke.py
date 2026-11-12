@@ -901,6 +901,43 @@ def main():
             return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
+        def design_change_in_view():
+            """T-360: a design change pointed at in the list is turned into view, not hidden behind the part
+            (the mushroom on its side, rounds at the stem's foot behind the cap)."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            side = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) < 0.1)")
+            assert side >= 0, page.evaluate("() => fdm.state.options.map((o) => o.up)")
+            if side != page.evaluate("() => fdm.state.active"):
+                run.act(lambda: page.locator("#options > li").nth(side).click())
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            if page.evaluate("() => document.querySelector('input[name=mode][value=print]').checked"):
+                run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
+            page.evaluate("() => fdm.steps.go('design')")
+            # Suggest again with the strength result (the rounds at the weak spot): a size change re-runs them.
+            run.act(lambda: page.dispatch_event("#param-stress_chamfer_mm", "change"), 300_000)
+            items = page.locator("#edits li")
+            assert items.count(), "no design changes listed"
+            seen = []
+            for i in range(items.count()):
+                items.nth(i).hover()
+                page.wait_for_timeout(500)  # the camera moves in 350 ms
+                share = page.evaluate(f"() => fdm.viewer.editVisible(fdm.state.edits[{i}])")
+                seen.append(round(share, 2))
+            assert min(seen) >= 0.5, f"design changes hidden behind the part from the view they turn to: {seen}"
+            return f"visible share per change: {seen}"
+        run.step("design change turned into view", design_change_in_view)
+
         def thorough_design_test():
             # Thorough: sizes tried on copies in the background; only the picked one becomes a version.
             def set_mode(value):  # a click on the mode already chosen starts no check
