@@ -391,20 +391,29 @@ def test_tall_boss_gets_ribs_at_its_foot():
 
 
 def test_thicker_stem_is_an_even_sleeve():
-    """The mushroom on its side, cap held, 10 kg sideways on the stem: the stem gets an even sleeve with a
-    45° end, not a wedge (T-357), and the part gets stronger (the old taper from the cap made it weaker)."""
+    """The mushroom on its side, cap held, 10 kg sideways at the stem's end: the stem gets an even sleeve
+    with a 45° end, not a wedge (T-357), square to the stem (a sleeve a degree off came out ragged, in
+    many small faces), joined to the cap, and the part gets stronger."""
     from fdmcore.booleans import apply_edits
     from fdmcore.mesh import to_binary_stl
+    from fdmcore.regions import find_regions
 
     prof, up = {"material": "pla"}, [0, 1, 0]
-    loads = [{"region": 8, "kind": "fixed"}, {"region": 2, "kind": "force", "kg": 10, "direction": "push"}]
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": [1, 0, 0]}]
     api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
     api.regions()
     before = api.strength(up, loads, prof)["safety_factor"]
     edit = next(e for e in api.design(up, prof)["edits"] if e["id"] == "thicken-weak")
     pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
-    widths = [np.abs(pts[np.abs(pts[:, 2] - z) < 0.3, :2]).max() for z in (18, 14, 10, 7)]
-    assert max(widths) - min(widths) < 0.3, widths  # the stem is 10 mm: 5 + 1.5 all along
-    assert widths[0] == pytest.approx(6.5, abs=0.3)
-    after = api.strength_variant(up, loads, to_binary_stl(apply_edits(api._require().mesh, [edit])), prof)["safety_factor"]
-    assert after > 1.1 * before
+    for z in (19, 14, 9):  # the stem is 10 mm: 5 + 1.5 all along, the same at every height
+        ring = pts[np.abs(pts[:, 2] - z) < 0.3, :2]
+        assert np.abs(ring).max(axis=0) == pytest.approx([6.5, 6.5], abs=0.05), (z, np.abs(ring).max(axis=0))
+    assert pts[:, 2].max() > 20  # into the cap: no slit under it
+    thick = apply_edits(api._require().mesh, [edit])
+    regions = find_regions(thick)
+    normals, areas = thick.normals_and_areas()
+    middle = thick.triangles.mean(axis=1)
+    side = (normals[:, 0] < -0.99) & (middle[:, 0] < -6.4) & (middle[:, 0] > -7) & (middle[:, 2] < 20)  # the sleeve's -x side
+    assert len(np.unique(regions[side])) == 1  # one flat side, not a ragged one
+    after = api.strength_variant(up, loads, to_binary_stl(thick), prof)["safety_factor"]
+    assert after > 1.25 * before

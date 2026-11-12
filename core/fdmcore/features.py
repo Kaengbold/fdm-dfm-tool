@@ -797,7 +797,9 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
         piece = section(layer, max(reach, wide))
         if piece is None:
             continue
-        own = dz == 0 and (narrow is None or piece.area <= NARROW_SHARE * narrow.area)
+        # Sections that match the narrowest one (to 0.1 mm) use it, so the sleeve's slabs are identical and
+        # join without hair-thin steps (each slice differs a little; the steps were taken for inside corners).
+        own = dz == 0 and (narrow is None or (piece.area <= NARROW_SHARE * narrow.area and not _same_outline(piece, narrow)))
         shape = piece if own or narrow is None else narrow
         x0, y0, x1, y1 = shape.bounds
         grown = shape.buffer(g, quad_segs=4)
@@ -810,9 +812,11 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
         for poly in parts(grown.simplify(0.05), 0.05):
             if not poly.intersects(piece):  # a bit cut off by the round around the spot: it would float
                 continue
-            # Slabs overlap a little so they join, but never stick out past the part's ends (a lip there
-            # would make a new face where a clamp or load sits).
-            prism = extrude(poly, max(layer.z - THICKEN_STEP_MM / 2 - 0.02, 0.0), min(layer.z + THICKEN_STEP_MM / 2 + 0.02, top))
+            # Slabs reach a whole step into their neighbours, so the sleeve always joins what is next to it:
+            # the next layer may lie inside a wide end and get no slab, and half a step stopped short of it
+            # (0.07 mm under the mushroom's cap: a slit with odd small inside edges, T-359). Never past the
+            # part's ends (a lip there would make a new face where a clamp or load sits).
+            prism = extrude(poly, max(layer.z - THICKEN_STEP_MM - 0.02, 0.0), min(layer.z + THICKEN_STEP_MM + 0.02, top))
             if prism is not None:
                 pieces.append((prism + [0, 0, base]) @ r)
     if not pieces:
@@ -822,6 +826,12 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
                   f"Adds {grow:.1f} mm of plastic all round {where} and {sleeve:.0f} mm past it either side, with a 45° end; "
                   "parts that are already thicker stay as they are. More cross-section is the direct fix when the plastic "
                   "itself is the limit. Check that nothing needs to fit there.", pieces, op="add", param="thicken_mm")]
+
+
+def _same_outline(a, b, tol: float = 0.1) -> bool:
+    """Two sections the same to about ``tol`` mm: bounds and area agree (no overlay: those can throw in
+    Pyodide's GEOS on near-identical outlines, see checks._safe_diff)."""
+    return bool(np.allclose(a.bounds, b.bounds, atol=tol) and abs(a.area - b.area) <= tol * max(a.length, b.length))
 
 
 def _weak_axis(mesh: Mesh, spot: np.ndarray, hot_spots) -> tuple[np.ndarray, float, bool]:
@@ -846,7 +856,26 @@ def _weak_axis(mesh: Mesh, spot: np.ndarray, hot_spots) -> tuple[np.ndarray, flo
         area = _narrowest(mesh, spot, a)
         if best is None or area < 0.85 * best[0]:
             best = (area, a, joined)
-    return best[1], float(np.sqrt(best[0])), best[2]
+    return _true_axis(mesh, spot, best[1]), float(np.sqrt(best[0])), best[2]
+
+
+def _true_axis(mesh: Mesh, spot: np.ndarray, axis: np.ndarray, within_deg: float = 10.0) -> np.ndarray:
+    """``axis`` (from voxels and stress spots, a little off) set exactly along the member's side faces:
+    the direction their normals are all square to, for a straight bar or a round pin. A sleeve a degree
+    off the member it wraps came out ragged, in many small faces (T-357). Unchanged when the faces near
+    the spot don't agree on one direction within ``within_deg``."""
+    normals, areas = mesh.normals_and_areas()
+    centres = mesh.triangles.mean(axis=1)
+    near = np.linalg.norm(centres - spot, axis=1) <= 2.5 * THICKEN_REACH_MM
+    side = near & (np.abs(normals @ axis) < np.sin(np.radians(2 * within_deg)))
+    if areas[side].sum() <= 0:
+        return axis
+    n, a = normals[side], areas[side]
+    w, v = np.linalg.eigh((n * a[:, None]).T @ n)
+    if w[0] > 0.01 * w.sum():  # the sides don't share one axis (a tapered or bent member)
+        return axis
+    exact = v[:, 0] * np.sign(v[:, 0] @ axis)
+    return exact if exact @ axis >= np.cos(np.radians(within_deg)) else axis
 
 
 def _narrowest(mesh: Mesh, spot: np.ndarray, axis: np.ndarray, reach: float = THICKEN_REACH_MM) -> float:
