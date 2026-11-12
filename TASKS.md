@@ -381,7 +381,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 - [~] **T-387 P1** Better layer strength test print: the bar with a hole near each end breaks at the holes, not between the layers. Use a shape that fails in the test zone (CNC Kitchen-style hook or similar; source in the PR). · files: `core/fdmcore/api.py` (calibration_part) · owner: Claude (`task/T-387-layer-test-print`)
 - [ ] **T-388 P2** Combine the test prints into one object (or one plate) to save printing, with each size / length written on it so nothing needs measuring. Builds on T-170, T-104. · files: `core/fdmcore/api.py` (calibration_part) · owner: —
-- [ ] **T-389 P2** One test part that triggers every feature of the app (holes, slots, fillets, thin walls, overhangs, text, pins, warping, …) with a list of what to check, for manual testing. · files: `tools/make_samples.py`, `web/samples/` · owner: —
+- [~] **T-389 P2** One test part that triggers every feature of the app (holes, slots, fillets, thin walls, overhangs, text, pins, warping, …) with a list of what to check, for manual testing. · files: `tools/make_samples.py`, `web/samples/` · owner: Claude (`task/T-389-everything-part`)
 
 ### Print failure risk
 
