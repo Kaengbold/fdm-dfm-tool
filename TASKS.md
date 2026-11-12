@@ -345,7 +345,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 - [ ] **T-365 P1** After applying settings there (or changing walls / infill / material), run Make it stronger again on the new settings and show the new list. · files: `web/app.js` · owner: —
 - [~] **T-366 P2** Suggest slicer settings before a material change: when settings reach the target, show them first even if a material gain is bigger; material last. · files: `core/fdmcore/api.py` (strength_options) · owner: Claude (`task/T-366-settings-first`)
 - [ ] **T-367 P2** Design changes are tested in the background and shown with their result (×n), not applied; the user applies one if it's worth it. Today this is the optional "Thorough" trial (`tryDesigns`): make it the default where it makes sense, few sizes, low priority so the PC stays usable. · files: `web/app.js` (TRIALS, tryDesigns) · owner: —
-- [ ] **T-368 P2** When the strength check says it won't hold: on the first run for this part, check the orientations for a stronger one and offer it straight away ("Lie it on its side: holds ×n. Use it?"). Once per part. · files: `web/app.js`, `core/fdmcore/api.py` · owner: —
+- [~] **T-368 P2** When the strength check says it won't hold: on the first run for this part, check the orientations for a stronger one and offer it straight away ("Lie it on its side: holds ×n. Use it?"). Once per part. · files: `web/app.js`, `core/fdmcore/api.py` · owner: Claude (`task/T-368-offer-orientation`)
 
 ### Strength analysis ("Will it hold?")
 
