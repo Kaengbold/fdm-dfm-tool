@@ -169,8 +169,9 @@ def set_expert(values: dict[str, float]) -> dict:
 CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge")
 # What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
 CALIBRATION_HOW = {
-    "layer_strength": "A 60 mm bar with a hole near each end. Print one lying flat and one standing on its end, hang each "
-                      "by one hole and add weight at the other until it breaks. Standing ÷ flat is your layer strength.",
+    "layer_strength": "A 98 mm dog-bone: thin in the middle, wide with a hole at each end. Print one lying flat and one "
+                      "standing on its end (a brim helps it stay up). Hang each by one hole and pull on the other with a "
+                      "luggage scale (or add weight) until it breaks in the thin middle. Standing ÷ flat is your layer strength.",
     "warping": "Bars 40, 80, 120 and 160 mm long. Print them without a brim (in your enclosure if you have one): "
                "the longest one that stays flat on the bed is how long a part can get before its corners lift.",
     "fit": "A 6 mm peg and holes 6.0 … 6.5 mm (the notched end is 6.0). Try the peg in each hole: "
@@ -181,6 +182,13 @@ CALIBRATION_HOW = {
               "the longest one that doesn't sag is how far it can bridge.",
 }
 FIT_GAUGE_GAPS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)  # hole sizes of the fit gauge: 6 mm + these
+# Layer strength dog-bone (T-387), the shape of tensile test bars (ASTM D638 / ISO 527): the middle is the weakest
+# section, so it breaks there and not at a hole. The old straight bar had only 4 of its 10 mm left beside each
+# hole and broke there. A pin in a hole puts 2.5-3x the average stress beside it, so the ends carry 9x the
+# middle's section; the strength check (pin on a third of the hole) then finds the most stress in the middle,
+# lying and standing. A thin middle also keeps the break weight within a luggage scale (PLA ~50 MPa x 12 mm²).
+# Ends: width, length, hole (an M5 bolt, a string); middle: width, length; round between them; thickness (mm).
+DOGBONE = {"end_w": 34.0, "end_l": 22.0, "hole_d": 6.0, "mid_w": 3.0, "mid_l": 30.0, "round": 12.0, "thick": 4.0}
 OVERHANG_TEST_DEG = (40, 45, 50, 55, 60, 65, 70)  # from vertical
 BRIDGE_TEST_MM = (10, 20, 30, 40, 50)
 
@@ -218,12 +226,18 @@ def calibration_part(kind: str) -> dict:
         return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "bridge_test.stl", "how": CALIBRATION_HOW[kind]}
 
     if kind == "layer_strength":
-        from shapely.geometry import Point, box as sbox
-
-        from .additions import extrude
-
-        outline = sbox(0, 0, 60, 10).difference(Point(6, 5).buffer(3, 32)).difference(Point(54, 5).buffer(3, 32))
-        return {"stl": to_binary_stl(Mesh(extrude(outline, 0, 6))), "name": "layer_strength_test.stl", "how": CALIBRATION_HOW[kind]}
+        d = DOGBONE
+        length = 2 * (d["end_l"] + d["round"]) + d["mid_l"]
+        w, half, r, e = d["end_w"], d["mid_w"] / 2, d["round"], d["end_l"]
+        # Top edge, then mirrored: the inside corners where the middle meets the ends are quarter rounds (no
+        # corner for a crack to start at). Drawn point by point: a shrinking buffer can kill Pyodide's GEOS (T-268).
+        a = np.linspace(0, np.pi / 2, 16)
+        top = [(0, w / 2), (e, w / 2), *zip(e + r - r * np.cos(a), half + r - r * np.sin(a)),
+               *zip(length - e - r + r * np.sin(a), half + r - r * np.cos(a)), (length - e, w / 2), (length, w / 2)]
+        bone = Polygon([(x, w / 2 + y) for x, y in top] + [(x, w / 2 - y) for x, y in reversed(top)])
+        for x in (d["end_l"] / 2, length - d["end_l"] / 2):
+            bone = bone.difference(Point(x, w / 2).buffer(d["hole_d"] / 2, 64))
+        return {"stl": to_binary_stl(Mesh(extrude(bone, 0, d["thick"]))), "name": "layer_strength_test.stl", "how": CALIBRATION_HOW[kind]}
     if kind == "warping":
         tris = []
         for i, length in enumerate((40, 80, 120, 160)):
