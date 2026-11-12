@@ -341,7 +341,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### Make it stronger
 
-- [ ] **T-364 P1** Tick several suggestions and press one "Re-check" button at the bottom, instead of each button applying at once. · files: `web/app.js` (optionGroups, optionCard, applyOption) · owner: —
+- [~] **T-364 P1** Tick several suggestions and press one "Re-check" button at the bottom, instead of each button applying at once. · files: `web/app.js` (optionGroups, optionCard, applyOption) · owner: Claude (`task/T-364-tick-and-recheck`)
 - [ ] **T-365 P1** After applying settings there (or changing walls / infill / material), run Make it stronger again on the new settings and show the new list. · files: `web/app.js` · owner: —
 - [ ] **T-366 P2** Suggest slicer settings before a material change: when settings reach the target, show them first even if a material gain is bigger; material last. · files: `core/fdmcore/api.py` (strength_options) · owner: —
 - [ ] **T-367 P2** Design changes are tested in the background and shown with their result (×n), not applied; the user applies one if it's worth it. Today this is the optional "Thorough" trial (`tryDesigns`): make it the default where it makes sense, few sizes, low priority so the PC stays usable. · files: `web/app.js` (TRIALS, tryDesigns) · owner: —
