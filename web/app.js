@@ -1703,8 +1703,9 @@ const TRIALS = {
   ],
 };
 
-async function tryDesigns() {
-  const how = await askLong("Test design changes", "trials", [
+/** ``auto``: run the quick plan without asking (after "How can I make it stronger?", T-367). */
+async function tryDesigns(auto = false) {
+  const how = auto ? "few" : await askLong("Test design changes", "trials", [
     { value: "all", kind: "trials", label: "Every size, then the best two together (8 checks)" },
     { value: "few", kind: "trials_few", label: "A few sizes, then both together (4 checks)" }]);
   if (!how) return;
@@ -1726,8 +1727,13 @@ async function tryDesigns() {
     const r = await call("design", { up, profile: profile(), params: { ...designParams(), ...params }, keep_clear });
     const edits = r.edits.filter((e) => ids.includes(e.id) && !e.clash).map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) }));
     if (edits.length !== ids.length) return null;
-    const soup = await applyDesignEdits(state.triangles, edits);
-    return { ...(await call("strength_variant", check, stlBytes(soup))), edits, title: title ?? edits[0].title };
+    try {
+      const soup = await applyDesignEdits(state.triangles, edits);
+      return { ...(await call("strength_variant", check, stlBytes(soup))), edits, title: title ?? edits[0].title };
+    } catch (err) {
+      if (err instanceof Cancelled) throw err;
+      return null; // a variant that can't be built is left out of the list, not an error (T-367)
+    }
   };
   await busy("Testing design changes…", async () => {
     const best = [];
@@ -1802,8 +1808,14 @@ async function showStrengthOptions() {
     $("strength-options").replaceChildren(...optionGroups(opts, opts[0]?.base_safety ?? state.strength?.safety_factor), noMaterial);
     setStatus(state.summary);
     return opts;
+  }).then(async (opts) => {
+    // Design ideas come without a number: test them on copies straight away when that's quick (T-367).
+    // Nothing is applied; the results list says what each would do.
+    if (opts?.some((o) => o.kind === "design") && estimate("trials_few") <= AUTO_TRIALS_S) await tryDesigns(true);
+    return opts;
   });
 }
+const AUTO_TRIALS_S = 60; // longer than this, the user starts the tests ("Test design changes for me")
 
 const OPTION_GROUP = { slicer: "Slicer settings", orientation: "Orientation", design: "Design changes", material: "Material", load: "Less load" };
 // Ticked and applied together with "Re-check" (T-364); one orientation and one material at a time.

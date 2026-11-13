@@ -221,10 +221,13 @@ def edit_params(params: dict | None) -> dict:
 def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", param=None) -> dict:
     """A design edit. An edit that both adds and cuts (grip fins) also gets ``piece_ops``, "add" or "cut" per
     piece; then, as for whole edits, every addition is made before any cut."""
+    # A piece with a non-finite corner can't be built (the browser's manifold refuses it with an error, T-367):
+    # leave it out rather than fail the whole change.
+    pieces = [q for q in pieces if np.isfinite(q).all()]
     return {
         "id": id_, "rule": rule, "title": title, "description": description, "op": op, "param": param,
-        "mesh": np.concatenate(pieces).astype("<f4").tobytes(),
-        "pieces": [len(p) for p in pieces],
+        "mesh": (np.concatenate(pieces) if pieces else np.zeros((0, 3, 3))).astype("<f4").tobytes(),
+        "pieces": [len(q) for q in pieces],
     }
 
 
@@ -762,7 +765,10 @@ def _round_arc(e: dict, mid: np.ndarray, size: float, steps: int = 6) -> list[np
     bis = (t1 + t2) / np.linalg.norm(t1 + t2)
     centre = mid + bis * radius / np.sin(phi / 2)
     a, b = mid + t1 * size - centre, mid + t2 * size - centre
-    turn = np.arccos(np.clip(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)), -1.0, 1.0))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        turn = np.arccos(np.clip(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)), -1.0, 1.0))
+    if not np.isfinite(turn) or turn < 1e-3:  # facets of an earlier round meet almost flat: nothing to round
+        return []
     out = []
     for i in range(1, steps):
         k = i / steps
