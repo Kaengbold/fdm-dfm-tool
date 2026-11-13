@@ -1687,6 +1687,26 @@ def _dynamics_story(r: dict) -> str:
     return out
 
 
+STRONGER_TURN = 1.3  # another build direction is offered when it holds at least this much more
+
+
+def stronger_orientation(up, loads: list[dict], profile: dict | None = None, walls: int | None = None,
+                         infill: float | None = None, top: int | None = None, bottom: int | None = None) -> dict:
+    """The strongest of the six square build directions for ``loads`` (T-368: offered straight away when the
+    strength check fails): its ``up`` and ``safety_factor``, and ``current`` for ``up`` on the same quick
+    solve, so the two compare like with like. ``up`` is None when no direction holds STRONGER_TURN × more."""
+    from .strength import cases_safety
+
+    p = Profile.from_dict(profile)
+    case = _load_case(loads)
+    now = np.asarray(up, float) / np.linalg.norm(up)
+    axes = np.vstack([now, np.eye(3), -np.eye(3)])
+    sfs = cases_safety(case, axes, p, _shells(p, walls, infill, top, bottom))
+    best = int(np.argmax(sfs[1:])) + 1
+    better = sfs[best] >= STRONGER_TURN * sfs[0] and abs(float(axes[best] @ now)) < 0.99
+    return {"up": axes[best].tolist() if better else None, "safety_factor": float(sfs[best]), "current": float(sfs[0])}
+
+
 def strength_options(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
@@ -2917,6 +2937,7 @@ METHODS = {
     "strength": strength,
     "strength_variant": strength_variant,
     "strength_options": strength_options,
+    "stronger_orientation": stronger_orientation,
     "design": design,
     "compare_nozzles": compare_nozzles,
     "topology": topology,
