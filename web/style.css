@@ -477,6 +477,8 @@ body:not([data-level="simple"]) .settings-fold > summary { display: none; }
 .expert-values .changed { font-weight: 700; color: var(--accent); }
 .expert-values .note { font-size: 13px; color: var(--muted); }
 .guide h2 { margin-bottom: 4px; }
+.guide h3 { margin: 18px 0 2px; font-size: 15px; }
+.guide button.soon { opacity: 0.6; cursor: default; }
 .guide button { display: block; width: 100%; text-align: left; padding: 12px 14px; margin: 8px 0 0; }
 .guide button b { font-size: 16px; }
 .guide button.current { border: 2px solid var(--accent); background: var(--accent-soft); }
@@ -554,6 +556,11 @@ button.primary:disabled { opacity: 1; background: var(--soft); border-color: var
 .compute-steps li.done::before { background: var(--accent); border-color: var(--accent); }
 .compute-steps li.skipped::before { border-style: dashed; }
 @media (prefers-reduced-motion: reduce) { .compute-steps li.working::before { animation: none; } }
+
+/* A hint that waits for a click on the part (T-386). */
+@keyframes pulse { 50% { opacity: 0.45; } }
+.hint.pulse { animation: pulse 1.4s ease-in-out infinite; font-weight: 600; color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .hint.pulse { animation: none; } }
 
 /* Layout clean-up (T-381): empty lists and notes take no room, text after a button gets air,
    long summaries wrap under their title instead of splitting into columns. */

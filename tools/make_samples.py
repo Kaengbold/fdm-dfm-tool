@@ -103,6 +103,33 @@ def dumbbell():
     return trimesh.boolean.union([low, neck, high], engine="manifold")
 
 
+def feature_test():
+    """One part with something for every check and design change, for testing the app by hand (T-389).
+    What to look for where: docs/feature_test.md."""
+    import numpy as np
+
+    base = at(box([100, 60, 4]), z=2)  # sharp corners: bed rounds, foot chamfer; 100 mm long: ABS warps
+    block = at(box([12, 20, 24]), x=-42, z=16)  # with a sideways Ø8 hole: oval, teardrop
+    stem = at(box([10, 10, 18]), x=-15, z=13)  # stem under a cap: ledge needs support; load it for strength
+    cap = at(box([24, 24, 4]), x=-15, z=24)
+    pillars = [at(box([6, 10, 15]), x=x, y=-20, z=11.5) for x in (7, 43)]  # a 30 mm bridge between them
+    beam = at(box([42, 10, 3]), x=25, y=-20, z=20.5)
+    fin = at(box([15, 0.6, 10]), x=12.5, y=20, z=9)  # one line wide
+    hair = at(box([15, 0.3, 10]), x=12.5, y=26, z=9)  # too thin to print
+    slot = [at(box([2, 13, 10]), x=x, y=21.5, z=9) for x in (31, 36)]  # 3 mm slot: pick both faces for a fit
+    fused = [at(box([2, 13, 10]), x=x, y=21.5, z=9) for x in (41, 43.15)]  # 0.15 mm gap: fuses
+    pin = at(cylinder(radius=1.5, height=36, sections=32), x=25, z=22)  # alone above the rest: small layers, cooling
+    part = trimesh.boolean.union([base, block, stem, cap, *pillars, beam, fin, hair, *slot, *fused, pin], engine="manifold")
+    side = cylinder(radius=4, height=30, sections=48)
+    side.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    at(side, x=-42, z=18)
+    screw = at(cylinder(radius=1.5, height=10, sections=48), x=-35, y=-22)  # M3 at screw size: clearance / pilot / insert
+    hole5 = at(cylinder(radius=2.5, height=10, sections=48), x=-25, y=-22)
+    nut = at(cylinder(radius=5.5 / np.sqrt(3), height=2.4, sections=6), x=-15, y=-22, z=4 - 1.2)  # M3 nut pocket, no play: tight
+    grooves = [at(box([0.4, 8, 0.6]), x=-48 + 2 * i, y=20, z=4) for i in range(4)]  # engraved 0.3 mm deep: faint
+    return trimesh.boolean.difference([part, side, screw, hole5, nut, *grooves], engine="manifold")
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     for name, fn in {
@@ -115,6 +142,7 @@ if __name__ == "__main__":
         "cable_clip": cable_clip,
         "detail_plate": detail_plate,
         "dumbbell": dumbbell,
+        "feature_test": feature_test,
     }.items():
         m = fn()
         assert m.is_watertight, name

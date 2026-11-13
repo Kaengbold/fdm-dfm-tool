@@ -382,12 +382,17 @@ def main():
             label = row.locator("button.link").first.inner_text()
             assert "picked" in (row.get_attribute("class") or ""), "picked gap not selected"
             assert page.evaluate("() => fdm.state.fitSel?.regions.length") == 2, "both faces of the gap should light up"
+            shown = lambda: page.evaluate("() => fdm.viewer.fitView?.children.length ?? 0")  # noqa: E731
+            assert shown() >= 2, "no measured width on the part"  # T-386: line + label
             value = float(row.locator("input").input_value())
             row.locator("input").fill(f"{value - 0.5:.1f}" if label.startswith("Slot") else f"{value + 0.5:.1f}")
+            row.locator("input").dispatch_event("input")
+            assert shown() >= 4, "no bars for the other part"  # + one bar (slot) or two walls (tab), with edges
             run.act(lambda: row.get_by_role("button", name="Size it").click())
             note = page.locator("#gaps li").first.locator("p.hint").inner_text()
             edits = page.locator("#edits label").all_inner_texts()
             assert any(("slot" in e or "tab" in e) and "fit" in e for e in edits), edits
+            assert page.locator("#gaps li").first.get_by_role("button", name="Show in Design changes").count() == 1
             page.locator("#gaps li").first.get_by_role("button", name="Remove").click()
             page.wait_for_function("() => !document.querySelector('#gaps li')", timeout=120_000)
             return f"{label}: {note[:90]}"
