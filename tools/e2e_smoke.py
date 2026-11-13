@@ -1373,6 +1373,25 @@ def main():
             return text
         run.step("failing strength check offers a stronger orientation", offer_stronger_orientation)
 
+        def turn_by_hand():
+            """T-380: the user can turn the part themselves: 90° steps or any angle, as a "Your own" option."""
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('orient')")
+            page.locator("#turn-own > summary").click()
+            up = lambda: page.evaluate("() => fdm.state.options[fdm.state.active].up")  # noqa: E731
+            before = up()
+            run.act(lambda: page.click("[data-tip=flip]"))
+            flipped = up()
+            assert sum(a * b for a, b in zip(before, flipped)) < -0.99, (before, flipped)
+            assert page.evaluate("() => fdm.state.options[fdm.state.active].label") == "Your own"
+            page.fill("#tip-forward", "90")
+            run.act(lambda: page.click("#tip-use"))
+            tipped = up()
+            assert abs(sum(a * b for a, b in zip(flipped, tipped))) < 0.01, (flipped, tipped)
+            assert page.evaluate("() => fdm.state.options.filter((o) => o.label === 'Your own').length") == 1
+            return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}"
+        run.step("turn the part by hand", turn_by_hand)
+
         def hidden_gap_from_side():
             """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
             refused), and its outline is drawn over the part so it can be seen inside it."""
@@ -1404,24 +1423,38 @@ def main():
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
 
-        def turn_by_hand():
-            """T-380: the user can turn the part themselves: 90° steps or any angle, as a "Your own" option."""
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
-            page.evaluate("() => fdm.steps.go('orient')")
-            page.locator("#turn-own > summary").click()
-            up = lambda: page.evaluate("() => fdm.state.options[fdm.state.active].up")  # noqa: E731
-            before = up()
-            run.act(lambda: page.click("[data-tip=flip]"))
-            flipped = up()
-            assert sum(a * b for a, b in zip(before, flipped)) < -0.99, (before, flipped)
-            assert page.evaluate("() => fdm.state.options[fdm.state.active].label") == "Your own"
-            page.fill("#tip-forward", "90")
-            run.act(lambda: page.click("#tip-use"))
-            tipped = up()
-            assert abs(sum(a * b for a, b in zip(flipped, tipped))) < 0.01, (flipped, tipped)
-            assert page.evaluate("() => fdm.state.options.filter((o) => o.label === 'Your own').length") == 1
-            return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}"
-        run.step("turn the part by hand", turn_by_hand)
+        def tick_and_recheck():
+            """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            recheck = page.get_by_role("button", name="Re-check with the ticked changes")
+            assert recheck.is_disabled(), "re-check enabled with nothing ticked"
+            page.locator("#strength-options summary", has_text="Slicer settings").evaluate("s => s.parentElement.open = true")
+            ticks = page.locator("#strength-options li.slicer input[type=checkbox]")
+            assert ticks.count() >= 2, f"{ticks.count()} slicer ideas"
+            ticks.nth(0).check()
+            ticks.nth(1).check()
+            assert page.locator("#strength-options li.slicer input:checked").count() == 2 and recheck.is_enabled()
+            before = page.evaluate("() => ({ ...fdm.state.overrides })")
+            run.act(lambda: recheck.click(), 300_000)
+            after = page.evaluate("() => ({ ...fdm.state.overrides })")
+            changed = {k: v for k, v in after.items() if before.get(k) != v}
+            assert len(changed) >= 2, f"settings from two ideas not both applied: {changed}"
+            assert page.evaluate("() => !!fdm.state.strength"), "strength not checked again"
+            return f"applied together: {changed}"
+        run.step("make it stronger: tick several, re-check once", tick_and_recheck)
 
         for part in args.parts:
             def load_part(part=part):
