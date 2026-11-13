@@ -185,8 +185,11 @@ def main():
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
+            assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+            # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
+            assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
             return f"guide -> {simple[0]}; back to expert"
         run.step("levels and start guide", levels_and_guide)
 
@@ -288,6 +291,21 @@ def main():
             assert not any("Thicken" in e for e in again), f"walls still thin after thickening: {again}"
             return f"{edits} -> {again or 'nothing'} | findings: {findings(page)}"
         run.step("design edits that add material", added_material)
+
+        def design_keeps_orientation():
+            """T-353: a design change made with another orientation picked keeps that orientation."""
+            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: page.locator("#options > li").nth(1).click())
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
+            run.act(lambda: page.click("#apply-edits"))
+            now = page.evaluate("() => ({ up: fdm.state.options[fdm.state.active].up, version: fdm.state.version })")
+            assert now["version"] == 1 and sum(a * b for a, b in zip(up, now["up"])) > 0.999, f"orientation {up} -> {now}"
+            run.act(lambda: page.select_option("#version", "0"), 300_000)
+            back = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            assert sum(a * b for a, b in zip(up, back)) > 0.999, f"switching back to the original: {up} -> {back}"
+            return f"stays on {[round(v, 2) for v in up]} after the change and back on the original"
+        run.step("design change keeps the orientation", design_keeps_orientation)
 
         def feature_confirm():
             run.act(lambda: page.click("[data-sample=l_bracket]"))
@@ -632,6 +650,7 @@ def main():
             return "support and no-support boxes in the 3MF; undo and remove work"
         run.step("advanced design changes: support boxes", advanced_boxes)
 
+
         def rank_with_strength():
             run.act(lambda: page.get_by_role("button", name="Find the best orientation including strength").click(), 600_000)
             text = page.locator("#strength-result").inner_text()
@@ -653,6 +672,10 @@ def main():
             text = page.locator("#warp-result").inner_text()
             assert "bar" in text, text
             assert page.locator("#legend").is_visible() and "Curls" in page.locator("#legend").inner_text()
+            # T-362: true size by default (so PLA and ABS look different), exaggerated on request.
+            assert "true size" in page.locator("#legend").inner_text(), page.locator("#legend").inner_text()
+            page.select_option("#warp-show", "exaggerated")
+            assert "exaggerated" in page.locator("#legend").inner_text()
             page.select_option("#warp-show", "stress")
             assert "Stress left inside" in page.locator("#legend").inner_text()
             page.select_option("#warp-show", "shape")
@@ -901,6 +924,42 @@ def main():
             return status + " | " + status2
         run.step("strength suggestion: test a design change", test_design_change)
 
+        def design_change_in_view():
+            """T-360: a design change pointed at in the list is turned into view, not hidden behind the part
+            (the mushroom on its side, rounds at the stem's foot behind the cap)."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            side = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) < 0.1)")
+            assert side >= 0, page.evaluate("() => fdm.state.options.map((o) => o.up)")
+            if side != page.evaluate("() => fdm.state.active"):
+                run.act(lambda: page.locator("#options > li").nth(side).click())
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            if page.evaluate("() => document.querySelector('input[name=mode][value=print]').checked"):
+                run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
+            page.evaluate("() => fdm.steps.go('design')")
+            # Suggest again with the strength result (the rounds at the weak spot): a size change re-runs them.
+            run.act(lambda: page.dispatch_event("#param-stress_chamfer_mm", "change"), 300_000)
+            items = page.locator("#edits li")
+            assert items.count(), "no design changes listed"
+            seen = []
+            for i in range(items.count()):
+                items.nth(i).hover()
+                page.wait_for_timeout(500)  # the camera moves in 350 ms
+                share = page.evaluate(f"() => fdm.viewer.editVisible(fdm.state.edits[{i}])")
+                seen.append(round(share, 2))
+            assert min(seen) >= 0.5, f"design changes hidden behind the part from the view they turn to: {seen}"
+            return f"visible share per change: {seen}"
+        run.step("design change turned into view", design_change_in_view)
 
         def thorough_design_test():
             # Thorough: sizes tried on copies in the background; only the picked one becomes a version.
@@ -1164,6 +1223,8 @@ def main():
             run.act(lambda: page.click("[data-sample=l_bracket]"))
             page.evaluate("() => fdm.steps.go('fits')")
             run.act(lambda: page.set_input_files("#mate-file", str(mate)), 300_000)
+            # Going to the step starts jobs of its own, so "idle" can come before the result: wait for it.
+            page.wait_for_function("() => document.getElementById('mate-result').textContent.trim()", timeout=300_000)
             text = page.locator("#mate-result").inner_text()
             assert "0.30 mm per side" in text and "move freely" in text, text
             return text[:120]
@@ -1174,7 +1235,8 @@ def main():
             # one plate overhangs every way up. Cut so each piece prints its own way without (T-347).
             spool = ROOT / "tools" / "fixtures" / "spool.stl"
             run.act(lambda: page.set_input_files("#file", str(spool)), 300_000)
-            assert page.evaluate("() => !document.getElementById('dl-split-support').hidden"), "no 'less support' cut offered"
+            # The cut is worked out after the check: wait for it (on a slow runner "idle" came first).
+            page.wait_for_function("() => !document.getElementById('dl-split-support').hidden", timeout=300_000)
             run.act(lambda: page.evaluate("() => document.getElementById('dl-split-support').click()"), 300_000)
             page.wait_for_function("() => !document.getElementById('split-panel').hidden", timeout=60_000)
             text = page.locator("#split-text").inner_text()
@@ -1291,6 +1353,37 @@ def main():
             assert "90° lean" in page.locator("#loads").inner_text(), page.locator("#loads").inner_text()
             return f"lean 90° on a face with normal {[round(v, 2) for v in normal]}: {d}"
         run.step("load at an angle to the face", load_at_an_angle)
+
+        def hidden_gap_from_side():
+            """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
+            refused), and its outline is drawn over the part so it can be seen inside it."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("() => fdm.steps.go('extra')")
+            xy = page.evaluate("""() => {
+              const v = fdm.viewer, p = v.part.geometry.getAttribute('position'), n = p.count / 3;
+              for (let f = 0; f < n; f++) {
+                const a = [0, 1, 2].map((k) => [p.getX(3 * f + k), p.getY(3 * f + k), p.getZ(3 * f + k)]);
+                const u = a[1].map((x, i) => x - a[0][i]), w = a[2].map((x, i) => x - a[0][i]);
+                const c = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+                if (Math.abs(c[2]) > 0.1 * Math.hypot(...c)) continue; // side faces only
+                const [x, y] = v.screenPointOfFace(f);
+                const el = document.elementFromPoint(x, y);
+                if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y];
+              }
+              return null;
+            }""")
+            assert xy, "no side face in view"
+            page.select_option("#vol-kind", "void")
+            page.click("#vol-pick")
+            run.act(lambda: page.mouse.click(*xy))
+            got = page.evaluate("() => fdm.state.volumes.map((v) => ({ kind: v.kind, notes: v.notes }))")
+            assert len(got) == 1 and got[0]["kind"] == "void", f"gap not placed: {got} | {page.locator('#status').inner_text()}"
+            assert not any("shows as a hole" in n for n in got[0]["notes"]), got
+            over = page.evaluate("() => fdm.viewer.zones.children.some((c) => c.isLineSegments && c.material.depthTest === false)")
+            assert over, "the gap's outline is hidden by the part"
+            page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
+            return f"placed inside the wall: {got[0]['notes'][:1]}"
+        run.step("hidden gap from a side face", hidden_gap_from_side)
 
         for part in args.parts:
             def load_part(part=part):

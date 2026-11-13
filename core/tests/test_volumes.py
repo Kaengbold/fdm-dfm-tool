@@ -113,3 +113,30 @@ def test_suggestions_keep_out_of_keep_clear_space():
     cut = api.volume_solid([0, 0, 1], [{**block, "kind": "cut_solid"}])
     assert "clash" not in api._keep_clear_clash(cut, [0, 0, 1], [clear])[0]  # cutting never fills the space
     assert "edits" in api.design([0, 0, 1], {}, keep_clear=[clear])
+
+
+def test_support_boxes_cover_only_the_picked_face():
+    """T-363: "No support here" on the mushroom cap's underside covers that face (not 3 mm past it all
+    round) and reaches down to the bed, where the supports under it stand; on the top face, up to the top."""
+    from pathlib import Path
+
+    api.load((Path(__file__).resolve().parents[2] / "web" / "samples" / "mushroom.stl").read_bytes(), "mushroom")
+    regs = api.regions()["regions"]
+    under = next(r["id"] for r in regs if r["normal"][2] < -0.9 and r["centroid"][2] > 10)  # the cap's underside, z = 20
+    v = api.volume_at([0, 0, 1], "blocker", region=under)
+    assert v["margin"] == pytest.approx(api.FACE_SUPPORT_MARGIN_MM)
+    assert v["lo"][:2] == pytest.approx([-20.5, -20.5], abs=0.01) and v["hi"][:2] == pytest.approx([20.5, 20.5], abs=0.01)
+    assert v["lo"][2] == pytest.approx(0.0, abs=0.01) and v["hi"][2] == pytest.approx(20.5, abs=0.01)
+    top = next(r["id"] for r in regs if r["normal"][2] > 0.9)
+    w = api.volume_at([0, 0, 1], "support", region=top)
+    assert w["lo"][2] == pytest.approx(25.5, abs=0.01) and w["hi"][2] == pytest.approx(26.0, abs=0.01)  # the part's top: nothing above
+
+
+def test_pin_hole_from_a_side_face_goes_into_the_wall():
+    """T-363: a click on a side face is on its surface; the upright pin hole moves into the wall."""
+    api.load(box(40, 20, 10), "block")
+    v = api.volume_at([0, 0, 1], "void", point=[0.0, 10, 5], normal=[-1, 0, 0])  # the x = 0 side
+    middle = (v["lo"][0] + v["hi"][0]) / 2
+    assert middle == pytest.approx(api.VOID_COVER_MM + api.VOID_MM / 2, abs=0.01)
+    assert v["hi"][2] - v["lo"][2] == pytest.approx(10 - 2 * api.VOID_COVER_MM, abs=0.3)
+    assert not any("shows as a hole" in n for n in v["notes"])
