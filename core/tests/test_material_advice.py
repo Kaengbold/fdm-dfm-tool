@@ -54,3 +54,21 @@ def test_fibre_filament_is_never_stronger():
         assert advice["pa_cf"]["rating"] != "good"
     finally:
         api.custom_presets()
+
+
+def test_settings_before_another_material():
+    """T-366: a slicer setting that is enough comes first, and another material only after every setting and
+    orientation, even when the material would be stronger (mushroom in ABS, 12 kg pulling on the stem)."""
+    from pathlib import Path
+
+    api.load((Path(__file__).resolve().parents[2] / "web" / "samples" / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 12, "direction": "pull"}]
+    opts = api.strength_options([0, 0, 1], loads, {"material": "abs"})
+    kinds = [o["kind"] for o in opts]
+    assert kinds[0] == "slicer" and opts[0]["safety_factor"] >= 2
+    last_setting = max(i for i, k in enumerate(kinds) if k in ("slicer", "orientation"))
+    first_material = kinds.index("material")
+    assert last_setting < first_material
+    assert max(o["safety_factor"] for o in opts if o["kind"] == "material") > opts[last_setting]["safety_factor"]  # though stronger
+    assert kinds[-1] == "load"
