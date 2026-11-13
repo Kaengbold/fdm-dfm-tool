@@ -317,7 +317,8 @@ def main():
             """T-355: loads, held faces, face marks and slicer settings stay on the part when a design change makes a
             new version and when switching back."""
             run.act(lambda: page.click("[data-sample=mushroom]"))
-            run.act(lambda: page.click("#design-on"))
+            if page.locator("#design-on").is_visible():  # design changes off (run on its own)
+                run.act(lambda: page.click("#design-on"))
             page.evaluate("""async () => {
               const r = await fdm.call("regions");
               fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
