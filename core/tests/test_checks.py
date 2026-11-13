@@ -852,3 +852,33 @@ def test_shrink_lines_from_a_raised_floor_and_a_thick_rib():
     assert [f["rule"] for f in ribs] == ["rib_sink_line"] * 2  # both ends of the partition
     assert sorted(round(f["bbox"][0][1] + 2) for f in ribs) == [-17, 17] and ribs[0]["metrics"]["rib_mm"] == pytest.approx(2.0, abs=0.35)
     assert not found(box_ + cube((29.5, 1, 1), (1, 38, 29))) and not found(box_)
+
+
+def test_layer_strength_test_print_breaks_in_the_middle():
+    """T-387: the old bar broke at its holes (4 of 10 mm left beside them). The dog-bone's middle carries the
+    most stress, printed standing (what it measures: the layers) with a pin pulling on a third of each hole."""
+    from fdmcore import strength as S
+    from fdmcore.fea import element_stress, rotate_stiffness
+    from fdmcore.placement import rotation_to_z
+
+    d = api.DOGBONE
+    length = 2 * (d["end_l"] + d["round"]) + d["mid_l"]
+    w, t = d["end_w"], d["thick"]
+    api.load(api.calibration_part("layer_strength")["stl"], "bone")
+    assert (w - d["hole_d"]) >= 3 * d["mid_w"] and d["end_l"] / 2 >= 1.5 * d["hole_d"]  # ends much stronger, hole well in
+    info = api.regions()["regions"]
+    hole = lambda x: min(info, key=lambda r: np.hypot(r["centroid"][0] - x, r["centroid"][1] - w / 2) + (100 if r["kind"] == "flat" else 0))["id"]  # noqa: E731
+    xa, xb = d["end_l"] / 2, length - d["end_l"] / 2
+    pa, pb = [xa - d["hole_d"] / 2, w / 2, t / 2], [xb + d["hole_d"] / 2, w / 2, t / 2]
+    loads = [{"region": hole(xa), "point": pa, "radius": 3.0, "kind": "fixed"},
+             {"region": hole(xb), "point": pb, "radius": 3.0, "kind": "force", "kg": 10, "direction": [1, 0, 0]}]
+    s, p, up = api._require(), Profile.from_dict({"material": "pla"}), [1, 0, 0]  # standing on its end
+    case = S.prepare_cases(s.mesh, s.regions, loads, 20_000)[0]
+    mat = S.material_for(p)
+    c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
+    scale = S.element_scale(case.model, up, S.Shells(), p)
+    u, _ = S._solve(case, c, scale, mat.e_xy)
+    fi = np.maximum(*S.failure_indices(element_stress(case.model, c, scale, u), np.asarray(up, float), mat, scale))
+    x = case.model.grid.centers(case.model.elems)[:, 0]
+    middle = (x > d["end_l"] + 2) & (x < length - d["end_l"] - 2)
+    assert fi[middle].max() > fi[~middle].max()
