@@ -313,6 +313,38 @@ def main():
             return f"stays on {[round(v, 2) for v in up]} after the change and back on the original"
         run.step("design change keeps the orientation", design_keeps_orientation)
 
+        def versions_keep_loads():
+            """T-355: loads, held faces, face marks and slicer settings stay on the part when a design change makes a
+            new version and when switching back."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: page.click("#design-on"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              const side = r.regions.findIndex((x, i) => i !== cap.i && i !== end.i && Math.abs(x.normal[2]) < 0.1);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              fdm.state.marks = [{ region: side, kind: "clean" }];
+              fdm.state.overrides = { wall_loops: 5 };
+            }""")
+            where = lambda: page.evaluate("""() => ({ v: fdm.state.version, walls: fdm.state.overrides.wall_loops,
+              loads: fdm.state.loads.map((l) => [l.kind, fdm.state.regionInfo[l.region].normal.map(Math.round)].join()),
+              marks: fdm.state.marks.map((m) => [m.kind, fdm.state.regionInfo[m.region].normal.map(Math.round)].join()) })""")  # noqa: E731
+            before = where()
+            page.evaluate("() => fdm.steps.go('design')")
+            assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
+            run.act(lambda: page.click("#apply-edits"), 300_000)
+            changed = where()
+            run.act(lambda: page.select_option("#version", "0"), 300_000)
+            back = where()
+            for got, v in ((changed, 1), (back, 0)):
+                assert got == {**before, "v": v}, (before, got)
+            return f"{len(before['loads'])} loads, {len(before['marks'])} mark, walls {before['walls']} kept on both versions"
+        run.step("model versions keep loads, marks and settings", versions_keep_loads)
+
         def feature_confirm():
             run.act(lambda: page.click("[data-sample=l_bracket]"))
             row = page.locator("#features li", has_text="Ø8.0 mm hole")

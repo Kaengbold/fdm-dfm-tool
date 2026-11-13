@@ -2656,8 +2656,8 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     addVersion(chosen[0].title.replace(/ \(.*\)$/, "") + (chosen.length > 1 ? ` + ${chosen.length - 1} more` : ""));
     // The edits are made in the model's own frame, so the same build direction still applies (T-353).
     await loadFile(name, stlBytes(soup), null, step, "version", { body: 0, scale: 1, up: activeOption()?.up });
-    await restoreLoads(carry);
-    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
+    const lost = await restoreLoads(carry);
+    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost && ` ${lost}`}`);
   });
 }
 
@@ -2777,37 +2777,60 @@ $("version").onchange = () => showVersion(Number($("version").value));
 $("compare-file").onchange = async (e) => {
   const file = e.target.files[0];
   e.target.value = "";
-  if (file) await openFile(file.name, new Uint8Array(await file.arrayBuffer()), "version");
+  if (!file) return;
+  const carry = carryLoads(); // another version of the same part: what was set on it stays
+  await openFile(file.name, new Uint8Array(await file.arrayBuffer()), "version");
+  if (state.triangles && !/\.(json|html?)$/i.test(file.name)) { // a project brings its own
+    const lost = await restoreLoads(carry);
+    if (lost) setStatus(`${state.summary} — ${lost}`);
+  }
 };
 
-/** Loads and held faces by where they are on the part, to put them back on an edited model. */
+/** What was set on the part and belongs to it, not to one model version: the loads and held faces, the
+ * face marks (keep clean / on the bed) by where they are on the part, and the slicer settings (T-355). */
 function carryLoads() {
-  return state.loads.map((l) => ({ load: l, at: l.point ? null : state.regionInfo[l.region] }));
+  const at = (x) => (x.point ? null : state.regionInfo[x.region]);
+  return {
+    loads: state.loads.map((l) => ({ item: l, at: at(l) })),
+    marks: state.marks.map((m) => ({ item: m, at: at(m) })),
+    overrides: { ...state.overrides },
+  };
 }
 
-/** Put carried loads on the same faces of the new model: the face nearest the old one's middle that
- * faces the same way (spots keep their point). Faces that are gone drop out. */
+/** The face of the new model nearest the old one's middle that faces the same way, or -1. */
+function sameFace(at) {
+  let best = -1;
+  let bestD = Infinity;
+  state.regionInfo.forEach((r, i) => {
+    const facing = r.normal[0] * at.normal[0] + r.normal[1] * at.normal[1] + r.normal[2] * at.normal[2];
+    const d = Math.hypot(r.centroid[0] - at.centroid[0], r.centroid[1] - at.centroid[1], r.centroid[2] - at.centroid[2]);
+    if (facing > 0.9 && d < bestD) [best, bestD] = [i, d];
+  });
+  return best;
+}
+
+/** Put the carried loads, marks and settings on the new model (spots keep their point; faces that are gone
+ * drop out and the status says so), then check it again with them. */
 async function restoreLoads(carry) {
-  if (!carry.length) return;
-  await ensureRegions();
-  const loads = [];
-  for (const { load, at } of carry) {
-    if (!at) {
-      loads.push(load);
-      continue;
-    }
-    let best = -1;
-    let bestD = Infinity;
-    state.regionInfo.forEach((r, i) => {
-      const facing = r.normal[0] * at.normal[0] + r.normal[1] * at.normal[1] + r.normal[2] * at.normal[2];
-      const d = Math.hypot(r.centroid[0] - at.centroid[0], r.centroid[1] - at.centroid[1], r.centroid[2] - at.centroid[2]);
-      if (facing > 0.9 && d < bestD) [best, bestD] = [i, d];
-    });
-    if (best >= 0) loads.push({ ...load, region: best });
-  }
+  const move = (list) => list.flatMap(({ item, at }) => {
+    if (!at) return [item];
+    const region = sameFace(at);
+    return region >= 0 ? [{ ...item, region }] : [];
+  });
+  if (carry.loads.length || carry.marks.length) await ensureRegions();
+  const loads = move(carry.loads);
+  const marks = move(carry.marks);
   state.loads = loads;
+  state.marks = marks;
+  state.overrides = carry.overrides;
   renderLoads();
+  renderMarks();
+  renderSettings();
   recolor();
+  // The check that ran on loading didn't know the marks or settings yet.
+  if (marks.length || Object.keys(carry.overrides).length) await runCheck();
+  const lost = carry.loads.length - loads.length + carry.marks.length - marks.length;
+  return lost ? `${lost} load${lost > 1 ? "s or marks" : " or mark"} didn't fit on this version (the face is gone): set ${lost > 1 ? "them" : "it"} again in "${STEP_NAMES.strength}".` : "";
 }
 
 /** Show version ``i``: load its model again, with the loads carried over (``carry: false`` for undo,
@@ -2816,12 +2839,12 @@ async function showVersion(i, carry = true) {
   const v = state.versions[i];
   if (v?.dropped) setStatus(`${versionName(v, i)} was let go to save memory: its results stay in the table, but it can't be shown again.`);
   if (!v?.source || i === state.version) return renderVersions();
-  const loads = carry ? carryLoads() : [];
+  const loads = carry ? carryLoads() : null;
   state.version = i;
   const { name, bytes, faceIds, body, scale } = v.source;
   await loadFile(name, bytes, faceIds, v.step, "version", { body, scale, up: activeOption()?.up });
-  await restoreLoads(loads);
-  setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
+  const lost = loads ? await restoreLoads(loads) : "";
+  setStatus(`${state.summary} — showing ${versionName(v, i)}.${lost && ` ${lost}`}`);
 }
 $("apply-edits").onclick = () => applyEdits();
 
