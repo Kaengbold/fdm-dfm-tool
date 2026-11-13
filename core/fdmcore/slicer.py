@@ -21,7 +21,11 @@ from .mesh import Mesh
 _Z_JITTER = 1.37e-4
 # Outlines are simplified to this (mm). Far below a printed line, but fine CAD exports carry
 # thousands of points per circle, and every later shapely operation scales with point count.
-SIMPLIFY_MM = 0.01
+# Also drops notches only a few hundredths of a mm deep (3DBenchy has rows of 0.02 mm ones): Pyodide's
+# GEOS 3.12 throws "depth mismatch" when it buffers such an outline, which kills the engine (T-351).
+# Slicers close gaps that small anyway (OrcaSlicer / PrusaSlicer slice_closing_radius 0.049 mm).
+# Hole sizes come from layer areas: this makes them at most ~0.03 mm smaller.
+SIMPLIFY_MM = 0.025
 
 
 @dataclass

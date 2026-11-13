@@ -1,10 +1,12 @@
 name: Browser smoke test
 
-# The slowest check (~15 min): only when the app, the engine files it loads, the rules it shows or the test
-# change. Local-only engine files (LOCAL_ONLY in tools/make_manifest.py) don't reach the browser.
+# The slowest check (~15 min of Actions time): not on every pull request. It runs when the pull request has the
+# label "browser-test" (add it when it's ready to merge, or to re-check) or by hand from the Actions tab. Run it
+# locally before opening a pull request (AGENTS.md). Then only when the app, the engine files it loads, the rules
+# it shows or the test change; local-only engine files (LOCAL_ONLY in tools/make_manifest.py) don't reach the browser.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [labeled, synchronize, reopened, ready_for_review]
     paths:
       - "web/**"
       - "core/fdmcore/**"
@@ -24,7 +26,8 @@ concurrency:
 jobs:
   browser:
     name: Browser smoke test
-    if: github.event.pull_request.draft != true
+    # A skipped job costs no minutes: without the label, nothing runs.
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.draft != true && contains(github.event.pull_request.labels.*.name, 'browser-test'))
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
