@@ -185,6 +185,8 @@ def main():
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
+            assert page.locator("#guide button.soon").is_disabled(), "fix-my-print path should be coming soon"
+
             assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
@@ -1212,7 +1214,11 @@ def main():
             mine = page.locator("#failed-result .mine li").all_inner_texts()
             assert any("Shallow slope" in m for m in mine), mine
             return mine[0][:100]
-        run.step("my print failed: matched to the part's findings", print_failed)
+        # Switched off in the levels for now (T-383); its step comes back with the "fix my print" path (T-384).
+        def print_failed_off():
+            assert page.locator("#failed-block").is_hidden(), "\"My print failed\" shown"
+            return "hidden"
+        run.step("my print failed is switched off", print_failed_off)
 
         def mating_part():
             # Two parts of one assembly: a copy of the bracket 0.3 mm above it -> 0.30 mm per side, loose (T-348).
