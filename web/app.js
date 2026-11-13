@@ -811,6 +811,7 @@ function recolor() {
   if (!option) return;
   viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : []);
+  viewer.showFit(shows("fits") ? shownFit() : null);
   drawBoxes();
   showMarkers();
   if (strengthView()) return;
@@ -2337,6 +2338,12 @@ function renderFits(list) {
 const fitKey = (f) => `hole-${f.region}`;
 const gapKey = (g) => `gap-${g.faces.join("-")}`;
 
+/** The selected slot / tab for the 3D view: its width, and the other part at the size typed in (T-386). */
+function shownFit() {
+  const g = state.gaps.find((q) => gapKey(q) === state.fitSel?.key);
+  return g?.plane ? { plane: g.plane, kind: g.kind, distance: g.distance_mm, partner: g.partner } : null;
+}
+
 /** Select a hole / post (``f``) or a slot / tab (``g``): its faces light up on the part and its row in the list. */
 function selectFit(sel) {
   state.fitSel = sel;
@@ -2433,6 +2440,7 @@ $("gap-pick").onclick = async () => {
   await ensureRegions();
   state.gapPick = [];
   $("gap-hint").hidden = false;
+  $("gap-hint").classList.add("pulse");
   $("gap-hint").textContent = "Click the first flat face of the slot (or one side of the tab)…";
 };
 
@@ -2440,11 +2448,13 @@ async function pickGapFace(hit) {
   state.gapPick.push(state.faceRegions[hit.face]);
   if (state.gapPick.length < 2) {
     $("gap-hint").textContent = "Now click the face on the other side…";
+    selectFit({ key: "gap-pick", regions: [...state.gapPick] }); // the first face lights up while picking the second
     return;
   }
   const faces = state.gapPick;
   state.gapPick = null;
   $("gap-hint").hidden = true;
+  $("gap-hint").classList.remove("pulse");
   try {
     const g = await call("set_gap", { face_a: faces[0], face_b: faces[1], up: activeOption().up });
     state.gaps = [...state.gaps.filter((q) => q.faces.join() !== g.faces.join()), { ...g, partner: Math.round(g.distance_mm * 10) / 10, fit: "sliding" }];
@@ -2460,6 +2470,10 @@ function renderGaps() {
     const slot = g.kind === "slot";
     const size = el("input", { type: "number", min: 0.2, step: 0.1, value: g.partner,
       title: slot ? "Thickness of what goes into the slot" : "Width of the slot the tab goes into" });
+    size.oninput = () => { // the bars on the part follow the size typed in
+      if (Number(size.value) > 0) g.partner = Number(size.value);
+      if (state.fitSel?.key === gapKey(g)) recolor();
+    };
     const kind = el("select", {}, ...Object.entries(FIT_LABEL).map(([v, t]) => el("option", { value: v, textContent: t })));
     kind.value = g.fit;
     const go = el("button", { textContent: "Size it", onclick: () =>
@@ -2470,6 +2484,7 @@ function renderGaps() {
         renderFits(state.fitList);
         if (mode() === "print") $("design-on").click(); // the new size is a design change: show them
         await suggestDesign();
+        setStatus("The new size is a design change: tick it under Design changes and apply it.");
       }) });
     const forget = el("button", { className: "link", textContent: "Remove", onclick: async () => {
       await call("set_gap", { face_a: g.faces[0], face_b: g.faces[1], up: activeOption().up });
@@ -2481,7 +2496,9 @@ function renderGaps() {
     return el("li", { className: state.fitSel?.key === gapKey(g) ? "picked" : "" },
       el("button", { className: "link", textContent: `${slot ? "Slot" : "Tab"} ${g.distance_mm.toFixed(2)} mm ${slot ? "wide" : "thick"}`, onclick: () => selectGap(g) }),
       el("div", { className: "fit row" }, el("span", { className: "hint", textContent: slot ? "What goes in:" : "Goes into a slot of" }), size, "mm,", kind, go),
-      g.text ? el("p", { className: "hint", textContent: g.text }) : "", forget);
+      g.text ? el("p", { className: "hint", textContent: g.text }) : "",
+      g.text && steps.steps.includes("design") ? el("button", { textContent: "Show in Design changes", onclick: () => steps.go("design") }) : "",
+      forget);
   }));
 }
 
