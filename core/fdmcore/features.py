@@ -25,11 +25,16 @@ from .slicer import slice_mesh
 TEARDROP_MIN_DIAMETER = 5.0  # smaller horizontal holes bridge fine
 
 
+# A concave arc covering at most this share of a circle is a rounded inside edge (a fillet: about a
+# quarter), not a hole. A half-round slot end (one half) is still asked about (T-356).
+ROUNDED_EDGE_COVERAGE = 0.4
+
 TAGS = ("hole", "boss", "none")  # what the user can say a detected feature is ("none": not a feature)
 
 
 def detect_features(mesh: Mesh, region: np.ndarray, tags: dict | None = None) -> list[dict]:
-    """Round holes and bosses, one per curved region. ``tags`` ({region: tag}) are the user's
+    """Round holes and bosses, one per curved region (``rounded_edge``: a fillet in an inside corner,
+    listed so the user can still say it's a hole). ``tags`` ({region: tag}) are the user's
     answers: they override the guessed type, and "none" marks a false find (kept in the list,
     so it can be undone, but ignored by edits and checks). ``confidence`` "low" means: ask."""
     tags = {int(k): v for k, v in (tags or {}).items()}
@@ -93,8 +98,9 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
     inward = float(np.mean(np.einsum("ij,ij->i", n, radial) < 0))
     ang = np.arctan2(p2[:, 1] - cy, p2[:, 0] - cx)
     coverage = len(np.unique(np.floor((ang + np.pi) / (2 * np.pi) * 36))) / 36
+    hole = inward > 0.5
     return {
-        "type": "hole" if inward > 0.5 else "boss",
+        "type": ("rounded_edge" if coverage <= ROUNDED_EDGE_COVERAGE else "hole") if hole else "boss",
         "axis": axis.tolist(),
         "center": center.tolist(),
         "radius": radius,
