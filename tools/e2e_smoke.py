@@ -1431,7 +1431,13 @@ def main():
             tipped = up()
             assert abs(sum(a * b for a, b in zip(flipped, tipped))) < 0.01, (flipped, tipped)
             assert page.evaluate("() => fdm.state.options.filter((o) => o.label === 'Your own').length") == 1
-            return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}"
+            # T-354: another material keeps the orientation the user chose (it went back to the best one).
+            run.act(lambda: page.select_option("#material", "petg"), 300_000)
+            kept = up()
+            label = page.evaluate("() => fdm.state.options[fdm.state.active].label")
+            run.act(lambda: page.select_option("#material", "pla"), 300_000)
+            assert label == "Your own" and sum(a * b for a, b in zip(tipped, kept)) > 0.99, (label, tipped, kept)
+            return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}, kept after a material change"
         run.step("turn the part by hand", turn_by_hand)
 
         def hidden_gap_from_side():
