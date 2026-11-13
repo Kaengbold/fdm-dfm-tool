@@ -268,3 +268,17 @@ def test_copies_on_one_plate():
         assert 'instances_count="4"' in z.read("Metadata/Slic3r_PE_model.config").decode()
     one = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {}))).read("3D/3dmodel.model").decode()
     assert one.count("<item ") == 1 and "transform" not in one
+
+
+def test_kept_direction_stays_an_option():
+    """After a design change the part stays the way the user had it on the bed (T-353): the kept
+    direction is always among the options, as the same option when it already was one."""
+    api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")
+    first = api.orientations()
+    assert first["kept"] is None
+    second = first["orientations"][1]["up"]
+    again = api.orientations(keep=second)
+    assert np.dot(again["orientations"][again["kept"]]["up"], second) > 0.999
+    odd = list(np.array([1.0, 1.0, 0.3]) / np.linalg.norm([1.0, 1.0, 0.3]))  # no generic search picks this
+    r = api.orientations(keep=odd)
+    assert np.dot(r["orientations"][r["kept"]]["up"], odd) > 0.999

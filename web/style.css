@@ -61,11 +61,11 @@ body {
   margin: 0;
   height: 100vh;
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr) 410px;
+  grid-template-columns: 210px minmax(0, 1fr) 460px; /* wider panel: less wrapping (T-381) */
   grid-template-rows: 56px minmax(0, 1fr);
   background: var(--panel);
 }
-body[data-level="expert"] { grid-template-columns: 210px minmax(0, 1fr) 520px; }
+body[data-level="expert"] { grid-template-columns: 210px minmax(0, 1fr) 560px; }
 .steps { grid-area: 2 / 1; }
 main#viewer { grid-area: 2 / 2; }
 .panel { grid-area: 2 / 3; }
@@ -544,3 +544,10 @@ button.primary:disabled { opacity: 1; background: var(--soft); border-color: var
   border-radius: var(--r); background: var(--soft); font-size: 14px; position: sticky; top: 0; z-index: 1; }
 .fit-selected .swatch { width: 12px; height: 12px; border-radius: 3px; background: var(--now); }
 .fit-selected .link { margin-left: auto; }
+
+/* Layout clean-up (T-381): empty lists and notes take no room, text after a button gets air,
+   long summaries wrap under their title instead of splitting into columns. */
+.pane ul:empty, .pane ol:empty, .pane p:empty, .fit-selected:empty { display: none; }
+button + p, button + .hint, button + div:not(.row) { margin-top: 8px; }
+.shells > summary { flex-wrap: wrap; column-gap: 6px; row-gap: 2px; }
+.shells > summary span { font-weight: 400; }
