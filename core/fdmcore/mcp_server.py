@@ -308,6 +308,23 @@ def strength_options(
 
 
 @server.tool()
+def stronger_orientation(
+    up: list[float],
+    loads: list[dict],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    walls: int | None = None,
+    infill: float | None = None,
+    top: int | None = None,
+    bottom: int | None = None,
+) -> dict:
+    """Quick check whether the part holds clearly more (1.3x) lying another way: the strongest of the six square
+    build directions (``up``, None if none is clearly better), its safety factor and ``current`` for ``up``."""
+    return api.stronger_orientation(up, loads, _profile(printer, material, nozzle), walls, infill, top, bottom)
+
+
+@server.tool()
 def optimise_strength(
     up: list[float],
     loads: list[dict],
@@ -832,6 +849,7 @@ API_TOOLS = {
     "strength": "check_strength",
     "strength_variant": "strength_variant",
     "strength_options": "strength_options",
+    "stronger_orientation": "stronger_orientation",
     "design": "suggest_design_changes",
     "compare_nozzles": "compare_nozzles",
     "topology": "suggest_lighter_shape",

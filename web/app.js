@@ -377,6 +377,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
     state.keepUp = keep.up ?? null;
     if (as === "new" || !state.versions.length) {
+      state.turnOffered = false; // a new part: offer a stronger orientation again (T-368)
       state.versions = [{ label: "Original" }];
       state.version = 0;
       undoStack.length = 0;
@@ -1241,7 +1242,7 @@ async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
   const what = useGcode() ? " with your sliced print (its walls, infill and line directions)" : "";
-  return busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
+  const r = await busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
     const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: printZones() }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
@@ -1262,8 +1263,28 @@ async function runStrength(fine = false) {
     setStatus(state.summary);
     return r;
   }, ["strength", "result"]);
+  // The first time a part doesn't hold: is it just lying the wrong way? (Once per part, T-368.)
+  if (r && !fine && r.verdict !== "fine" && !state.turnOffered) {
+    state.turnOffered = true;
+    await offerTurn();
+  }
+  return r;
 }
 $("run-strength").onclick = () => runStrength();
+
+/** Offer the strongest square build direction, when it holds clearly more than this one. */
+async function offerTurn() {
+  const o = await busy("Checking whether another orientation holds more…", () =>
+    call("stronger_orientation", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() }), ["strength"]);
+  if (!o?.up) return;
+  const box = el("div", { className: "verdict borderline turn-offer" },
+    el("strong", { textContent: `Turned another way it holds ×${o.safety_factor.toFixed(1)} instead of ×${o.current.toFixed(1)}` }),
+    el("p", { textContent: "The load would run along the layers instead of pulling them apart. Use that orientation?" }),
+    el("div", { className: "row" },
+      el("button", { className: "primary", textContent: "Turn it", onclick: () => applyOption({ up: o.up }) }),
+      el("button", { textContent: "Keep this one", onclick: () => box.remove() })));
+  $("strength-result").prepend(box);
+}
 
 // ---------- strength: shaking and knocks (optional, Advanced) ----------
 for (const [box, row] of [["dyn-shake", "dyn-shake-row"], ["dyn-drop", "dyn-drop-row"]]) {
