@@ -856,12 +856,13 @@ function showMarkers() {
 /** Lock on held faces, arrow + weight on loads, for the 3D view. */
 function loadSymbols() {
   if (!state.regionInfo.length) return [];
-  return state.loads.map((l, i) => {
+  return [...state.loads, ...(state.previewLoad ? [state.previewLoad] : [])].map((l, i) => {
     const info = state.regionInfo[l.region];
     const normal = l.normal ?? info?.normal ?? [0, 0, 1];
     const point = l.point ?? info?.centroid;
     if (l.kind === "fixed") return { kind: "fixed", point, normal };
     const dir = loadVector(l);
+    if (l === state.previewLoad) return { kind: "force", load: null, point, normal, dir, label: `${l.kg} kg?` };
     return { kind: "force", load: i, point, normal, dir, label: `${l.kg} kg${multiCase() ? ` · case ${l.case}` : ""}` };
   }).filter((s) => s.point);
 }
@@ -900,6 +901,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
+  previewAngle();
   state.showHeat = false;
   recolor();
   // Looking around the part in another step must not pull the user to "Will it hold?": the face
@@ -925,6 +927,7 @@ function addLoad(load) {
   state.loads = state.loads.filter((l) => !same(l)).concat(load);
   state.selectedRegion = -1;
   $("pick-panel").hidden = true;
+  state.previewLoad = null;
   renderLoads();
   recolor();
 }
@@ -945,6 +948,7 @@ function setMark(kind) {
   state.marks = state.marks.filter((m) => m.region !== region && !(kind === "bed" && m.kind === "bed")).concat({ region, kind });
   state.selectedRegion = -1;
   $("pick-panel").hidden = true;
+  state.previewLoad = null;
   renderMarks();
   findOrientations(Boolean(state.strength)); // keep strength in the ranking if it was checked
 }
@@ -968,10 +972,56 @@ $("mark-vertical").onclick = () => setMark("vertical");
 
 $("as-fixed").onclick = () => addLoad({ ...target(), kind: "fixed", ...($("hold").value === "clamped" ? {} : { hold: $("hold").value }) });
 $("as-load").onclick = () =>
-  addLoad({ ...target(), kind: "force", kg: Number($("kg").value), direction: $("dir").value, case: Number($("load-case").value) });
+  addLoad({ ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection(), case: Number($("load-case").value) });
+
+/** The direction chosen in the pick panel: push, pull, or a vector "at an angle" to the picked face (T-372). */
+function pickedDirection() {
+  if ($("dir").value !== "angle") return $("dir").value;
+  const normal = state.regionInfo[state.selectedRegion]?.normal ?? [0, 0, 1];
+  return faceAngle(normal, Number($("dir-lean").value), Number($("dir-toward").value));
+}
+
+/** A direction leaning ``lean``° from pushing straight into the face (normal ``n``: 0 = push, 90 = along
+ * the face, 180 = pull), towards ``toward``° round the face, 0 = up as printed (or +X on a level face). */
+function faceAngle(n, lean, toward) {
+  const { n: m, t1, t2 } = faceAxes(n);
+  const [l, t] = [lean * DEG, toward * DEG];
+  return m.map((v, i) => Math.round((-Math.cos(l) * v + Math.sin(l) * (Math.cos(t) * t1[i] + Math.sin(t) * t2[i])) * 1e4) / 1e4);
+}
+
+/** Lean and towards (degrees, see faceAngle) of direction ``d`` on a face with normal ``n``. */
+function faceAngles(n, d) {
+  const { n: m, t1, t2 } = faceAxes(n);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const lean = Math.round(Math.acos(Math.max(-1, Math.min(1, -dot(d, m) / Math.hypot(...d)))) / DEG);
+  const toward = Math.round(((Math.atan2(dot(d, t2), dot(d, t1)) / DEG) + 360) % 360);
+  return { lean, toward: lean % 180 === 0 ? 0 : toward };
+}
+
+/** The face's unit normal and two directions along it: t1 "up" as printed (+X on a level face), t2 = n × t1. */
+function faceAxes(n) {
+  const len = (v) => Math.hypot(...v);
+  const unit = (v) => v.map((x) => x / len(v));
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const m = unit(n);
+  const up = unit(activeOption()?.up ?? [0, 0, 1]);
+  const along = up.map((u, i) => u - m[i] * (up[0] * m[0] + up[1] * m[1] + up[2] * m[2])); // "up" on the face
+  const t1 = len(along) > 0.1 ? unit(along) : unit(cross(m, Math.abs(m[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+  return { n: m, t1, t2: cross(m, t1) };
+}
+
+/** Show the angle choice, and its arrow on the part, while "at an angle" is picked. */
+function previewAngle() {
+  const on = $("dir").value === "angle" && !$("pick-panel").hidden && state.selectedRegion >= 0;
+  $("dir-angle").hidden = $("dir").value !== "angle";
+  $("dir-angle-out").textContent = `${$("dir-lean").value}° lean, towards ${$("dir-toward").value}°`;
+  state.previewLoad = on ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
+  viewer.showLoadSymbols(loadSymbols());
+}
+for (const id of ["dir", "dir-lean", "dir-toward", "kg"]) $(id).addEventListener("input", previewAngle);
 $("at-spot").onchange = recolor;
 
-const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" };
+const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" }; // "down": loads saved before T-372, agents
 const DEG = Math.PI / 180;
 
 /** Direction a force acts in (unit vector, part coordinates). */
@@ -980,31 +1030,29 @@ function loadVector(l) {
   const n = l.normal ?? state.regionInfo[l.region]?.normal ?? [0, 0, 1];
   return { push: n.map((v) => -v), pull: n, down: [0, 0, -1] }[l.direction] ?? n;
 }
-/** turn: around the model's Z axis from +X; tilt: up from horizontal (degrees). */
-const toAngles = ([x, y, z]) => ({ turn: Math.round(Math.atan2(y, x) / DEG), tilt: Math.round(Math.asin(Math.max(-1, Math.min(1, z))) / DEG) });
-const fromAngles = (turn, tilt) => [Math.cos(tilt * DEG) * Math.cos(turn * DEG), Math.cos(tilt * DEG) * Math.sin(turn * DEG), Math.sin(tilt * DEG)].map((v) => Math.round(v * 1e4) / 1e4);
+const faceNormal = (l) => l.normal ?? state.regionInfo[l.region]?.normal ?? [0, 0, 1];
 function dirLabel(l) {
   if (!Array.isArray(l.direction)) return DIR_LABEL[l.direction];
-  const a = toAngles(l.direction);
-  return `at an angle (turn ${a.turn}°, tilt ${a.tilt}°)`;
+  const a = faceAngles(faceNormal(l), l.direction);
+  return `at an angle (${a.lean}° lean, towards ${a.toward}°)`;
 }
 
 /** Edit a load in place: weight, direction (preset or any angle), load case. */
 function loadEditor(l) {
-  const a = toAngles(loadVector(l));
+  const a = faceAngles(faceNormal(l), loadVector(l));
   const kg = el("input", { type: "number", min: 0.1, step: 0.5, value: l.kg, "aria-label": "Load in kg" });
   const dir = el("select", { "aria-label": "Direction" },
-    ...[["push", "pushing on the face"], ["pull", "pulling the face"], ["down", "hanging down (−Z as modelled)"], ["angle", "at an angle…"]]
+    ...[["push", "pushing on the face"], ["pull", "pulling the face"], ...(l.direction === "down" ? [["down", "hanging down"]] : []), ["angle", "at an angle…"]]
       .map(([v, t]) => el("option", { value: v, textContent: t })));
   dir.value = Array.isArray(l.direction) ? "angle" : l.direction;
   const kase = el("select", { "aria-label": "Load case" }, ...[1, 2, 3].map((c) => el("option", { value: c, textContent: `case ${c}` })));
   kase.value = l.case ?? 1;
-  const out = el("span", { textContent: `turn ${a.turn}°, tilt ${a.tilt}°` });
-  const turn = el("input", { type: "range", min: -180, max: 180, step: 5, value: a.turn, "aria-label": "Turn" });
-  const tilt = el("input", { type: "range", min: -90, max: 90, step: 5, value: a.tilt, "aria-label": "Tilt" });
+  const out = el("span", { textContent: `${a.lean}° lean, towards ${a.toward}°` });
+  const lean = el("input", { type: "range", min: 0, max: 180, step: 5, value: a.lean, "aria-label": "Lean" });
+  const toward = el("input", { type: "range", min: 0, max: 355, step: 5, value: a.toward, "aria-label": "Towards" });
   const angles = el("div", { className: "angles", hidden: dir.value !== "angle" },
-    el("label", {}, "Turn ", turn), el("label", {}, "Tilt ", tilt), out,
-    el("p", { className: "hint", textContent: "Or drag the arrow on the part: it follows the mouse." }));
+    el("label", {}, "Lean ", lean), el("label", {}, "Towards ", toward), out,
+    el("p", { className: "hint", textContent: "Lean: 0° pushes straight in, 90° slides along the face, 180° pulls out. Towards: 0° is up. Or drag the arrow on the part." }));
   const changed = () => {
     viewer.showLoadSymbols(loadSymbols());
     $("loads").querySelector(`#load-${state.loads.indexOf(l)} > span`).textContent = loadText(l);
@@ -1016,12 +1064,12 @@ function loadEditor(l) {
   kase.onchange = () => ((l.case = Number(kase.value)), renderLoads());
   dir.onchange = () => {
     angles.hidden = dir.value !== "angle";
-    l.direction = dir.value === "angle" ? fromAngles(Number(turn.value), Number(tilt.value)) : dir.value;
+    l.direction = dir.value === "angle" ? faceAngle(faceNormal(l), Number(lean.value), Number(toward.value)) : dir.value;
     changed();
   };
-  turn.oninput = tilt.oninput = () => {
-    l.direction = fromAngles(Number(turn.value), Number(tilt.value));
-    out.textContent = `turn ${turn.value}°, tilt ${tilt.value}°`;
+  lean.oninput = toward.oninput = () => {
+    l.direction = faceAngle(faceNormal(l), Number(lean.value), Number(toward.value));
+    out.textContent = `${lean.value}° lean, towards ${toward.value}°`;
     changed();
   };
   return el("div", { className: "angle-editor" },

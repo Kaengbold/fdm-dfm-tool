@@ -267,8 +267,15 @@
                   <select id="dir" aria-label="Load direction">
                     <option value="push">pushing on the face</option>
                     <option value="pull">pulling the face</option>
-                    <option value="down">hanging down (−Z as modelled)</option>
+                    <option value="angle">at an angle…</option>
                   </select>
+                </div>
+                <div id="dir-angle" class="angles" hidden>
+                  <label>Lean <input id="dir-lean" type="range" min="0" max="180" step="5" value="45" /></label>
+                  <label>Towards <input id="dir-toward" type="range" min="0" max="355" step="5" value="0" /></label>
+                  <span id="dir-angle-out"></span>
+                  <p class="hint">Lean: 0° pushes straight into the face, 90° slides along it, 180° pulls straight out.
+                    Towards: which way along the face, 0° is up. The arrow on the part shows it.</p>
                 </div>
                 <div class="row">
                   <label data-min="advanced">in <select id="load-case" aria-label="Load case">
