@@ -385,7 +385,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### Print failure risk
 
-- [~] **T-390 P2** Bed adhesion: does the warping pull exceed what the bed holds? Researched grip values per material and bed surface (editable in Expert) → "may come loose here". · files: `core/fdmcore/warp.py`, `core/fdmcore/data/thresholds.yaml`, `rules.yaml` · owner: Claude (`task/T-390-bed-grip`)
+- [ ] **T-390 P2** Bed adhesion: does the warping pull exceed what the bed holds? Researched grip values per material and bed surface (editable in Expert) → "may come loose here". · files: `core/fdmcore/warp.py`, `core/fdmcore/data/thresholds.yaml`, `rules.yaml` · owner: — — 2026-11-13 Claude, not done: (1) no published first-layer grip *stress* found for PLA/PETG/ABS on PEI or glass (one 2025 study rates surfaces qualitatively, doi:10.1515/ipp-2025-0113; Appl. Sci. 14(2):945 measures pull-off but MDPI blocks automated reading — read it by hand); (2) calibrating the grip from the reference bar fails: in the warp model the bed's pull over a 5 mm corner patch levels off after a few bar heights (PLA and ABS bars 50–160 mm all give ~1.0× the reference), so it can't tell a short bar from a long one. The curl ratio (today's verdict) does. A real check needs a peeling model (cohesive zone at the bed) plus measured values.
 - [ ] **T-391 P2** Print failure risk rating from the printer (enclosure, bed) and the warping / adhesion simulation, with a brim or raft suggested from it. · files: `core/fdmcore/api.py`, `core/fdmcore/data/rules.yaml` · owner: —
 
 ### Advanced design changes
