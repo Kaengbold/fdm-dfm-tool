@@ -357,7 +357,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### Levels and steps
 
-- [ ] **T-374 P1** Simple: show the goal (Balanced / Strong / Fast / Light; today Basic and up), a "Compute" button, and what the tool is doing while it works (the steps, one after another). Strength is a normal part of Simple and Basic, not an optional fold. · files: `web/index.html`, `web/steps.js`, `web/app.js` · owner: —
+- [~] **T-374 P1** Simple: show the goal (Balanced / Strong / Fast / Light; today Basic and up), a "Compute" button, and what the tool is doing while it works (the steps, one after another). Strength is a normal part of Simple and Basic, not an optional fold. · files: `web/index.html`, `web/steps.js`, `web/app.js` · owner: Claude (`task/T-374-simple-goal-compute`)
 - [ ] **T-375 P1** Simple and Basic layout: the settings are the main view, step by step; the 3D view moves to the side and shows what each step changes, so the user sees cause and effect. Builds on T-141. · files: `web/index.html`, `web/style.css`, `web/steps.js` · owner: —
 - [~] **T-376 P1** Step order and simulations: Problems comes after the optional simulations (not right after "On the bed"). Split the simulations into two steps: **Forces on the part** (strength, shaking and knocks, temperature) and **While printing** (cooling / heat build-up — moved out of Problems, warping, deformation). · files: `web/steps.js`, `web/index.html` · owner: Claude (`task/T-376-step-order`)
 - [ ] **T-377 P2** Shape optimisation ("A lighter shape") becomes its own step in Advanced, next to the design changes; after it runs the result is shown by default. · files: `web/steps.js`, `web/index.html`, `web/app.js` · owner: —
