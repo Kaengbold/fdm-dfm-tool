@@ -188,6 +188,9 @@ def main():
             assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+            order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
+            assert order.index("sims") < order.index("printing") < order.index("problems"), order
+
             # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
             assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
             return f"guide -> {simple[0]}; back to expert"
