@@ -375,7 +375,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 ### Tolerances and fits
 
 - [ ] **T-385 P2** Rework Tolerances & tuning: hole compensation is the *result* of the tolerance test print and the hole / slot fits, not a separate field; fewer words, more pictures. · files: `web/index.html`, `web/app.js` · owner: —
-- [ ] **T-386 P2** Slots and flat gaps: highlight what is picked while picking, an animated hint showing what to tap, check the change really gets applied, show the measured thickness on the part and two bars beside it that show the fit (the mating part with its gap). · files: `web/app.js` (flat gaps), `web/viewer.js`, `core/fdmcore/features.py` · owner: —
+- [~] **T-386 P2** Slots and flat gaps: highlight what is picked while picking, an animated hint showing what to tap, check the change really gets applied, show the measured thickness on the part and two bars beside it that show the fit (the mating part with its gap). · files: `web/app.js` (flat gaps), `web/viewer.js`, `core/fdmcore/features.py` · owner: Claude (`task/T-386-slot-fit-view`)
 
 ### Test prints
 
