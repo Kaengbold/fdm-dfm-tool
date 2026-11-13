@@ -11,17 +11,16 @@ export const STEP_NAMES = {
 // what to fix.
 const ALL = ["part", "have", "orient", "strength", "sims", "printing", "problems", "fits", "design", "extra", "settings", "download"];
 export const LEVEL_STEPS = {
-  simple: ["part", "have", "result"],
+  simple: ["part", "have", "strength", "result"], // strength is a step of its own here too (T-374)
   basic: ["part", "have", "orient", "strength", "problems", "settings", "download"],
   advanced: ALL,
   expert: ALL, // one long page: every pane at once, no step list
 };
 
 // Blocks that live somewhere else than the pane they are written in, per level. Simple has no
-// problems/settings/download steps: those blocks make up its Result, and the load is optional
-// under "What you have".
+// problems/settings/download steps: those blocks make up its Result.
 const MOVED = {
-  simple: [["blk-download", "result"], ["blk-problems", "result"], ["blk-settings", "result"], ["blk-strength", "load-optional"]],
+  simple: [["blk-download", "result"], ["blk-problems", "result"], ["blk-settings", "result"]],
 };
 
 // What a change in a step re-computes: shown under the step, so cause and effect are visible.

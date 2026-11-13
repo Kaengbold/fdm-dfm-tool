@@ -426,6 +426,8 @@ async function partLoaded(info) {
   renderOptions();
   $("view-empty").hidden = true;
   $("view-key").hidden = false;
+  $("compute").disabled = false;
+  $("compute-steps").hidden = true; // the list belongs to the last Compute
   if (steps.current === "part") steps.go("have");
   else steps.render();
   const up = state.keepUp;
@@ -3147,6 +3149,35 @@ document.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () =>
   updateModeNote();
   if (state.triangles) runCheck();
 }));
+// ---------- Simple: "Compute", and what the tool is doing (T-374) ----------
+const COMPUTE_STEPS = [["orient", "Finding the best way to lay it on the bed"], ["problems", "Checking for problems"],
+  ["strength", "Checking the strength"], ["settings", "Choosing the slicer settings"]];
+
+/** Run everything for Simple again, ticking off each step as it goes, then show the result. */
+async function compute() {
+  const items = Object.fromEntries(COMPUTE_STEPS.map(([k, t]) => [k, el("li", {}, el("span", { textContent: t }))]));
+  $("compute-steps").replaceChildren(...Object.values(items));
+  $("compute-steps").hidden = false;
+  const mark = (k, how, note) => {
+    items[k].className = how;
+    if (note) items[k].firstChild.append(el("small", { textContent: ` — ${note}` }));
+  };
+  if (steps.ready("result") === true) steps.go("result");
+  mark("orient", "working");
+  mark("problems", "working");
+  await findOrientations(readyForStrength());
+  mark("orient", "done");
+  mark("problems", "done", `${state.check?.findings.length ?? 0} found`);
+  if (readyForStrength()) {
+    mark("strength", "working");
+    const r = await runStrength();
+    mark("strength", "done", r ? `safety ×${r.safety_factor.toFixed(1)}` : "");
+  } else mark("strength", "skipped", "no load set (optional: Will it hold?)");
+  mark("settings", "done");
+  steps.go("result");
+}
+$("compute").onclick = compute;
+
 document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () => {
   updateGoalNote();
   if (state.triangles) findOrientations();

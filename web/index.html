@@ -110,7 +110,7 @@
               <ul id="advice-list" class="options"></ul>
             </details>
 
-            <div class="choice" role="radiogroup" aria-label="What matters most" data-min="basic">
+            <div class="choice" role="radiogroup" aria-label="What matters most">
               <span class="choice-label">What matters most?</span>
               <div class="seg">
                 <label><input type="radio" name="goal" value="balanced" checked /> Balanced</label>
@@ -120,6 +120,7 @@
               </div>
               <p id="goal-note" class="note"></p>
             </div>
+            <button id="compute" class="primary only-simple" disabled>Compute</button>
 
             <label class="field" data-min="basic">Where is it used?
               <select id="use-temp" title="Plastic gets weaker as it warms up, and soft near its limit (PLA around 60 °C)">
@@ -213,7 +214,7 @@
               <button id="copy-yaml" hidden>Copy as YAML (to share in a pull request)</button>
             </details>
           </div>
-          <details id="load-optional" class="more-block load-optional">
+          <details id="load-optional" class="more-block load-optional" hidden><!-- empty since T-374: strength is its own step in Simple -->
             <summary>Something pushes or pulls on it <small>optional</small></summary>
           </details>
         </section>
@@ -597,6 +598,7 @@
         </section>
 
         <section class="pane" data-pane="result">
+          <ol id="compute-steps" class="compute-steps" hidden></ol>
           <div id="verdict" class="summary"></div>
         </section>
 

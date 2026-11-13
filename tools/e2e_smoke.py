@@ -187,7 +187,8 @@ def main():
             assert simple == ["simple", False, False], simple
             assert page.locator("#guide button.soon").is_disabled(), "fix-my-print path should be coming soon"
 
-            assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
+            # T-374: strength is a step of its own in Simple; the optional fold stays hidden.
+            assert page.evaluate("() => document.getElementById('load-optional').hidden && fdm.steps.steps.includes('strength')"), "Simple: strength not a step"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
             order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
@@ -1449,6 +1450,24 @@ def main():
             page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
+
+        def simple_compute():
+            """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that
+            ticks off what the tool does."""
+            page.click("input[name=level][value=simple] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("() => fdm.steps.go('have')")
+            assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
+            run.act(lambda: page.click("#compute"), 300_000)
+            items = page.locator("#compute-steps li")
+            states = items.evaluate_all("lis => lis.map((li) => li.className)")
+            assert len(states) == 4 and all(c in ("done", "skipped") for c in states), states
+            assert page.evaluate("() => fdm.steps.current") == "result"
+            page.click("input[name=level][value=expert] >> xpath=..")
+            assert page.locator("#compute").is_hidden(), "Compute is for Simple only"
+            return " | ".join(items.all_inner_texts())
+        run.step("simple: goal and Compute", simple_compute)
 
         def tick_and_recheck():
             """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
