@@ -1809,7 +1809,7 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
             ("The plastic itself is the limit there: more cross-section is the direct fix. " if base["mode"] == "material" else "")
-            + "Adds 1.5 mm of plastic all round the weak spot, tapering out either side (size under Design changes). "
+            + "Adds 1.5 mm of plastic all round the weak spot as an even sleeve with 45° ends (size under Design changes). "
             "Test it to see how much it helps.", "changes the shape", edit="thicken-weak")
 
     # Other materials: stresses don't depend on stiffness here, only the strengths change. Fibre filled

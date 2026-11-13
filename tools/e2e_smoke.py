@@ -1345,6 +1345,33 @@ def main():
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
 
+        def load_at_an_angle():
+            """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
+            to the tapped face, with the arrow shown on the part while it's set."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("() => fdm.steps.go('strength')")
+            assert "down" not in page.eval_on_selector_all("#dir option", "os => os.map((o) => o.value)")
+            xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
+              for (let f = 0; f < n; f++) { const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);
+                if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y]; } return null; }""")
+            page.mouse.click(*xy)
+            page.wait_for_selector("#pick-panel:not([hidden])", timeout=300_000)  # the first click loads the face tools
+            arrows = page.evaluate("() => fdm.viewer.symbols?.children.length ?? 0")
+            page.select_option("#dir", "angle")
+            page.dispatch_event("#dir", "input")
+            page.fill("#dir-lean", "90")
+            page.dispatch_event("#dir-lean", "input")
+            assert page.locator("#dir-angle").is_visible()
+            assert page.evaluate("() => fdm.viewer.symbols.children.length") > arrows, "no preview arrow"
+            normal = page.evaluate("() => fdm.state.regionInfo[fdm.state.selectedRegion].normal")
+            page.click("#as-load")
+            d = page.evaluate("() => fdm.state.loads.at(-1).direction")
+            assert isinstance(d, list) and abs(sum(a * b for a, b in zip(d, normal))) < 0.01, (d, normal)  # along the face
+            assert page.evaluate("() => fdm.state.previewLoad") is None
+            assert "90° lean" in page.locator("#loads").inner_text(), page.locator("#loads").inner_text()
+            return f"lean 90° on a face with normal {[round(v, 2) for v in normal]}: {d}"
+        run.step("load at an angle to the face", load_at_an_angle)
+
         def offer_stronger_orientation():
             """T-368: the first failing strength check on a part offers a stronger orientation, once."""
             run.act(lambda: page.click("[data-sample=mushroom]"))
@@ -1404,32 +1431,38 @@ def main():
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
 
-        def load_at_an_angle():
-            """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
-            to the tapped face, with the arrow shown on the part while it's set."""
+        def tick_and_recheck():
+            """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
             run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
             page.evaluate("() => fdm.steps.go('strength')")
-            assert "down" not in page.eval_on_selector_all("#dir option", "os => os.map((o) => o.value)")
-            xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
-              for (let f = 0; f < n; f++) { const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);
-                if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y]; } return null; }""")
-            page.mouse.click(*xy)
-            page.wait_for_selector("#pick-panel:not([hidden])", timeout=300_000)  # the first click loads the face tools
-            arrows = page.evaluate("() => fdm.viewer.symbols?.children.length ?? 0")
-            page.select_option("#dir", "angle")
-            page.dispatch_event("#dir", "input")
-            page.fill("#dir-lean", "90")
-            page.dispatch_event("#dir-lean", "input")
-            assert page.locator("#dir-angle").is_visible()
-            assert page.evaluate("() => fdm.viewer.symbols.children.length") > arrows, "no preview arrow"
-            normal = page.evaluate("() => fdm.state.regionInfo[fdm.state.selectedRegion].normal")
-            page.click("#as-load")
-            d = page.evaluate("() => fdm.state.loads.at(-1).direction")
-            assert isinstance(d, list) and abs(sum(a * b for a, b in zip(d, normal))) < 0.01, (d, normal)  # along the face
-            assert page.evaluate("() => fdm.state.previewLoad") is None
-            assert "90° lean" in page.locator("#loads").inner_text(), page.locator("#loads").inner_text()
-            return f"lean 90° on a face with normal {[round(v, 2) for v in normal]}: {d}"
-        run.step("load at an angle to the face", load_at_an_angle)
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            recheck = page.get_by_role("button", name="Re-check with the ticked changes")
+            assert recheck.is_disabled(), "re-check enabled with nothing ticked"
+            page.locator("#strength-options summary", has_text="Slicer settings").evaluate("s => s.parentElement.open = true")
+            ticks = page.locator("#strength-options li.slicer input[type=checkbox]")
+            assert ticks.count() >= 2, f"{ticks.count()} slicer ideas"
+            ticks.nth(0).check()
+            ticks.nth(1).check()
+            assert page.locator("#strength-options li.slicer input:checked").count() == 2 and recheck.is_enabled()
+            before = page.evaluate("() => ({ ...fdm.state.overrides })")
+            run.act(lambda: recheck.click(), 300_000)
+            after = page.evaluate("() => ({ ...fdm.state.overrides })")
+            changed = {k: v for k, v in after.items() if before.get(k) != v}
+            assert len(changed) >= 2, f"settings from two ideas not both applied: {changed}"
+            assert page.evaluate("() => !!fdm.state.strength"), "strength not checked again"
+            return f"applied together: {changed}"
+        run.step("make it stronger: tick several, re-check once", tick_and_recheck)
 
         for part in args.parts:
             def load_part(part=part):

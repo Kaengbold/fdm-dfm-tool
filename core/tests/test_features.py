@@ -203,7 +203,7 @@ def test_all_edits_together_give_a_clean_mesh(name, material):
 
 def test_thicker_weak_spot_helps():
     """A bar clamped at one end and pulled down at the other breaks at the clamp: "make the weak spot
-    thicker" adds plastic round it (tapering out), and the strength check gets better on the result."""
+    thicker" adds plastic round it (an even sleeve), and the strength check gets better on the result."""
     import numpy as np
 
     from fdmcore import api
@@ -225,7 +225,7 @@ def test_thicker_weak_spot_helps():
     assert edit["op"] == "add" and edit["param"] == "thicken_mm" and "2.0 mm" in edit["title"]
     pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
     # All round the bar along the stretch bent hardest (stress at least 65 % of the clamp's: the first third),
-    # tapering out well before the loaded end.
+    # ending well before the loaded end.
     assert pts[:, 0].max() < 60 and pts[:, 1].max() > 13 and pts[:, 2].max() > 13
     assert any(o.get("edit") == "thicken-weak" for o in api.strength_options([0, 0, 1], loads(), prof))
     part = api._require().mesh
@@ -389,6 +389,59 @@ def test_tall_boss_gets_ribs_at_its_foot():
     assert 400 < abs(grown.volume()) - abs(part.volume()) < 700 and _clean(grown.triangles) == (0, 0)
     assert not load(12)
 
+
+def test_thicker_stem_is_an_even_sleeve():
+    """The mushroom on its side, cap held, 10 kg sideways at the stem's end: the stem gets an even sleeve
+    with a 45° end, not a wedge (T-357), square to the stem (a sleeve a degree off came out ragged, in
+    many small faces), joined to the cap, and the part gets stronger."""
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+    from fdmcore.regions import find_regions
+
+    prof, up = {"material": "pla"}, [0, 1, 0]
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": [1, 0, 0]}]
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    before = api.strength(up, loads, prof)["safety_factor"]
+    edit = next(e for e in api.design(up, prof)["edits"] if e["id"] == "thicken-weak")
+    pts = np.frombuffer(edit["mesh"], "<f4").reshape(-1, 3)
+    for z in (19, 14, 9):  # the stem is 10 mm: 5 + 1.5 all along, the same at every height
+        ring = pts[np.abs(pts[:, 2] - z) < 0.3, :2]
+        assert np.abs(ring).max(axis=0) == pytest.approx([6.5, 6.5], abs=0.05), (z, np.abs(ring).max(axis=0))
+    assert pts[:, 2].max() > 20  # into the cap: no slit under it
+    thick = apply_edits(api._require().mesh, [edit])
+    regions = find_regions(thick)
+    normals, areas = thick.normals_and_areas()
+    middle = thick.triangles.mean(axis=1)
+    side = (normals[:, 0] < -0.99) & (middle[:, 0] < -6.4) & (middle[:, 0] > -7) & (middle[:, 2] < 20)  # the sleeve's -x side
+    assert len(np.unique(regions[side])) == 1  # one flat side, not a ragged one
+    after = api.strength_variant(up, loads, to_binary_stl(thick), prof)["safety_factor"]
+    assert after > 1.25 * before
+
+
+def test_round_after_thickening_goes_all_round_the_stem():
+    """After "make the weak spot thicker", rounding the inside corner at the most stress rounded only 2 of
+    the stem's 4 sides (T-359): the sleeve's steps and a slit under the cap broke the corner into pieces,
+    and the round went to those. Now the whole foot of the sleeve is one corner, rounded all round."""
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    prof, up = {"material": "pla"}, [0, 1, 0]
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": [1, 0, 0]}]
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    api.strength(up, loads, prof)
+    edit = next(e for e in api.design(up, prof)["edits"] if e["id"] == "thicken-weak")
+    api.load(to_binary_stl(apply_edits(api._require().mesh, [edit])), "thicker")
+    regs = api.regions()["regions"]
+    cap = max(regs, key=lambda r: r["centroid"][2] if r["normal"][2] > 0.9 else -1e9)["id"]
+    end = min(regs, key=lambda r: r["centroid"][2] if r["normal"][2] < -0.9 else 1e9)["id"]
+    api.strength(up, [{"region": cap, "kind": "fixed"}, {"region": end, "kind": "force", "kg": 10, "direction": [1, 0, 0]}], prof)
+    rounds = next(e for e in api.design(up, prof)["edits"] if e["id"] == "stress-chamfer")
+    assert "weakest" in rounds["title"], rounds["title"]  # one corner, not "the 2 inside corners"
+    pts = np.frombuffer(rounds["mesh"], "<f4").reshape(-1, 3)
+    assert np.abs(pts[:, 2] - 20).max() < 4  # at the foot under the cap
+    assert pts[:, 0].min() < -6 and pts[:, 0].max() > 6 and pts[:, 1].min() < -6 and pts[:, 1].max() > 6  # all 4 sides
 
 def test_fillet_in_an_inside_corner_is_not_a_hole():
     """A rounded inside corner fits a circle with its faces turned to the axis, like a hole, but only
