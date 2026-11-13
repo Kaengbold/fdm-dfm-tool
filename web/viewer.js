@@ -403,7 +403,10 @@ export class Viewer {
       geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(c.flat()), 3));
       geometry.setIndex(idx);
       this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
-      this.zones.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color })));
+      // Edges drawn over the part: a box inside it (a hidden gap, a stronger zone) must stay visible (T-363).
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color, depthTest: false }));
+      edges.renderOrder = 5;
+      this.zones.add(edges);
     }
   }
 
@@ -420,7 +423,9 @@ export class Viewer {
     this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
     const ring = (f) => {
       const pts = Array.from({ length: 48 }, (_, k) => f((2 * Math.PI * k) / 48));
-      this.zones.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color })));
+      const loop = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false }));
+      loop.renderOrder = 5;
+      this.zones.add(loop);
     };
     const rings = shape === "ball"
       ? [(t) => at(Math.cos(t), Math.sin(t), 0), (t) => at(Math.cos(t), 0, Math.sin(t)), (t) => at(0, Math.cos(t), Math.sin(t))]
@@ -595,21 +600,76 @@ export class Viewer {
     }
   }
 
-  /** Turn the camera to look at a design edit from outside the part, so the part doesn't hide it. */
+  /** Turn the camera to look at a design edit from where the part doesn't hide it (T-360). */
   focusEdit(edit) {
+    const { box, points, slack } = this.editSamples(edit);
+    box.expandByScalar(this.part.geometry.boundingSphere.radius * 0.35); // some of the part around it, to see where it is
+    const now = this.camera.position.clone().sub(this.controls.target).normalize();
+    this.focusFinding({ bbox: [box.min.toArray(), box.max.toArray()] }, this.clearView(points, now, slack));
+  }
+
+  /** Bounds of an edit (print frame), up to VIEW_SAMPLES of its points, and how far in front of them the
+   * part may be without hiding them (its own surface). */
+  editSamples(edit) {
     const { out } = placeTriangles(edit.mesh, this.placement.rotation, this.placement.shift);
     const box = new THREE.Box3().setFromArray(out);
-    const center = box.getCenter(new THREE.Vector3());
-    box.expandByScalar(this.part.geometry.boundingSphere.radius * 0.35); // some of the part around it, to see where it is
-    const from = center.clone().sub(this.part.geometry.boundingSphere.center);
-    from.z = Math.max(from.z, 0) + from.length() * 0.6; // a little from above
-    if (from.lengthSq() < 1e-6) from.set(1.2, -1.6, 1.1);
-    this.focusFinding({ bbox: [box.min.toArray(), box.max.toArray()] }, from);
+    const step = Math.max(1, Math.floor(out.length / 3 / VIEW_SAMPLES));
+    const points = [];
+    for (let i = 0; i < out.length / 3; i += step) points.push(new THREE.Vector3(out[3 * i], out[3 * i + 1], out[3 * i + 2]));
+    return { box, points, slack: Math.max(2, 0.1 * box.getSize(new THREE.Vector3()).length()) };
+  }
+
+  /** Share of an edit the camera sees now (0–1): for the browser test. */
+  editVisible(edit) {
+    const { points, slack } = this.editSamples(edit);
+    return this.visibleShare(points, this.camera.position.clone().sub(this.controls.target).normalize(), slack);
+  }
+
+  /** Share of ``points`` seen from far out along ``d`` (unit): hidden when the part is hit more than
+   * ``slack`` mm in front of one. */
+  visibleShare(points, d, slack) {
+    const ray = new THREE.Raycaster();
+    const centre = this.part.geometry.boundingSphere.center;
+    const r = this.part.geometry.boundingSphere.radius;
+    let seen = 0;
+    for (const p of points) {
+      const far = 3 * r + p.distanceTo(centre);
+      ray.set(p.clone().addScaledVector(d, far), d.clone().negate());
+      ray.far = far - slack;
+      if (!ray.intersectObject(this.part, false).length) seen++;
+    }
+    return seen / Math.max(points.length, 1);
+  }
+
+  /** The view direction (unit, from the target towards the camera) from which most of ``points`` (print
+   * frame) can be seen past the part: from far out along each candidate direction, a point is hidden when
+   * the part is hit more than ``slack`` mm in front of it (an edit sits in or on the part's surface, which
+   * mustn't count). The old choice (from the part's middle towards the edit) looked through the part when
+   * the edit went all round a stem. Ties: nearest ``prefer`` (the view now), then from above. */
+  clearView(points, prefer, slack = 2) {
+    const big = this.part.geometry.attributes.position.count > 1.2e6; // ray casts test every triangle: fewer on huge parts
+    const dirs = [prefer.clone()];
+    for (const elev of big ? [35] : [20, 55]) {
+      for (let az = 0; az < 360; az += big ? 90 : 45) {
+        const a = (az * Math.PI) / 180, e = (elev * Math.PI) / 180;
+        dirs.push(new THREE.Vector3(Math.cos(a) * Math.cos(e), Math.sin(a) * Math.cos(e), Math.sin(e)));
+      }
+    }
+    dirs.push(new THREE.Vector3(0, 0, 1));
+    const pts = big ? points.filter((_, i) => i % 3 === 0) : points;
+    let best = null;
+    for (const d of dirs) {
+      if (d.z < -0.2) continue; // not from under the bed
+      const score = this.visibleShare(pts, d, slack) + 0.02 * d.dot(prefer) + 0.01 * d.z; // ties only
+      if (!best || score > best.score) best = { score, d };
+    }
+    return best.d;
   }
 }
 
 /** Rotate the triangle soup and sit it centred on the bed origin at z = 0 (matches fdmcore.checks.orient).
  * Pass ``fixedShift`` to place other geometry (ghosts) exactly like the part. */
+const VIEW_SAMPLES = 24; // points of an edit tested for a clear view
 export const FIELD_BANDS = 10;
 
 /** Classic FEA rainbow in bands: blue (0) → cyan → green → yellow → red (1 and above). */
