@@ -49,10 +49,23 @@ def _filter(model) -> tuple:
     return h, np.asarray(h.sum(axis=1)).ravel()
 
 
+def contact_cubes(case: LoadCase) -> tuple[np.ndarray, np.ndarray]:
+    """(cubes the load goes in at, cubes the part is held at): the one layer of cubes on those faces, all
+    of whose corners carry the load or are held. Not ``case.ignore``: that reaches two more cubes in (for
+    the stress check), and on a held plate it is most of the plate — kept whole, it used up the plastic
+    allowed and the member between load and support was taken away instead (T-361)."""
+    corners = case.model.edof[:, 0::3] // 3  # node of each corner
+    loaded = np.abs(case.forces).sum(axis=1) > 0
+    held = case.held()
+    return loaded[corners].all(axis=1), held[corners].all(axis=1)
+
+
 def optimise(cases: list[LoadCase], up, profile: Profile, keep: float = 0.4, iterations: int = 40) -> dict:
     """Densities (E,) per cube of ``cases[0].model`` keeping ``keep`` of the volume, stiffest for all
-    load cases together (sum of their compliances). Also returns the rounds run and the compliance
-    of the full part and the result (lower = stiffer)."""
+    load cases together (sum of their compliances). Also returns the rounds run, the compliance
+    of the full part and the result (lower = stiffer), the cubes that always stay (``passive``), split
+    into ``loaded`` and ``held``, and the share of the volume actually kept as the target (``keep_used``:
+    more than ``keep`` when the faces that must stay already take most of it)."""
     if not KEEP_RANGE[0] <= keep <= KEEP_RANGE[1]:
         raise ValueError(f"keep must be between {KEEP_RANGE[0]:g} and {KEEP_RANGE[1]:g}")
     model = cases[0].model
@@ -60,11 +73,18 @@ def optimise(cases: list[LoadCase], up, profile: Profile, keep: float = 0.4, ite
     c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
     ke = element_stiffness(c, model.grid.h)
     fill = np.broadcast_to(_fill(model), (len(model.elems),)).astype(float)
-    passive = np.zeros(len(model.elems), dtype=bool)
+    loaded = np.zeros(len(model.elems), dtype=bool)
+    held = np.zeros(len(model.elems), dtype=bool)
     for case in cases:  # cubes at loads and held faces carry the load in and out: they stay
-        passive |= case.ignore
+        lo_, he_ = contact_cubes(case)
+        loaded |= lo_
+        held |= he_
+    passive = loaded | held
     h, hs = _filter(model)
-    target = keep * fill.sum()
+    # The faces that must stay can take much of the plastic allowed (a whole held plate): leave the
+    # rest at least a fifth of what's free, so there is plastic to connect them.
+    fixed_part = fill[passive].sum()
+    target = max(keep * fill.sum(), fixed_part + 0.2 * (fill.sum() - fixed_part))
     x = np.full(len(fill), keep)
     x[passive] = 1.0
     starts = [None] * len(cases)
@@ -100,18 +120,20 @@ def optimise(cases: list[LoadCase], up, profile: Profile, keep: float = 0.4, ite
         if it >= 5 and change < STOP_CHANGE:
             break
     rho = np.where(passive, 1.0, (h @ x) / hs)
-    return {"density": rho, "rounds": len(history), "compliance": history, "passive": passive}
+    return {"density": rho, "rounds": len(history), "compliance": history, "passive": passive, "loaded": loaded,
+            "held": held, "keep_used": float(target / fill.sum())}
 
 
-def keep_connected(model, solid: np.ndarray, passive: np.ndarray) -> np.ndarray:
-    """Drop bits of the shape that hang free: only pieces that touch a load or a held face stay."""
+def keep_connected(model, solid: np.ndarray, loaded: np.ndarray, held: np.ndarray) -> np.ndarray:
+    """Only pieces of the shape that join a load to a held face: a piece with only one of them carries
+    nothing (it hangs free, or the load has nothing to push against). Empty when none does."""
     from scipy.ndimage import label
 
     grid = np.zeros(model.grid.solid.shape, dtype=bool)
     grid[tuple(model.elems[solid].T)] = True
     islands, _ = label(grid)
     ids = islands[tuple(model.elems.T)]
-    wanted = np.unique(ids[solid & passive])
+    wanted = np.intersect1d(ids[solid & loaded], ids[solid & held])
     return solid & np.isin(ids, wanted[wanted > 0])
 
 
@@ -151,5 +173,8 @@ def safety_solid(case: LoadCase, up, profile: Profile, solid: np.ndarray) -> flo
     u, _ = _solve(case, c, scale, mat.e_xy)
     stress = element_stress(case.model, c, scale, u)
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
-    worst = np.maximum(fi_layer, fi_plane)[solid & ~case.ignore]
-    return float(1 / worst.max()) if len(worst) and worst.max() > 0 else float("inf")
+    fi = np.maximum(fi_layer, fi_plane)
+    # Away from the loads and supports, as the strength check does; a shape that is all contact band
+    # is judged on what it has.
+    worst = fi[solid & ~case.ignore] if (solid & ~case.ignore).any() else fi[solid]
+    return float(1 / worst.max()) if len(worst) and worst.max() > 0 else 0.0

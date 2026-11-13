@@ -552,6 +552,26 @@ def test_thick_blocks_without_a_buffer():
         assert bounds == pytest.approx(where, abs=1.0)
 
 
+def test_sub_print_notches_dropped_when_slicing():
+    """3DBenchy has rows of 0.02 mm notches in its outlines; buffering such an outline killed the
+    engine in the browser ("depth mismatch" in Pyodide's GEOS 3.12, T-351). Slicers close gaps that
+    small anyway (slice_closing_radius 0.049 mm), so the slicer's simplification drops them."""
+    from shapely.geometry import Polygon
+
+    from fdmcore.additions import extrude
+    from fdmcore.mesh import Mesh
+    from fdmcore.slicer import SIMPLIFY_MM
+
+    pts = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0)]
+    for x in np.arange(19.0, 1.0, -0.4):  # notches 0.02 mm deep, 0.2 mm wide along the top edge
+        pts += [(x, 20.0), (x, 19.98), (x - 0.2, 19.98), (x - 0.2, 20.0)]
+    pts.append((0.0, 20.0))
+    assert SIMPLIFY_MM > 0.02
+    layers = slice_mesh(Mesh(extrude(Polygon(pts), 0, 2)), 0.2, max_layers=3)
+    assert len(layers[0].geom.exterior.coords) <= 6
+    assert layers[0].geom.area == pytest.approx(400, abs=0.5)
+
+
 def test_too_big_counts_as_can_fail():
     api.load((SAMPLES / "hook.stl").read_bytes(), "hook")
     api.scale(20)
@@ -852,3 +872,33 @@ def test_shrink_lines_from_a_raised_floor_and_a_thick_rib():
     assert [f["rule"] for f in ribs] == ["rib_sink_line"] * 2  # both ends of the partition
     assert sorted(round(f["bbox"][0][1] + 2) for f in ribs) == [-17, 17] and ribs[0]["metrics"]["rib_mm"] == pytest.approx(2.0, abs=0.35)
     assert not found(box_ + cube((29.5, 1, 1), (1, 38, 29))) and not found(box_)
+
+
+def test_layer_strength_test_print_breaks_in_the_middle():
+    """T-387: the old bar broke at its holes (4 of 10 mm left beside them). The dog-bone's middle carries the
+    most stress, printed standing (what it measures: the layers) with a pin pulling on a third of each hole."""
+    from fdmcore import strength as S
+    from fdmcore.fea import element_stress, rotate_stiffness
+    from fdmcore.placement import rotation_to_z
+
+    d = api.DOGBONE
+    length = 2 * (d["end_l"] + d["round"]) + d["mid_l"]
+    w, t = d["end_w"], d["thick"]
+    api.load(api.calibration_part("layer_strength")["stl"], "bone")
+    assert (w - d["hole_d"]) >= 3 * d["mid_w"] and d["end_l"] / 2 >= 1.5 * d["hole_d"]  # ends much stronger, hole well in
+    info = api.regions()["regions"]
+    hole = lambda x: min(info, key=lambda r: np.hypot(r["centroid"][0] - x, r["centroid"][1] - w / 2) + (100 if r["kind"] == "flat" else 0))["id"]  # noqa: E731
+    xa, xb = d["end_l"] / 2, length - d["end_l"] / 2
+    pa, pb = [xa - d["hole_d"] / 2, w / 2, t / 2], [xb + d["hole_d"] / 2, w / 2, t / 2]
+    loads = [{"region": hole(xa), "point": pa, "radius": 3.0, "kind": "fixed"},
+             {"region": hole(xb), "point": pb, "radius": 3.0, "kind": "force", "kg": 10, "direction": [1, 0, 0]}]
+    s, p, up = api._require(), Profile.from_dict({"material": "pla"}), [1, 0, 0]  # standing on its end
+    case = S.prepare_cases(s.mesh, s.regions, loads, 20_000)[0]
+    mat = S.material_for(p)
+    c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
+    scale = S.element_scale(case.model, up, S.Shells(), p)
+    u, _ = S._solve(case, c, scale, mat.e_xy)
+    fi = np.maximum(*S.failure_indices(element_stress(case.model, c, scale, u), np.asarray(up, float), mat, scale))
+    x = case.model.grid.centers(case.model.elems)[:, 0]
+    middle = (x > d["end_l"] + 2) & (x < length - d["end_l"] - 2)
+    assert fi[middle].max() > fi[~middle].max()
