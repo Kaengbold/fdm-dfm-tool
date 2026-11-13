@@ -1268,6 +1268,7 @@ def main():
             """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that
             ticks off what the tool does."""
             page.click("input[name=level][value=simple] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
             run.act(lambda: page.click("[data-sample=mushroom]"))
             page.evaluate("() => fdm.steps.go('have')")
             assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
