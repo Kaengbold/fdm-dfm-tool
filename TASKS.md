@@ -390,7 +390,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### CI
 
-- [~] **T-393 P1** Fewer GitHub Actions minutes (user: limited minutes, the browser test is heavy) and the flaky browser steps that failed most round-3 PRs ("gap to a mating part", "less support: split": they read the result before it's there). · files: `.github/workflows/`, `tools/e2e_smoke.py`, `AGENTS.md` · owner: Claude (`task/T-393-ci-minutes`)
+- [x] **T-393 P1** Fewer GitHub Actions minutes (user: limited minutes, the browser test is heavy) and the flaky browser steps that failed most round-3 PRs ("gap to a mating part", "less support: split": they read the result before it's there). · files: `.github/workflows/`, `tools/e2e_smoke.py`, `AGENTS.md` · owner: Claude (`task/T-393-ci-minutes`) — the browser test (~15 min) runs only with the label `browser-test` or by hand (a skipped job costs no minutes); engine tests on both runner cores (`-n 2`, pytest-xdist: 287 passed in 5:43 locally, about half); the two flaky steps wait for their result (going to the step starts jobs of its own, so "idle" came first on the slower runner; they failed 16 of the round-3 PRs). AGENTS.md says how.
 
 ### Advanced design changes
 

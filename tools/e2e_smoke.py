@@ -1163,6 +1163,8 @@ def main():
             run.act(lambda: page.click("[data-sample=l_bracket]"))
             page.evaluate("() => fdm.steps.go('fits')")
             run.act(lambda: page.set_input_files("#mate-file", str(mate)), 300_000)
+            # Going to the step starts jobs of its own, so "idle" can come before the result: wait for it.
+            page.wait_for_function("() => document.getElementById('mate-result').textContent.trim()", timeout=300_000)
             text = page.locator("#mate-result").inner_text()
             assert "0.30 mm per side" in text and "move freely" in text, text
             return text[:120]
@@ -1173,7 +1175,8 @@ def main():
             # one plate overhangs every way up. Cut so each piece prints its own way without (T-347).
             spool = ROOT / "tools" / "fixtures" / "spool.stl"
             run.act(lambda: page.set_input_files("#file", str(spool)), 300_000)
-            assert page.evaluate("() => !document.getElementById('dl-split-support').hidden"), "no 'less support' cut offered"
+            # The cut is worked out after the check: wait for it (on a slow runner "idle" came first).
+            page.wait_for_function("() => !document.getElementById('dl-split-support').hidden", timeout=300_000)
             run.act(lambda: page.evaluate("() => document.getElementById('dl-split-support').click()"), 300_000)
             page.wait_for_function("() => !document.getElementById('split-panel').hidden", timeout=60_000)
             text = page.locator("#split-text").inner_text()
