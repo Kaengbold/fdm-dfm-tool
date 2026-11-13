@@ -30,6 +30,10 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: core/pyproject.toml
-      - run: pip install -e "core[dev]"
-      - run: python -m pytest -q
+      - run: pip install -e "core[dev]" pytest-xdist
+      # Both of the runner's cores: about half the minutes. Each test process has its own engine session.
+      - run: python -m pytest -q -n 2
         working-directory: core
+        env:
+          OMP_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
