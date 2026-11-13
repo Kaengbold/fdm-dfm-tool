@@ -185,6 +185,8 @@ def main():
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
+            assert page.locator("#guide button.soon").is_disabled(), "fix-my-print path should be coming soon"
+
             assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
@@ -379,12 +381,17 @@ def main():
             label = row.locator("button.link").first.inner_text()
             assert "picked" in (row.get_attribute("class") or ""), "picked gap not selected"
             assert page.evaluate("() => fdm.state.fitSel?.regions.length") == 2, "both faces of the gap should light up"
+            shown = lambda: page.evaluate("() => fdm.viewer.fitView?.children.length ?? 0")  # noqa: E731
+            assert shown() >= 2, "no measured width on the part"  # T-386: line + label
             value = float(row.locator("input").input_value())
             row.locator("input").fill(f"{value - 0.5:.1f}" if label.startswith("Slot") else f"{value + 0.5:.1f}")
+            row.locator("input").dispatch_event("input")
+            assert shown() >= 4, "no bars for the other part"  # + one bar (slot) or two walls (tab), with edges
             run.act(lambda: row.get_by_role("button", name="Size it").click())
             note = page.locator("#gaps li").first.locator("p.hint").inner_text()
             edits = page.locator("#edits label").all_inner_texts()
             assert any(("slot" in e or "tab" in e) and "fit" in e for e in edits), edits
+            assert page.locator("#gaps li").first.get_by_role("button", name="Show in Design changes").count() == 1
             page.locator("#gaps li").first.get_by_role("button", name="Remove").click()
             page.wait_for_function("() => !document.querySelector('#gaps li')", timeout=120_000)
             return f"{label}: {note[:90]}"
@@ -1212,7 +1219,11 @@ def main():
             mine = page.locator("#failed-result .mine li").all_inner_texts()
             assert any("Shallow slope" in m for m in mine), mine
             return mine[0][:100]
-        run.step("my print failed: matched to the part's findings", print_failed)
+        # Switched off in the levels for now (T-383); its step comes back with the "fix my print" path (T-384).
+        def print_failed_off():
+            assert page.locator("#failed-block").is_hidden(), "\"My print failed\" shown"
+            return "hidden"
+        run.step("my print failed is switched off", print_failed_off)
 
         def mating_part():
             # Two parts of one assembly: a copy of the bracket 0.3 mm above it -> 0.30 mm per side, loose (T-348).

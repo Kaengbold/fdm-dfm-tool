@@ -1143,7 +1143,22 @@ def flat_pair(mesh: Mesh, region: np.ndarray, a: int, b: int) -> dict:
     dist = float(abs(na @ (cb - ca)))
     if dist < 1e-3:
         raise ValueError("The two faces lie in one plane")
-    return {"kind": "slot" if na @ (cb - ca) > 0 else "tab", "distance_mm": dist, "normal_a": na, "normal_b": nb, "centre_a": ca, "centre_b": cb}
+    # Where the two faces overlap, as a rectangle on face a: for showing the gap and the fit on the part (T-386).
+    u = np.cross(na, [1.0, 0, 0] if abs(na[0]) < 0.9 else [0, 1.0, 0])
+    u /= np.linalg.norm(u)
+    v = np.cross(na, u)
+    spans = []
+    for r in (a, b):
+        pts = mesh.triangles[region == r].reshape(-1, 3) - ca
+        spans.append((pts @ u, pts @ v))
+    lo = [max(spans[0][k].min(), spans[1][k].min()) for k in (0, 1)]
+    hi = [min(spans[0][k].max(), spans[1][k].max()) for k in (0, 1)]
+    if hi[0] <= lo[0] or hi[1] <= lo[1]:  # they don't overlap: show face a's own extent
+        lo, hi = [spans[0][k].min() for k in (0, 1)], [spans[0][k].max() for k in (0, 1)]
+    plane = {"origin": ca.tolist(), "normal": na.tolist(), "u": u.tolist(), "v": v.tolist(),
+             "u_range": [float(lo[0]), float(hi[0])], "v_range": [float(lo[1]), float(hi[1])]}
+    return {"kind": "slot" if na @ (cb - ca) > 0 else "tab", "distance_mm": dist, "normal_a": na, "normal_b": nb,
+            "centre_a": ca, "centre_b": cb, "plane": plane}
 
 
 def gap_size(pair: dict, partner_mm: float, fit: str, up, profile=None, warp_mm: float = 0.0) -> tuple[float, str]:
