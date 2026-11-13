@@ -97,6 +97,10 @@ export class Steps {
       if (block.parentElement !== home) home.append(block);
     }
     for (const [id, to] of moved) (this.panes[to] ?? document.getElementById(to)).append(document.getElementById(id));
+    // The optional load fold only has something in it where the strength block moves in (Simple);
+    // elsewhere "Will it hold?" is its own step and an empty fold would open to nothing.
+    const fold = document.getElementById("load-optional");
+    fold.hidden = !moved.some(([, to]) => to === "load-optional");
     document.getElementById("settings-fold").open = level !== "simple";
     // Keep the "what it updates" note last in its pane after blocks moved in.
     for (const note of document.querySelectorAll(".affects")) note.parentElement.append(note);
