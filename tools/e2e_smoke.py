@@ -1400,6 +1400,25 @@ def main():
             return text
         run.step("failing strength check offers a stronger orientation", offer_stronger_orientation)
 
+        def turn_by_hand():
+            """T-380: the user can turn the part themselves: 90° steps or any angle, as a "Your own" option."""
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('orient')")
+            page.locator("#turn-own > summary").click()
+            up = lambda: page.evaluate("() => fdm.state.options[fdm.state.active].up")  # noqa: E731
+            before = up()
+            run.act(lambda: page.click("[data-tip=flip]"))
+            flipped = up()
+            assert sum(a * b for a, b in zip(before, flipped)) < -0.99, (before, flipped)
+            assert page.evaluate("() => fdm.state.options[fdm.state.active].label") == "Your own"
+            page.fill("#tip-forward", "90")
+            run.act(lambda: page.click("#tip-use"))
+            tipped = up()
+            assert abs(sum(a * b for a, b in zip(flipped, tipped))) < 0.01, (flipped, tipped)
+            assert page.evaluate("() => fdm.state.options.filter((o) => o.label === 'Your own').length") == 1
+            return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}"
+        run.step("turn the part by hand", turn_by_hand)
+
         def hidden_gap_from_side():
             """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
             refused), and its outline is drawn over the part so it can be seen inside it."""

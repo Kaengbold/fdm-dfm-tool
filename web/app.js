@@ -490,6 +490,33 @@ async function selectOption(i) {
   state.nozzleCompare = $("nozzle-block").open ? compareNozzles() : null;
 }
 
+// ---------- turning the part by hand (T-380) ----------
+/** The build direction after tipping the part as it lies now: ``forward`` degrees about the bed's X axis,
+ * then ``sideways`` about its Y axis. ``rotation`` turns the part into its printed position, so the new
+ * "up" is rotationᵀ · (the bed's up seen from the tipped part). */
+function tippedUp(forward, sideways) {
+  const R = activeOption().rotation;
+  const [a, b] = [forward * DEG, sideways * DEG];
+  const v = [-Math.sin(b), Math.cos(b) * Math.sin(a), Math.cos(b) * Math.cos(a)];
+  return [0, 1, 2].map((k) => R[0][k] * v[0] + R[1][k] * v[1] + R[2][k] * v[2]);
+}
+
+/** Lay the part the way the user turned it: one "Your own" option, checked like the others. */
+async function useOwnOrientation(up) {
+  const option = await busy("Checking your orientation…", () => call("orientation", { up, profile: profile(), label: "Your own" }));
+  option.reasons.push("Turned by you");
+  state.options = [...state.options.filter((o) => o.label !== "Your own"), option];
+  renderOptions();
+  await selectOption(state.options.length - 1);
+}
+const TIPS = { forward: [90, 0], sideways: [0, 90], flip: [180, 0] };
+for (const b of document.querySelectorAll("[data-tip]")) b.onclick = () => activeOption() && useOwnOrientation(tippedUp(...TIPS[b.dataset.tip]));
+$("tip-use").onclick = async () => {
+  if (!activeOption()) return;
+  await useOwnOrientation(tippedUp(Number($("tip-forward").value) || 0, Number($("tip-sideways").value) || 0));
+  $("tip-forward").value = $("tip-sideways").value = 0; // angles count from how it lies now
+};
+
 function clearWarp() {
   state.warp = null;
   state.showWarp = false;
