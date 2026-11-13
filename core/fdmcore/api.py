@@ -775,10 +775,14 @@ SOLID_KINDS = ("add_solid", "cut_solid")  # change the model itself (volume_soli
 DESIGN_ONLY = ("keep_clear", *SOLID_KINDS)  # not in the 3MF
 VOID_MM = 0.6  # a gap picked on a spot: a thin upright pin hole, the "holes that force walls" trick
 VOID_COVER_MM = 1.0  # plastic left above and below such a pin hole, so it doesn't show
+# Support / no support on a picked face: only that face, not 3 mm round it (T-363), reaching where the
+# supports touching it are: down to the bed under a face that faces down, up to the top over one that
+# faces up, ZONE_MARGIN_MM out from a side face.
+FACE_SUPPORT_MARGIN_MM = 0.5
 
 
 def volume_at(up, kind: str, region: int | None = None, point=None, point2=None, margin: float | None = None,
-              profile: dict | None = None, shape: str = "box") -> dict:
+              profile: dict | None = None, shape: str = "box", normal=None) -> dict:
     """An advanced design box, upright in the build frame like a zone: around a face (``region``),
     a spot (``point``) or between two spots (``point`` and ``point2``, part coordinates), ``margin``
     mm bigger on every side. ``kind``: "support" / "blocker" (support enforcer / blocker in the 3MF),
@@ -786,7 +790,8 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     hole up through the part that stays inside it), "keep_clear" (space that must stay empty; not
     exported), "add_solid" / "cut_solid" (a block of plastic added to or cut from the model itself: see
     volume_solid). Returns the box, its corners on the bed and plain notes on what it does here. ``shape``:
-    "box", "cylinder" or "ball" inside that box (strength.ZONE_SHAPES)."""
+    "box", "cylinder" or "ball" inside that box (strength.ZONE_SHAPES). ``normal``: the clicked face's outward
+    normal (part coordinates), so a pin hole picked on a side face goes into the wall, not along its surface."""
     from .regions import find_regions
 
     if kind not in VOLUME_KINDS:
@@ -807,10 +812,18 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     built = pts @ r0.T
     zs = (s.mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2]
     pin = kind == "void" and region is None and point2 is None
+    on_face = kind in ("support", "blocker") and region is not None
     if margin is None:
-        margin = VOID_MM / 2 if pin else ZONE_MARGIN_MM
-    lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
+        margin = VOID_MM / 2 if pin else FACE_SUPPORT_MARGIN_MM if on_face else ZONE_MARGIN_MM
     inside = _inside_test(s.mesh, r0)
+    if pin and normal is not None:  # into the wall: the vertical pin can't run along a side face
+        n = r0 @ np.asarray(normal, float)
+        side = np.hypot(n[0], n[1])
+        if side > 0.3:
+            built = built - [*(n[:2] / side * (VOID_COVER_MM + VOID_MM / 2)), 0.0]
+    lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
+    if on_face:
+        _reach_supports(s.mesh, int(region), r0, lo, hi, zs)
     if pin:
         lo[2], hi[2] = _solid_run(inside, built[0], zs.min(), zs.max())
     # Slicer boxes stay between the bed and the top of the part (see _zone_box); keep-clear space may be above it.
@@ -823,7 +836,7 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
         raise ValueError(f"shape must be one of {ZONE_SHAPES}")
     box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0, "shape": shape}
     corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"], _moving(p))["corners_print"]
-    return {**box, "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
+    return {**box, "margin": float(margin), "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
 
 
 def volume_solid(up, boxes: list[dict]) -> list[dict]:
@@ -940,6 +953,27 @@ def _inside_test(mesh: Mesh, r0: np.ndarray):
 
     inside.h = grid.h
     return inside
+
+
+def _reach_supports(mesh: Mesh, region: int, r0: np.ndarray, lo: np.ndarray, hi: np.ndarray, zs: np.ndarray) -> None:
+    """Grow a support / no-support box on a face (in place) to where the supports touching that face are:
+    down to the bed under a face that faces down, up to the top over one facing up, out from a side face."""
+    s = _require()
+    normals, areas = mesh.normals_and_areas()
+    sel = np.asarray(s.regions) == region
+    n = r0 @ ((normals[sel] * areas[sel, None]).sum(axis=0))
+    n /= max(np.linalg.norm(n), 1e-12)
+    if n[2] < -0.3:
+        lo[2] = zs.min()
+    elif n[2] > 0.3:
+        hi[2] = zs.max()
+    side = np.hypot(n[0], n[1])
+    if side > 0.3:
+        for k in (0, 1):
+            if n[k] > 0.3 * side:
+                hi[k] += ZONE_MARGIN_MM
+            elif n[k] < -0.3 * side:
+                lo[k] -= ZONE_MARGIN_MM
 
 
 def _solid_run(inside, at: np.ndarray, zmin: float, zmax: float) -> tuple[float, float]:

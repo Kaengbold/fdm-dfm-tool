@@ -632,6 +632,7 @@ def main():
             return "support and no-support boxes in the 3MF; undo and remove work"
         run.step("advanced design changes: support boxes", advanced_boxes)
 
+
         def rank_with_strength():
             run.act(lambda: page.get_by_role("button", name="Find the best orientation including strength").click(), 600_000)
             text = page.locator("#strength-result").inner_text()
@@ -1263,6 +1264,37 @@ def main():
             assert got["name"].startswith("l_bracket") and got["material"] == "petg", got
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
+
+        def hidden_gap_from_side():
+            """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
+            refused), and its outline is drawn over the part so it can be seen inside it."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("() => fdm.steps.go('extra')")
+            xy = page.evaluate("""() => {
+              const v = fdm.viewer, p = v.part.geometry.getAttribute('position'), n = p.count / 3;
+              for (let f = 0; f < n; f++) {
+                const a = [0, 1, 2].map((k) => [p.getX(3 * f + k), p.getY(3 * f + k), p.getZ(3 * f + k)]);
+                const u = a[1].map((x, i) => x - a[0][i]), w = a[2].map((x, i) => x - a[0][i]);
+                const c = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+                if (Math.abs(c[2]) > 0.1 * Math.hypot(...c)) continue; // side faces only
+                const [x, y] = v.screenPointOfFace(f);
+                const el = document.elementFromPoint(x, y);
+                if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y];
+              }
+              return null;
+            }""")
+            assert xy, "no side face in view"
+            page.select_option("#vol-kind", "void")
+            page.click("#vol-pick")
+            run.act(lambda: page.mouse.click(*xy))
+            got = page.evaluate("() => fdm.state.volumes.map((v) => ({ kind: v.kind, notes: v.notes }))")
+            assert len(got) == 1 and got[0]["kind"] == "void", f"gap not placed: {got} | {page.locator('#status').inner_text()}"
+            assert not any("shows as a hole" in n for n in got[0]["notes"]), got
+            over = page.evaluate("() => fdm.viewer.zones.children.some((c) => c.isLineSegments && c.material.depthTest === false)")
+            assert over, "the gap's outline is hidden by the part"
+            page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
+            return f"placed inside the wall: {got[0]['notes'][:1]}"
+        run.step("hidden gap from a side face", hidden_gap_from_side)
 
         for part in args.parts:
             def load_part(part=part):
