@@ -1264,6 +1264,23 @@ def main():
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
 
+        def simple_compute():
+            """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that
+            ticks off what the tool does."""
+            page.click("input[name=level][value=simple] >> xpath=..")
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("() => fdm.steps.go('have')")
+            assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
+            run.act(lambda: page.click("#compute"), 300_000)
+            items = page.locator("#compute-steps li")
+            states = items.evaluate_all("lis => lis.map((li) => li.className)")
+            assert len(states) == 4 and all(c in ("done", "skipped") for c in states), states
+            assert page.evaluate("() => fdm.steps.current") == "result"
+            page.click("input[name=level][value=expert] >> xpath=..")
+            assert page.locator("#compute").is_hidden(), "Compute is for Simple only"
+            return " | ".join(items.all_inner_texts())
+        run.step("simple: goal and Compute", simple_compute)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)
