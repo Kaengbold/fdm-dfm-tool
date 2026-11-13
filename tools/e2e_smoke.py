@@ -190,6 +190,9 @@ def main():
             assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+            order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
+            assert order.index("sims") < order.index("printing") < order.index("problems"), order
+
             # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
             assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
             return f"guide -> {simple[0]}; back to expert"
@@ -736,7 +739,11 @@ def main():
                 page.select_option("#use-temp", "")  # back to room temperature for the next steps
                 run.act(lambda: page.dispatch_event("#use-temp", "change"), 300_000)
             return text[:120] + " …" + text[text.index(" | walls"):]
-        run.step("heat inside an electronics box", box_heat)
+        # Switched off in the app for now (T-379): its step comes back with the card.
+        def box_heat_off():
+            assert page.locator("#box-heat").is_hidden(), "electronics box card shown"
+            return "hidden"
+        run.step("electronics box heat is switched off", box_heat_off)
 
         def report_with_pictures():
             with page.expect_download(timeout=180_000) as dl:
@@ -1332,6 +1339,34 @@ def main():
             assert got["name"].startswith("l_bracket") and got["material"] == "petg", got
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
+
+        def offer_stronger_orientation():
+            """T-368: the first failing strength check on a part offers a stronger orientation, once."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            standing = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) > 0.9)")
+            if standing != page.evaluate("() => fdm.state.active"):
+                run.act(lambda: page.locator("#options > li").nth(standing).click())
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 30, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            offer = page.locator("#strength-result .turn-offer")
+            assert offer.count() == 1, page.locator("#strength-result").inner_text()[:200]
+            text = offer.locator("strong").inner_text()
+            run.act(lambda: offer.get_by_role("button", name="Turn it").click(), 300_000)
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            assert abs(up[2]) < 0.01, up  # lying on its side now
+            assert page.locator("#strength-result .turn-offer").count() == 0  # once per part
+            return text
+        run.step("failing strength check offers a stronger orientation", offer_stronger_orientation)
 
         def hidden_gap_from_side():
             """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
