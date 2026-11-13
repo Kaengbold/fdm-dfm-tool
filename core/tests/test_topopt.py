@@ -64,3 +64,18 @@ def test_api_mcp_cli(tmp_path, capsys):
     stl.write_bytes(to_binary_stl(Mesh((BOX * [120, 10, 30])[np.array(FACES)])))
     assert cli.main(["topology", str(stl), "--up", "0,1,0", "--loads", json.dumps(loads), "-o", str(tmp_path / "c.stl")]) == 0
     assert json.loads(capsys.readouterr().out)["saved"] == str(tmp_path / "c.stl")
+
+
+def test_stem_on_a_held_plate_stays():
+    """Mushroom held at the cap, 10 kg sideways on the stem (T-361): the bands kept at the held face used to
+    be most of the cap, which used up the plastic allowed; the stem went and the shape carried nothing
+    (safety "inf"). Now the stem stays, joined to the cap, and the shape holds the load."""
+    from pathlib import Path
+
+    api.load((Path(__file__).resolve().parents[2] / "web" / "samples" / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 2, "kind": "force", "kg": 10, "direction": "push"}]
+    r = api.topology([0, 0, -1], loads, keep=0.4)
+    tris = np.frombuffer(r["triangles"], "<f4").reshape(-1, 3)
+    assert tris[:, 2].min() < 2  # the stem reaches down to where the load is (the cap is at z 20-26)
+    assert 0 < r["safety_solid_shape"] < np.inf and r["shape_g"] < 0.6 * r["part_g"]

@@ -55,7 +55,10 @@ function startWorker() {
       else if (pending.has(data.id)) {
         const { resolve: ok, reject: fail } = pending.get(data.id);
         pending.delete(data.id);
-        data.error ? fail(new Error(data.error)) : ok(data.result);
+        if (data.fatal) {
+          fail(new Error(`The engine crashed on this part and has restarted, so you can go on (please report the part): ${data.error}`));
+          cancelEngine(); // a dead engine fails every later call, even loading another part
+        } else data.error ? fail(new Error(data.error)) : ok(data.result);
       }
     });
   });
@@ -360,7 +363,8 @@ function showBodyPicker(bodies, active, pick) {
 }
 
 /** ``step``: the STEP file this part came from (and the edits applied so far), or null. ``as``: "new"
- * starts the version list over; otherwise the model is the current version (see versions). */
+ * starts the version list over; otherwise the model is the current version (see versions).
+ * ``keep.up``: the build direction to stay on (another version of the same part). */
 async function loadFile(name, bytes, faceIds = null, step = null, as = "new", keep = { body: 0, scale: 1 }) {
   await busy("Reading the part…", async () => {
     await engineReady;
@@ -371,6 +375,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
+    state.keepUp = keep.up ?? null;
     if (as === "new" || !state.versions.length) {
       state.versions = [{ label: "Original" }];
       state.version = 0;
@@ -422,7 +427,9 @@ async function partLoaded(info) {
   $("view-key").hidden = false;
   if (steps.current === "part") steps.go("have");
   else steps.render();
-  await findOrientations();
+  const up = state.keepUp;
+  state.keepUp = null;
+  await findOrientations(false, up);
 }
 
 /** Parts exported in inches, centimetres or metres arrive 25.4× / 10× / 1000× off; offer a one-click fix. */
@@ -446,14 +453,15 @@ function showUnitHint(hint) {
   });
 }
 
-async function findOrientations(withLoads = false) {
+/** ``keep``: a build direction (``up``) to stay on if the user had picked it: it is always among the options. */
+async function findOrientations(withLoads = false, keep = null) {
   // With the Strength goal, known loads always count (the simulation beats the pin/neck heuristics).
   const loads = (withLoads || profile().goal === "strength") && readyForStrength() ? state.loads : undefined;
   await busy(loads ? "Finding the best orientation for printing and strength…" : "Finding the best orientation…", async () => {
-    const r = await call("orientations", { profile: profile(), loads, faces: faceMarks() });
+    const r = await call("orientations", { profile: profile(), loads, faces: faceMarks(), keep: keep ?? undefined });
     state.options = [...r.orientations, r.as_loaded];
     renderOptions();
-    await selectOption(0);
+    await selectOption(keep && r.kept != null ? r.kept : 0);
   }, ["orient", "problems", "strength", "settings", "result"]);
 }
 
@@ -2038,13 +2046,13 @@ async function pickVolume(hit) {
   const info = state.regionInfo[region];
   let from, what;
   if (pick.clicks === 2) [from, what] = [{ point: pick.points[0], point2: pick.points[1] }, "between two spots"];
-  else if (pick.kind === "void") [from, what] = [{ point: hit.point }, "pin hole at the spot"];
+  else if (pick.kind === "void") [from, what] = [{ point: hit.point, normal: info.normal }, "pin hole at the spot"]; // into the wall from a side face
   else if (info.area_mm2 > BIG_FACE_MM2) [from, what] = [{ point: hit.point }, "the clicked spot"];
   else [from, what] = [{ region }, info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`];
   try {
     const v = await busy("Placing the box…", () => call("volume_at", { up: activeOption().up, kind: pick.kind, profile: profile(), ...from }));
     remember("an advanced design change");
-    setVolumes([...state.volumes, { ...v, from, what, margin: v.kind === "void" && !from.region && !from.point2 ? 0.3 : 3 }]);
+    setVolumes([...state.volumes, { ...v, from, what }]);
     setStatus(`${VOLUME_NAME[v.kind]} added. ${v.notes[0] ?? ""}`);
   } catch (err) {
     setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
@@ -2102,7 +2110,7 @@ function setVolumes(volumes) {
     const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
     const size = pin
       ? el("label", {}, "Width ", num(+(v.margin * 2).toFixed(1), 0.2, 4, 0.1, (e) => resizeVolume(i, Math.max(0.1, Number(e.target.value) / 2 || 0.3))), " mm")
-      : el("label", {}, "Reaches ", num(v.margin, 0, 30, 1, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
+      : el("label", {}, "Reaches ", num(v.margin, 0, 30, 0.5, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
       el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
@@ -2467,7 +2475,8 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     remember("design changes");
     const carry = carryLoads();
     addVersion(chosen[0].title.replace(/ \(.*\)$/, "") + (chosen.length > 1 ? ` + ${chosen.length - 1} more` : ""));
-    await loadFile(name, stlBytes(soup), null, step, "version");
+    // The edits are made in the model's own frame, so the same build direction still applies (T-353).
+    await loadFile(name, stlBytes(soup), null, step, "version", { body: 0, scale: 1, up: activeOption()?.up });
     await restoreLoads(carry);
     setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
   });
@@ -2631,7 +2640,7 @@ async function showVersion(i, carry = true) {
   const loads = carry ? carryLoads() : [];
   state.version = i;
   const { name, bytes, faceIds, body, scale } = v.source;
-  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale });
+  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale, up: activeOption()?.up });
   await restoreLoads(loads);
   setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
 }
