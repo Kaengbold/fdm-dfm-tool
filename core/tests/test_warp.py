@@ -77,3 +77,14 @@ def test_tilted_part_curls_like_the_flat_one():
     turn = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])
     tilted = Mesh(bar(45).triangles @ turn.T)
     assert warp.curl(warp.simulate(tilted, turn @ [0, 0, 1], p, h=1.0)) == pytest.approx(flat, rel=0.25)
+
+
+def test_abs_curls_more_than_pla():
+    """T-362: the same bar curls several times more in ABS than in PLA (shrinkage 0.8 vs 0.3 %); the view
+    shows it true size on one scale, so the difference must be in the numbers."""
+    from test_hold import box
+
+    api.load(box(120, 20, 5), "bar")
+    pla, abs_ = (api.warping([0, 0, 1], {"material": m}) for m in ("pla", "abs"))
+    assert abs_["max_mm"] > 2.5 * pla["max_mm"]
+    assert "curl up to" in abs_["explanation"] and abs_["verdict"] != "fine"
