@@ -317,6 +317,7 @@ async function openProject(bytes) {
   renderSettings();
   if (p.up) {
     const option = await call("orientation", { up: p.up, profile: profile(), label: "From the project" });
+    state.picked = { up: p.up, label: option.label };
     state.options.unshift(option);
     renderOptions();
     await selectOption(0);
@@ -433,6 +434,7 @@ async function partLoaded(info) {
   else steps.render();
   const up = state.keepUp;
   state.keepUp = null;
+  if (!up) state.picked = null; // a new part: no orientation picked on it yet
   await findOrientations(false, up);
 }
 
@@ -457,16 +459,31 @@ function showUnitHint(hint) {
   });
 }
 
-/** ``keep``: a build direction (``up``) to stay on if the user had picked it: it is always among the options. */
+/** ``keep``: a build direction (``up``) to stay on: it is always among the options. Without one, the
+ * orientation the user picked (``state.picked``) stays, so a material or printer change doesn't undo it (T-354). */
 async function findOrientations(withLoads = false, keep = null) {
+  const picked = keep ? null : state.picked;
+  keep ??= picked?.up ?? null;
   // With the Strength goal, known loads always count (the simulation beats the pin/neck heuristics).
   const loads = (withLoads || profile().goal === "strength") && readyForStrength() ? state.loads : undefined;
   await busy(loads ? "Finding the best orientation for printing and strength…" : "Finding the best orientation…", async () => {
     const r = await call("orientations", { profile: profile(), loads, faces: faceMarks(), keep: keep ?? undefined });
     state.options = [...r.orientations, r.as_loaded];
+    if (picked && r.kept != null) { // keep the name it had ("Strongest", "Your own"), not a ranking label
+      const o = state.options[r.kept];
+      o.label = picked.label;
+      if (picked.reason) o.reasons.push(picked.reason);
+    }
     renderOptions();
     await selectOption(keep && r.kept != null ? r.kept : 0);
   }, ["orient", "problems", "strength", "settings", "result"]);
+}
+
+/** The user chose an option: it stays chosen when the setup changes; the recommended one follows the ranking. */
+function pickOption(i) {
+  const o = state.options[i];
+  state.picked = i === 0 ? null : { up: o.up, label: o.label };
+  return selectOption(i);
 }
 
 async function selectOption(i) {
@@ -508,6 +525,7 @@ function tippedUp(forward, sideways) {
 async function useOwnOrientation(up) {
   const option = await busy("Checking your orientation…", () => call("orientation", { up, profile: profile(), label: "Your own" }));
   option.reasons.push("Turned by you");
+  state.picked = { up, label: option.label, reason: "Turned by you" };
   state.options = [...state.options.filter((o) => o.label !== "Your own"), option];
   renderOptions();
   await selectOption(state.options.length - 1);
@@ -563,7 +581,7 @@ function renderOptions() {
     ...state.options.map((o, i) =>
       el(
         "li",
-        { onclick: () => selectOption(i), className: i === state.active ? "active" : "" },
+        { onclick: () => pickOption(i), className: i === state.active ? "active" : "" },
         el("strong", { textContent: o.label }, i === 0 ? el("span", { className: "tag", textContent: "Recommended" }) : ""),
         el("ul", {}, ...o.reasons.map((r) => el("li", { textContent: r }))),
         optionCost(o) ? el("p", { className: "option-cost", textContent: optionCost(o) }) : "",
@@ -1795,6 +1813,7 @@ async function useTrial(t) {
 /** Re-rank with the loads, then show the strength of the new best orientation (not the old result). */
 async function rankWithStrength() {
   const before = activeOption()?.label;
+  state.picked = null; // asked for a new ranking
   await findOrientations(true);
   await runStrength();
   setStatus(`${activeOption().label === before ? "Still the best" : "New best orientation"} with your load: safety ×${state.strength.safety_factor.toFixed(1)}.`);
@@ -2283,6 +2302,7 @@ async function applyOption(o, recheck = true) {
   } else if (o.up) {
     const option = await call("orientation", { up: o.up, profile: profile(), label: "Strongest" });
     option.reasons.push("Strongest for your load");
+    state.picked = { up: o.up, label: option.label, reason: "Strongest for your load" };
     state.options.unshift(option);
     renderOptions();
     await selectOption(0);
