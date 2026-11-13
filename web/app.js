@@ -55,7 +55,10 @@ function startWorker() {
       else if (pending.has(data.id)) {
         const { resolve: ok, reject: fail } = pending.get(data.id);
         pending.delete(data.id);
-        data.error ? fail(new Error(data.error)) : ok(data.result);
+        if (data.fatal) {
+          fail(new Error(`The engine crashed on this part and has restarted, so you can go on (please report the part): ${data.error}`));
+          cancelEngine(); // a dead engine fails every later call, even loading another part
+        } else data.error ? fail(new Error(data.error)) : ok(data.result);
       }
     });
   });
@@ -360,7 +363,8 @@ function showBodyPicker(bodies, active, pick) {
 }
 
 /** ``step``: the STEP file this part came from (and the edits applied so far), or null. ``as``: "new"
- * starts the version list over; otherwise the model is the current version (see versions). */
+ * starts the version list over; otherwise the model is the current version (see versions).
+ * ``keep.up``: the build direction to stay on (another version of the same part). */
 async function loadFile(name, bytes, faceIds = null, step = null, as = "new", keep = { body: 0, scale: 1 }) {
   await busy("Reading the part…", async () => {
     await engineReady;
@@ -371,6 +375,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
+    state.keepUp = keep.up ?? null;
     if (as === "new" || !state.versions.length) {
       state.versions = [{ label: "Original" }];
       state.version = 0;
@@ -422,7 +427,9 @@ async function partLoaded(info) {
   $("view-key").hidden = false;
   if (steps.current === "part") steps.go("have");
   else steps.render();
-  await findOrientations();
+  const up = state.keepUp;
+  state.keepUp = null;
+  await findOrientations(false, up);
 }
 
 /** Parts exported in inches, centimetres or metres arrive 25.4× / 10× / 1000× off; offer a one-click fix. */
@@ -446,14 +453,15 @@ function showUnitHint(hint) {
   });
 }
 
-async function findOrientations(withLoads = false) {
+/** ``keep``: a build direction (``up``) to stay on if the user had picked it: it is always among the options. */
+async function findOrientations(withLoads = false, keep = null) {
   // With the Strength goal, known loads always count (the simulation beats the pin/neck heuristics).
   const loads = (withLoads || profile().goal === "strength") && readyForStrength() ? state.loads : undefined;
   await busy(loads ? "Finding the best orientation for printing and strength…" : "Finding the best orientation…", async () => {
-    const r = await call("orientations", { profile: profile(), loads, faces: faceMarks() });
+    const r = await call("orientations", { profile: profile(), loads, faces: faceMarks(), keep: keep ?? undefined });
     state.options = [...r.orientations, r.as_loaded];
     renderOptions();
-    await selectOption(0);
+    await selectOption(keep && r.kept != null ? r.kept : 0);
   }, ["orient", "problems", "strength", "settings", "result"]);
 }
 
@@ -1481,21 +1489,26 @@ function stopSwing() {
 }
 
 // ---------- warping simulation ----------
-const WARP_FIELD = { title: "Curls by (mm)", note: "exaggerated shape, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+const WARP_FIELD = { title: "Curls by (mm)", note: "true size, after it comes off the bed", fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) };
+const WARP_FIELD_BIG = { ...WARP_FIELD, note: "shape exaggerated so it's easy to see" };
+// One colour scale for every material (T-362): scaled to each result's own maximum, PLA and ABS looked alike
+// although ABS curls several times more.
+const WARP_SCALE_MM = 1;
 const RESIDUAL_FIELD = { title: "Stress left inside (MPa)", note: "after it cools, rough", fmt: (v) => v.toFixed(v < 10 ? 1 : 0) };
 
 /** The warping result in the 3D view: the curled shape, or the stress the shrinking leaves inside. */
 function warpView() {
   const w = state.warp;
   const stress = state.warpShow === "stress";
-  const max = Math.max(stress ? w.stress_max : w.max_mm, 1e-9);
+  const big = state.warpShow === "exaggerated";
+  const max = Math.max(stress ? w.stress_max : Math.max(w.max_mm, WARP_SCALE_MM), 1e-9);
   const key = `warp|${w.curl_mm}|${activeOption().up}|${stress}`;
   if (viewer.fieldKey !== key || !viewer.field) {
     viewer.showField({ triangles: f32(w.field_triangles), values: f32(stress ? w.stress_value : w.vertex_value), disp: f32(w.vertex_disp), max });
     viewer.fieldKey = key;
   }
-  viewer.setDeformation(stress ? 0 : (0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9));
-  renderLegend(stress ? RESIDUAL_FIELD : WARP_FIELD, max);
+  viewer.setDeformation(stress ? 0 : big ? (0.06 * viewer.part.geometry.boundingSphere.radius) / Math.max(w.max_mm, 1e-9) : 1);
+  renderLegend(stress ? RESIDUAL_FIELD : big ? WARP_FIELD_BIG : WARP_FIELD, max);
   return true;
 }
 
@@ -1514,7 +1527,8 @@ $("run-warp").onclick = async () => {
       recolor();
     };
     const what = el("select", { id: "warp-show" },
-      el("option", { value: "shape", textContent: "Curled shape (red dots lift first)" }),
+      el("option", { value: "shape", textContent: "Curled shape, true size (red dots lift first)" }),
+      el("option", { value: "exaggerated", textContent: "Curled shape, exaggerated" }),
       el("option", { value: "stress", textContent: "Stress left inside after cooling" }));
     what.value = state.warpShow ?? "shape";
     what.onchange = () => {
@@ -2059,13 +2073,13 @@ async function pickVolume(hit) {
   const info = state.regionInfo[region];
   let from, what;
   if (pick.clicks === 2) [from, what] = [{ point: pick.points[0], point2: pick.points[1] }, "between two spots"];
-  else if (pick.kind === "void") [from, what] = [{ point: hit.point }, "pin hole at the spot"];
+  else if (pick.kind === "void") [from, what] = [{ point: hit.point, normal: info.normal }, "pin hole at the spot"]; // into the wall from a side face
   else if (info.area_mm2 > BIG_FACE_MM2) [from, what] = [{ point: hit.point }, "the clicked spot"];
   else [from, what] = [{ region }, info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`];
   try {
     const v = await busy("Placing the box…", () => call("volume_at", { up: activeOption().up, kind: pick.kind, profile: profile(), ...from }));
     remember("an advanced design change");
-    setVolumes([...state.volumes, { ...v, from, what, margin: v.kind === "void" && !from.region && !from.point2 ? 0.3 : 3 }]);
+    setVolumes([...state.volumes, { ...v, from, what }]);
     setStatus(`${VOLUME_NAME[v.kind]} added. ${v.notes[0] ?? ""}`);
   } catch (err) {
     setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
@@ -2123,7 +2137,7 @@ function setVolumes(volumes) {
     const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
     const size = pin
       ? el("label", {}, "Width ", num(+(v.margin * 2).toFixed(1), 0.2, 4, 0.1, (e) => resizeVolume(i, Math.max(0.1, Number(e.target.value) / 2 || 0.3))), " mm")
-      : el("label", {}, "Reaches ", num(v.margin, 0, 30, 1, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
+      : el("label", {}, "Reaches ", num(v.margin, 0, 30, 0.5, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
       el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
@@ -2488,7 +2502,8 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     remember("design changes");
     const carry = carryLoads();
     addVersion(chosen[0].title.replace(/ \(.*\)$/, "") + (chosen.length > 1 ? ` + ${chosen.length - 1} more` : ""));
-    await loadFile(name, stlBytes(soup), null, step, "version");
+    // The edits are made in the model's own frame, so the same build direction still applies (T-353).
+    await loadFile(name, stlBytes(soup), null, step, "version", { body: 0, scale: 1, up: activeOption()?.up });
     await restoreLoads(carry);
     setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.`);
   });
@@ -2652,7 +2667,7 @@ async function showVersion(i, carry = true) {
   const loads = carry ? carryLoads() : [];
   state.version = i;
   const { name, bytes, faceIds, body, scale } = v.source;
-  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale });
+  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale, up: activeOption()?.up });
   await restoreLoads(loads);
   setStatus(`${state.summary} — showing ${versionName(v, i)}.`);
 }

@@ -548,7 +548,7 @@
             <label class="field" title="Several of this part on one plate, set out in rows; how many fit depends on the printer">Copies on the plate <input id="dl-copies" type="number" min="1" step="1" value="1" /></label>
             <p id="copies-text" class="hint" hidden></p>
             <ul id="copies-notes" class="hint" hidden></ul>
-            <label class="field" title="The slicer roughens the outside walls: a grippy, matte surface for knobs and handles that also hides layer lines. Those walls print slower"><input type="checkbox" id="dl-grip" /> Grip texture (fuzzy skin) on the outside</label>
+            <label class="toggle" title="The slicer roughens the outside walls: a grippy, matte surface for knobs and handles that also hides layer lines. Those walls print slower"><input type="checkbox" id="dl-grip" /> Grip texture (fuzzy skin) on the outside</label>
             <label id="pause-for" class="field" hidden><input type="checkbox" id="dl-pause" checked /> <span id="pause-text"></span></label>
             <label id="pause-sliced" class="file-button" hidden title="Bambu Studio ignores the pause in the 3MF. Slice there, export the plate's sliced file (or the G-code), choose it here and print the file you get back">Add the pause to a file sliced in Bambu Studio…<input id="pause-file" type="file" accept=".gcode,.gco,.g,.3mf" hidden /></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
