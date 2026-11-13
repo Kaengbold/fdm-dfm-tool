@@ -377,6 +377,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
     state.keepUp = keep.up ?? null;
     if (as === "new" || !state.versions.length) {
+      state.turnOffered = false; // a new part: offer a stronger orientation again (T-368)
       state.versions = [{ label: "Original" }];
       state.version = 0;
       undoStack.length = 0;
@@ -831,7 +832,7 @@ function shows(block) {
 }
 
 /** Everything drawn on the part, for the step shown: loads and results in "Will it hold?", heat and
- * warping in "Problems", edit previews in "Design changes" — each step shows its own things only. */
+ * warping in "While printing", edit previews in "Design changes" — each step shows its own things only. */
 function recolor() {
   const option = activeOption();
   if (!option) return;
@@ -840,7 +841,7 @@ function recolor() {
   drawBoxes();
   showMarkers();
   if (strengthView()) return;
-  if (shows("problems") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
+  if (shows("printing") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
   const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
   const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
@@ -870,7 +871,7 @@ function showMarkers() {
     viewer.mark(viewer.toShown(state.boxHeat.source), "--force"); // the electronics
     return;
   }
-  if (shows("sims") && state.showWarp && state.warp) {
+  if (shows("printing") && state.showWarp && state.warp) {
     viewer.showFindings([]);
     if (state.warpShow !== "stress") for (const p of state.warp.lift_points_print) viewer.mark(p);
     return;
@@ -1268,7 +1269,7 @@ async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
   const what = useGcode() ? " with your sliced print (its walls, infill and line directions)" : "";
-  return busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
+  const r = await busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
     const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: printZones() }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
@@ -1289,8 +1290,28 @@ async function runStrength(fine = false) {
     setStatus(state.summary);
     return r;
   }, ["strength", "result"]);
+  // The first time a part doesn't hold: is it just lying the wrong way? (Once per part, T-368.)
+  if (r && !fine && r.verdict !== "fine" && !state.turnOffered) {
+    state.turnOffered = true;
+    await offerTurn();
+  }
+  return r;
 }
 $("run-strength").onclick = () => runStrength();
+
+/** Offer the strongest square build direction, when it holds clearly more than this one. */
+async function offerTurn() {
+  const o = await busy("Checking whether another orientation holds more…", () =>
+    call("stronger_orientation", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() }), ["strength"]);
+  if (!o?.up) return;
+  const box = el("div", { className: "verdict borderline turn-offer" },
+    el("strong", { textContent: `Turned another way it holds ×${o.safety_factor.toFixed(1)} instead of ×${o.current.toFixed(1)}` }),
+    el("p", { textContent: "The load would run along the layers instead of pulling them apart. Use that orientation?" }),
+    el("div", { className: "row" },
+      el("button", { className: "primary", textContent: "Turn it", onclick: () => applyOption({ up: o.up }) }),
+      el("button", { textContent: "Keep this one", onclick: () => box.remove() })));
+  $("strength-result").prepend(box);
+}
 
 // ---------- strength: shaking and knocks (optional, Advanced) ----------
 for (const [box, row] of [["dyn-shake", "dyn-shake-row"], ["dyn-drop", "dyn-drop-row"]]) {
@@ -1411,7 +1432,7 @@ const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
 function strengthView() {
   if (shows("sims") && state.showSwing && state.swing) return swingView();
   stopSwing();
-  if (shows("sims") && state.showWarp && state.warp) return warpView();
+  if (shows("printing") && state.showWarp && state.warp) return warpView();
   if (shows("sims") && state.showBoxHeat && state.boxHeat) return boxHeatView();
   const r = state.strength;
   if (!(shows("strength") && state.showHeat && r)) {
@@ -3333,7 +3354,7 @@ const makeReport = (project = false) =>
         state.showWarp = true;
         report.warp = { kind: w.verdict === "fine" ? "ok" : w.verdict === "might lift" ? "warn" : "bad",
           head: w.verdict === "fine" ? "Stays flat" : w.verdict === "might lift" ? "Corners might lift" : "Corners will likely lift",
-          lines: [w.explanation], picture: pictureWith("sims", () => viewer.snapshot()), note: "Shape exaggerated; red dots lift first." };
+          lines: [w.explanation], picture: pictureWith("printing", () => viewer.snapshot()), note: "Shape exaggerated; red dots lift first." };
       }
       const chosen = state.edits.filter((e) => e.selected);
       if (chosen.length) report.design = { items: chosen, picture: pictureWith("design", () => viewer.snapshot()) };
