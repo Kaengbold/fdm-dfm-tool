@@ -385,7 +385,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### Print failure risk
 
-- [ ] **T-390 P2** Bed adhesion: does the warping pull exceed what the bed holds? Researched grip values per material and bed surface (editable in Expert) → "may come loose here". · files: `core/fdmcore/warp.py`, `core/fdmcore/data/thresholds.yaml`, `rules.yaml` · owner: —
+- [~] **T-390 P2** Bed adhesion: does the warping pull exceed what the bed holds? Researched grip values per material and bed surface (editable in Expert) → "may come loose here". · files: `core/fdmcore/warp.py`, `core/fdmcore/data/thresholds.yaml`, `rules.yaml` · owner: Claude (`task/T-390-bed-grip`)
 - [ ] **T-391 P2** Print failure risk rating from the printer (enclosure, bed) and the warping / adhesion simulation, with a brim or raft suggested from it. · files: `core/fdmcore/api.py`, `core/fdmcore/data/rules.yaml` · owner: —
 
 ### Advanced design changes
