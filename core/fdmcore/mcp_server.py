@@ -308,6 +308,23 @@ def strength_options(
 
 
 @server.tool()
+def stronger_orientation(
+    up: list[float],
+    loads: list[dict],
+    printer: str = "bambu_p1s",
+    material: str = "pla",
+    nozzle: str = "0.4",
+    walls: int | None = None,
+    infill: float | None = None,
+    top: int | None = None,
+    bottom: int | None = None,
+) -> dict:
+    """Quick check whether the part holds clearly more (1.3x) lying another way: the strongest of the six square
+    build directions (``up``, None if none is clearly better), its safety factor and ``current`` for ``up``."""
+    return api.stronger_orientation(up, loads, _profile(printer, material, nozzle), walls, infill, top, bottom)
+
+
+@server.tool()
 def optimise_strength(
     up: list[float],
     loads: list[dict],
@@ -333,7 +350,8 @@ def suggest_design_changes(
     up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", params: dict | None = None,
     keep_clear: list[dict] | None = None,
 ) -> dict:
-    """Detected holes/bosses and suggested geometry edits for this orientation: teardrop holes and corner
+    """Detected holes/bosses (``rounded_edge``: a fillet in an inside corner) and suggested geometry edits
+    for this orientation: teardrop holes and corner
     chamfers (cut away, ``op: cut``), 45° fills under ledges, sacrificial layers over holes that start in
     mid-air and thicker walls (added, ``op: add``).
     ``params`` sets edit sizes, e.g. {"chamfer_mm": 2, "teardrop_angle_deg": 40, "ledge_max_mm": 20,
@@ -840,6 +858,7 @@ API_TOOLS = {
     "strength": "check_strength",
     "strength_variant": "strength_variant",
     "strength_options": "strength_options",
+    "stronger_orientation": "stronger_orientation",
     "design": "suggest_design_changes",
     "compare_nozzles": "compare_nozzles",
     "topology": "suggest_lighter_shape",
