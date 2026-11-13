@@ -185,9 +185,14 @@ def main():
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
+            assert page.locator("#guide button.soon").is_disabled(), "fix-my-print path should be coming soon"
+
             assert page.evaluate("() => !document.getElementById('load-optional').hidden && document.getElementById('load-optional').querySelector('#blk-strength') !== null"), "Simple: load fold empty or hidden"
             page.click("input[name=level][value=expert] >> xpath=..")
             assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+            order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
+            assert order.index("sims") < order.index("printing") < order.index("problems"), order
+
             # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
             assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
             return f"guide -> {simple[0]}; back to expert"
@@ -734,7 +739,11 @@ def main():
                 page.select_option("#use-temp", "")  # back to room temperature for the next steps
                 run.act(lambda: page.dispatch_event("#use-temp", "change"), 300_000)
             return text[:120] + " …" + text[text.index(" | walls"):]
-        run.step("heat inside an electronics box", box_heat)
+        # Switched off in the app for now (T-379): its step comes back with the card.
+        def box_heat_off():
+            assert page.locator("#box-heat").is_hidden(), "electronics box card shown"
+            return "hidden"
+        run.step("electronics box heat is switched off", box_heat_off)
 
         def report_with_pictures():
             with page.expect_download(timeout=180_000) as dl:
@@ -1205,7 +1214,11 @@ def main():
             mine = page.locator("#failed-result .mine li").all_inner_texts()
             assert any("Shallow slope" in m for m in mine), mine
             return mine[0][:100]
-        run.step("my print failed: matched to the part's findings", print_failed)
+        # Switched off in the levels for now (T-383); its step comes back with the "fix my print" path (T-384).
+        def print_failed_off():
+            assert page.locator("#failed-block").is_hidden(), "\"My print failed\" shown"
+            return "hidden"
+        run.step("my print failed is switched off", print_failed_off)
 
         def mating_part():
             # Two parts of one assembly: a copy of the bracket 0.3 mm above it -> 0.30 mm per side, loose (T-348).
@@ -1327,32 +1340,33 @@ def main():
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
 
-        def load_at_an_angle():
-            """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
-            to the tapped face, with the arrow shown on the part while it's set."""
+        def offer_stronger_orientation():
+            """T-368: the first failing strength check on a part offers a stronger orientation, once."""
             run.act(lambda: page.click("[data-sample=mushroom]"))
+            standing = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) > 0.9)")
+            if standing != page.evaluate("() => fdm.state.active"):
+                run.act(lambda: page.locator("#options > li").nth(standing).click())
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 30, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
             page.evaluate("() => fdm.steps.go('strength')")
-            assert "down" not in page.eval_on_selector_all("#dir option", "os => os.map((o) => o.value)")
-            xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
-              for (let f = 0; f < n; f++) { const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);
-                if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y]; } return null; }""")
-            page.mouse.click(*xy)
-            page.wait_for_selector("#pick-panel:not([hidden])", timeout=300_000)  # the first click loads the face tools
-            arrows = page.evaluate("() => fdm.viewer.symbols?.children.length ?? 0")
-            page.select_option("#dir", "angle")
-            page.dispatch_event("#dir", "input")
-            page.fill("#dir-lean", "90")
-            page.dispatch_event("#dir-lean", "input")
-            assert page.locator("#dir-angle").is_visible()
-            assert page.evaluate("() => fdm.viewer.symbols.children.length") > arrows, "no preview arrow"
-            normal = page.evaluate("() => fdm.state.regionInfo[fdm.state.selectedRegion].normal")
-            page.click("#as-load")
-            d = page.evaluate("() => fdm.state.loads.at(-1).direction")
-            assert isinstance(d, list) and abs(sum(a * b for a, b in zip(d, normal))) < 0.01, (d, normal)  # along the face
-            assert page.evaluate("() => fdm.state.previewLoad") is None
-            assert "90° lean" in page.locator("#loads").inner_text(), page.locator("#loads").inner_text()
-            return f"lean 90° on a face with normal {[round(v, 2) for v in normal]}: {d}"
-        run.step("load at an angle to the face", load_at_an_angle)
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            offer = page.locator("#strength-result .turn-offer")
+            assert offer.count() == 1, page.locator("#strength-result").inner_text()[:200]
+            text = offer.locator("strong").inner_text()
+            run.act(lambda: offer.get_by_role("button", name="Turn it").click(), 300_000)
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            assert abs(up[2]) < 0.01, up  # lying on its side now
+            assert page.locator("#strength-result .turn-offer").count() == 0  # once per part
+            return text
+        run.step("failing strength check offers a stronger orientation", offer_stronger_orientation)
 
         def hidden_gap_from_side():
             """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
@@ -1384,6 +1398,33 @@ def main():
             page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
+
+        def load_at_an_angle():
+            """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
+            to the tapped face, with the arrow shown on the part while it's set."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("() => fdm.steps.go('strength')")
+            assert "down" not in page.eval_on_selector_all("#dir option", "os => os.map((o) => o.value)")
+            xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
+              for (let f = 0; f < n; f++) { const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);
+                if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y]; } return null; }""")
+            page.mouse.click(*xy)
+            page.wait_for_selector("#pick-panel:not([hidden])", timeout=300_000)  # the first click loads the face tools
+            arrows = page.evaluate("() => fdm.viewer.symbols?.children.length ?? 0")
+            page.select_option("#dir", "angle")
+            page.dispatch_event("#dir", "input")
+            page.fill("#dir-lean", "90")
+            page.dispatch_event("#dir-lean", "input")
+            assert page.locator("#dir-angle").is_visible()
+            assert page.evaluate("() => fdm.viewer.symbols.children.length") > arrows, "no preview arrow"
+            normal = page.evaluate("() => fdm.state.regionInfo[fdm.state.selectedRegion].normal")
+            page.click("#as-load")
+            d = page.evaluate("() => fdm.state.loads.at(-1).direction")
+            assert isinstance(d, list) and abs(sum(a * b for a, b in zip(d, normal))) < 0.01, (d, normal)  # along the face
+            assert page.evaluate("() => fdm.state.previewLoad") is None
+            assert "90° lean" in page.locator("#loads").inner_text(), page.locator("#loads").inner_text()
+            return f"lean 90° on a face with normal {[round(v, 2) for v in normal]}: {d}"
+        run.step("load at an angle to the face", load_at_an_angle)
 
         for part in args.parts:
             def load_part(part=part):
