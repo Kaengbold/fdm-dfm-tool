@@ -169,8 +169,9 @@ def set_expert(values: dict[str, float]) -> dict:
 CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge")
 # What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
 CALIBRATION_HOW = {
-    "layer_strength": "A 60 mm bar with a hole near each end. Print one lying flat and one standing on its end, hang each "
-                      "by one hole and add weight at the other until it breaks. Standing ÷ flat is your layer strength.",
+    "layer_strength": "A 98 mm dog-bone: thin in the middle, wide with a hole at each end. Print one lying flat and one "
+                      "standing on its end (a brim helps it stay up). Hang each by one hole and pull on the other with a "
+                      "luggage scale (or add weight) until it breaks in the thin middle. Standing ÷ flat is your layer strength.",
     "warping": "Bars 40, 80, 120 and 160 mm long. Print them without a brim (in your enclosure if you have one): "
                "the longest one that stays flat on the bed is how long a part can get before its corners lift.",
     "fit": "A 6 mm peg and holes 6.0 … 6.5 mm (the notched end is 6.0). Try the peg in each hole: "
@@ -181,6 +182,13 @@ CALIBRATION_HOW = {
               "the longest one that doesn't sag is how far it can bridge.",
 }
 FIT_GAUGE_GAPS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)  # hole sizes of the fit gauge: 6 mm + these
+# Layer strength dog-bone (T-387), the shape of tensile test bars (ASTM D638 / ISO 527): the middle is the weakest
+# section, so it breaks there and not at a hole. The old straight bar had only 4 of its 10 mm left beside each
+# hole and broke there. A pin in a hole puts 2.5-3x the average stress beside it, so the ends carry 9x the
+# middle's section; the strength check (pin on a third of the hole) then finds the most stress in the middle,
+# lying and standing. A thin middle also keeps the break weight within a luggage scale (PLA ~50 MPa x 12 mm²).
+# Ends: width, length, hole (an M5 bolt, a string); middle: width, length; round between them; thickness (mm).
+DOGBONE = {"end_w": 34.0, "end_l": 22.0, "hole_d": 6.0, "mid_w": 3.0, "mid_l": 30.0, "round": 12.0, "thick": 4.0}
 OVERHANG_TEST_DEG = (40, 45, 50, 55, 60, 65, 70)  # from vertical
 BRIDGE_TEST_MM = (10, 20, 30, 40, 50)
 
@@ -218,12 +226,18 @@ def calibration_part(kind: str) -> dict:
         return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "bridge_test.stl", "how": CALIBRATION_HOW[kind]}
 
     if kind == "layer_strength":
-        from shapely.geometry import Point, box as sbox
-
-        from .additions import extrude
-
-        outline = sbox(0, 0, 60, 10).difference(Point(6, 5).buffer(3, 32)).difference(Point(54, 5).buffer(3, 32))
-        return {"stl": to_binary_stl(Mesh(extrude(outline, 0, 6))), "name": "layer_strength_test.stl", "how": CALIBRATION_HOW[kind]}
+        d = DOGBONE
+        length = 2 * (d["end_l"] + d["round"]) + d["mid_l"]
+        w, half, r, e = d["end_w"], d["mid_w"] / 2, d["round"], d["end_l"]
+        # Top edge, then mirrored: the inside corners where the middle meets the ends are quarter rounds (no
+        # corner for a crack to start at). Drawn point by point: a shrinking buffer can kill Pyodide's GEOS (T-268).
+        a = np.linspace(0, np.pi / 2, 16)
+        top = [(0, w / 2), (e, w / 2), *zip(e + r - r * np.cos(a), half + r - r * np.sin(a)),
+               *zip(length - e - r + r * np.sin(a), half + r - r * np.cos(a)), (length - e, w / 2), (length, w / 2)]
+        bone = Polygon([(x, w / 2 + y) for x, y in top] + [(x, w / 2 - y) for x, y in reversed(top)])
+        for x in (d["end_l"] / 2, length - d["end_l"] / 2):
+            bone = bone.difference(Point(x, w / 2).buffer(d["hole_d"] / 2, 64))
+        return {"stl": to_binary_stl(Mesh(extrude(bone, 0, d["thick"]))), "name": "layer_strength_test.stl", "how": CALIBRATION_HOW[kind]}
     if kind == "warping":
         tris = []
         for i, length in enumerate((40, 80, 120, 160)):
@@ -290,13 +304,16 @@ def _info() -> dict:
     }
 
 
-def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | None = None, faces: dict | None = None) -> dict:
+def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | None = None, faces: dict | None = None,
+                 keep: list[float] | None = None) -> dict:
     """Best build directions for the loaded part, plus how it scores as loaded.
 
     With ``loads``, candidates are also ranked by strength: a weak orientation is
     penalised even when it prints more easily. ``faces`` = {"clean": [region ids],
     "bed": [...], "vertical": [...]}: faces that should stay free of support marks / sit on
     the bed / stand upright (a flat face upright, or a round hole or pin with its axis up).
+    ``keep``: a build direction that is always among the options (``kept`` = its index), scored like
+    the others: after a design change the part stays the way the user had it on the bed (T-353).
     """
     s = _require()
     p = Profile.from_dict(profile)
@@ -304,6 +321,13 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     progress.report(0, "Scoring directions")
     candidates = find_orientations(s.mesh, settings, top=3 * top)  # extra, some get filtered out below
     as_loaded = evaluate(s.mesh, [0, 0, 1], settings)
+    kept = None
+    if keep is not None:
+        k = np.asarray(keep, float) / np.linalg.norm(keep)
+        kept = next((r for r in candidates if np.dot(r.up, k) > 0.999), None)
+        if kept is None:
+            kept = evaluate(s.mesh, k, settings)
+            candidates.append(kept)
     marked = _marked_faces(faces)
     if marked:
         # Lying on a face the user wants on the bed may not be among the generic best: add it.
@@ -357,13 +381,19 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
             seen.add(key)
             unique.append(r)
     candidates = unique
+    if kept is not None and all(r is not kept for r in candidates):  # filtered out as a near-twin or as worse
+        candidates.append(kept)
 
     candidates = candidates[: top + 2]
+    if kept is not None and all(r is not kept for r in candidates):
+        candidates.append(kept)
     placed = {id(r): _placement(s.mesh, r, p) for r in [*candidates, as_loaded]}
     with stage(0.95 if loads or p.goal == "strength" else 0.2, 1.0):
         _refine(s.mesh, [*candidates, as_loaded], placed, settings, p)
     candidates.sort(key=lambda r: (not placed[id(r)][1]["fits"], r.score))
     candidates = candidates[:top]
+    if kept is not None and all(r is not kept for r in candidates):
+        candidates.append(kept)
 
     def pack(r, label):
         out = _pack(s.mesh, r, label, settings, placed[id(r)][0], p, safety.get(id(r)))
@@ -374,6 +404,7 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     return {
         "as_loaded": pack(as_loaded, "As loaded"),
         "orientations": [pack(r, f"Option {i + 1}") for i, r in enumerate(candidates)],
+        "kept": next((i for i, r in enumerate(candidates) if r is kept), None),
     }
 
 
@@ -697,7 +728,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
-        best["beyond"] = _strongest_first(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target))
+        best["beyond"] = _preferred(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target), target)
     if zones:
         with stage(0.9, 1.0):
             light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
@@ -775,10 +806,14 @@ SOLID_KINDS = ("add_solid", "cut_solid")  # change the model itself (volume_soli
 DESIGN_ONLY = ("keep_clear", *SOLID_KINDS)  # not in the 3MF
 VOID_MM = 0.6  # a gap picked on a spot: a thin upright pin hole, the "holes that force walls" trick
 VOID_COVER_MM = 1.0  # plastic left above and below such a pin hole, so it doesn't show
+# Support / no support on a picked face: only that face, not 3 mm round it (T-363), reaching where the
+# supports touching it are: down to the bed under a face that faces down, up to the top over one that
+# faces up, ZONE_MARGIN_MM out from a side face.
+FACE_SUPPORT_MARGIN_MM = 0.5
 
 
 def volume_at(up, kind: str, region: int | None = None, point=None, point2=None, margin: float | None = None,
-              profile: dict | None = None, shape: str = "box") -> dict:
+              profile: dict | None = None, shape: str = "box", normal=None) -> dict:
     """An advanced design box, upright in the build frame like a zone: around a face (``region``),
     a spot (``point``) or between two spots (``point`` and ``point2``, part coordinates), ``margin``
     mm bigger on every side. ``kind``: "support" / "blocker" (support enforcer / blocker in the 3MF),
@@ -786,7 +821,8 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     hole up through the part that stays inside it), "keep_clear" (space that must stay empty; not
     exported), "add_solid" / "cut_solid" (a block of plastic added to or cut from the model itself: see
     volume_solid). Returns the box, its corners on the bed and plain notes on what it does here. ``shape``:
-    "box", "cylinder" or "ball" inside that box (strength.ZONE_SHAPES)."""
+    "box", "cylinder" or "ball" inside that box (strength.ZONE_SHAPES). ``normal``: the clicked face's outward
+    normal (part coordinates), so a pin hole picked on a side face goes into the wall, not along its surface."""
     from .regions import find_regions
 
     if kind not in VOLUME_KINDS:
@@ -807,10 +843,18 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     built = pts @ r0.T
     zs = (s.mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2]
     pin = kind == "void" and region is None and point2 is None
+    on_face = kind in ("support", "blocker") and region is not None
     if margin is None:
-        margin = VOID_MM / 2 if pin else ZONE_MARGIN_MM
-    lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
+        margin = VOID_MM / 2 if pin else FACE_SUPPORT_MARGIN_MM if on_face else ZONE_MARGIN_MM
     inside = _inside_test(s.mesh, r0)
+    if pin and normal is not None:  # into the wall: the vertical pin can't run along a side face
+        n = r0 @ np.asarray(normal, float)
+        side = np.hypot(n[0], n[1])
+        if side > 0.3:
+            built = built - [*(n[:2] / side * (VOID_COVER_MM + VOID_MM / 2)), 0.0]
+    lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
+    if on_face:
+        _reach_supports(s.mesh, int(region), r0, lo, hi, zs)
     if pin:
         lo[2], hi[2] = _solid_run(inside, built[0], zs.min(), zs.max())
     # Slicer boxes stay between the bed and the top of the part (see _zone_box); keep-clear space may be above it.
@@ -823,7 +867,7 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
         raise ValueError(f"shape must be one of {ZONE_SHAPES}")
     box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0, "shape": shape}
     corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"], _moving(p))["corners_print"]
-    return {**box, "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
+    return {**box, "margin": float(margin), "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
 
 
 def volume_solid(up, boxes: list[dict]) -> list[dict]:
@@ -940,6 +984,27 @@ def _inside_test(mesh: Mesh, r0: np.ndarray):
 
     inside.h = grid.h
     return inside
+
+
+def _reach_supports(mesh: Mesh, region: int, r0: np.ndarray, lo: np.ndarray, hi: np.ndarray, zs: np.ndarray) -> None:
+    """Grow a support / no-support box on a face (in place) to where the supports touching that face are:
+    down to the bed under a face that faces down, up to the top over one facing up, out from a side face."""
+    s = _require()
+    normals, areas = mesh.normals_and_areas()
+    sel = np.asarray(s.regions) == region
+    n = r0 @ ((normals[sel] * areas[sel, None]).sum(axis=0))
+    n /= max(np.linalg.norm(n), 1e-12)
+    if n[2] < -0.3:
+        lo[2] = zs.min()
+    elif n[2] > 0.3:
+        hi[2] = zs.max()
+    side = np.hypot(n[0], n[1])
+    if side > 0.3:
+        for k in (0, 1):
+            if n[k] > 0.3 * side:
+                hi[k] += ZONE_MARGIN_MM
+            elif n[k] < -0.3 * side:
+                lo[k] -= ZONE_MARGIN_MM
 
 
 def _solid_run(inside, at: np.ndarray, zmin: float, zmax: float) -> tuple[float, float]:
@@ -1207,7 +1272,7 @@ def _warp_story(r: dict, p: Profile) -> str:
     }[r["verdict"]]
     fix = "" if r["verdict"] == "fine" else (" A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
                                               " or rounding the corners of the base help. Upper layers shrinking onto the warm bottom cause it.")
-    return head + fix + " The shape shown is exaggerated." + _stress_story(r)
+    return head + fix + f" Off the bed it would curl up to {r['max_mm']:.2f} mm." + _stress_story(r)
 
 
 def _stress_story(r: dict) -> str:
@@ -1273,7 +1338,9 @@ def topology(up, loads: list[dict], profile: dict | None = None, keep: float = 0
     model = cases[0].model
     with stage(0.0, 0.9):
         r = topopt.optimise(cases, up, p, float(keep))
-    solid = topopt.keep_connected(model, r["density"] > topopt.SOLID, r["passive"])
+    solid = topopt.keep_connected(model, r["density"] > topopt.SOLID, r["loaded"], r["held"])
+    if not solid.any():
+        raise ValueError("No shape at this setting joins the load to where the part is held: keep more plastic")
     tris = topopt.voxel_surface(model.grid, model.elems[solid])
     with stage(0.9, 1.0):
         before = min(topopt.safety_solid(c, up, p, np.ones(len(solid), bool)) for c in cases)
@@ -1285,8 +1352,11 @@ def topology(up, loads: list[dict], profile: dict | None = None, keep: float = 0
             f"({100 * shape_g / part_g:.0f} %). Printed solid it holds about ×{after:.1f} the load (the whole part solid: ×{before:.1f}). ")
     text += ("That's still enough. " if after >= need else
              f"That's below ×{need:g}: keep more plastic, or thicken the thinnest struts when you redesign it. ")
+    if r["keep_used"] > float(keep) + 0.01:
+        text += (f"The held and loaded faces stay whole and already take much of the plastic, so it keeps "
+                 f"{100 * r['keep_used']:.0f} % instead of {100 * float(keep):.0f} %. ")
     text += "It's blocky and not a finished part: use it as a guide to redesign the part in CAD."
-    return {"keep": float(keep), "rounds": r["rounds"], "cubes": int(len(solid)), "part_g": round(part_g, 1),
+    return {"keep": float(keep), "keep_used": r["keep_used"], "rounds": r["rounds"], "cubes": int(len(solid)), "part_g": round(part_g, 1),
             "shape_g": round(shape_g, 1), "safety_solid_part": before, "safety_solid_shape": after, "enough": after >= need,
             "explanation": text, "stl": to_binary_stl(Mesh(tris)), "triangles": tris.astype(np.float32).tobytes()}
 
@@ -1621,8 +1691,8 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
                      top: int | None = None, bottom: int | None = None) -> list[dict]:
     """Every way to make it stronger, each with its safety factor, what it costs and why it helps:
     slicer settings (more walls, infill, top/bottom layers), the strongest orientation, a design change
-    at the weak spot (from the last strength check), other materials and a lighter load. Sorted strongest
-    first, a lighter load always last. ``base_safety`` on each: today's safety with the same shell model,
+    at the weak spot (from the last strength check), other materials and a lighter load. In the order of
+    ``_preferred`` (easiest that is enough first, materials and a lighter load last). ``base_safety`` on each: today's safety with the same shell model,
     so the +/- % compares like with like (the G-code strength check gives its own, different number)."""
     from dataclasses import replace
 
@@ -1670,13 +1740,24 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
     out += _beyond_settings(base, p, profile, loads)
     for o in out:
         o["base_safety"] = float(base["safety_factor"])
-    return _strongest_first(out)
+    return _preferred(out, required_safety(p))
 
 
-def _strongest_first(options: list[dict]) -> list[dict]:
-    """Strongest first, but carrying less always last: it doesn't make the part any stronger, it's
-    the way out when nothing else is enough — so it never leads, even with the best number."""
-    return sorted(options, key=lambda o: (o["kind"] == "load", -(o["safety_factor"] or 0)))
+# How much fuss each kind of change is: the easiest one that is enough comes first (T-366).
+EFFORT = {"slicer": 0, "orientation": 1, "design": 2}
+
+
+def _preferred(options: list[dict], need: float) -> list[dict]:
+    """The easiest changes that reach ``need`` first (slicer settings before turning the part before a
+    design change), then the rest strongest first. Another material comes after all of those, even
+    when it's stronger: the user would have to buy and dry a new spool (T-366). Carrying less is
+    always last: it doesn't make the part stronger, it's the way out when nothing else is enough."""
+    def key(o):
+        sf = o["safety_factor"]
+        enough = sf is not None and sf >= need
+        return (o["kind"] == "load", o["kind"] == "material", not enough,
+                EFFORT.get(o["kind"], 3) if enough else 0, -(sf or 0))
+    return sorted(options, key=key)
 
 
 def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:

@@ -62,6 +62,7 @@ onmessage = async ({ data: { id, method, args, data } }) => {
   } catch (err) {
     // Python tracebacks are long; the last line is the useful one.
     const msg = String(err.message ?? err).trim().split("\n").pop();
-    postMessage({ id, error: msg });
+    // A C++ error (GEOS) aborts Pyodide for good: the page has to start a fresh engine.
+    postMessage({ id, error: msg, fatal: Boolean(err.pyodide_fatal_error) });
   }
 };
