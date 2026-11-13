@@ -350,7 +350,8 @@ def suggest_design_changes(
     up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", params: dict | None = None,
     keep_clear: list[dict] | None = None,
 ) -> dict:
-    """Detected holes/bosses and suggested geometry edits for this orientation: teardrop holes and corner
+    """Detected holes/bosses (``rounded_edge``: a fillet in an inside corner) and suggested geometry edits
+    for this orientation: teardrop holes and corner
     chamfers (cut away, ``op: cut``), 45° fills under ledges, sacrificial layers over holes that start in
     mid-air and thicker walls (added, ``op: add``).
     ``params`` sets edit sizes, e.g. {"chamfer_mm": 2, "teardrop_angle_deg": 40, "ledge_max_mm": 20,
