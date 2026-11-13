@@ -65,8 +65,10 @@ Run both pytest and the e2e smoke test before marking a task done if you touched
 or `core/fdmcore/api.py`.
 
 CI (`.github/workflows/`) runs each check only on pull requests that change its files, and not again
-on `main` after the merge, to save Actions minutes: run the checks locally as above, or start one by
-hand from the Actions tab ("Run workflow").
+on `main` after the merge, to save Actions minutes (they are limited). The browser smoke test (~15 min) doesn't
+run by itself at all: add the label `browser-test` to a pull request when it's ready to merge (each push then
+re-runs it; remove the label to stop), or start it by hand from the Actions tab ("Run workflow"). So run the
+checks locally as above before opening a pull request. Engine tests run on both of the runner's cores (`-n 2`).
 
 ## Style
 

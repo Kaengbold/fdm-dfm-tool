@@ -2035,13 +2035,13 @@ async function pickVolume(hit) {
   const info = state.regionInfo[region];
   let from, what;
   if (pick.clicks === 2) [from, what] = [{ point: pick.points[0], point2: pick.points[1] }, "between two spots"];
-  else if (pick.kind === "void") [from, what] = [{ point: hit.point }, "pin hole at the spot"];
+  else if (pick.kind === "void") [from, what] = [{ point: hit.point, normal: info.normal }, "pin hole at the spot"]; // into the wall from a side face
   else if (info.area_mm2 > BIG_FACE_MM2) [from, what] = [{ point: hit.point }, "the clicked spot"];
   else [from, what] = [{ region }, info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`];
   try {
     const v = await busy("Placing the box…", () => call("volume_at", { up: activeOption().up, kind: pick.kind, profile: profile(), ...from }));
     remember("an advanced design change");
-    setVolumes([...state.volumes, { ...v, from, what, margin: v.kind === "void" && !from.region && !from.point2 ? 0.3 : 3 }]);
+    setVolumes([...state.volumes, { ...v, from, what }]);
     setStatus(`${VOLUME_NAME[v.kind]} added. ${v.notes[0] ?? ""}`);
   } catch (err) {
     setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
@@ -2099,7 +2099,7 @@ function setVolumes(volumes) {
     const num = (value, min, max, step, onchange) => Object.assign(el("input", { type: "number", min, max, step, value }), { onchange });
     const size = pin
       ? el("label", {}, "Width ", num(+(v.margin * 2).toFixed(1), 0.2, 4, 0.1, (e) => resizeVolume(i, Math.max(0.1, Number(e.target.value) / 2 || 0.3))), " mm")
-      : el("label", {}, "Reaches ", num(v.margin, 0, 30, 1, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
+      : el("label", {}, "Reaches ", num(v.margin, 0, 30, 0.5, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
       el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
