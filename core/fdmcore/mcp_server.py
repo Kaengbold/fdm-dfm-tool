@@ -583,6 +583,13 @@ def check_setup(printer: str = "bambu_p1s", material: str = "pla", nozzle: str =
 
 
 @server.tool()
+def printer_tolerance(printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """The fit gaps in use (typical, or measured with the fit test print in My materials) and the slicer hole
+    compensation that follows from them (None until the fit test is measured)."""
+    return _clean(api.tolerance(_profile(printer, material, nozzle)))
+
+
+@server.tool()
 def heat_curve(material: str = "pla", use_temp_c: float | None = None) -> dict:
     """How much of its strength a material keeps from −20 °C to past its heat limit (``temps_c`` with
     ``share_pct``), where it gets brittle (``cold_c``) or soft (``soft_c``), and a plain sentence for
@@ -819,6 +826,7 @@ API_TOOLS = {
     "load_gcode": "load_gcode",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
+    "tolerance": "printer_tolerance",
     "clearance": "check_clearance",
     "diagnose": "diagnose_failed_print",
     "warping": "check_warping",
