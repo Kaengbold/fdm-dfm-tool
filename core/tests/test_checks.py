@@ -874,6 +874,13 @@ def test_shrink_lines_from_a_raised_floor_and_a_thick_rib():
     assert not found(box_ + cube((29.5, 1, 1), (1, 38, 29))) and not found(box_)
 
 
+def test_feature_test_part_triggers_its_checks():
+    """The "Feature test" sample is for trying every check by hand (T-389, docs/feature_test.md): it must
+    keep triggering them as the checks change."""
+    found = rules_for("feature_test")
+    assert {"bridge_sag", "elephant_foot", "gap_fuses", "nut_trap_tight", "shallow_relief", "sideways_hole_oval",
+            "small_layers_cooling", "support_marks", "too_thin_to_print", "warping", "weak_upright_pin"} <= set(found), sorted(found)
+
 def test_layer_strength_test_print_breaks_in_the_middle():
     """T-387: the old bar broke at its holes (4 of 10 mm left beside them). The dog-bone's middle carries the
     most stress, printed standing (what it measures: the layers) with a pin pulling on a third of each hole."""

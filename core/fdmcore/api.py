@@ -2210,7 +2210,7 @@ def set_gap(face_a: int, face_b: int, up, partner_mm: float | None = None, fit: 
         s.regions = find_regions(s.mesh)
     a, b = sorted((int(face_a), int(face_b)))
     pair = flat_pair(s.mesh, s.regions, a, b)
-    out = {"faces": [a, b], "kind": pair["kind"], "distance_mm": round(pair["distance_mm"], 3)}
+    out = {"faces": [a, b], "kind": pair["kind"], "distance_mm": round(pair["distance_mm"], 3), "plane": pair["plane"]}
     if partner_mm is None:
         s.gaps.pop((a, b), None)
         return out

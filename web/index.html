@@ -86,6 +86,7 @@
               <button data-sample="detail_plate">Small details</button>
               <button data-sample="enclosure">Enclosure</button>
               <button data-sample="dumbbell">Neck</button>
+              <button data-sample="feature_test" title="Something for every check and design change, to try them all">Feature test</button>
             </div>
           </div>
         </section>
@@ -559,7 +560,8 @@
               <button id="dl-project" title="The part with everything set on it (orientation, loads, zones, settings): open it here again later, or give it to your AI agent">Save project</button>
               <button id="copy-report" title="A text summary of the part, its problems and the settings, for an AI chat or a forum post">Copy for your AI chat</button>
             </div>
-            <details id="failed-block" class="failed-block">
+            <!-- Switched off for now (T-383): it becomes its own path from the start guide (T-384); the code stays. -->
+            <details id="failed-block" class="failed-block" hidden>
               <summary>My print failed</summary>
               <label class="field">What went wrong? <select id="failed-symptom"><option value="">Pick one…</option></select></label>
               <div id="failed-result"></div>
@@ -607,12 +609,15 @@
       <div id="expert-sections"></div>
     </dialog>
     <dialog id="guide" class="guide">
-      <h2>How much do you want to see?</h2>
-      <p class="hint">You can switch any time at the top.</p>
+      <h2>What do you want to do?</h2>
+      <h3>Make my print better</h3>
+      <p class="hint">How much do you want to see? You can switch any time at the top.</p>
       <button data-guide="settings"><b>Simple</b><span>Pick your printer and material. Get the problems, settings and a file to print.</span></button>
       <button data-guide="strength"><b>Basic</b><span>Every choice, step by step: orientation, problems, strength, settings.</span></button>
       <button data-guide="steps"><b>Advanced</b><span>Also detailed strength views, optional simulations (warping, shaking and knocks, your G-code) and design changes.</span></button>
       <button data-guide="expert"><b>Expert</b><span>Every tool on one long page.</span></button>
+      <h3>Help me fix my print failures</h3>
+      <button class="soon" disabled><b>Fix a failed print</b><span>Coming soon: show a photo or pick what went wrong, and your own AI agent suggests fixes.</span></button>
     </dialog>
     <script type="module" src="app.js"></script>
   </body>

@@ -94,6 +94,11 @@ def test_slot_and_tab_between_flat_faces():
     a, b, left, right = slotted_block()
     m = api.set_gap(a, b, [0, 0, 1])
     assert m["kind"] == "slot" and m["distance_mm"] == pytest.approx(4.0)
+    # Where the two faces overlap, for drawing the gap and the fit on the part (T-386): a rectangle on face a,
+    # and stepping across along its normal (a slot: into the gap) lands on face b.
+    plane = m["plane"]
+    assert all(hi > lo for lo, hi in (plane["u_range"], plane["v_range"]))
+    assert abs(np.dot(plane["normal"], plane["u"])) < 1e-9 and abs(np.dot(plane["normal"], plane["v"])) < 1e-9
     r = api.set_gap(a, b, [0, 0, 1], 4.0, "sliding")
     assert r["suggested_mm"] == pytest.approx(4.35) and "slot" in r["explanation"]
     edit = next(e for e in api.design([0, 0, 1], {})["edits"] if e["id"] == f"gap-{min(a, b)}-{max(a, b)}")
