@@ -374,7 +374,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### Tolerances and fits
 
-- [~] **T-385 P2** Rework Tolerances & tuning: hole compensation is the *result* of the tolerance test print and the hole / slot fits, not a separate field; fewer words, more pictures. · files: `web/index.html`, `web/app.js` · owner: Claude (`task/T-385-tolerances`)
+- [x] **T-385 P2** Rework Tolerances & tuning: hole compensation is the *result* of the tolerance test print and the hole / slot fits, not a separate field; fewer words, more pictures. · files: `web/index.html`, `web/app.js` · owner: Claude (`task/T-385-tolerances`) — "Hole compensation in the slicer" and "Tune it to your printer" are one card, "Your printer's tolerance": the gaps in use (typical, or from your fit test) and the hole compensation that follows from them (new `api.tolerance` / MCP `printer_tolerance`: half the extra snug gap your printer needs, per side, as OrcaSlicer's X-Y hole compensation is; capped at 0.3 mm), with a "Use 0.05 mm" button; polyholes stay. The holes and slots explanations are a sentence each. Test `test_hole_compensation_follows_the_fit_test`, e2e "printer tolerance card".
 - [~] **T-386 P2** Slots and flat gaps: highlight what is picked while picking, an animated hint showing what to tap, check the change really gets applied, show the measured thickness on the part and two bars beside it that show the fit (the mating part with its gap). · files: `web/app.js` (flat gaps), `web/viewer.js`, `core/fdmcore/features.py` · owner: Claude (`task/T-386-slot-fit-view`)
 
 ### Test prints

@@ -1264,6 +1264,20 @@ def main():
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
 
+        def printer_tolerance():
+            """T-385: one card for the printer's tolerance: the gaps in use, the fit test, and the hole compensation
+            (a slicer setting in the 3MF)."""
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('fits')")
+            page.wait_for_function("() => document.getElementById('tol-text').textContent.length > 0", timeout=60_000)
+            text = page.locator("#tol-text").inner_text()
+            assert "Typical gaps" in text and "fit test" in text, text
+            page.fill("#hole-comp", "0.05")
+            page.dispatch_event("#hole-comp", "change")
+            assert page.evaluate("() => fdm.state.overrides.xy_hole_compensation") == "0.05"
+            return text
+        run.step("printer tolerance card", printer_tolerance)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)

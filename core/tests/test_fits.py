@@ -183,3 +183,16 @@ def test_grip_fins_for_a_press_fit():
     thin = next(f for f in api.design([0, 0, 1], {})["features"] if f["type"] == "hole")
     api.set_fit(thin["region"], [0, 0, 1], 6.0, "press")
     assert not [e for e in api.design([0, 0, 1], {})["edits"] if e["id"].startswith("grip-fins")]
+
+
+def test_hole_compensation_follows_the_fit_test():
+    """T-385: hole compensation is the result of the fit test, not a number to guess: a printer that needs 0.3 mm
+    to push a peg in snugly (typical 0.2) prints holes 0.1 mm small, so they grow 0.05 mm per side."""
+    typical = api.tolerance({"material": "pla"})
+    assert not typical["measured"] and typical["hole_compensation_mm"] is None and "fit test" in typical["explanation"]
+    api.custom_presets(materials={"mine": {"based_on": "pla", "name": "My PLA", "fit_gap_mm": {"snug": 0.3, "sliding": 0.45}},
+                                  "tight": {"based_on": "pla", "name": "Tight", "fit_gap_mm": {"snug": 0.1}}})
+    mine = api.tolerance({"material": "my_mine"})
+    assert mine["measured"] and mine["hole_compensation_mm"] == pytest.approx(0.05) and mine["gaps"]["snug"] == 0.3
+    assert api.tolerance({"material": "my_tight"})["hole_compensation_mm"] == 0
+    api.custom_presets()

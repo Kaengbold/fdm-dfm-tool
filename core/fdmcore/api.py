@@ -2556,6 +2556,33 @@ def clearance(data: bytes, profile: dict | None = None) -> dict:
     return {**r, "explanation": text}
 
 
+HOLE_COMP_MAX_MM = 0.3  # more than this per side points at a printer problem, not something to compensate
+
+
+def tolerance(profile: dict | None = None) -> dict:
+    """The fit gaps in use (``gaps``: typical, or ``measured`` with the fit test print) and the slicer hole
+    compensation that follows from them (T-385): when this printer needs a bigger snug gap than a typical one,
+    its holes print that much smaller, so every hole grows by half the difference per side (OrcaSlicer's
+    X-Y hole compensation is per side). ``hole_compensation_mm`` is None until the fit test is measured."""
+    p = Profile.from_dict(profile)
+    typical = load_data("thresholds")["fits"]["gap_mm"]
+    mine = p.material.get("fit_gap_mm") or {}
+    gaps = {**typical, **mine}
+    comp = None
+    if "snug" in mine:
+        comp = round(min(max((mine["snug"] - typical["snug"]) / 2, 0.0), HOLE_COMP_MAX_MM), 2)
+    if comp is None:
+        text = (f"Typical gaps: {gaps['snug']:.2f} mm to push in snugly, {gaps['sliding']:.2f} mm to slide. Print the fit"
+                " test once to get your printer's, and the hole compensation that goes with them.")
+    elif comp == 0:
+        text = (f"From your fit test: {gaps['snug']:.2f} mm snug, {gaps['sliding']:.2f} mm sliding. Your holes come out"
+                " true to size: no hole compensation needed.")
+    else:
+        text = (f"From your fit test: {gaps['snug']:.2f} mm snug, {gaps['sliding']:.2f} mm sliding. Your holes print about"
+                f" {2 * comp:.2f} mm small: hole compensation {comp:.2f} mm makes them right for parts you can't change.")
+    return {"gaps": gaps, "measured": bool(mine), "hole_compensation_mm": comp, "explanation": text}
+
+
 def setup_check(profile: dict | None = None, settings: dict | None = None) -> dict:
     """Mistakes in the chosen printer / material / nozzle (presets the user made) and in slicer values
     they set (``settings``, slicer keys such as layer_height, support_top_z_distance, outer_wall_speed):
@@ -2801,6 +2828,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
+    "tolerance": tolerance,
     "clearance": clearance,
     "diagnose": diagnose,
     "warping": warping,

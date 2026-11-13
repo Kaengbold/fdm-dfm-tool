@@ -150,6 +150,7 @@ const steps = new Steps({
   changed: () => {
     recolor();
     suggestDesignIfShown();
+    if (shows("fits")) renderTolerance().catch(() => {}); // a new material or fit test changes it
     // A note about the last action ("Report copied …") belongs to the step it was made in.
     if (!busyCount && state.summary) setStatus(state.summary);
   },
@@ -2200,7 +2201,22 @@ $("hole-comp").onchange = () => {
   remember("hole compensation");
   state.overrides.xy_hole_compensation = String(Math.max(0, Number($("hole-comp").value) || 0));
   renderSettings();
+  renderTolerance();
 };
+
+/** The fit gaps in use and the hole compensation that follows from the fit test (T-385). */
+async function renderTolerance() {
+  const t = await call("tolerance", { profile: profile() });
+  $("tol-text").textContent = t.explanation;
+  const now = Number(state.overrides.xy_hole_compensation ?? 0);
+  const use = $("tol-use");
+  use.hidden = !t.hole_compensation_mm || Math.abs(now - t.hole_compensation_mm) < 0.005;
+  use.textContent = `Use ${t.hole_compensation_mm?.toFixed(2)} mm`;
+  use.onclick = () => {
+    $("hole-comp").value = t.hole_compensation_mm;
+    $("hole-comp").dispatchEvent(new Event("change"));
+  };
+}
 $("polyholes").onchange = () => {
   remember("polyholes");
   state.overrides.hole_to_polyhole = $("polyholes").checked ? "1" : "0";

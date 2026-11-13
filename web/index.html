@@ -390,34 +390,28 @@
             </div>
             <div class="sim-card">
               <h3>Holes and what goes in them</h3>
-              <p class="hint">Say what goes into each hole (or which hole a post goes into) and how tight it should be. We work out the size
-                to model from your printer's usual tolerance, or from your own fit test below. The new size shows up under Design changes.</p>
+              <p class="hint">Say what goes into each hole and how tight: you get the size to model, as a design change.</p>
               <p id="fits-summary" class="hint">Looking for holes and posts…</p>
               <ul id="fits" class="features"></ul>
             </div>
             <div class="sim-card" id="gap-card">
               <h3>Slots and flat gaps</h3>
-              <p class="hint">Something that slides into a slot, or a tab that goes into one: click the two flat faces on either side, then say
-                how thick the other part is and how tight. If you ran the warping simulation, how much the gap closes as the part curls is
-                added. The new size shows up under Design changes.</p>
+              <p class="hint">A slot or a tab: click the faces on both sides, then say how thick the other part is and how tight. You get the width to model, as a design change (a warping simulation's squeeze is added).</p>
               <div class="row">
                 <button id="gap-pick">Pick two faces</button>
                 <span id="gap-hint" class="hint" hidden></span>
               </div>
               <ul id="gaps" class="features"></ul>
             </div>
-            <div class="sim-card">
-              <h3>Hole compensation in the slicer</h3>
-              <p class="hint">Small holes print a little too small. The slicer can make every hole bigger by a set amount: use it when you
-                can't change the model. For one exact fit, sizing the hole above is better.</p>
-              <label class="field sub">Make holes bigger by <span><input id="hole-comp" type="number" step="0.05" min="0" max="0.5" /> mm</span></label>
-              <label class="toggle"><input id="polyholes" type="checkbox" /> Polyholes: rounder small holes (OrcaSlicer only)</label>
-            </div>
-            <div class="sim-card">
-              <h3>Tune it to your printer</h3>
-              <p class="hint">Print the fit test once (a 6 mm peg and holes 6.0 … 6.5 mm) and say which hole fits how. Every size here then
-                uses your printer's real tolerance instead of a typical one. More test prints are in the same place.</p>
-              <button id="open-fit-test">Open the fit test</button>
+            <div class="sim-card" id="tol-card">
+              <h3>Your printer's tolerance</h3>
+              <p id="tol-text" class="hint"></p>
+              <div class="row">
+                <button id="tol-use" hidden></button>
+                <button id="open-fit-test">Fit test print</button>
+              </div>
+              <label class="field sub" title="Grows every hole by this much per side in the slicer: for parts you can't change. One exact fit is better sized in the model (above).">Hole compensation <span><input id="hole-comp" type="number" step="0.01" min="0" max="0.5" /> mm</span></label>
+              <label class="toggle" title="OrcaSlicer only"><input id="polyholes" type="checkbox" /> Polyholes: rounder small holes</label>
             </div>
           </div>
         </section>
