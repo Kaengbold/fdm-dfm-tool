@@ -1281,6 +1281,20 @@ def main():
             return "suggested for knob.stl, fuzzy skin in the 3MF, off for the next part"
         run.step("grip texture on a knob", grip_texture)
 
+        def printer_tolerance():
+            """T-385: one card for the printer's tolerance: the gaps in use, the fit test, and the hole compensation
+            (a slicer setting in the 3MF)."""
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('fits')")
+            page.wait_for_function("() => document.getElementById('tol-text').textContent.length > 0", timeout=60_000)
+            text = page.locator("#tol-text").inner_text()
+            assert "Typical gaps" in text and "fit test" in text, text
+            page.fill("#hole-comp", "0.05")
+            page.dispatch_event("#hole-comp", "change")
+            assert page.evaluate("() => fdm.state.overrides.xy_hole_compensation") == "0.05"
+            return text
+        run.step("printer tolerance card", printer_tolerance)
+
         def plate_copies():
             # Four copies of the test block: how many fit, the plate's time, the notes, four items in the 3MF (T-349).
             import io
@@ -1404,19 +1418,38 @@ def main():
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
 
-        def printer_tolerance():
-            """T-385: one card for the printer's tolerance: the gaps in use, the fit test, and the hole compensation
-            (a slicer setting in the 3MF)."""
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
-            page.evaluate("() => fdm.steps.go('fits')")
-            page.wait_for_function("() => document.getElementById('tol-text').textContent.length > 0", timeout=60_000)
-            text = page.locator("#tol-text").inner_text()
-            assert "Typical gaps" in text and "fit test" in text, text
-            page.fill("#hole-comp", "0.05")
-            page.dispatch_event("#hole-comp", "change")
-            assert page.evaluate("() => fdm.state.overrides.xy_hole_compensation") == "0.05"
-            return text
-        run.step("printer tolerance card", printer_tolerance)
+        def tick_and_recheck():
+            """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
+            recheck = page.get_by_role("button", name="Re-check with the ticked changes")
+            assert recheck.is_disabled(), "re-check enabled with nothing ticked"
+            page.locator("#strength-options summary", has_text="Slicer settings").evaluate("s => s.parentElement.open = true")
+            ticks = page.locator("#strength-options li.slicer input[type=checkbox]")
+            assert ticks.count() >= 2, f"{ticks.count()} slicer ideas"
+            ticks.nth(0).check()
+            ticks.nth(1).check()
+            assert page.locator("#strength-options li.slicer input:checked").count() == 2 and recheck.is_enabled()
+            before = page.evaluate("() => ({ ...fdm.state.overrides })")
+            run.act(lambda: recheck.click(), 300_000)
+            after = page.evaluate("() => ({ ...fdm.state.overrides })")
+            changed = {k: v for k, v in after.items() if before.get(k) != v}
+            assert len(changed) >= 2, f"settings from two ideas not both applied: {changed}"
+            assert page.evaluate("() => !!fdm.state.strength"), "strength not checked again"
+            return f"applied together: {changed}"
+        run.step("make it stronger: tick several, re-check once", tick_and_recheck)
 
         for part in args.parts:
             def load_part(part=part):
