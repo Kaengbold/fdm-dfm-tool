@@ -407,6 +407,55 @@ export class Viewer {
     }
   }
 
+  /** A slot or tab on the part (T-386): its measured width as a line with a label, and the other part as
+   * bars: what goes into a slot, or the two walls of the slot a tab goes into, so the gap on each side
+   * shows. ``fit`` (part coordinates): {plane (api.set_gap), kind, distance, partner}; null hides it. */
+  showFit(fit) {
+    empty(this.fitView);
+    if (!this.fitView) this.scene.add((this.fitView = new THREE.Group()));
+    if (!fit || !this.placement) return;
+    const { rotation: R, shift } = this.placement;
+    const put = (q) => new THREE.Vector3(...[0, 1, 2].map((i) => R[i][0] * q[0] + R[i][1] * q[1] + R[i][2] * q[2] + shift[i]));
+    const { origin, normal, u, v, u_range: ur, v_range: vr } = fit.plane;
+    const d = normal.map((x) => (fit.kind === "slot" ? x : -x)); // from face a across to face b
+    const at = (a, b, t) => [0, 1, 2].map((i) => origin[i] + a * u[i] + b * v[i] + t * d[i]);
+    const [um, vm] = [(ur[0] + ur[1]) / 2, (vr[0] + vr[1]) / 2];
+    const [p0, p1] = [put(at(um, vm, 0)), put(at(um, vm, fit.distance))];
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([p0, p1]), new THREE.LineBasicMaterial({ color: css("--text"), depthTest: false }));
+    line.renderOrder = 6;
+    this.fitView.add(line);
+    const tag = iconSprite(`${fit.distance.toFixed(2)} mm`, Math.max(3, 0.07 * this.part.geometry.boundingSphere.radius));
+    tag.position.copy(p0).add(p1).multiplyScalar(0.5);
+    tag.material.depthTest = false;
+    tag.renderOrder = 7;
+    this.fitView.add(tag);
+    if (!(fit.partner > 0)) return;
+    const [a, b] = [(fit.distance - fit.partner) / 2, (fit.distance + fit.partner) / 2];
+    const wall = Math.max(1.5, 0.15 * fit.distance);
+    const ok = fit.kind === "slot" ? fit.partner < fit.distance : fit.partner > fit.distance;
+    const color = css(ok ? "--clean" : "--support");
+    for (const [t0, t1] of fit.kind === "slot" ? [[a, b]] : [[a - wall, a], [b, b + wall]]) {
+      const c = [];
+      for (const x of ur) for (const y of vr) for (const t of [t0, t1]) c.push(put(at(x, y, t)).toArray()); // index 4·ix + 2·iy + iz
+      const idx = [];
+      for (let axis = 0; axis < 3; axis++) {
+        for (const side of [0, 1]) {
+          const bit = 2 - axis;
+          const others = [0, 1, 2].filter((k) => k !== axis).map((k) => 2 - k);
+          const face = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([i, j]) => (side << bit) | (i << others[0]) | (j << others[1]));
+          idx.push(face[0], face[1], face[2], face[0], face[2], face[3]);
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(c.flat()), 3));
+      g.setIndex(idx);
+      this.fitView.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })));
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color, depthTest: false }));
+      edges.renderOrder = 5;
+      this.fitView.add(edges);
+    }
+  }
+
   /** A cylinder or ball inside the box given by its 8 corners (index 4·ix + 2·iy + iz): see-through,
    *  with its rims (cylinder) or three rings (ball) drawn as lines. */
   roundZone(c, shape, color) {

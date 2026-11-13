@@ -375,7 +375,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 ### Tolerances and fits
 
 - [ ] **T-385 P2** Rework Tolerances & tuning: hole compensation is the *result* of the tolerance test print and the hole / slot fits, not a separate field; fewer words, more pictures. · files: `web/index.html`, `web/app.js` · owner: —
-- [~] **T-386 P2** Slots and flat gaps: highlight what is picked while picking, an animated hint showing what to tap, check the change really gets applied, show the measured thickness on the part and two bars beside it that show the fit (the mating part with its gap). · files: `web/app.js` (flat gaps), `web/viewer.js`, `core/fdmcore/features.py` · owner: Claude (`task/T-386-slot-fit-view`)
+- [x] **T-386 P2** Slots and flat gaps: highlight what is picked while picking, an animated hint showing what to tap, check the change really gets applied, show the measured thickness on the part and two bars beside it that show the fit (the mating part with its gap). · files: `web/app.js` (flat gaps), `web/viewer.js`, `core/fdmcore/features.py` · owner: Claude (`task/T-386-slot-fit-view`) — the first picked face lights up while picking the second; the hint pulses; the measured width is drawn on the part (line + "30.00 mm"), and with a size typed in the other part shows as bars: one in a slot, the two walls of the slot round a tab (green when it fits, red when not), following the number as it's typed (`set_gap` returns the faces' shared rectangle, `viewer.showFit`). The new size was already applied as a design change: now the status says so and "Show in Design changes" jumps there. A demo animation belongs to T-382.
 
 ### Test prints
 
