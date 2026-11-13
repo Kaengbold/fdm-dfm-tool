@@ -403,7 +403,10 @@ export class Viewer {
       geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(c.flat()), 3));
       geometry.setIndex(idx);
       this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
-      this.zones.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color })));
+      // Edges drawn over the part: a box inside it (a hidden gap, a stronger zone) must stay visible (T-363).
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color, depthTest: false }));
+      edges.renderOrder = 5;
+      this.zones.add(edges);
     }
   }
 
@@ -420,7 +423,9 @@ export class Viewer {
     this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
     const ring = (f) => {
       const pts = Array.from({ length: 48 }, (_, k) => f((2 * Math.PI * k) / 48));
-      this.zones.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color })));
+      const loop = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false }));
+      loop.renderOrder = 5;
+      this.zones.add(loop);
     };
     const rings = shape === "ball"
       ? [(t) => at(Math.cos(t), Math.sin(t), 0), (t) => at(Math.cos(t), 0, Math.sin(t)), (t) => at(0, Math.cos(t), Math.sin(t))]
