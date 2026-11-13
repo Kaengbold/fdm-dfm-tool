@@ -238,3 +238,16 @@ def test_a_held_face_is_held_everywhere_not_at_a_few_points():
     bottom = nodes[:, 2] == nodes[:, 2].min()
     assert case.fixed[top].all()
     assert (np.abs(case.forces[bottom]).sum(axis=1) > 0).all()
+
+
+def test_stronger_orientation_offered_when_it_holds_more():
+    """T-368: the mushroom standing on its cap, pulled on the stem, pulls its layers apart; lying on its side
+    holds about twice as much and is offered. Already lying that way, nothing is."""
+    from pathlib import Path
+
+    api.load((Path(__file__).resolve().parents[2] / "web" / "samples" / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 30, "direction": "pull"}]
+    o = api.stronger_orientation([0, 0, 1], loads, {"material": "pla"})
+    assert o["up"] is not None and abs(o["up"][2]) < 0.01 and o["safety_factor"] > 1.5 * o["current"]
+    assert api.stronger_orientation(o["up"], loads, {"material": "pla"})["up"] is None
