@@ -292,6 +292,21 @@ def main():
             return f"{edits} -> {again or 'nothing'} | findings: {findings(page)}"
         run.step("design edits that add material", added_material)
 
+        def design_keeps_orientation():
+            """T-353: a design change made with another orientation picked keeps that orientation."""
+            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: page.locator("#options > li").nth(1).click())
+            up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
+            run.act(lambda: page.click("#apply-edits"))
+            now = page.evaluate("() => ({ up: fdm.state.options[fdm.state.active].up, version: fdm.state.version })")
+            assert now["version"] == 1 and sum(a * b for a, b in zip(up, now["up"])) > 0.999, f"orientation {up} -> {now}"
+            run.act(lambda: page.select_option("#version", "0"), 300_000)
+            back = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            assert sum(a * b for a, b in zip(up, back)) > 0.999, f"switching back to the original: {up} -> {back}"
+            return f"stays on {[round(v, 2) for v in up]} after the change and back on the original"
+        run.step("design change keeps the orientation", design_keeps_orientation)
+
         def feature_confirm():
             run.act(lambda: page.click("[data-sample=l_bracket]"))
             row = page.locator("#features li", has_text="Ø8.0 mm hole")

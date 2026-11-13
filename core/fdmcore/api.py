@@ -304,13 +304,16 @@ def _info() -> dict:
     }
 
 
-def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | None = None, faces: dict | None = None) -> dict:
+def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | None = None, faces: dict | None = None,
+                 keep: list[float] | None = None) -> dict:
     """Best build directions for the loaded part, plus how it scores as loaded.
 
     With ``loads``, candidates are also ranked by strength: a weak orientation is
     penalised even when it prints more easily. ``faces`` = {"clean": [region ids],
     "bed": [...], "vertical": [...]}: faces that should stay free of support marks / sit on
     the bed / stand upright (a flat face upright, or a round hole or pin with its axis up).
+    ``keep``: a build direction that is always among the options (``kept`` = its index), scored like
+    the others: after a design change the part stays the way the user had it on the bed (T-353).
     """
     s = _require()
     p = Profile.from_dict(profile)
@@ -318,6 +321,13 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     progress.report(0, "Scoring directions")
     candidates = find_orientations(s.mesh, settings, top=3 * top)  # extra, some get filtered out below
     as_loaded = evaluate(s.mesh, [0, 0, 1], settings)
+    kept = None
+    if keep is not None:
+        k = np.asarray(keep, float) / np.linalg.norm(keep)
+        kept = next((r for r in candidates if np.dot(r.up, k) > 0.999), None)
+        if kept is None:
+            kept = evaluate(s.mesh, k, settings)
+            candidates.append(kept)
     marked = _marked_faces(faces)
     if marked:
         # Lying on a face the user wants on the bed may not be among the generic best: add it.
@@ -371,13 +381,19 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
             seen.add(key)
             unique.append(r)
     candidates = unique
+    if kept is not None and all(r is not kept for r in candidates):  # filtered out as a near-twin or as worse
+        candidates.append(kept)
 
     candidates = candidates[: top + 2]
+    if kept is not None and all(r is not kept for r in candidates):
+        candidates.append(kept)
     placed = {id(r): _placement(s.mesh, r, p) for r in [*candidates, as_loaded]}
     with stage(0.95 if loads or p.goal == "strength" else 0.2, 1.0):
         _refine(s.mesh, [*candidates, as_loaded], placed, settings, p)
     candidates.sort(key=lambda r: (not placed[id(r)][1]["fits"], r.score))
     candidates = candidates[:top]
+    if kept is not None and all(r is not kept for r in candidates):
+        candidates.append(kept)
 
     def pack(r, label):
         out = _pack(s.mesh, r, label, settings, placed[id(r)][0], p, safety.get(id(r)))
@@ -388,6 +404,7 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     return {
         "as_loaded": pack(as_loaded, "As loaded"),
         "orientations": [pack(r, f"Option {i + 1}") for i, r in enumerate(candidates)],
+        "kept": next((i for i, r in enumerate(candidates) if r is kept), None),
     }
 
 
