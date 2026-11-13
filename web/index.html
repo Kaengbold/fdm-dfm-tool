@@ -234,14 +234,6 @@
               <summary>Which nozzle? Compare 0.2 – 0.8 mm for this part</summary>
               <table id="nozzle-table"></table>
             </details>
-            <div class="sim-card" data-min="advanced">
-              <h3>Cooling: does each layer cool in time?</h3>
-              <p class="hint">Finds spots that can't lose their heat fast enough: a thin tip or pin, or a small area printed on top of a
-                big block of hot plastic. If the layer below is still soft when the next one goes on, it droops, blobs or bends.
-                Counts the part fan and the slicer slowing down small layers.</p>
-              <p id="cooling-summary"></p>
-              <label class="toggle"><input id="show-temp" type="checkbox" /> Show the heat on the part (red = still soft when the next layer goes on)</label>
-            </div>
           </div>
         </section>
 
@@ -311,8 +303,8 @@
         </section>
 
         <section class="pane" data-pane="sims">
-          <h2>Optional simulations</h2>
-          <p class="lead">Extra checks that take longer. None is needed: run the ones that matter for your part.</p>
+          <h2>Forces on the part</h2>
+          <p class="lead">More about the loads and where it's used. Optional: run the ones that matter for your part.</p>
           <div id="blk-sims">
             <div id="temp-card" class="sim-card">
               <h3>How warm or cold it gets</h3>
@@ -323,12 +315,6 @@
               </div>
               <div id="temp-chart" class="temp-chart"></div>
               <p id="temp-story"></p>
-            </div>
-            <div class="sim-card">
-              <h3>Warping: will the corners lift?</h3>
-              <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
-              <button id="run-warp">Simulate warping <small class="eta" data-eta="warping"></small></button>
-              <div id="warp-result"></div>
             </div>
             <div id="dynamics" class="sim-card">
               <h3>Shaking and knocks</h3>
@@ -341,7 +327,8 @@
               <p id="dynamics-need" class="hint">Set where it is held and a load in <b>Will it hold?</b> first.</p>
               <p id="dynamics-result" class="dynamics-result"></p>
             </div>
-            <div id="box-heat" class="sim-card">
+            <!-- Switched off for now (T-379, user: not really useful); the code stays for later. -->
+            <div id="box-heat" class="sim-card" hidden>
               <h3>Heat inside an electronics box</h3>
               <p class="hint">If this part is a closed box around electronics, everything they use turns into heat that has to get out
                 through the walls. Quick estimate from the box's outside surface.</p>
@@ -360,6 +347,27 @@
                 <span id="heat-place-hint" class="hint" hidden>Click inside the box where they sit…</span>
               </div>
               <div id="box-heat-result"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="printing">
+          <h2>While printing</h2>
+          <p class="lead">How the printing itself goes: heat that builds up, corners that lift. Optional.</p>
+          <div id="blk-printing">
+            <div class="sim-card" data-min="advanced">
+              <h3>Cooling: does each layer cool in time?</h3>
+              <p class="hint">Finds spots that can't lose their heat fast enough: a thin tip or pin, or a small area printed on top of a
+                big block of hot plastic. If the layer below is still soft when the next one goes on, it droops, blobs or bends.
+                Counts the part fan and the slicer slowing down small layers.</p>
+              <p id="cooling-summary"></p>
+              <label class="toggle"><input id="show-temp" type="checkbox" /> Show the heat on the part (red = still soft when the next layer goes on)</label>
+            </div>
+            <div class="sim-card">
+              <h3>Warping: will the corners lift?</h3>
+              <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
+              <button id="run-warp">Simulate warping <small class="eta" data-eta="warping"></small></button>
+              <div id="warp-result"></div>
             </div>
             <div class="sim-card">
               <h3>Detailed check from your sliced print</h3>
