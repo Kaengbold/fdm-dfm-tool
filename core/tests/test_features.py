@@ -78,7 +78,7 @@ def test_bottom_chamfer_and_fillet_at_the_weak_spot():
     api.regions()
     api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}], prof)
     fillet = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
-    assert fillet["op"] == "add" and len(fillet["pieces"]) == 4  # the four edges where the stem meets the cap
+    assert fillet["op"] == "add" and len(fillet["pieces"]) == 8  # the four edges where the stem meets the cap + its 4 corners
 
 
 def test_edit_params_change_cutters():
@@ -270,7 +270,7 @@ def test_chamfers_at_every_weak_corner():
     def check(mesh_bytes):
         api.load(mesh_bytes, "posts")
         info = api.regions()["regions"]
-        face = lambda n, ok: [r["id"] for r in info if np.dot(r["normal"], n) > 0.99 and ok(r["centroid"])]  # noqa: E731
+        face = lambda n, ok: [r["id"] for r in info if np.dot(r["normal"], n) > 0.99 and ok(r["centroid"]) and r["area_mm2"] > 1]  # noqa: E731 (not slivers)
         loads = [{"region": face([0, 0, -1], lambda c: True)[0], "kind": "fixed"}]
         loads += [{"region": f, "kind": "force", "kg": 3, "direction": "push"} for f in face([0, -1, 0], lambda c: c[2] > 6)]
         return api.strength([0, 0, 1], loads, prof)["safety_factor"]
@@ -405,3 +405,20 @@ def test_fillet_in_an_inside_corner_is_not_a_hole():
         api.load(to_binary_stl(mesh), "part")
         kinds = {f["type"] for f in api.design([0, 0, 1])["features"]}
         assert kinds == want, kinds
+
+@pytest.mark.parametrize("up", [[0, 0, 1], [0, 0, -1]])  # chamfers (they'd hang over) / rounds
+def test_corner_round_goes_round_the_stems_corners(up):
+    """T-358: rounding / chamfering the inside corner all round the mushroom's stem left an open wedge at
+    each of the stem's corners (every edge's piece is straight and stops there). Corner pieces close them."""
+    from fdmcore.booleans import apply_edits
+
+    prof = {"material": "pla"}
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 2, "kind": "force", "kg": 10, "direction": "push"}]
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    api.strength(up, loads, prof)
+    edit = next(e for e in api.design(up, prof)["edits"] if e["id"] == "stress-chamfer")
+    inside = api._inside_test(apply_edits(api._require().mesh, [edit]), np.eye(3))
+    corners = np.array([[sx * 5.6, sy * 5.6, 19.4] for sx in (-1, 1) for sy in (-1, 1)])  # just off the stem's corners, under the cap
+    assert inside(corners).all()
+    assert not inside(np.array([[-5.6, -5.6, 15.0]]))[0]  # and nothing far below the corner

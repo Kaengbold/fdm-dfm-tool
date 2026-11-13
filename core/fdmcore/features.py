@@ -659,7 +659,7 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
             if heat[corner].max() > 0:
                 others.append((heat[corner].max(), corner))
         corners += [c for _, c in sorted(others, key=lambda o: -o[0])[:MAX_STRESS_CORNERS - 1]]
-    pieces, rounds = [], 0
+    pieces, rounds, profiles = [], 0, {}
     for k in [k for c in corners for k in c][:MAX_FILLET_PIECES]:
         e = edges[k]
         mid = (e["a"] + e["b"]) / 2
@@ -668,13 +668,14 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
         rounded = up is None or _round_prints(e, up, max_overhang_deg)
         d = size * ROUND_SAME_PLASTIC if rounded else size
         ends = [mid + e["t1"] * d - e["n1"] * 0.15, mid + e["t2"] * d - e["n2"] * 0.15]
-        if rounded:
-            pieces.append(_prism([mid + inset, ends[0], *_round_arc(e, mid, d), ends[1]], half))
-            rounds += 1
-        else:
-            pieces.append(_prism([mid + inset, *ends], half))
+        profile = [mid + inset, ends[0], *_round_arc(e, mid, d), ends[1]] if rounded else [mid + inset, *ends]
+        pieces.append(_prism(profile, half))
+        rounds += rounded
+        profiles[k] = (profile, mid)
+    pieces += _corner_pieces(edges, profiles)
     r_mm = size * ROUND_SAME_PLASTIC
-    shape = (f"{r_mm:.1f} mm round" if rounds == len(pieces) else f"{size:.1f} mm 45° chamfer" if not rounds
+    every = len(profiles)  # edges; the corner pieces follow their edges
+    shape = (f"{r_mm:.1f} mm round" if rounds == every else f"{size:.1f} mm 45° chamfer" if not rounds
              else f"{r_mm:.1f} mm round / {size:.1f} mm chamfer")
     shape = shape[0].upper() + shape[1:]
     if len(corners) == 1:
@@ -685,12 +686,54 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
         found = ("The strength check found the most stress at these sharp inside corners, each nearly as weak as the "
                  "worst one: fixing only one would just move the weak spot to the next. ")
     how = ("A round spreads the load over more material, often the cheapest way to make a part much stronger."
-           if rounds == len(pieces) else
+           if rounds == every else
            "A 45° chamfer spreads the load over more material and prints without support where a round would hang over."
            if not rounds else
            "Rounds spread the load best; where one would hang over in this orientation it is a 45° chamfer, which prints "
            "without support.")
     return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how, pieces, op="add", param="stress_chamfer_mm")]
+
+
+CORNER_STEPS = 6  # pieces of a corner piece's turn
+
+
+def _corner_pieces(edges: list[dict], profiles: dict) -> list[np.ndarray]:
+    """Fill the gap where two rounded / chamfered inside edges meet at an outside corner (the corner of a
+    stem standing on a plate): each edge's piece is straight and ends at the corner, so a wedge was left
+    open there (T-358). The first edge's cross-section is swept round the corner, about the line through
+    it square to the face both edges share, from one wall's direction to the other's. Where the edges meet
+    at an inside corner their pieces already overlap. ``profiles``: {edge index: (cross-section, its middle)}."""
+    by_vertex: dict = {}
+    for k in profiles:
+        for v in (edges[k]["va"], edges[k]["vb"]):
+            by_vertex.setdefault(v, []).append(k)
+    out = []
+    for v, ks in by_vertex.items():
+        if len(ks) != 2:
+            continue
+        e1, e2 = edges[ks[0]], edges[ks[1]]
+        shared = next(((i, j) for i in ("n1", "n2") for j in ("n1", "n2") if e1[i] @ e2[j] > 0.99), None)
+        if shared is None:
+            continue  # no face in common (the corner turns another way): leave it
+        axis = e1[shared[0]]
+        walls = []
+        for e, i in ((e1, shared[0]), (e2, shared[1])):
+            w = e["n2" if i == "n1" else "n1"]
+            w = w - axis * (w @ axis)
+            walls.append(w / max(np.linalg.norm(w), 1e-12))
+        r1, r2 = walls
+        turn = float(np.arccos(np.clip(r1 @ r2, -1.0, 1.0)))
+        corner, other = (e1["a"], e1["b"]) if e1["va"] == v else (e1["b"], e1["a"])
+        if turn < np.radians(5) or (other - corner) @ r2 > -1e-6:
+            continue  # straight on, or an inside corner
+        q = r2 - r1 * (r1 @ r2)
+        q /= np.linalg.norm(q)
+        profile, mid = profiles[ks[0]]
+        flat = [((pt - mid) @ r1, (pt - mid) @ axis) for pt in profile]
+        rings = [np.array([corner + s * (np.cos(a) * r1 + np.sin(a) * q) + z * axis for s, z in flat])
+                 for a in np.linspace(0.0, turn, CORNER_STEPS + 1)]
+        out.append(_sweep(rings, closed=False))
+    return out
 
 
 def _round_prints(e: dict, up, max_overhang_deg: float) -> bool:
