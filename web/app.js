@@ -55,7 +55,10 @@ function startWorker() {
       else if (pending.has(data.id)) {
         const { resolve: ok, reject: fail } = pending.get(data.id);
         pending.delete(data.id);
-        data.error ? fail(new Error(data.error)) : ok(data.result);
+        if (data.fatal) {
+          fail(new Error(`The engine crashed on this part and has restarted, so you can go on (please report the part): ${data.error}`));
+          cancelEngine(); // a dead engine fails every later call, even loading another part
+        } else data.error ? fail(new Error(data.error)) : ok(data.result);
       }
     });
   });
