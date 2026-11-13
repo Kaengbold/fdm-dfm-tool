@@ -1264,6 +1264,31 @@ def main():
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
 
+        def design_ideas_tested():
+            """T-367: design ideas under "How can I make it stronger?" are tested on copies straight away and shown
+            with their result; nothing is applied."""
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === "flat").sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              fdm.state.loads = [{ region: cap.i, kind: "fixed" }, { region: end.i, kind: "force", kg: 20, direction: "pull", case: 1 }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            versions = page.evaluate("() => fdm.state.versions.length")
+            run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 600_000)
+            page.wait_for_function("() => document.querySelector('#design-trials li')", timeout=600_000)
+            tested = page.locator("#design-trials li").all_inner_texts()
+            assert tested and all("×" in t for t in tested), tested
+            assert page.evaluate("() => fdm.state.versions.length") == versions, "a tested change was applied"
+            return f"{len(tested)} tested: " + " | ".join(t.splitlines()[0] for t in tested)
+        run.step("make it stronger: design ideas tested straight away", design_ideas_tested)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)
