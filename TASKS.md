@@ -367,7 +367,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### Look and text
 
-- [ ] **T-381 P1** Layout: text sitting right after buttons looks bad; wider side panel, consistent spacing between buttons, fields and text. · files: `web/style.css`, `web/index.html` · owner: —
+- [~] **T-381 P1** Layout: text sitting right after buttons looks bad; wider side panel, consistent spacing between buttons, fields and text. · files: `web/style.css`, `web/index.html` · owner: Claude (`task/T-381-layout-spacing`)
 - [ ] **T-382 P1** Much less text: explanations move into tooltips, plus an "Explain mode" that walks through every tool (what it is, what to do). User-friendly means less text, not more. · files: `web/index.html`, `web/app.js`, `web/style.css` · owner: —
 - [~] **T-383 P1** Start menu with two paths: **Make my print better** (Simple / Basic / Advanced / Expert) and **Help me fix my print failures** (shows "coming soon", T-384). The current "My print failed" fold is only deactivated (hidden), not removed: its markup, app code, engine code and MCP tool stay in place for T-384. · files: `web/index.html`, `web/app.js` · owner: Claude (`task/T-383-start-paths`)
 - [-] **T-384 P3** Help me fix my print failures: a photo or a picked failure + the model or G-code → analysis and fixes by the user's own AI agent. **Parked** (2026-11-11, user): "coming soon" only (T-383). · owner: —
