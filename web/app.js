@@ -404,7 +404,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -1347,6 +1347,8 @@ async function runStrength(fine = false) {
     state.turnOffered = true;
     await offerTurn();
   }
+  // The ideas were worked out for the old settings: once asked for, the list follows every new result (T-365).
+  if (r && state.strongerShown) await showStrengthOptions();
   return r;
 }
 $("run-strength").onclick = () => runStrength();
@@ -1807,6 +1809,7 @@ async function showStrengthOptions() {
       : el("p", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` });
     // Compare with the engine's own baseline: with "Use the G-code" the shown safety comes from another model.
     $("strength-options").replaceChildren(...optionGroups(opts, opts[0]?.base_safety ?? state.strength?.safety_factor), noMaterial);
+    state.strongerShown = true;
     setStatus(state.summary);
     return opts;
   }).then(async (opts) => {
@@ -1872,7 +1875,7 @@ async function applyTicked(ticked) {
   const material = ticked.find((o) => o.material);
   if (material) {
     $("material").value = material.material;
-    await setupChanged("material");
+    await setupChanged("material", false);
   }
   const turn = ticked.find((o) => o.up);
   if (turn) await applyOption(turn, false);
@@ -3119,14 +3122,18 @@ async function compareNozzles() {
 }
 $("nozzle-block").ontoggle = (e) => e.target.open && state.triangles && compareNozzles();
 
-/** Printer, material, nozzle or multi-material changed: remember it and find the orientations again. */
-function setupChanged(id) {
+/** Printer, material, nozzle or multi-material changed: remember it and find the orientations again; a
+ * strength result shown before is worked out again for the new setup (``recheck: false``: the caller does). */
+async function setupChanged(id, recheck = true) {
   store.set("fdm-setup", JSON.stringify({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value }));
   viewer.setBed(state.presets.printers[$("printer").value].bed);
   syncMultiMaterial();
   $("nozzle-block").open = false; // comparison belongs to the old setup
   if (id === "material") renderTempCurve();
-  return state.triangles ? findOrientations() : Promise.resolve();
+  if (!state.triangles) return;
+  const hadStrength = Boolean(state.strength);
+  await findOrientations();
+  if (recheck && hadStrength && readyForStrength()) await runStrength();
 }
 for (const id of ["printer", "material", "nozzle", "multi-material"]) $(id).onchange = () => setupChanged(id);
 const GOAL_NOTES = {

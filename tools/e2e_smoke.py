@@ -1513,7 +1513,15 @@ def main():
             changed = {k: v for k, v in after.items() if before.get(k) != v}
             assert len(changed) >= 2, f"settings from two ideas not both applied: {changed}"
             assert page.evaluate("() => !!fdm.state.strength"), "strength not checked again"
-            return f"applied together: {changed}"
+            # T-365: the list is worked out again for the new settings, and after a material change.
+            groups = page.locator("#strength-options .option-group")
+            assert groups.count(), "no ideas listed after the re-check"
+            base = page.evaluate("() => fdm.state.strength.safety_factor")
+            run.act(lambda: page.select_option("#material", "petg"), 300_000)
+            assert page.evaluate("() => fdm.state.strength?.material").lower().startswith("petg"), "strength not checked again for PETG"
+            assert groups.count(), "no ideas listed after the material change"
+            run.act(lambda: page.select_option("#material", "pla"), 300_000)
+            return f"applied together: {changed}; list shown again after the re-check (×{base:.1f}) and for PETG"
         run.step("make it stronger: tick several, re-check once", tick_and_recheck)
 
         def design_ideas_tested():
