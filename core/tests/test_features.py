@@ -475,3 +475,25 @@ def test_corner_round_goes_round_the_stems_corners(up):
     corners = np.array([[sx * 5.6, sy * 5.6, 19.4] for sx in (-1, 1) for sy in (-1, 1)])  # just off the stem's corners, under the cap
     assert inside(corners).all()
     assert not inside(np.array([[-5.6, -5.6, 15.0]]))[0]  # and nothing far below the corner
+
+
+def test_rounds_on_an_already_rounded_part_are_finite():
+    """Rounding the stem again after it was rounded met facets of the first round lying almost flat: the arc
+    came out NaN, and the browser's manifold threw on it while testing design changes (T-367)."""
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import to_binary_stl
+
+    prof, up = {"material": "pla"}, [0, 0, -1]
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 20, "direction": "pull"}]
+    api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
+    api.regions()
+    api.strength(up, loads, prof)
+    rounds = next(e for e in api.design(up, prof)["edits"] if e["id"] == "stress-chamfer")
+    api.load(to_binary_stl(apply_edits(api._require().mesh, [rounds])), "rounded")
+    regs = api.regions()["regions"]
+    cap = max(regs, key=lambda r: r["area_mm2"] if r["kind"] == "flat" else 0)["id"]
+    end = min(regs, key=lambda r: abs(r["area_mm2"] - 100) if r["kind"] == "flat" else 1e9)["id"]
+    api.strength(up, [{"region": cap, "kind": "fixed"}, {"region": end, "kind": "force", "kg": 20, "direction": "pull"}], prof)
+    for size in (2, 4):
+        for e in api.design(up, prof, {"stress_chamfer_mm": size})["edits"]:
+            assert np.isfinite(np.frombuffer(e["mesh"], "<f4")).all(), e["id"]

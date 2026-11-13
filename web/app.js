@@ -1650,8 +1650,13 @@ async function tryDesigns(auto = false) {
     const r = await call("design", { up, profile: profile(), params: { ...designParams(), ...params }, keep_clear });
     const edits = r.edits.filter((e) => ids.includes(e.id) && !e.clash).map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) }));
     if (edits.length !== ids.length) return null;
-    const soup = await applyDesignEdits(state.triangles, edits);
-    return { ...(await call("strength_variant", check, stlBytes(soup))), edits, title: title ?? edits[0].title };
+    try {
+      const soup = await applyDesignEdits(state.triangles, edits);
+      return { ...(await call("strength_variant", check, stlBytes(soup))), edits, title: title ?? edits[0].title };
+    } catch (err) {
+      if (err instanceof Cancelled) throw err;
+      return null; // a variant that can't be built is left out of the list, not an error (T-367)
+    }
   };
   await busy("Testing design changes…", async () => {
     const best = [];
