@@ -638,3 +638,28 @@ button + p, button + .hint, button + div:not(.row) { margin-top: 8px; }
 .paint-tools label { display: flex; align-items: center; gap: 6px; }
 .paint-tools input[type="range"] { width: 120px; }
 body.painting #viewer canvas { cursor: crosshair; }
+
+/* ---------- less text (T-382): explanations behind an ⓘ, and the "Explain" walk-through ---------- */
+.info-btn {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; margin-left: 4px;
+  border-radius: 50%; border: 1px solid var(--line-strong); background: var(--panel); color: var(--accent);
+  font: italic 700 12px/1 Georgia, serif; vertical-align: 2px; cursor: pointer;
+}
+.info-btn[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.info-text { margin: 6px 0 10px; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: var(--r); }
+.tour { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.tour-ring {
+  position: fixed; border-radius: 10px; outline: 3px solid var(--now);
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.45); transition: all 0.25s ease;
+}
+.tour-card {
+  position: fixed; width: min(340px, calc(100vw - 32px)); padding: 14px 16px; pointer-events: auto;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--r);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.25);
+}
+.tour-card h3 { margin: 2px 0 6px; }
+.tour-card p { margin: 0 0 12px; }
+.tour-card .row { justify-content: flex-end; align-items: center; }
+.tour-card .row .link { margin-right: auto; }
+.tour-count { color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .tour-ring { transition: none; } }

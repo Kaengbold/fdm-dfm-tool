@@ -3727,6 +3727,107 @@ function openGuide() {
 $("show-guide").onclick = openGuide;
 if (!store.get("fdm-guided") && !new URLSearchParams(location.search).has("level")) openGuide();
 
+// ---------- less text (T-382): explanations behind an ⓘ, and "Explain" walks through what is shown ----------
+
+/** The heading a paragraph explains: the nearest heading before it, looking up to two levels out. */
+function infoHost(p) {
+  for (let node = p, up = 0; node && up < 3; node = node.parentElement, up++) {
+    for (let s = node.previousElementSibling; s; s = s.previousElementSibling) if (s.matches("h2, h3, summary, label.toggle")) return s;
+  }
+  return null;
+}
+
+/** Each paragraph marked data-info folds away behind a small ⓘ at the end of its heading: the screen
+ * shows what to do, the why is one tap away. The paragraph itself stays where it was (it just opens). */
+function foldInfo() {
+  let n = 0;
+  for (const p of document.querySelectorAll("[data-info]")) {
+    const host = infoHost(p);
+    if (!host) continue;
+    p.id ||= `info-${++n}`;
+    p.hidden = true;
+    p.classList.add("info-text");
+    const b = el("button", { type: "button", className: "info-btn", textContent: "i", title: "What is this?" });
+    b.setAttribute("aria-label", `About: ${host.textContent.trim()}`);
+    b.setAttribute("aria-expanded", "false");
+    b.setAttribute("aria-controls", p.id);
+    b.onclick = (e) => {
+      e.preventDefault(); // inside a <summary>: open the text, not the section
+      e.stopPropagation();
+      p.hidden = !p.hidden;
+      b.setAttribute("aria-expanded", String(!p.hidden));
+    };
+    host.append(" ", b);
+    p.infoHost = host;
+  }
+}
+foldInfo();
+
+const onScreen = (node) => node.getClientRects().length > 0 && !node.closest("[hidden]");
+const TOUR_START = [
+  ["#steps", "The steps", "Go through them in order. A tick means that step is done; tap any step to go back to it."],
+  [".levels", "How much to show", "Simple shows only what you need to print. Switch up for more choices and checks, any time."],
+  ["#viewer", "Your part in 3D", "Drag to turn it, scroll or pinch to zoom. Tap a face to pick it: to hold it, load it or keep it clean."],
+];
+
+/** The stops for what is on screen now: the steps, the levels, the 3D view, then every explained heading
+ * that is visible, in page order. Built fresh each time, so it always matches the page. */
+function tourStops() {
+  const stops = TOUR_START.map(([sel, title, text]) => ({ node: document.querySelector(sel), title, text }));
+  for (const p of document.querySelectorAll(".info-text")) {
+    const host = p.infoHost;
+    if (host && onScreen(host)) stops.push({ node: host, title: host.textContent.replace(/\s*i$/, "").trim(), text: p.textContent.trim() });
+  }
+  return stops.filter((s) => s.node && onScreen(s.node));
+}
+
+const tour = { stops: [], at: 0 };
+function showStop() {
+  const stop = tour.stops[tour.at];
+  stop.node.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  $("tour-count").textContent = `${tour.at + 1} of ${tour.stops.length}`;
+  $("tour-title").textContent = stop.title;
+  $("tour-text").textContent = stop.text;
+  $("tour-back").disabled = tour.at === 0;
+  $("tour-next").textContent = tour.at === tour.stops.length - 1 ? "Done" : "Next";
+  setTimeout(placeTour, 350); // after the scroll
+  $("tour-next").focus();
+}
+
+/** The ring around the thing explained, the card next to it (below, else above, kept on screen). */
+function placeTour() {
+  if ($("tour").hidden) return;
+  const r = tour.stops[tour.at].node.getBoundingClientRect();
+  const pad = 6;
+  Object.assign($("tour").querySelector(".tour-ring").style, {
+    left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+  const card = $("tour").querySelector(".tour-card");
+  const h = card.offsetHeight, w = card.offsetWidth;
+  const below = r.bottom + pad + 10 + h < innerHeight;
+  const top = below ? r.bottom + pad + 10 : Math.max(10, r.top - pad - 10 - h);
+  const left = Math.min(Math.max(10, r.left), innerWidth - w - 10);
+  Object.assign(card.style, { top: `${Math.min(top, innerHeight - h - 10)}px`, left: `${left}px` });
+}
+
+function startTour() {
+  tour.stops = tourStops();
+  tour.at = 0;
+  if (!tour.stops.length) return;
+  $("tour").hidden = false;
+  showStop();
+}
+function endTour() {
+  $("tour").hidden = true;
+  $("explain").focus();
+}
+$("explain").onclick = startTour;
+$("tour-next").onclick = () => (tour.at < tour.stops.length - 1 ? (tour.at++, showStop()) : endTour());
+$("tour-back").onclick = () => tour.at > 0 && (tour.at--, showStop());
+$("tour-skip").onclick = endTour;
+addEventListener("keydown", (e) => e.key === "Escape" && !$("tour").hidden && endTour());
+addEventListener("resize", placeTour);
+addEventListener("scroll", placeTour, true);
+
 // ---------- input ----------
 $("file").onchange = async (e) => {
   const file = e.target.files[0];
