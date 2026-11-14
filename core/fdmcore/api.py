@@ -78,7 +78,7 @@ def custom_presets(printers: dict | None = None, materials: dict | None = None) 
 
 # Analysis grids (Expert settings): more cubes are more exact and slower (about linear in the browser).
 ANALYSIS = {
-    "strength_voxels": (12_000, 2_000, 200_000, "Cubes in the strength grid (Will it hold?, shaking, the optimiser). Seconds in the browser at 12 000."),
+    "strength_voxels": (12_000, 2_000, 200_000, "Cubes in the strength grid (strength analysis, shaking, the optimiser). Seconds in the browser at 12 000."),
     "fine_voxels": (40_000, 5_000, 400_000, "Cubes for \"Check accuracy with a finer grid\": about 1.5× finer than the normal grid."),
     "warp_voxels": (6_000, 1_000, 100_000, "Cubes in the warping simulation: it solves once per group of layers, so a coarser grid."),
 }

@@ -117,7 +117,7 @@ def to_html(rep: dict) -> str:
 <h2>What needs support</h2>{pic("overhangs", "Seen from below")}
 <p class="muted">Seen from below. Red needs support, amber is borderline, green sits on the bed.</p>
 <h2>Problems</h2>{problems}
-{result(rep.get("strength"), "Will it hold?", "stress")}
+{result(rep.get("strength"), "Strength analysis", "stress")}
 {result(rep.get("warp"), "Warping", "warp", "warping")}
 {nozzles}
 {f'<h2>Slicer settings</h2><p class="muted">What to change from your slicer defaults.</p><table><tr><th>Setting</th><th>Value</th><th>Why</th></tr>{settings}</table>' if settings else ""}
@@ -155,7 +155,7 @@ def to_markdown(rep: dict, stem: str) -> tuple[str, dict[str, bytes]]:
         lines += [f"### {f['title']} ({SEVERITY.get(f['severity'], f['severity'])})", "", *pic(f.get("picture"), f["title"]),
                   f["detail"], "", f["why"], ""]
         lines += [f"- *{DOMAIN.get(x['domain'], x['domain'])}*: {x['text']}" for x in f["fixes"]] + [""]
-    for key, title, picture, chart in (("strength", "Will it hold?", "stress", None), ("warp", "Warping", "warp", "warping")):
+    for key, title, picture, chart in (("strength", "Strength analysis", "stress", None), ("warp", "Warping", "warp", "warping")):
         x = rep.get(key)
         if x:
             lines += [f"## {title}", "", f"**{x['head']}.** {x['text']}", "", *(svg(chart, title) if chart else []), *pic(picture, title)]

@@ -3,7 +3,7 @@
 // what is ready and what is being worked on.
 
 export const STEP_NAMES = {
-  part: "Your part", have: "What you have", orient: "On the bed", problems: "Problems", strength: "Will it hold?",
+  part: "Your part", have: "What you have", orient: "On the bed", problems: "Problems", strength: "Strength analysis",
   sims: "Forces on the part", printing: "While printing", fits: "Tolerances & tuning", design: "Design changes", extra: "Advanced design changes", settings: "Slicer settings", download: "Download", result: "Result",
 };
 
@@ -97,7 +97,7 @@ export class Steps {
     }
     for (const [id, to] of moved) (this.panes[to] ?? document.getElementById(to)).append(document.getElementById(id));
     // The optional load fold only has something in it where the strength block moves in (Simple);
-    // elsewhere "Will it hold?" is its own step and an empty fold would open to nothing.
+    // elsewhere "Strength analysis" is its own step and an empty fold would open to nothing.
     const fold = document.getElementById("load-optional");
     fold.hidden = !moved.some(([, to]) => to === "load-optional");
     document.getElementById("settings-fold").open = level !== "simple";
