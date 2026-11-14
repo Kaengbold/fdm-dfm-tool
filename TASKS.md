@@ -396,7 +396,7 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 ### Advanced design changes
 
-- [ ] **T-392 P2** Move placed boxes in space (drag them), and place support / no-support boxes and hidden gaps automatically from the overhang and strength results; manual boxes alone add little over the slicer. Builds on T-251, after T-363. · files: `web/app.js`, `web/viewer.js`, `core/fdmcore/api.py` · owner: Claude (task/T-392-move-auto-boxes)
+- [x] **T-392 P2** Move placed boxes in space (drag them), and place support / no-support boxes and hidden gaps automatically from the overhang and strength results; manual boxes alone add little over the slicer. Builds on T-251, after T-363. · files: `web/app.js`, `web/viewer.js`, `core/fdmcore/api.py` · owner: Claude (task/T-392-move-auto-boxes) — "Move" shows arrows on a box: drag to slide it (`volume_move`, MCP `move_box`); "Suggest boxes": support where a face may droop, none on clean-marked faces that would get supports, a hidden gap at the weakest spot, dashed until "Use these" ([#115](https://github.com/Kaengbold/fdm-dfm-tool/pull/115))
 
 ## Done
 
