@@ -29,6 +29,7 @@
         <label title="Every tool on one long page"><input type="radio" name="level" value="expert" /> Expert</label>
       </div>
       <button type="button" id="show-expert" class="ghost small" data-min="expert" title="Every number the checks use, with its source">All settings</button>
+      <button type="button" id="explain" class="ghost small" title="Walk through what is on this step, one thing at a time">Explain</button>
       <button type="button" id="show-guide" class="ghost small">Guide</button>
     </header>
 
@@ -155,7 +156,7 @@
 
             <details id="my-presets" class="more-block" data-min="basic">
               <summary>My printers &amp; materials</summary>
-              <p class="hint">Add your own printer or filament, starting from a similar one. Saved in this browser only.</p>
+              <p class="hint" data-info>Add your own printer or filament, starting from a similar one. Saved in this browser only.</p>
               <div class="row">
                 <button id="new-material">New material…</button>
                 <button id="new-printer">New printer…</button>
@@ -333,11 +334,11 @@
 
         <section class="pane" data-pane="sims">
           <h2>Forces on the part</h2>
-          <p class="lead">More about the loads and where it's used. Optional: run the ones that matter for your part.</p>
+          <p class="lead" data-info>More about the loads and where it's used. Optional: run the ones that matter for your part.</p>
           <div id="blk-sims">
             <div id="temp-card" class="sim-card">
               <h3>How warm or cold it gets</h3>
-              <p class="hint">Plastic gets weaker as it warms up and soft near its limit. The strength check and the other checks use this temperature.</p>
+              <p class="hint" data-info>Plastic gets weaker as it warms up and soft near its limit. The strength check and the other checks use this temperature.</p>
               <div class="row">
                 <label>Where it's used <input id="sim-temp" type="number" step="1" min="-60" max="300" /> °C</label>
                 <button id="sim-temp-use">Check again at this temperature</button>
@@ -347,7 +348,7 @@
             </div>
             <div id="dynamics" class="sim-card">
               <h3>Shaking and knocks</h3>
-              <p class="hint">Uses where it is held and the load from <b>Will it hold?</b>: does it start to swing when something mounted on it shakes, and does it survive the load dropping onto it?</p>
+              <p class="hint" data-info>Uses where it is held and the load from <b>Will it hold?</b>: does it start to swing when something mounted on it shakes, and does it survive the load dropping onto it?</p>
               <label class="toggle"><input id="dyn-shake" type="checkbox" /> Shaking: something is mounted on it</label>
               <label class="field sub" id="dyn-shake-row" hidden>Weight mounted on the loaded face <span><input id="dyn-kg" type="number" value="0.5" min="0" step="0.1" /> kg</span></label>
               <label class="toggle"><input id="dyn-drop" type="checkbox" /> Knocks: the load can drop onto it</label>
@@ -359,7 +360,7 @@
             <!-- Switched off for now (T-379, user: not really useful); the code stays for later. -->
             <div id="box-heat" class="sim-card" hidden>
               <h3>Heat inside an electronics box</h3>
-              <p class="hint">If this part is a closed box around electronics, everything they use turns into heat that has to get out
+              <p class="hint" data-info>If this part is a closed box around electronics, everything they use turns into heat that has to get out
                 through the walls. Quick estimate from the box's outside surface.</p>
               <div class="row">
                 <label>Electronics use <input id="heat-w" type="number" value="3" min="0" step="0.5" /> W</label>
@@ -382,11 +383,11 @@
 
         <section class="pane" data-pane="printing">
           <h2>While printing</h2>
-          <p class="lead">How the printing itself goes: heat that builds up, corners that lift. Optional.</p>
+          <p class="lead" data-info>How the printing itself goes: heat that builds up, corners that lift. Optional.</p>
           <div id="blk-printing">
             <div class="sim-card" data-min="advanced">
               <h3>Cooling: does each layer cool in time?</h3>
-              <p class="hint">Finds spots that can't lose their heat fast enough: a thin tip or pin, or a small area printed on top of a
+              <p class="hint" data-info>Finds spots that can't lose their heat fast enough: a thin tip or pin, or a small area printed on top of a
                 big block of hot plastic. If the layer below is still soft when the next one goes on, it droops, blobs or bends.
                 Counts the part fan and the slicer slowing down small layers.</p>
               <p id="cooling-summary"></p>
@@ -394,13 +395,13 @@
             </div>
             <div class="sim-card">
               <h3>Warping: will the corners lift?</h3>
-              <p class="hint">Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
+              <p class="hint" data-info>Simulates the print layer by layer: the upper layers shrink as they cool and pull the corners off the bed.</p>
               <button id="run-warp">Simulate warping <small class="eta" data-eta="warping"></small></button>
               <div id="warp-result"></div>
             </div>
             <div class="sim-card">
               <h3>Detailed check from your sliced print</h3>
-              <p class="hint">The most exact strength and cooling check. Download the 3MF in this orientation, slice it, save the G-code and load it here.
+              <p class="hint" data-info>The most exact strength and cooling check. Download the 3MF in this orientation, slice it, save the G-code and load it here.
                 The checks then use the walls, infill, line directions and layer times your printer will really print.</p>
               <details class="more-block" id="detailed">
                 <summary>Load a G-code <span id="gcode-summary"></span></summary>
@@ -416,25 +417,25 @@
 
         <section class="pane" data-pane="fits">
           <h2>Tolerances &amp; tuning</h2>
-          <p class="lead">Make parts fit together: holes, pegs, bearings, screws, things that slide or press in.</p>
+          <p class="lead" data-info>Make parts fit together: holes, pegs, bearings, screws, things that slide or press in.</p>
           <p id="fit-selected" class="fit-selected" aria-live="polite"></p>
           <div id="blk-fits">
             <div class="sim-card">
               <h3>Gap to a mating part</h3>
-              <p class="hint">Export the other part from the same CAD assembly (so it keeps its place) and choose it: the closest gap
+              <p class="hint" data-info>Export the other part from the same CAD assembly (so it keeps its place) and choose it: the closest gap
                 between the two and the fit it gives.</p>
               <label class="file-button">Choose the mating part (STL or 3MF)<input id="mate-file" type="file" accept=".stl,.3mf" hidden /></label>
               <p id="mate-result" aria-live="polite"></p>
             </div>
             <div class="sim-card">
               <h3>Holes and what goes in them</h3>
-              <p class="hint">Say what goes into each hole and how tight: you get the size to model, as a design change.</p>
+              <p class="hint" data-info>Say what goes into each hole and how tight: you get the size to model, as a design change.</p>
               <p id="fits-summary" class="hint">Looking for holes and posts…</p>
               <ul id="fits" class="features"></ul>
             </div>
             <div class="sim-card" id="gap-card">
               <h3>Slots and flat gaps</h3>
-              <p class="hint">A slot or a tab: click the faces on both sides, then say how thick the other part is and how tight. You get the width to model, as a design change (a warping simulation's squeeze is added).</p>
+              <p class="hint" data-info>A slot or a tab: click the faces on both sides, then say how thick the other part is and how tight. You get the width to model, as a design change (a warping simulation's squeeze is added).</p>
               <div class="row">
                 <button id="gap-pick">Pick two faces</button>
                 <span id="gap-hint" class="hint" hidden></span>
@@ -479,14 +480,14 @@
               </div>
               <div class="sim-card topology" data-min="advanced">
                 <h3>A lighter shape</h3>
-                <p class="hint">Keeps the plastic only where your load runs through the part. It's blocky and not a finished part: use it as a guide to redesign the part in CAD. Needs the loads from "Will it hold?".</p>
+                <p class="hint" data-info>Keeps the plastic only where your load runs through the part. It's blocky and not a finished part: use it as a guide to redesign the part in CAD. Needs the loads from "Will it hold?".</p>
                 <label>Keep <input id="topo-keep" type="range" min="20" max="80" step="5" value="40" /> <output id="topo-keep-out">40 %</output> of the plastic</label>
                 <button id="run-topology" disabled>Suggest a lighter shape</button>
                 <div id="topology-result"></div>
               </div>
               <div class="sim-card versions">
                 <h3>Your versions</h3>
-                <p class="hint">Each time you apply changes, a new version is kept. Switch between them on the 3D view (or with Ctrl+Z) and compare.</p>
+                <p class="hint" data-info>Each time you apply changes, a new version is kept. Switch between them on the 3D view (or with Ctrl+Z) and compare.</p>
                 <table id="versions"></table>
                 <label class="file-button">Add another model to compare <input id="compare-file" type="file" accept=".stl,.3mf,.step,.stp" hidden /></label>
               </div>
@@ -497,7 +498,7 @@
         <section class="pane" data-pane="extra">
           <h2>Advanced design changes</h2>
           <div id="blk-extra">
-            <p class="lead">Boxes you place on the part for the slicer: supports where you want them, none where you don't, and hidden gaps that make it print solid walls inside.
+            <p class="lead" data-info>Boxes you place on the part for the slicer: supports where you want them, none where you don't, and hidden gaps that make it print solid walls inside.
               They go into the 3MF; the strength check counts the gaps.</p>
             <div class="sim-card" id="vol-card">
               <label class="field">What to place
@@ -519,7 +520,7 @@
             </div>
             <div class="sim-card" id="snap-card">
               <h3>Add another model</h3>
-              <p class="hint">Put a second part onto this one and print them as one: a bracket onto a box, a knob onto a lid. Its biggest flat
+              <p class="hint" data-info>Put a second part onto this one and print them as one: a bracket onto a box, a knob onto a lid. Its biggest flat
                 face goes flat onto the face you click, centred where you click. It becomes a new version of the model (Undo goes back).</p>
               <div class="row">
                 <label class="file-button">Choose a model (STL or 3MF)<input id="snap-file" type="file" accept=".stl,.3mf" hidden /></label>
@@ -534,7 +535,7 @@
           <h2>Slicer settings</h2>
           <div id="blk-settings">
             <div id="settings-block">
-              <p class="lead">What we change from your slicer's defaults. Hover a row for why.</p>
+              <p class="lead" data-info>What we change from your slicer's defaults. Hover a row for why.</p>
               <details id="settings-fold" class="more-block settings-fold" open>
                 <summary>Show the slicer settings</summary>
                 <table id="settings"></table>
@@ -543,7 +544,7 @@
             </div>
             <div class="sim-card" id="zone-card" data-min="advanced">
               <h3>Stronger in one area</h3>
-              <p class="hint">More walls and infill only where it's needed: around a screw hole, a hinge, a clip. The rest stays light.
+              <p class="hint" data-info>More walls and infill only where it's needed: around a screw hole, a hinge, a clip. The rest stays light.
                 The area goes into the 3MF as a modifier (orange box) and counts in the strength check. Let it reach well past
                 the spot that carries the load: where a stiff area ends, the stress gathers.</p>
               <div id="zone-suggest" class="zone-suggest"></div>
@@ -631,7 +632,7 @@
         <h2>All settings</h2>
         <button type="button" id="expert-close" class="ghost">Close</button>
       </div>
-      <p class="hint">Every number the checks use: grid sizes for the simulations and every detection limit, each with where it comes
+      <p class="hint" data-info>Every number the checks use: grid sizes for the simulations and every detection limit, each with where it comes
         from. Changed values are marked and stay in this browser; the checks run again with them. Defaults come from research
         (the bracketed names point to <code>research/</code>).</p>
       <div class="row"><input id="expert-filter" type="search" placeholder="Filter, e.g. bridge, warp, hole" aria-label="Filter settings" />
@@ -649,6 +650,19 @@
       <h3>Help me fix my print failures</h3>
       <button class="soon" disabled><b>Fix a failed print</b><span>Coming soon: show a photo or pick what went wrong, and your own AI agent suggests fixes.</span></button>
     </dialog>
+    <div id="tour" class="tour" hidden>
+      <div class="tour-ring"></div>
+      <div class="tour-card" role="dialog" aria-modal="false" aria-labelledby="tour-title">
+        <p class="tour-count" id="tour-count"></p>
+        <h3 id="tour-title"></h3>
+        <p id="tour-text"></p>
+        <div class="row">
+          <button type="button" id="tour-skip" class="link">Skip</button>
+          <button type="button" id="tour-back" class="ghost small">Back</button>
+          <button type="button" id="tour-next" class="primary">Next</button>
+        </div>
+      </div>
+    </div>
     <script type="module" src="app.js"></script>
   </body>
 </html>

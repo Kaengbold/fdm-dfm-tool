@@ -1530,6 +1530,31 @@ def main():
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
 
+        def less_text():
+            """T-382: explanations fold behind an ⓘ next to their heading; "Explain" walks through what is shown."""
+            page.evaluate("() => fdm.steps.go('printing')")
+            folded = page.evaluate("() => [...document.querySelectorAll('.info-text')].filter((p) => p.hidden).length")
+            assert folded >= 15, f"only {folded} explanations folded away"
+            btn = page.locator("[data-pane=printing] .info-btn").first
+            text = page.locator("#" + btn.get_attribute("aria-controls"))
+            assert text.is_hidden()
+            btn.click()
+            assert text.is_visible() and btn.get_attribute("aria-expanded") == "true", "the ⓘ doesn't open its text"
+            btn.click()
+            assert text.is_hidden()
+            page.click("#explain")
+            assert page.locator("#tour").is_visible()
+            count = page.locator("#tour-count").inner_text()
+            stops = int(count.split(" of ")[1])
+            assert stops >= 4, count
+            page.click("#tour-next")
+            page.click("#tour-next")
+            assert page.locator("#tour-count").inner_text().startswith("3 of"), page.locator("#tour-count").inner_text()
+            page.keyboard.press("Escape")
+            assert page.locator("#tour").is_hidden(), "Esc doesn't end the walk-through"
+            return f"{folded} explanations behind an ⓘ; walk-through with {stops} stops here"
+        run.step("less text: ⓘ explanations and the Explain walk-through", less_text)
+
         def simple_compute():
             """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that
             ticks off what the tool does."""
