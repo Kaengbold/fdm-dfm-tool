@@ -51,6 +51,7 @@
         <li><i style="background: var(--bed)"></i>On the bed</li>
       </ul>
       </div>
+      <p id="sa-demo-caption" class="demo-caption" role="status" hidden></p>
       <div id="working" class="working" role="status" aria-live="polite" hidden>
         <div class="working-head">
           <span class="spinner" aria-hidden="true"></span>
@@ -253,68 +254,84 @@
         </section>
 
         <section class="pane" data-pane="strength">
-          <h2>Will it hold?</h2>
+          <h2>Strength analysis</h2>
           <div id="blk-strength" class="strength wip" data-wip="rough estimate, not yet checked against real test prints (T-032).">
-            <p class="lead" id="pick-hint">Tap a face on the part. Then say if it's <b>held</b> there (screwed, glued, clamped) or <b>loaded</b> (a weight hangs on it, something pushes or pulls). You need one of each.</p>
-            <div id="pick-panel" hidden>
-              <p class="hint">Selected: <span id="pick-info"></span></p>
-              <div class="row" data-min="basic">
-                <button id="mark-clean" title="Orientations that put supports on this face rank lower">Keep this face clean</button>
-                <button id="mark-bed" title="Only orientations with this face on the bed are recommended">Put this face on the bed</button>
-                <button id="mark-vertical" title="Upright faces and holes print most accurately (a hole stands with its axis up, so it comes out round)">Keep this upright</button>
-              </div>
+            <button type="button" id="sa-demo" class="link">Show me how</button>
+            <div id="pick-panel" class="pick-panel" hidden>
+              <p class="hint">Tapped: <span id="pick-info"></span></p>
               <label class="toggle" data-min="advanced"><input id="at-spot" type="checkbox" /> Only around the tapped spot (Ø6 mm): an edge, a corner or part of a big face</label>
-              <div class="pick-step">
-                <b>Holds here?</b>
-                <div class="row">
-                  <select id="hold" aria-label="How it is held">
-                    <option value="clamped">clamped or glued (can't move)</option>
-                    <option value="resting">resting on something (can lift off)</option>
-                    <option value="screw">a screw or bolt in this hole</option>
-                  </select>
-                  <button id="as-fixed" class="mark-held">Holds here</button>
-                </div>
+              <div class="row" data-min="basic">
+                <span class="hint">This face also:</span>
+                <button id="mark-clean" class="small" title="Orientations that put supports on this face rank lower">Keep it clean</button>
+                <button id="mark-bed" class="small" title="Only orientations with this face on the bed are recommended">Put it on the bed</button>
+                <button id="mark-vertical" class="small" title="Upright faces and holes print most accurately (a hole stands with its axis up, so it comes out round)">Keep it upright</button>
               </div>
-              <div class="pick-step">
-                <b>Or loaded here?</b>
-                <div class="row">
-                  <input id="kg" type="number" value="2" min="0.1" step="0.5" aria-label="Load in kg" /> kg
-                  <select id="dir" aria-label="Load direction">
-                    <option value="push">pushing on the face</option>
-                    <option value="pull">pulling the face</option>
-                    <option value="angle">at an angle…</option>
-                  </select>
-                </div>
-                <div id="dir-angle" class="angles" hidden>
-                  <label>Lean <input id="dir-lean" type="range" min="0" max="180" step="5" value="45" /></label>
-                  <label>Towards <input id="dir-toward" type="range" min="0" max="355" step="5" value="0" /></label>
-                  <span id="dir-angle-out"></span>
-                  <p class="hint">Lean: 0° pushes straight into the face, 90° slides along it, 180° pulls straight out.
-                    Towards: which way along the face, 0° is up. The arrow on the part shows it.</p>
-                </div>
-                <div class="row">
-                  <label data-min="advanced">in <select id="load-case" aria-label="Load case">
-                    <option value="1">case 1</option><option value="2">case 2</option><option value="3">case 3</option>
-                  </select></label>
-                  <button id="as-load" class="primary mark-load">Load here</button>
-                </div>
-              </div>
-              <p class="hint" data-min="advanced">Loads in the same case act together. Use separate cases for different situations (hanging, being knocked sideways): the weakest one counts.</p>
             </div>
+            <ol class="sa-flow">
+              <li class="sa-stage" data-stage="held">
+                <button type="button" class="sa-head"><span class="sa-num">1</span><span class="sa-title">Where it's held</span><span class="sa-sum"></span></button>
+                <div class="sa-body">
+                  <p class="sa-do">Turn the part and tap the face that is <b>screwed, glued or clamped</b>. A lock shows where it holds.</p>
+                  <div class="row">
+                    <select id="hold" aria-label="How it is held">
+                      <option value="clamped">clamped or glued (can't move)</option>
+                      <option value="resting">resting on something (can lift off)</option>
+                      <option value="screw">a screw or bolt in this hole</option>
+                    </select>
+                    <button id="as-fixed" class="mark-held" disabled title="Tap a face first">Holds here</button>
+                  </div>
+                  <button type="button" class="primary sa-next" data-next="load" disabled>Next: where the load goes</button>
+                </div>
+              </li>
+              <li class="sa-stage" data-stage="load">
+                <button type="button" class="sa-head"><span class="sa-num">2</span><span class="sa-title">Where the load goes</span><span class="sa-sum"></span></button>
+                <div class="sa-body">
+                  <p class="sa-do">Tap the face where <b>a weight hangs or something pushes or pulls</b>. The arrow shows which way.</p>
+                  <div class="row">
+                    <input id="kg" type="number" value="2" min="0.1" step="0.5" aria-label="Load in kg" /> kg
+                    <select id="dir" aria-label="Load direction">
+                      <option value="push">pushing on the face</option>
+                      <option value="pull">pulling the face</option>
+                      <option value="angle">at an angle…</option>
+                    </select>
+                  </div>
+                  <div id="dir-angle" class="angles" hidden>
+                    <label>Lean <input id="dir-lean" type="range" min="0" max="180" step="5" value="45" /></label>
+                    <label>Towards <input id="dir-toward" type="range" min="0" max="355" step="5" value="0" /></label>
+                    <span id="dir-angle-out"></span>
+                    <p class="hint">Lean: 0° pushes straight into the face, 90° slides along it, 180° pulls straight out.
+                      Towards: which way along the face, 0° is up. The arrow on the part shows it.</p>
+                  </div>
+                  <div class="row">
+                    <label data-min="advanced">in <select id="load-case" aria-label="Load case">
+                      <option value="1">case 1</option><option value="2">case 2</option><option value="3">case 3</option>
+                    </select></label>
+                    <button id="as-load" class="mark-load" disabled title="Tap a face first">Load here</button>
+                  </div>
+                  <p class="hint" data-min="advanced">Loads in the same case act together. Use separate cases for different situations (hanging, being knocked sideways): the weakest one counts.</p>
+                  <button type="button" class="primary sa-next" data-next="extra" disabled>Next: extra settings</button>
+                </div>
+              </li>
+              <li class="sa-stage" data-stage="extra">
+                <button type="button" class="sa-head"><span class="sa-num">3</span><span class="sa-title">Extra settings</span><span class="sa-sum"></span></button>
+                <div class="sa-body">
+                  <label class="toggle"><input id="constant-load" type="checkbox" /> The load is on all the time (e.g. a shelf that always carries its weight)</label>
+                  <p class="hint sub">Plastic slowly stretches and sags under a load that never goes away (creep), so the check then asks for ×3 safety instead of ×2.</p>
+                  <details class="more-block shells" data-min="basic">
+                    <summary>How it's printed: <span id="shells-summary"></span></summary>
+                    <p class="hint">Most strength comes from the solid outside: <b>walls</b> around the sides and solid <b>layers</b> on top and bottom. Inside is a light <b>infill</b> grid. These go into the 3MF too.</p>
+                    <div class="row">
+                      <label>Walls <input id="sh-walls" type="number" min="1" max="20" step="1" /></label>
+                      <label>Top layers <input id="sh-top" type="number" min="0" max="30" step="1" /></label>
+                      <label>Bottom layers <input id="sh-bottom" type="number" min="0" max="30" step="1" /></label>
+                      <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
+                    </div>
+                  </details>
+                </div>
+              </li>
+            </ol>
             <ul id="marks" class="marks"></ul>
             <ul id="loads" class="loads"></ul>
-            <label class="toggle"><input id="constant-load" type="checkbox" /> The load is on all the time (e.g. a shelf that always carries its weight)</label>
-            <p class="hint sub">Plastic slowly stretches and sags under a load that never goes away (creep), so the check then asks for ×3 safety instead of ×2.</p>
-            <details class="more-block shells" data-min="basic">
-              <summary>How it's printed: <span id="shells-summary"></span></summary>
-              <p class="hint">Most strength comes from the solid outside: <b>walls</b> around the sides and solid <b>layers</b> on top and bottom. Inside is a light <b>infill</b> grid. These go into the 3MF too.</p>
-              <div class="row">
-                <label>Walls <input id="sh-walls" type="number" min="1" max="20" step="1" /></label>
-                <label>Top layers <input id="sh-top" type="number" min="0" max="30" step="1" /></label>
-                <label>Bottom layers <input id="sh-bottom" type="number" min="0" max="30" step="1" /></label>
-                <label>Infill <input id="sh-infill" type="number" min="0" max="100" step="5" /> %</label>
-              </div>
-            </details>
             <div class="actions">
               <button id="run-strength" class="primary" disabled>Check strength</button>
               <button id="run-optimise" disabled data-min="basic" title="Tries walls, top/bottom layers and infill, and finds the lightest print that holds your load with a safety margin">Find the lightest settings that hold</button>
@@ -340,13 +357,13 @@
             </div>
             <div id="dynamics" class="sim-card">
               <h3>Shaking and knocks</h3>
-              <p class="hint">Uses where it is held and the load from <b>Will it hold?</b>: does it start to swing when something mounted on it shakes, and does it survive the load dropping onto it?</p>
+              <p class="hint">Uses where it is held and the load from <b>Strength analysis</b>: does it start to swing when something mounted on it shakes, and does it survive the load dropping onto it?</p>
               <label class="toggle"><input id="dyn-shake" type="checkbox" /> Shaking: something is mounted on it</label>
               <label class="field sub" id="dyn-shake-row" hidden>Weight mounted on the loaded face <span><input id="dyn-kg" type="number" value="0.5" min="0" step="0.1" /> kg</span></label>
               <label class="toggle"><input id="dyn-drop" type="checkbox" /> Knocks: the load can drop onto it</label>
               <label class="field sub" id="dyn-drop-row" hidden>Drop height <span><input id="dyn-mm" type="number" value="50" min="0" step="10" /> mm</span></label>
               <button id="run-dynamics" disabled>Run these checks <small class="eta" data-eta="dynamics"></small></button>
-              <p id="dynamics-need" class="hint">Set where it is held and a load in <b>Will it hold?</b> first.</p>
+              <p id="dynamics-need" class="hint">Set where it is held and a load in <b>Strength analysis</b> first.</p>
               <p id="dynamics-result" class="dynamics-result"></p>
             </div>
             <!-- Switched off for now (T-379, user: not really useful); the code stays for later. -->
@@ -472,7 +489,7 @@
               </div>
               <div class="sim-card topology" data-min="advanced">
                 <h3>A lighter shape</h3>
-                <p class="hint">Keeps the plastic only where your load runs through the part. It's blocky and not a finished part: use it as a guide to redesign the part in CAD. Needs the loads from "Will it hold?".</p>
+                <p class="hint">Keeps the plastic only where your load runs through the part. It's blocky and not a finished part: use it as a guide to redesign the part in CAD. Needs the loads from "Strength analysis".</p>
                 <label>Keep <input id="topo-keep" type="range" min="20" max="80" step="5" value="40" /> <output id="topo-keep-out">40 %</output> of the plastic</label>
                 <button id="run-topology" disabled>Suggest a lighter shape</button>
                 <div id="topology-result"></div>
