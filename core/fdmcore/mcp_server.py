@@ -629,6 +629,13 @@ def place_box(up: list[float], kind: str, region: int | None = None, point: list
 
 
 @server.tool()
+def move_box(up: list[float], box: dict, by: list[float], printer: str = "bambu_p1s", material: str = "pla",
+             nozzle: str = "0.4") -> dict:
+    """A box from place_box moved by ``by`` mm (part coordinates), same size, with new notes."""
+    return _clean(api.volume_move(up, box, by, _profile(printer, material, nozzle)))
+
+
+@server.tool()
 def apply_blocks(up: list[float], boxes: list[dict], output_path: str) -> dict:
     """Join the "add_solid" boxes onto the part and cut the "cut_solid" ones out of it (boxes from
     place_box with the same ``up``), save the changed STL and load it as the part."""
@@ -851,6 +858,7 @@ API_TOOLS = {
     "box_heat": "box_heat",
     "zone_at": "add_zone",
     "volume_at": "place_box",
+    "volume_move": "move_box",
     "tag_feature": "tag_feature",
     "strength": "check_strength",
     "strength_variant": "strength_variant",

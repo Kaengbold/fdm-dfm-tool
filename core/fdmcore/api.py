@@ -857,17 +857,39 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
         _reach_supports(s.mesh, int(region), r0, lo, hi, zs)
     if pin:
         lo[2], hi[2] = _solid_run(inside, built[0], zs.min(), zs.max())
-    # Slicer boxes stay between the bed and the top of the part (see _zone_box); keep-clear space may be above it.
+    return {**_volume_box(up, kind, lo, hi, shape, p, inside), "margin": float(margin)}
+
+
+def _volume_box(up, kind: str, lo, hi, shape: str, p: Profile, inside=None) -> dict:
+    """An advanced design box (build frame ``lo`` / ``hi``) with its corners on the bed and its notes.
+    Slicer boxes stay between the bed and the top of the part (see _zone_box); keep-clear space may be above it."""
+    from .strength import ZONE_SHAPES
+
+    s = _require()
+    r0 = rotation_to_z(up)
+    zs = (s.mesh.triangles.reshape(-1, 3) @ r0.T)[:, 2]
+    lo, hi = np.array(lo, float), np.array(hi, float)
     lo[2], hi[2] = max(lo[2], zs.min()), (hi[2] if kind in DESIGN_ONLY else min(hi[2], zs.max()))
     if np.any(hi - lo <= 0):
         raise ValueError("That box is outside the part's height")
-    from .strength import ZONE_SHAPES
-
     if shape not in ZONE_SHAPES:
         raise ValueError(f"shape must be one of {ZONE_SHAPES}")
     box = {"kind": kind, "lo": lo.tolist(), "hi": hi.tolist(), "walls": 0, "infill": 0.0, "shape": shape}
     corners = _zone_info(_box_zone(box), s.mesh, up, p.printer["bed"], _moving(p))["corners_print"]
-    return {**box, "margin": float(margin), "corners_print": corners, "notes": _volume_notes(s.mesh, r0, inside, box, p)}
+    notes = _volume_notes(s.mesh, r0, inside if inside is not None else _inside_test(s.mesh, r0), box, p)
+    return {**box, "corners_print": corners, "notes": notes}
+
+
+def volume_move(up, box: dict, by, profile: dict | None = None) -> dict:
+    """An advanced design box (volume_at) moved ``by`` mm (part coordinates): the user dragged it in the
+    3D view. Same size; its height still stops at the bed and the top of the part, and the notes say
+    what it does in its new place."""
+    if box.get("kind") not in VOLUME_KINDS:
+        raise ValueError(f"Unknown kind {box.get('kind')!r}: use one of {', '.join(VOLUME_KINDS)}")
+    shift = rotation_to_z(up) @ np.asarray(by, float)  # part -> build frame
+    lo, hi = np.asarray(box["lo"], float) + shift, np.asarray(box["hi"], float) + shift
+    moved = _volume_box(up, box["kind"], lo, hi, box.get("shape", "box"), Profile.from_dict(profile))
+    return {**moved, **({"margin": box["margin"]} if "margin" in box else {})}
 
 
 def volume_solid(up, boxes: list[dict]) -> list[dict]:
@@ -2957,6 +2979,7 @@ METHODS = {
     "box_heat": box_heat,
     "zone_at": zone_at,
     "volume_at": volume_at,
+    "volume_move": volume_move,
     "tag_feature": tag_feature,
     "session_state": session_state,
     "holes_state": holes_state,

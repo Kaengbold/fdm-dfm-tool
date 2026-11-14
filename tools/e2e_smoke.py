@@ -1530,6 +1530,64 @@ def main():
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
 
+        def move_and_suggest_boxes():
+            """T-392: drag a box by its arrow in the 3D view, and let the app suggest boxes."""
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f += Math.max(1, Math.floor(n / 50))) { const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); if (el && el.tagName === 'CANVAS' && v.pick({clientX: x, clientY: y}) >= 0) return [x, y]; } return [0, 0]; }"
+            )
+            page.select_option("#vol-kind", "support")
+            page.click("#vol-pick")
+            run.act(lambda: page.mouse.click(x, y))
+            before = page.evaluate("() => fdm.state.volumes[0]")
+            page.locator("#vol-list li").first.get_by_role("button", name="Move", exact=True).click()
+            assert page.evaluate("() => fdm.viewer.handles.children.length") == 3, "no move arrows"
+            # The x arrow on screen: from the arrows' middle to its tip; drag the tip further out.
+            mid, tip = page.evaluate("""() => {
+              const v = fdm.viewer, a = v.handles.children[0], r = v.renderer.domElement.getBoundingClientRect();
+              const screen = (p) => { const q = p.clone().project(v.camera); return [r.left + (q.x + 1) / 2 * r.width, r.top + (1 - q.y) / 2 * r.height]; };
+              return [screen(v.handles.userData.mid), screen(a.localToWorld(a.children[1].position.clone()))];
+            }""")
+            to = [tip[0] + 0.6 * (tip[0] - mid[0]), tip[1] + 0.6 * (tip[1] - mid[1])]
+            camera = page.evaluate("() => fdm.viewer.camera.position.toArray()")
+            page.mouse.move(*tip)
+            page.mouse.down()
+            page.mouse.move(*to, steps=8)
+            page.mouse.up()
+            page.wait_for_function("() => fdm.state.volumes[0].offset", timeout=60_000)
+            after = page.evaluate("() => fdm.state.volumes[0]")
+            moved = [b - a for a, b in zip(before["lo"], after["lo"])]
+            assert abs(moved[0]) > 0.4 or abs(moved[1]) > 0.4, f"box not moved: {moved}"
+            size = lambda v: [h - l for l, h in zip(v["lo"], v["hi"])]
+            assert all(abs(a - b) < 1e-6 for a, b in zip(size(before), size(after))), "the box changed size"
+            turned = max(abs(a - b) for a, b in zip(page.evaluate("() => fdm.viewer.camera.position.toArray()"), camera))
+            assert turned < 0.5, "the drag turned the view"
+            page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
+            # Suggestions: the face that needs the most support, marked "keep clean", gets a no-support box.
+            # Lying its best way the mushroom needs none: take the orientation with the most support.
+            most = page.evaluate("() => fdm.state.options.map((o) => o.face_classes.filter((c) => c === 2).length).reduce((b, n, i, a) => (n > a[b] ? i : b), 0)")
+            page.evaluate("() => fdm.steps.go('orient')")
+            run.act(lambda: page.locator("#options > li").nth(most).click())
+            page.evaluate("() => fdm.steps.go('extra')")
+            page.evaluate("""() => {
+              const s = fdm.state, cls = s.options[s.active].face_classes, n = new Map();
+              for (let f = 0; f < cls.length; f++) if (cls[f] === 2) n.set(s.faceRegions[f], (n.get(s.faceRegions[f]) ?? 0) + 1);
+              const region = [...n].sort((a, b) => b[1] - a[1])[0][0];
+              s.marks = [{ region, kind: 'clean' }];
+            }""")
+            run.act(lambda: page.click("#vol-suggest"))
+            kinds = page.evaluate("() => fdm.state.suggested.map((v) => v.kind)")
+            assert "blocker" in kinds, f"no no-support box suggested: {kinds} | {page.locator('#status').inner_text()}"
+            dashed = page.evaluate("() => fdm.viewer.zones.children.some((c) => c.isLineSegments && c.material.isLineDashedMaterial)")
+            assert dashed, "suggestions not drawn dashed"
+            page.click("#vol-use")
+            assert "blocker" in page.evaluate("() => fdm.state.volumes.map((v) => v.kind)"), "suggestions not added"
+            assert page.locator("#vol-suggested").is_hidden()
+            page.evaluate("() => { fdm.state.marks = []; }")
+            return f"moved by {[round(m, 1) for m in moved]} mm; suggested {kinds}"
+        run.step("move boxes and suggested boxes", move_and_suggest_boxes)
+
         def simple_compute():
             """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that
             ticks off what the tool does."""

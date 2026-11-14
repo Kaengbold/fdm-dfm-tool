@@ -499,6 +499,18 @@
           <div id="blk-extra">
             <p class="lead">Boxes you place on the part for the slicer: supports where you want them, none where you don't, and hidden gaps that make it print solid walls inside.
               They go into the 3MF; the strength check counts the gaps.</p>
+            <div class="sim-card" id="auto-card">
+              <h3>Place them for me</h3>
+              <p class="hint">Supports where a face may droop, none on faces you want clean, a hidden gap at the weakest spot of the strength analysis.</p>
+              <button id="vol-suggest">Suggest boxes</button>
+              <div id="vol-suggested" hidden>
+                <ul id="vol-suggest-list" class="zone-list vol-list"></ul>
+                <div class="row">
+                  <button id="vol-use" class="primary">Use these</button>
+                  <button id="vol-dismiss" class="link">Not now</button>
+                </div>
+              </div>
+            </div>
             <div class="sim-card" id="vol-card">
               <label class="field">What to place
                 <select id="vol-kind">
