@@ -409,7 +409,7 @@ export class Viewer {
   showZones(zones) {
     empty(this.zones);
     if (!this.zones) this.scene.add((this.zones = new THREE.Group()));
-    for (const z of zones) { // corner arrays (zones, orange) or {corners, color, shape}
+    for (const z of zones) { // corner arrays (zones, orange) or {corners, color, shape, faint}
       const [c, color] = Array.isArray(z) ? [z, css("--vertical")] : [z.corners, css(z.color ?? "--vertical")];
       if (z.shape && z.shape !== "box") {
         this.roundZone(c, z.shape, color);
@@ -427,12 +427,65 @@ export class Viewer {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(c.flat()), 3));
       geometry.setIndex(idx);
-      this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide })));
+      this.zones.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: z.faint ? 0.07 : 0.18, depthWrite: false, side: THREE.DoubleSide })));
       // Edges drawn over the part: a box inside it (a hidden gap, a stronger zone) must stay visible (T-363).
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color, depthTest: false }));
+      // A suggestion (faint) gets dashed edges: not placed yet.
+      const line = z.faint ? new THREE.LineDashedMaterial({ color, depthTest: false, dashSize: 2, gapSize: 1.5 }) : new THREE.LineBasicMaterial({ color, depthTest: false });
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), line);
+      if (z.faint) edges.computeLineDistances();
       edges.renderOrder = 5;
       this.zones.add(edges);
     }
+  }
+
+  /** Arrows to move a box (T-392): one per bed axis from the middle of its ``corners`` (shown frame),
+   * drawn over the part so they can be grabbed from any side; null hides them. */
+  showMoveHandles(corners) {
+    empty(this.handles);
+    if (!this.handles) this.scene.add((this.handles = new THREE.Group()));
+    if (!corners) return;
+    const mid = corners.reduce((a, p) => a.add(new THREE.Vector3(...p)), new THREE.Vector3()).multiplyScalar(1 / corners.length);
+    const r = this.part?.geometry.boundingSphere.radius ?? 20;
+    const [len, size] = [Math.max(10, 0.35 * r), Math.max(4, 0.08 * r)];
+    MOVE_AXES.forEach(([dir, color], axis) => {
+      const arrow = solidArrow(new THREE.Vector3(...dir), mid, len, size, color);
+      arrow.traverse((o) => {
+        if (o.material) o.material.depthTest = false;
+        o.renderOrder = 8;
+      });
+      arrow.userData.axis = axis;
+      this.handles.add(arrow);
+    });
+    this.handles.userData.mid = mid;
+  }
+
+  /** Which move arrow (0 x, 1 y, 2 z) is under the pointer, or null. */
+  pickHandle(event) {
+    if (!this.handles?.children.length) return null;
+    for (const hit of this.rayAt(event).intersectObjects(this.handles.children, true)) {
+      for (let o = hit.object; o; o = o.parent) if (o.userData.axis != null) return o.userData.axis;
+    }
+    return null;
+  }
+
+  /** How far along ``axis`` (mm, from the arrows' middle) the pointer is: where its ray meets the plane
+   * that holds the axis and faces the camera most. Differences between two calls give the drag. */
+  alongAxis(axis, event) {
+    const e = new THREE.Vector3(...MOVE_AXES[axis][0]);
+    const mid = this.handles.userData.mid;
+    const look = this.camera.position.clone().sub(mid);
+    const normal = look.sub(e.clone().multiplyScalar(look.dot(e))); // the view direction, without its part along the axis
+    if (normal.lengthSq() < 1e-9) return 0; // looking straight along the axis: no way to tell
+    const hit = this.rayAt(event).ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(normal.normalize(), mid), new THREE.Vector3());
+    return hit ? hit.sub(mid).dot(e) : 0;
+  }
+
+  rayAt(event) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    return ray;
   }
 
   /** A slot or tab on the part (T-386): its measured width as a line with a label, and the other part as
@@ -753,6 +806,9 @@ export function fieldColor(t, c = new THREE.Color()) {
 }
 
 /** A thick arrow (shaft + head) from ``tail`` along unit ``dir``. */
+// Move arrows for boxes (T-392): along the bed's x, y and up, in the usual axis colours.
+const MOVE_AXES = [[[1, 0, 0], "#d9480f"], [[0, 1, 0], "#2f9e44"], [[0, 0, 1], "#1c7ed6"]];
+
 function solidArrow(dir, tail, len, size, color) {
   const material = new THREE.MeshBasicMaterial({ color });
   const head = size * 0.7;
