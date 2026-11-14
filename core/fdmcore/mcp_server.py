@@ -187,7 +187,8 @@ def check_strength(
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
-    (default 3) — for an edge, a corner or part of a big face.
+    (default 3) — for an edge, a corner or part of a big face — or on an area: "points": [[x, y, z], …] with
+    "radius" (everything within it of any point, like the web app's brush).
     ``zones``: stronger areas (add_zone, or optimise_strength's ``zoned``) printed with their own walls / infill.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
     return _clean(api.strength(up, loads, _profile(printer, material, nozzle, use_temp_c=use_temp_c, constant_load=constant_load),
@@ -629,6 +630,13 @@ def place_box(up: list[float], kind: str, region: int | None = None, point: list
 
 
 @server.tool()
+def move_box(up: list[float], box: dict, by: list[float], printer: str = "bambu_p1s", material: str = "pla",
+             nozzle: str = "0.4") -> dict:
+    """A box from place_box moved by ``by`` mm (part coordinates), same size, with new notes."""
+    return _clean(api.volume_move(up, box, by, _profile(printer, material, nozzle)))
+
+
+@server.tool()
 def apply_blocks(up: list[float], boxes: list[dict], output_path: str) -> dict:
     """Join the "add_solid" boxes onto the part and cut the "cut_solid" ones out of it (boxes from
     place_box with the same ``up``), save the changed STL and load it as the part."""
@@ -851,6 +859,7 @@ API_TOOLS = {
     "box_heat": "box_heat",
     "zone_at": "add_zone",
     "volume_at": "place_box",
+    "volume_move": "move_box",
     "tag_feature": "tag_feature",
     "strength": "check_strength",
     "strength_variant": "strength_variant",

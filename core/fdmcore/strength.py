@@ -7,6 +7,7 @@ corner, a spot on a big face — part coordinates, ``radius`` mm, default 3):
   {"region": 5, "kind": "fixed", "hold": "screw"}     # a screw or bolt in this hole: bears on the hole wall
   {"region": 7, "kind": "force", "kg": 5, "direction": "push" | "pull" | "down" | [x, y, z], "case": 2}
   {"point": [10, 0, 5], "radius": 2, "kind": "force", "kg": 1}
+  {"points": [[10, 0, 5], [12, 0, 5]], "radius": 2.5, "kind": "fixed"}   # an area painted with a brush
 ``down`` means -Z in the part's own (as-modelled) coordinates, like a hanging weight.
 Forces with different ``case`` numbers are separate situations (e.g. "hanging" and "being
 pulled sideways"); fixed faces hold in every case and the weakest case decides.
@@ -183,10 +184,10 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
 
     for load in loads:
         sel = _load_faces(mesh, region, load, grid.h)
-        if "point" in load:  # outer voxels near the spot (a big triangle reaches far past it)
+        if on_spots(load):  # outer voxels near the spot (a big triangle reaches far past it)
             if surface is None:
                 surface = depth(grid.solid)[tuple(model.elems.T)] == 1
-            near = np.linalg.norm(grid.centers(model.elems) - load["point"], axis=1) <= _radius(load, grid.h) + 0.5 * grid.h
+            near = _distance_to_points(grid.centers(model.elems), _spots(load)) <= _radius(load, grid.h) + 0.5 * grid.h
             elems = np.flatnonzero(near & surface)
         else:
             elems = _surface_elements(mesh.triangles[sel], normals[sel], grid, elem_id)
@@ -291,17 +292,36 @@ def _loose_nodes(model: Model, fixed: np.ndarray) -> np.ndarray:
 def _load_faces(mesh: Mesh, region: np.ndarray, load: dict, h: float) -> np.ndarray:
     """Triangles a load acts on: its region, or the surface within ``radius`` of its point
     (at least ~1.5 voxels, so a small spot still reaches the grid)."""
-    if "point" in load:
-        p = np.asarray(load["point"], float)
+    if on_spots(load):
         r = _radius(load, h)
-        sel = _distance_to_triangles(mesh.triangles, p) <= r
+        sel = np.zeros(len(mesh.triangles), dtype=bool)
+        for p in _spots(load):
+            sel |= _distance_to_triangles(mesh.triangles, p) <= r
         if not sel.any():
-            raise ValueError(f"No surface within {r:.1f} mm of point {p.round(1).tolist()}")
+            raise ValueError(f"No surface within {r:.1f} mm of {_where(load).lower()}")
         return sel
     sel = region == load["region"]
     if not sel.any():
         raise ValueError(f"Unknown region {load['region']}")
     return sel
+
+
+def on_spots(load: dict) -> bool:
+    """Does the load sit on spots (a point, or an area painted with a brush) rather than a region?"""
+    return bool(load.get("points")) or load.get("point") is not None
+
+
+def _spots(load: dict) -> np.ndarray:
+    """The load's spots: the painted ``points``, else its one ``point`` ((n, 3), part coordinates)."""
+    return np.asarray(load["points"] if load.get("points") else [load["point"]], float).reshape(-1, 3)
+
+
+def _distance_to_points(xyz: np.ndarray, points: np.ndarray) -> np.ndarray:
+    """Distance from each of ``xyz`` to the nearest of ``points`` (a stroke has a few hundred at most)."""
+    best = np.full(len(xyz), np.inf)
+    for p in points:
+        best = np.minimum(best, np.linalg.norm(xyz - p, axis=1))
+    return best
 
 
 def _radius(load: dict, h: float) -> float:
@@ -328,7 +348,10 @@ def _distance_to_triangles(tris: np.ndarray, p: np.ndarray) -> np.ndarray:
 
 
 def _where(load: dict) -> str:
-    return f"The spot at {np.round(load['point'], 1).tolist()}" if "point" in load else f"Region {load['region']}"
+    if not on_spots(load):
+        return f"Region {load['region']}"
+    spots = _spots(load)
+    return f"The spot at {np.round(spots[0], 1).tolist()}" if len(spots) == 1 else f"The painted area at {np.round(spots.mean(axis=0), 1).tolist()}"
 
 
 def material_for(profile: Profile) -> Material:

@@ -631,6 +631,14 @@ button + p, button + .hint, button + div:not(.row) { margin-top: 8px; }
   box-shadow: 0 8px 24px #10241c40; z-index: 4; pointer-events: none; }
 @media (max-width: 820px) { .sa-body { padding-left: 12px; } }
 
+/* ---------- held / loaded: the whole face or a painted area (T-370) ---------- */
+.pick-mode { display: grid; gap: 8px; margin: 8px 0; }
+.paint-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.paint-tools .hint { flex-basis: 100%; margin: 0; }
+.paint-tools label { display: flex; align-items: center; gap: 6px; }
+.paint-tools input[type="range"] { width: 120px; }
+body.painting #viewer canvas { cursor: crosshair; }
+
 /* ---------- less text (T-382): explanations behind an ⓘ, and the "Explain" walk-through ---------- */
 .info-btn {
   display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; margin-left: 4px;

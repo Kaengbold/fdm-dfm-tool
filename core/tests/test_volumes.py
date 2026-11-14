@@ -140,3 +140,21 @@ def test_pin_hole_from_a_side_face_goes_into_the_wall():
     assert middle == pytest.approx(api.VOID_COVER_MM + api.VOID_MM / 2, abs=0.01)
     assert v["hi"][2] - v["lo"][2] == pytest.approx(10 - 2 * api.VOID_COVER_MM, abs=0.3)
     assert not any("shows as a hole" in n for n in v["notes"])
+
+
+def test_moved_box_keeps_its_size_and_stays_on_the_part():
+    """T-392: a box dragged in the 3D view. Moved in part coordinates (here the part lies on its side,
+    so part +z is a sideways move on the bed), same size, its notes updated, its height still within the part."""
+    api.load(box(40, 20, 10), "block")
+    up = [0, -1, 0]  # part -y points up: part z runs along the bed
+    v = api.volume_at(up, "support", point=[10, 10, 5], margin=2)
+    moved = api.volume_move(up, v, [0, 0, 3])
+    size = np.subtract(v["hi"], v["lo"])
+    assert np.subtract(moved["hi"], moved["lo"]) == pytest.approx(size)
+    shift = np.subtract(moved["lo"], v["lo"])
+    assert np.linalg.norm(shift) == pytest.approx(3) and abs(shift[2]) < 1e-9  # sideways on the bed, not up
+    assert moved["margin"] == v["margin"] and moved["notes"] and len(moved["corners_print"]) == 8
+    up_high = api.volume_move(up, v, [0, -9, 0])  # dragged 9 mm up, past the top: cut off there
+    assert up_high["hi"][2] - up_high["lo"][2] == pytest.approx(size[2] - 9 + 8, abs=1e-6)  # 4 mm tall, its top 8 mm under the part's: 1 mm cut off
+    with pytest.raises(ValueError, match="outside the part's height"):
+        api.volume_move(up, v, [0, -200, 0])

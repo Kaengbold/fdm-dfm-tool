@@ -267,7 +267,17 @@
             <button type="button" id="sa-demo" class="link">Show me how</button>
             <div id="pick-panel" class="pick-panel" hidden>
               <p class="hint">Tapped: <span id="pick-info"></span></p>
-              <label class="toggle" data-min="advanced"><input id="at-spot" type="checkbox" /> Only around the tapped spot (Ø6 mm): an edge, a corner or part of a big face</label>
+              <div class="pick-mode" data-min="advanced">
+                <div class="seg" role="radiogroup" aria-label="Hold or load">
+                  <label><input type="radio" name="pick-mode" value="face" checked /> The whole face</label>
+                  <label><input type="radio" name="pick-mode" id="pick-paint" value="paint" /> Paint an area</label>
+                </div>
+                <div id="paint-tools" class="paint-tools" hidden>
+                  <span class="hint">Drag over the part: an edge, a corner, part of a face.</span>
+                  <label>Brush <input id="brush-size" type="range" min="2" max="20" step="1" value="5" /> <output id="brush-size-out" for="brush-size">Ø5 mm</output></label>
+                  <button type="button" id="paint-clear" class="small">Clear</button>
+                </div>
+              </div>
               <div class="row" data-min="basic">
                 <span class="hint">This face also:</span>
                 <button id="mark-clean" class="small" title="Orientations that put supports on this face rank lower">Keep it clean</button>
@@ -517,6 +527,18 @@
           <div id="blk-extra">
             <p class="lead" data-info>Boxes you place on the part for the slicer: supports where you want them, none where you don't, and hidden gaps that make it print solid walls inside.
               They go into the 3MF; the strength check counts the gaps.</p>
+            <div class="sim-card" id="auto-card">
+              <h3>Place them for me</h3>
+              <p class="hint" data-info>Supports where a face may droop, none on faces you want clean, a hidden gap at the weakest spot of the strength analysis.</p>
+              <button id="vol-suggest">Suggest boxes</button>
+              <div id="vol-suggested" hidden>
+                <ul id="vol-suggest-list" class="zone-list vol-list"></ul>
+                <div class="row">
+                  <button id="vol-use" class="primary">Use these</button>
+                  <button id="vol-dismiss" class="link">Not now</button>
+                </div>
+              </div>
+            </div>
             <div class="sim-card" id="vol-card">
               <label class="field">What to place
                 <select id="vol-kind">

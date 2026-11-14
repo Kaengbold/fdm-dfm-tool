@@ -133,7 +133,9 @@ const state = {
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
-  volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
+  volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what, offset (moved, part mm)}
+  moving: -1, // the box whose move arrows show
+  suggested: [], // boxes the app suggests (T-392), like volumes plus why and use (ticked)
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
   fastenerNotes: {}, // region -> {size, use, text}: the screw, insert or nut in a hole (set_fastener)
   fitSel: null, // the hole, post or slot selected in Tolerances & tuning: {key, regions, label}
@@ -504,6 +506,8 @@ async function selectOption(i) {
   state.showSwing = false;
   renderGcode();
   setZones([]); // zones belong to one orientation
+  state.moving = -1;
+  setSuggested([]);
   setVolumes([]);
   clearWarp();
   clearEdits();
@@ -908,7 +912,7 @@ function recolor() {
   if (strengthView()) return;
   if (shows("printing") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
-  const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
+  const spot = painting() && state.paint.length > 0;
   const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
@@ -917,8 +921,13 @@ function recolor() {
     if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
-  const spots = shows("strength") ? state.loads.filter((l) => l.point).map((l) => ({ point: l.point, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
-  if (spot) spots.push({ point: state.pickedPoint, radius: SPOT_RADIUS, color: REGION_COLORS.selected });
+  showPainted();
+}
+
+/** Spots and painted areas on the part: the loads on them, and the area being painted now. */
+function showPainted() {
+  const spots = shows("strength") ? state.loads.filter((l) => l.point || l.points).map((l) => ({ point: l.point, points: l.points, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
+  if (painting() && state.paint.length) spots.push({ points: state.paint, radius: brushRadius(), color: REGION_COLORS.selected });
   viewer.showSpots(spots);
 }
 
@@ -972,6 +981,7 @@ async function ensureRegions() {
 let downAt = null;
 $("viewer").addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 $("viewer").addEventListener("pointerup", async (e) => {
+  if (stroke.done) return (stroke.done = false); // that was painting, not a tap
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || !state.triangles) return;
   const hit = viewer.pickHit(e);
   if (!hit) return;
@@ -985,6 +995,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
+  state.paint = [hit.point];
   hoverTip.hidden = true;
   const info = state.regionInfo[state.selectedRegion];
   $("pick-info").textContent = info.hole_diameter
@@ -1002,15 +1013,72 @@ $("viewer").addEventListener("pointerup", async (e) => {
   else setStatus(`Picked: ${$("pick-info").textContent}. To hold or load it, or keep it clean or on the bed, open "${STEP_NAMES.strength}".`);
 });
 
-const SPOT_RADIUS = 3; // mm, for loads "only around the clicked spot"
-const where = (l) => (l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
+const where = (l) => (l.points ? `area ${l.points.length} ${l.point.map((v) => v.toFixed(1)).join(",")}`
+  : l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
 
-/** The clicked face, or the spot around the clicked point when "only around the spot" is ticked. */
+/** The tapped face, or the area painted with the brush. A painted load keeps all its spots
+ * (``points``, part coordinates) and, as ``point``, the one in its middle for the lock or arrow. */
 function target() {
-  return $("at-spot").checked
-    ? { point: state.pickedPoint, radius: SPOT_RADIUS, normal: state.regionInfo[state.selectedRegion]?.normal }
-    : { region: state.selectedRegion };
+  if (!painting() || !state.paint.length) return { region: state.selectedRegion };
+  const pts = state.paint;
+  const mean = [0, 1, 2].map((k) => pts.reduce((s, p) => s + p[k], 0) / pts.length);
+  const point = pts.reduce((a, p) => (Math.hypot(...p.map((v, k) => v - mean[k])) < Math.hypot(...a.map((v, k) => v - mean[k])) ? p : a));
+  return { points: pts.map((p) => p.map((v) => +v.toFixed(2))), radius: brushRadius(), point, normal: state.regionInfo[state.selectedRegion]?.normal };
 }
+
+// ---------- the brush (T-370): paint where it's held or loaded, instead of a whole face ----------
+state.paint = []; // part coordinates of the painted spots
+const painting = () => document.querySelector("[name=pick-mode]:checked")?.value === "paint" && !$("pick-panel").hidden && shows("strength");
+const brushRadius = () => Number($("brush-size").value) / 2;
+const stroke = { on: false, done: false };
+
+/** Add a spot under the pointer unless the brush already covered it (a stroke stays a few hundred spots at most). */
+function paintAt(hit) {
+  if (!hit || state.paint.length >= 400) return;
+  const near = brushRadius() * 0.5;
+  if (state.paint.some((p) => Math.hypot(p[0] - hit.point[0], p[1] - hit.point[1], p[2] - hit.point[2]) < near)) return;
+  state.paint.push(hit.point);
+  showPainted();
+}
+
+// Captured before the camera sees it: on the part, a press paints instead of turning the view.
+$("viewer").addEventListener("pointerdown", (e) => {
+  if (!painting() || e.button !== 0) return;
+  const hit = viewer.pickHit(e);
+  if (!hit) return; // beside the part: turn the camera as usual
+  viewer.controls.enabled = false;
+  stroke.on = true;
+  paintAt(hit);
+}, { capture: true });
+$("viewer").addEventListener("pointermove", (e) => stroke.on && paintAt(viewer.pickHit(e)));
+for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+  $("viewer").addEventListener(type, () => {
+    if (!stroke.on) return;
+    Object.assign(stroke, { on: false, done: type === "pointerup" });
+    viewer.controls.enabled = true;
+    previewPick();
+    recolor();
+  }, { capture: true });
+}
+for (const radio of document.querySelectorAll("[name=pick-mode]")) {
+  radio.onchange = () => {
+    const paint = radio.value === "paint";
+    $("paint-tools").hidden = !paint;
+    document.body.classList.toggle("painting", paint);
+    state.paint = paint && state.pickedPoint ? [state.pickedPoint] : [];
+    previewPick();
+    recolor();
+  };
+}
+$("brush-size").oninput = () => {
+  $("brush-size-out").textContent = `Ø${$("brush-size").value} mm`;
+  showPainted();
+};
+$("paint-clear").onclick = () => {
+  state.paint = [];
+  previewPick();
+  recolor();
+};
 
 function addLoad(load) {
   remember(load.kind === "fixed" ? "where it is held" : "a load");
@@ -1020,6 +1088,7 @@ function addLoad(load) {
   state.selectedRegion = -1;
   $("pick-panel").hidden = true;
   state.previewLoad = null;
+  state.paint = [];
   renderLoads();
   previewPick();
   recolor();
@@ -1266,7 +1335,6 @@ function endDemo() {
 }
 $("sa-demo").onclick = playDemo;
 $("viewer").addEventListener("pointerdown", endDemo);
-$("at-spot").onchange = recolor;
 
 const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" }; // "down": loads saved before T-372, agents
 const DEG = Math.PI / 180;
@@ -1325,7 +1393,7 @@ function loadEditor(l) {
 }
 
 const HOLD_TEXT = { clamped: "Held: clamped or glued", resting: "Held: resting (only pushes back)", screw: "Held: screw or bolt" };
-const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
+const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.points ? " (painted area)" : l.point ? " (at a spot)" : "");
 
 // The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
 const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,
@@ -2219,11 +2287,16 @@ const volumesShown = () => zonesShown() || shows("extra");
 const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", keep_clear: "--clean", add_solid: "--bed", cut_solid: "--force" };
 
 /** Zones (orange) and the advanced design boxes (their own colours) in the 3D view. */
+let boxDrag = null; // {i, axis, start, along, corners}: a drag on a box's move arrow (T-392)
+
 function drawBoxes() {
+  const moving = volumesShown() ? state.volumes[state.moving] : null;
   viewer.showZones([
     ...(zonesShown() ? state.zones.map((z) => ({ corners: z.corners_print, shape: z.shape })) : []),
-    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind], shape: v.shape })) : []),
+    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v === moving && boxDrag ? boxDrag.corners : v.corners_print, color: VOLUME_COLOR[v.kind], shape: v.shape })) : []),
+    ...(volumesShown() ? state.suggested.filter((v) => v.use).map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind], faint: true })) : []),
   ]);
+  viewer.showMoveHandles(moving ? boxDrag?.corners ?? moving.corners_print : null);
 }
 
 /** What the slicer and the strength check get: zones plus the advanced design boxes. */
@@ -2464,14 +2537,144 @@ async function pickSnap(hit) {
 
 async function resizeVolume(i, margin, shape = state.volumes[i].shape ?? "box") {
   const old = state.volumes[i];
-  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin, shape }));
+  let v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin, shape }));
+  if (old.offset) v = await call("volume_move", { up: activeOption().up, box: v, by: old.offset, profile: profile() }); // it was moved: stay there
   remember("the box's size");
   setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, margin } : q)));
 }
 
+// ---------- move a box (T-392): drag its arrows in the 3D view ----------
+const MOVE_STEP_MM = 0.5;
+
+$("viewer").addEventListener("pointerdown", (e) => {
+  const axis = state.moving >= 0 && volumesShown() ? viewer.pickHandle(e) : null;
+  if (axis == null) return;
+  boxDrag = { i: state.moving, axis, start: viewer.alongAxis(axis, e), along: 0, corners: state.volumes[state.moving].corners_print };
+  viewer.controls.enabled = false; // before OrbitControls sees this press (capture phase)
+}, { capture: true });
+addEventListener("pointermove", (e) => {
+  if (!boxDrag) return;
+  const { i, axis, start } = boxDrag;
+  boxDrag.along = Math.round((viewer.alongAxis(axis, e) - start) / MOVE_STEP_MM) * MOVE_STEP_MM;
+  boxDrag.corners = state.volumes[i].corners_print.map((c) => c.map((v, k) => (k === axis ? v + boxDrag.along : v)));
+  drawBoxes(); // the box and its arrows follow; the engine places it on release
+});
+addEventListener("pointerup", async () => {
+  if (!boxDrag) return;
+  const { i, axis, along } = boxDrag;
+  downAt = null; // not a click on the part
+  viewer.controls.enabled = true;
+  if (!along) {
+    boxDrag = null;
+    return drawBoxes();
+  }
+  // Shown (bed) frame -> part: the move turned back by the part's placement on the bed.
+  const R = viewer.placement.rotation;
+  const by = [0, 1, 2].map((k) => R[axis][k] * along);
+  const old = state.volumes[i];
+  try {
+    const v = await call("volume_move", { up: activeOption().up, box: old, by, profile: profile() });
+    remember("moving a box");
+    const offset = [0, 1, 2].map((k) => (old.offset?.[k] ?? 0) + by[k]);
+    boxDrag = null;
+    setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, offset } : q)));
+    setStatus(`Moved ${Math.abs(along)} mm. ${v.notes[0] ?? ""}`);
+  } catch (err) {
+    boxDrag = null;
+    drawBoxes();
+    setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
+  }
+});
+
+// ---------- place them for me (T-392): boxes from the overhang and strength results ----------
+const DROOP_SHARE = 0.5; // of a face's triangles "may droop" before it gets a support box
+const MIN_FACE_MM2 = 20; // smaller faces print fine either way
+const MAX_SUGGESTED = 6;
+
+/** What to place where, from what the app already knows: faces that may droop (support), faces marked
+ * clean that would get supports (no support), and the weakest spot of the strength analysis (hidden gap). */
+function boxIdeas() {
+  const cls = activeOption().face_classes;
+  const counts = new Map(); // region -> [faces, may droop, needs support]
+  for (let f = 0; f < cls.length; f++) {
+    const c = counts.get(state.faceRegions[f]) ?? [0, 0, 0];
+    c[0]++;
+    if (cls[f] === 1) c[1]++;
+    if (cls[f] === 2) c[2]++;
+    counts.set(state.faceRegions[f], c);
+  }
+  const clean = new Set(state.marks.filter((m) => m.kind === "clean").map((m) => m.region));
+  const ideas = [];
+  for (const [region, [n, droop, support]] of counts) {
+    const info = state.regionInfo[region];
+    if (!info || info.area_mm2 < MIN_FACE_MM2) continue;
+    if (clean.has(region) && support / n > 0.3) {
+      ideas.push({ kind: "blocker", from: { region }, area: info.area_mm2,
+        why: "You want this face clean, and the slicer would put supports on it. Without them it prints in the air: fine if it droops only a little." });
+    } else if (droop / n >= DROOP_SHARE && support / n < 0.2) {
+      ideas.push({ kind: "support", from: { region }, area: info.area_mm2,
+        why: "This face may droop: the slicer's automatic supports often leave a slope like this out. A support box makes sure it gets one." });
+    }
+  }
+  ideas.sort((a, b) => b.area - a.area);
+  const weak = state.strength?.weak_marker;
+  if (weak) {
+    const R = viewer.placement.rotation;
+    const normal = [0, 1, 2].map((k) => R[0][k] * weak.normal[0] + R[1][k] * weak.normal[1] + R[2][k] * weak.normal[2]);
+    ideas.unshift({ kind: "void", from: { point: viewer.toPart(weak.point), normal }, area: Infinity,
+      why: "The weakest spot in the strength analysis: the slicer prints walls all round a hidden gap, so the plastic there comes out solid." });
+  }
+  return ideas.slice(0, MAX_SUGGESTED);
+}
+
+$("vol-suggest").onclick = async () => {
+  if (!activeOption()) return;
+  await ensureRegions();
+  const ideas = boxIdeas();
+  const placed = [];
+  await busy("Placing suggested boxes…", async () => {
+    for (const idea of ideas) {
+      try {
+        const v = await call("volume_at", { up: activeOption().up, kind: idea.kind, profile: profile(), ...idea.from });
+        const info = idea.from.region != null ? state.regionInfo[idea.from.region] : null;
+        const what = info ? (info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`) : "the weakest spot";
+        placed.push({ ...v, from: idea.from, what, why: idea.why, use: true });
+      } catch { /* a box that doesn't fit here is just not suggested */ }
+    }
+  });
+  setSuggested(placed);
+  const many = (n) => `${n} box${n > 1 ? "es" : ""}`;
+  setStatus(placed.length ? `${many(placed.length)} suggested (dashed): untick any you don't want, then "Use these".`
+    : state.strength ? "Nothing to add: no face that may droop, no clean face with supports."
+    : "Nothing to add yet. Run the strength analysis first for a hidden gap at the weakest spot.");
+};
+
+function setSuggested(list) {
+  state.suggested = list;
+  $("vol-suggested").hidden = !list.length;
+  $("vol-suggest-list").replaceChildren(...list.map((v) => {
+    const tick = el("input", { type: "checkbox", checked: v.use, onchange: () => { v.use = tick.checked; drawBoxes(); } });
+    const li = el("li", {}, el("label", { className: "toggle" }, tick, el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` })),
+      el("p", { className: "hint", textContent: v.why }));
+    li.dataset.kind = v.kind;
+    return li;
+  }));
+  drawBoxes();
+}
+$("vol-use").onclick = () => {
+  const use = state.suggested.filter((v) => v.use).map(({ use, why, ...v }) => v);
+  if (!use.length) return;
+  remember("the suggested boxes");
+  setSuggested([]);
+  setVolumes([...state.volumes, ...use]);
+  setStatus(`${use.length} box${use.length > 1 ? "es" : ""} added: they go into the 3MF.`);
+};
+$("vol-dismiss").onclick = () => setSuggested([]);
+
 /** Advanced design boxes: shown in the 3D view, listed with their notes, sent with the zones. */
 function setVolumes(volumes) {
   state.volumes = volumes;
+  if (state.moving >= volumes.length) state.moving = -1;
   drawBoxes();
   $("zones-for").hidden = !printZones().some((z) => z.kind !== "keep_clear");
   $("vol-list").replaceChildren(...volumes.map((v, i) => {
@@ -2480,13 +2683,22 @@ function setVolumes(volumes) {
     const size = pin
       ? el("label", {}, "Width ", num(+(v.margin * 2).toFixed(1), 0.2, 4, 0.1, (e) => resizeVolume(i, Math.max(0.1, Number(e.target.value) / 2 || 0.3))), " mm")
       : el("label", {}, "Reaches ", num(v.margin, 0, 30, 0.5, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
+    const move = el("button", { className: "small", textContent: state.moving === i ? "Done moving" : "Move",
+      "aria-pressed": String(state.moving === i), title: "Drag the coloured arrows on the box in the 3D view",
+      onclick: () => {
+        state.moving = state.moving === i ? -1 : i;
+        setVolumes(state.volumes);
+        if (state.moving === i) setStatus("Drag one of the coloured arrows on the box to move it.");
+      } });
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
       el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
       ...v.notes.map((n) => el("p", { className: "hint", textContent: n })),
       SOLID_KINDS.includes(v.kind) ? el("button", { textContent: "Apply to the model", onclick: () => applySolid(i) }) : "",
+      move,
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing a box");
+        state.moving = -1;
         setVolumes(state.volumes.filter((_, k) => k !== i));
       } }));
     li.dataset.kind = v.kind;
