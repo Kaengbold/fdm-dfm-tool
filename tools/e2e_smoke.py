@@ -156,7 +156,7 @@ def main():
         browser = p.chromium.launch(channel=channel, headless=not args.headed)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         # Expert level and no start guide, so every step finds its controls (the guide has its own step).
-        page.add_init_script("localStorage.setItem('fdm-guided', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
+        page.add_init_script("localStorage.setItem('fdm-guided', '1'); localStorage.setItem('fdm-sa-demo', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
         # Long simulations ask first; the test says "Run it" unless a step wants to see the question.
         page.add_init_script("""addEventListener('DOMContentLoaded', () => new MutationObserver(() => {
             const d = document.getElementById('long-run');
@@ -447,6 +447,7 @@ def main():
 
         def load_cases():
             # Another visible face (different region) gets a load in case 1 and a heavier one in case 2.
+            page.click("[data-next=load]")  # T-369: held is set, on to where the load goes
             x, y = page.evaluate(
                 "() => { const v = fdm.viewer, s = fdm.state, held = s.loads[0].region;"
                 " const n = v.part.geometry.getAttribute('position').count / 3;"
@@ -533,6 +534,7 @@ def main():
         run.step("FEA view: legend, section, finer grid", fea_view)
 
         def shells():
+            page.click("[data-stage=extra] .sa-head")
             page.locator(".shells:not(#detailed) summary").click()
             page.fill("#sh-walls", "6")
             run.act(lambda: page.dispatch_event("#sh-walls", "change"), 300_000)
@@ -803,7 +805,7 @@ def main():
             dl.value.save_as(out)
             html = out.read_text(encoding="utf-8")
             pictures = html.count('<img src="data:image/jpeg')
-            assert pictures >= 3 and "Will it hold?" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
+            assert pictures >= 3 and "Strength analysis" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
             return f"{len(html) // 1024} kB, {pictures} pictures"
         run.step("report with pictures", report_with_pictures)
 
@@ -1414,15 +1416,17 @@ def main():
             xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
               for (let f = 0; f < n; f++) { const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);
                 if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y]; } return null; }""")
+            page.click("[data-stage=load] .sa-head")
             page.mouse.click(*xy)
             page.wait_for_selector("#pick-panel:not([hidden])", timeout=300_000)  # the first click loads the face tools
             arrows = page.evaluate("() => fdm.viewer.symbols?.children.length ?? 0")
+            assert arrows > 0, "no preview arrow on the tapped face"  # T-369: shown before it's added
             page.select_option("#dir", "angle")
             page.dispatch_event("#dir", "input")
             page.fill("#dir-lean", "90")
             page.dispatch_event("#dir-lean", "input")
             assert page.locator("#dir-angle").is_visible()
-            assert page.evaluate("() => fdm.viewer.symbols.children.length") > arrows, "no preview arrow"
+            assert page.evaluate("() => fdm.viewer.symbols.children.length") == arrows, "the preview arrow should turn, not be added"
             normal = page.evaluate("() => fdm.state.regionInfo[fdm.state.selectedRegion].normal")
             page.click("#as-load")
             d = page.evaluate("() => fdm.state.loads.at(-1).direction")

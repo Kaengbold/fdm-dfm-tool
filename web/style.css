@@ -612,6 +612,25 @@ button + p, button + .hint, button + div:not(.row) { margin-top: 8px; }
 .shells > summary { flex-wrap: wrap; column-gap: 6px; row-gap: 2px; }
 .shells > summary span { font-weight: 400; }
 
+/* ---------- the guided strength flow (T-369) ---------- */
+.sa-flow { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sa-stage { border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--panel); }
+.sa-stage.open { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.sa-head { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; padding: 10px 12px; font-weight: 700; font-size: 15px; text-align: left; }
+.sa-num { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; background: #e1e7e2; color: var(--muted); }
+.sa-stage.done .sa-num { background: var(--good); color: #fff; }
+.sa-stage.open .sa-num { background: var(--now); color: var(--text); }
+.sa-sum { margin-left: auto; font-weight: 400; font-size: 13px; color: var(--muted); }
+.sa-body { display: none; flex-direction: column; gap: 10px; padding: 0 12px 12px 46px; }
+.sa-stage.open .sa-body { display: flex; }
+.sa-next { align-self: flex-start; }
+.pick-panel { padding: 8px 10px; border-radius: var(--r); background: var(--accent-soft); }
+#sa-demo { align-self: flex-end; font-size: 13px; }
+.demo-caption { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px);
+  margin: 0; padding: 9px 14px; border-radius: 10px; background: #173a2e; color: #f3f5f2; font-size: 15px; font-weight: 700;
+  box-shadow: 0 8px 24px #10241c40; z-index: 4; pointer-events: none; }
+@media (max-width: 820px) { .sa-body { padding-left: 12px; } }
+
 /* ---------- held / loaded: the whole face or a painted area (T-370) ---------- */
 .pick-mode { display: grid; gap: 8px; margin: 8px 0; }
 .paint-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
