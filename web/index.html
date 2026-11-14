@@ -270,7 +270,17 @@
                 <button id="mark-bed" title="Only orientations with this face on the bed are recommended">Put this face on the bed</button>
                 <button id="mark-vertical" title="Upright faces and holes print most accurately (a hole stands with its axis up, so it comes out round)">Keep this upright</button>
               </div>
-              <label class="toggle" data-min="advanced"><input id="at-spot" type="checkbox" /> Only around the tapped spot (Ø6 mm): an edge, a corner or part of a big face</label>
+              <div class="pick-mode" data-min="advanced">
+                <div class="seg" role="radiogroup" aria-label="Hold or load">
+                  <label><input type="radio" name="pick-mode" value="face" checked /> The whole face</label>
+                  <label><input type="radio" name="pick-mode" id="pick-paint" value="paint" /> Paint an area</label>
+                </div>
+                <div id="paint-tools" class="paint-tools" hidden>
+                  <span class="hint">Drag over the part: an edge, a corner, part of a face.</span>
+                  <label>Brush <input id="brush-size" type="range" min="2" max="20" step="1" value="5" /> <output id="brush-size-out" for="brush-size">Ø5 mm</output></label>
+                  <button type="button" id="paint-clear" class="small">Clear</button>
+                </div>
+              </div>
               <div class="pick-step">
                 <b>Holds here?</b>
                 <div class="row">

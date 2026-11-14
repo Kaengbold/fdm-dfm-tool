@@ -1587,7 +1587,7 @@ def strength_variant(up, loads: list[dict], data: bytes, profile: dict | None = 
     new = region_info(mesh, variant.regions)
     moved = []
     for load in loads:
-        if load.get("point") is not None or "region" not in load:
+        if "region" not in load or load.get("point") is not None or load.get("points"):
             moved.append(load)
             continue
         was = old[load["region"]]

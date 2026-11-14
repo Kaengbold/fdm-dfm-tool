@@ -478,18 +478,30 @@ def main():
             page.evaluate("() => { fdm.state.loads = fdm.state.loads.filter((l) => l.kind === 'fixed'); }")
             page.mouse.click(x, y)
             page.wait_for_selector("#pick-panel:not([hidden])")
-            page.check("#at-spot")
-            assert page.evaluate("() => fdm.viewer.spots.children.length") == 1, "no preview ball for the spot"
+            # T-370: paint an area with the brush (a short drag over the face) instead of the whole face.
+            page.click("label:has(#pick-paint)")
+            camera = page.evaluate("() => fdm.viewer.camera.position.toArray()")
+            page.mouse.move(x, y)
+            page.mouse.down()
+            for k in range(1, 9):
+                page.mouse.move(x + 3 * k, y + k, steps=2)
+            page.mouse.up()
+            painted = page.evaluate("() => fdm.state.paint.length")
+            assert painted > 1, f"the drag painted {painted} spot(s)"
+            moved = max(abs(a - b) for a, b in zip(page.evaluate("() => fdm.viewer.camera.position.toArray()"), camera))
+            assert moved < 0.5, "the drag turned the view instead of painting"
+            assert page.evaluate("() => fdm.viewer.spots.children.at(-1).count") == painted, "painted spots not shown"
             page.fill("#kg", "4")
             page.click("#as-load")
-            page.evaluate("() => { document.getElementById('at-spot').checked = false; }")  # back to whole faces
+            page.evaluate("() => { const r = document.querySelector('[name=pick-mode][value=face]'); r.checked = true; r.dispatchEvent(new Event('change')); }")  # back to whole faces (the panel is closed now)
             loads = page.locator("#loads li").all_inner_texts()
-            assert any("(at a spot)" in l for l in loads), loads
+            assert any("(painted area)" in l for l in loads), loads
+            assert page.evaluate("() => fdm.state.loads.at(-1).points.length") == painted
             run.act(lambda: page.click("#run-strength"), 300_000)
             text = page.locator("#strength-result").inner_text()
             assert "safety" in text.lower(), text
             return f"loads: {loads} | {text.splitlines()[0]}"
-        run.step("strength with a load on a spot", spot_load)
+        run.step("strength with a load on a painted area", spot_load)
 
         def shaking():
             page.check("#dyn-shake")

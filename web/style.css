@@ -611,3 +611,11 @@ button.primary:disabled { opacity: 1; background: var(--soft); border-color: var
 button + p, button + .hint, button + div:not(.row) { margin-top: 8px; }
 .shells > summary { flex-wrap: wrap; column-gap: 6px; row-gap: 2px; }
 .shells > summary span { font-weight: 400; }
+
+/* ---------- held / loaded: the whole face or a painted area (T-370) ---------- */
+.pick-mode { display: grid; gap: 8px; margin: 8px 0; }
+.paint-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.paint-tools .hint { flex-basis: 100%; margin: 0; }
+.paint-tools label { display: flex; align-items: center; gap: 6px; }
+.paint-tools input[type="range"] { width: 120px; }
+body.painting #viewer canvas { cursor: crosshair; }
