@@ -38,6 +38,7 @@
       <div id="view-empty" class="view-empty">Your part shows up here</div>
       <div id="legend" class="fea-legend" hidden></div>
       <div class="view-info">
+      <p id="view-changes" class="view-changes" hidden></p>
       <p id="view-label" class="view-label" hidden></p>
       <div class="view-tools">
         <label id="version-pick" hidden>Model <select id="version" aria-label="Model version"></select></label>
@@ -52,6 +53,12 @@
       </ul>
       </div>
       <p id="sa-demo-caption" class="demo-caption" role="status" hidden></p>
+      <div id="view-compare" class="view-compare" role="group" aria-label="Compare with how it was" hidden>
+        <button type="button" data-compare="before" aria-pressed="false">Before</button>
+        <button type="button" data-compare="after" aria-pressed="true">After</button>
+      </div>
+      <p class="view-before-label">As it lies in your file</p>
+      <button type="button" id="view-size" class="view-size small" aria-pressed="false">Bigger view</button>
       <div id="working" class="working" role="status" aria-live="polite" hidden>
         <div class="working-head">
           <span class="spinner" aria-hidden="true"></span>

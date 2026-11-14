@@ -51,7 +51,6 @@ PF = Path("C:/Program Files")
 SLICERS = {
     "orca": {
         "exe": PF / "OrcaSlicer/orca-slicer.exe",
-        "profiles": PF / "OrcaSlicer/resources/profiles/BBL",
     },
     "bambu": {
         "exe": PF / "Bambu Studio/bambu-studio.exe",
@@ -96,6 +95,12 @@ def slice_with(name: str, cfg: dict, model: Path, out: Path) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     if name == "prusa":
         cmd = [str(cfg["exe"]), "--export-gcode", "--output", str(out / "plate.gcode"), str(model)]
+    elif name == "orca":  # 2.5 packs its profiles, so the ones slicer_cli picks (installed or ours)
+        from fdmcore.slicer_cli import pick_profiles, write_profiles
+
+        f = write_profiles(pick_profiles(Path(cfg["exe"]), "Bambu Lab P1S", "0.4", "pla", 0.2), out)
+        cmd = [str(cfg["exe"]), "--slice", "0", "--outputdir", str(out),
+               "--load-settings", f"{f['machine']};{f['process']}", "--load-filaments", str(f["filament"]), str(model)]
     else:
         p = cfg["profiles"]
         cmd = [str(cfg["exe"]), "--slice", "0", "--outputdir", str(out),

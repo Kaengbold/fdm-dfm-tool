@@ -1477,6 +1477,32 @@ def main():
             return f"{[round(v) for v in before]} -> upside down {[round(v) for v in flipped]} -> tipped {[round(v) for v in tipped]}, kept after a material change"
         run.step("turn the part by hand", turn_by_hand)
 
+        def settings_lead():
+            """T-375: Simple and Basic put the settings first: steps across the top, the 3D view a card on the
+            right that says what the step changes, with Before / After for how the part lies."""
+            page.click("input[name=level][value=basic] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('orient')")
+            box = lambda sel: page.locator(sel).bounding_box()  # noqa: E731
+            nav, panel, view = box("#steps"), box("#panel"), box("#viewer")
+            assert nav["width"] > 1000 and nav["y"] + nav["height"] <= panel["y"] + 1, (nav, panel)
+            assert view["x"] >= panel["x"] + panel["width"] - 1 and panel["width"] > view["width"], (panel, view)
+            assert "which face lies on the bed" in page.inner_text("#view-changes")
+            page.click("[data-compare=before]")
+            assert page.evaluate("() => !!fdm.viewer.before && !fdm.viewer.part.visible")
+            assert not page.is_visible("#view-label") and page.is_visible(".view-before-label")
+            page.click("[data-compare=after]")
+            assert page.evaluate("() => !fdm.viewer.before && fdm.viewer.part.visible")
+            page.click("[data-compare=before]")
+            page.evaluate("() => fdm.steps.go('problems')")  # another step shows the part as it prints again
+            assert page.evaluate("() => !fdm.viewer.before && fdm.viewer.part.visible")
+            assert page.is_hidden("#view-compare")
+            page.click("input[name=level][value=advanced] >> xpath=..")
+            panel, view = box("#panel"), box("#viewer")
+            assert view["x"] < panel["x"] and page.is_hidden("#view-changes"), (panel, view)
+            page.click("input[name=level][value=expert] >> xpath=..")
+            return "Basic: settings left, 3D card right, Before / After works; Advanced keeps the big 3D view"
+        run.step("Simple and Basic: settings first, 3D beside them", settings_lead)
+
         def hidden_gap_from_side():
             """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
             refused), and its outline is drawn over the part so it can be seen inside it."""

@@ -2,12 +2,19 @@
 
 The pseudo-slicer (slicer.py) estimates; this gives the slicer's own numbers: print
 time, filament, layer count. Our per-object settings ride along in the 3MF (checked by
-tools/slicer_check.py); printer, process and filament come from OrcaSlicer's own system
+tools/slicer_check.py); printer, process and filament come from OrcaSlicer's system
 profiles, matched to our presets by name. Local-only (subprocess), not in the web app.
+
+Where the profiles come from: OrcaSlicer up to 2.4 keeps them as JSON files next to the program;
+2.5 packs them into ``.opc`` files in its own format. So we ship the ones we need, flattened
+(``data/orca_profiles.json.gz``, made by ``tools/orca_profiles.py`` from OrcaSlicer's source at a
+fixed version), and slicing works with any OrcaSlicer version on any computer. The installed JSON
+files still win when there are any, as they match that slicer exactly.
 """
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import re
@@ -26,6 +33,7 @@ ORCA_PATHS = [
 ]
 # Our material id -> OrcaSlicer filament_type.
 FILAMENT_TYPE = {"pla": "PLA", "pla_plus": "PLA", "petg": "PETG", "abs": "ABS", "asa": "ASA", "pc": "PC", "tpu_95a": "TPU", "pa_cf": "PA-CF"}
+BUNDLED = Path(__file__).parent / "data" / "orca_profiles.json.gz"
 
 
 def find_orca() -> Path | None:
@@ -42,7 +50,8 @@ def _norm(s: str) -> str:
 @lru_cache(maxsize=2)
 def _profiles(resources: Path) -> dict[str, dict]:
     """Every system profile by name: {"path", "kind" (machine/process/filament), "data"} with the
-    ``inherits`` chain merged in (child keys win)."""
+    ``inherits`` chain and the ``include``d templates merged in, like OrcaSlicer does: the parent, then
+    each template in the order listed (2.5: start / end G-code …), then the profile's own keys."""
     raw = {}
     for f in resources.glob("*/*/**/*.json"):
         kind = f.relative_to(resources).parts[1]
@@ -59,10 +68,34 @@ def _profiles(resources: Path) -> dict[str, dict]:
         p = raw.get(name)
         if p is None or name in seen:
             return {}
-        parent = p["own"].get("inherits")
-        return {**(full(parent, (*seen, name)) if parent else {}), **p["own"]}
+        own, seen = p["own"], (*seen, name)
+        out = full(own["inherits"], seen) if own.get("inherits") else {}
+        includes = own.get("include") or []
+        for template in [includes] if isinstance(includes, str) else includes:
+            out.update(full(template, seen))
+        out.update(own)
+        out.pop("include", None)  # merged in here: the command line can't look templates up
+        return out
 
     return {n: {"path": p["path"], "kind": p["kind"], "data": full(n), "own": p["own"]} for n, p in raw.items()}
+
+
+@lru_cache(maxsize=1)
+def bundled_profiles() -> dict[str, dict]:
+    """The profiles we ship, in the same form as ``_profiles`` ({} if the file is missing)."""
+    if not BUNDLED.exists():
+        return {}
+    snap = json.loads(gzip.decompress(BUNDLED.read_bytes()))
+    return {n: {"kind": p["kind"], "data": p["data"], "own": p["data"]} for n, p in snap["profiles"].items()}
+
+
+def installed_profiles(orca: Path) -> dict[str, dict]:
+    """The installed OrcaSlicer's profiles when it keeps them as JSON files (up to 2.4; the macOS app
+    has them under Resources), else {}."""
+    for resources in (orca.parent / "resources" / "profiles", orca.parents[1] / "Resources" / "profiles"):
+        if resources.is_dir():
+            return _profiles(resources)
+    return {}
 
 
 _TOKEN = re.compile(r"""\s*(?:
@@ -169,9 +202,17 @@ def _atom(t, i, env):
     raise ValueError(text)
 
 
-def match_profiles(resources: Path, printer_name: str, nozzle: str, material: str, layer_height: float) -> dict[str, Path]:
-    """OrcaSlicer machine, process and filament profiles for our printer / material, or KeyError."""
-    profiles = _profiles(resources)
+def fits(data: dict, machine: str, mdata: dict) -> bool:
+    """Does a process / filament profile name this machine (a list, or a condition on its settings)?"""
+    if data.get("compatible_printers"):
+        return machine in data["compatible_printers"]
+    cond = data.get("compatible_printers_condition", "")
+    return bool(cond) and _condition(cond, mdata)
+
+
+def match_profiles(profiles: dict[str, dict], printer_name: str, nozzle: str, material: str, layer_height: float) -> dict[str, str]:
+    """Names of the OrcaSlicer machine, process and filament profiles for our printer / material, or
+    KeyError. ``profiles``: ``installed_profiles``, ``bundled_profiles`` or ``_profiles`` of a folder."""
     usable = {n: p for n, p in profiles.items() if p["own"].get("instantiation") == "true"}
     base = _norm(re.sub(r"\(.*?\)", "", printer_name)).rstrip("+")
     want = f"{nozzle} nozzle"
@@ -179,14 +220,9 @@ def match_profiles(resources: Path, printer_name: str, nozzle: str, material: st
     if not machines:
         raise KeyError(f"No OrcaSlicer profile for {printer_name} with a {nozzle} mm nozzle")
     machine = min(machines, key=len)
-    mdata = profiles[machine]["data"]
 
     def compatible(n):
-        d = profiles[n]["data"]
-        if d.get("compatible_printers"):
-            return machine in d["compatible_printers"]
-        cond = d.get("compatible_printers_condition", "")
-        return bool(cond) and _condition(cond, mdata)
+        return fits(profiles[n]["data"], machine, profiles[machine]["data"])
 
     processes = [n for n, p in usable.items() if p["kind"] == "process" and compatible(n)]
     if not processes:
@@ -194,21 +230,77 @@ def match_profiles(resources: Path, printer_name: str, nozzle: str, material: st
     process = min(processes, key=lambda n: (abs(float(profiles[n]["data"].get("layer_height", 0.2)) - layer_height),
                                            "standard" not in n.lower(), len(n)))
     ftype = FILAMENT_TYPE.get(material, material.upper())
-    filaments = [n for n, p in usable.items() if p["kind"] == "filament" and ftype in p["data"].get("filament_type", []) and compatible(n)]
+    typed = [n for n, p in usable.items() if p["kind"] == "filament" and ftype in p["data"].get("filament_type", [])]
+
+    def for_any(n):  # OrcaSlicer's own generic filaments ("Generic PC @System") name no printer
+        d = profiles[n]["data"]
+        return not d.get("compatible_printers") and not d.get("compatible_printers_condition")
+
+    # The printer maker's filament first; when they have none of this type, the generic one.
+    filaments = [n for n in typed if compatible(n)] or [n for n in typed if for_any(n)]
     if not filaments:
         raise KeyError(f"No OrcaSlicer {ftype} filament profile for {machine}")
     filament = min(filaments, key=lambda n: ("Generic" not in n, len(n)))
-    return {k: profiles[n]["path"] for k, n in (("machine", machine), ("process", process), ("filament", filament))}
+    return {"machine": machine, "process": process, "filament": filament}
 
 
-def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int = 900, keep_gcode: bool = False) -> dict:
-    """Slice with OrcaSlicer; print time, filament and layers from the G-code it writes
-    (and the G-code itself as ``gcode`` with ``keep_gcode``, for the detailed simulation)."""
+def pick_profiles(orca: Path | None, printer_name: str, nozzle: str, material: str, layer_height: float) -> dict[str, dict]:
+    """Machine, process and filament for OrcaSlicer, each ``{"name", "data"}`` with the ``inherits``
+    chain merged in: from the installed OrcaSlicer's JSON files when it has them and knows this
+    printer, else from the profiles we ship. KeyError when neither has it."""
+    error = KeyError(f"No OrcaSlicer profiles for {printer_name}")
+    for profiles in (installed_profiles(orca) if orca else {}, bundled_profiles()):
+        if not profiles:
+            continue
+        try:
+            names = match_profiles(profiles, printer_name, nozzle, material, layer_height)
+        except KeyError as e:
+            error = e
+            continue
+        return {k: {"name": n, "data": profiles[n]["data"]} for k, n in names.items()}
+    raise error
+
+
+# OrcaSlicer's bed plates and the filament setting with the bed temperature on each (0 = not allowed).
+PLATES = (("Textured PEI Plate", "textured_plate_temp"), ("High Temp Plate", "hot_plate_temp"),
+          ("Engineering Plate", "eng_plate_temp"), ("Cool Plate", "cool_plate_temp"))
+
+
+def bed_type(filament: dict) -> str:
+    """A plate the filament may be printed on. Without one OrcaSlicer takes the Cool Plate, and
+    refuses PETG, ASA, PC … on it ("Cool Plate does not support filament 1")."""
+    for plate, key in PLATES:
+        temps = filament.get(key)
+        if temps and float(temps[0] if isinstance(temps, list) else temps) > 0:
+            return plate
+    return PLATES[0][0]
+
+
+def write_profiles(chosen: dict[str, dict], folder: Path) -> dict[str, Path]:
+    """The chosen profiles as files for OrcaSlicer's command line. Flattened, because the command line
+    does not follow ``inherits`` itself (up to 2.4: every key the file doesn't set falls back to the
+    built-in default, e.g. a 2 mm³/s melt rate instead of 12 for a P1S's PLA; 2.5 only looks a parent
+    up in the profiles the OrcaSlicer app has installed). ``from`` and ``type`` say what the file is."""
+    out = {}
+    for kind, p in chosen.items():
+        data = {k: v for k, v in p["data"].items() if k != "inherits"}
+        data.setdefault("type", kind)
+        data.setdefault("from", "system")
+        if kind == "process" and "filament" in chosen:
+            data["curr_bed_type"] = bed_type(chosen["filament"]["data"])
+        out[kind] = folder / f"{kind}.json"
+        out[kind].write_text(json.dumps(data), encoding="utf-8")
+    return out
+
+
+def slice_3mf(model: bytes, chosen: dict[str, dict], orca: Path, timeout: int = 900, keep_gcode: bool = False) -> dict:
+    """Slice with OrcaSlicer and ``pick_profiles``' profiles; print time, filament and layers from the
+    G-code it writes (and the G-code itself as ``gcode`` with ``keep_gcode``, for the detailed simulation)."""
     work = Path(tempfile.mkdtemp(prefix="fdm-orca-"))
     try:
         src = work / "part.3mf"
         src.write_bytes(model)
-        flat = {k: _flat_profile(Path(v), work) for k, v in profiles.items()}
+        flat = write_profiles(chosen, work)
         cmd = [str(orca), "--slice", "0", "--outputdir", str(work / "out"),
                "--load-settings", f"{flat['machine']};{flat['process']}", "--load-filaments", str(flat["filament"]), str(src)]
         (work / "out").mkdir()
@@ -218,27 +310,13 @@ def slice_3mf(model: bytes, profiles: dict[str, Path], orca: Path, timeout: int 
         if not gcode:
             code = run.returncode - 2**32 if run.returncode >= 2**31 else run.returncode
             if code == -17:  # CLI_PROCESS_NOT_COMPATIBLE
-                raise RuntimeError(f"OrcaSlicer's command line won't combine {profiles['machine'].stem} with "
-                                   f"{profiles['process'].stem} (it does in the app). Slice the exported 3MF in OrcaSlicer instead.")
+                raise RuntimeError(f"OrcaSlicer's command line won't combine {chosen['machine']['name']} with "
+                                   f"{chosen['process']['name']} (it does in the app). Slice the exported 3MF in OrcaSlicer instead.")
             raise RuntimeError(f"OrcaSlicer did not slice the part (exit {code}): {(run.stdout + run.stderr)[-500:]}")
         text = gcode[0].read_text(errors="replace")
         return {**parse_gcode(text), **({"gcode": text} if keep_gcode else {})}
     finally:
         shutil.rmtree(work, ignore_errors=True)
-
-
-def _flat_profile(path: Path, work: Path) -> Path:
-    """A copy of a system profile with its ``inherits`` chain merged in. OrcaSlicer's command line
-    does not follow ``inherits`` for profile files: every key the file doesn't set itself falls back
-    to the built-in default (e.g. a 2 mm³/s melt rate instead of the profile's 12 for a P1S's PLA)."""
-    resources = next((p for p in path.parents if p.name == "profiles"), None)
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if resources is not None and data.get("name") in (index := _profiles(resources)):
-        data = dict(index[data["name"]]["data"])
-    data.pop("inherits", None)
-    out = work / f"{path.parent.name}-{path.name}"
-    out.write_text(json.dumps(data), encoding="utf-8")
-    return out
 
 
 def _minutes(text: str) -> float:
