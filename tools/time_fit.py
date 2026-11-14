@@ -25,7 +25,7 @@ from fdmcore import api, checks  # noqa: E402
 from fdmcore.checks import orient, slice_mesh  # noqa: E402
 from fdmcore.placement import print_rotation  # noqa: E402
 from fdmcore.profile import Profile, presets  # noqa: E402
-from fdmcore.slicer_cli import find_orca, match_profiles, slice_3mf  # noqa: E402
+from fdmcore.slicer_cli import find_orca, pick_profiles, slice_3mf  # noqa: E402
 
 PRINTERS = ("bambu_p1s", "creality_k1c")
 GOALS = ("balanced", "speed")
@@ -36,7 +36,6 @@ def orca_times() -> dict:
     if CACHE.exists():
         return json.loads(CACHE.read_text())
     orca = find_orca()
-    resources = orca.parent / "resources" / "profiles"
     out = {}
     for f in sorted((ROOT / "web" / "samples").glob("*.stl")):
         api.load(f.read_bytes(), f.stem)
@@ -44,7 +43,7 @@ def orca_times() -> dict:
         for printer, goal in itertools.product(PRINTERS, GOALS):
             prof = {"printer": printer, "goal": goal}
             settings = {x["key"]: x["value"] for x in api.check(up, prof)["settings"]}
-            m = match_profiles(resources, presets()["printers"][printer]["name"], "0.4", "pla", float(settings["layer_height"]))
+            m = pick_profiles(orca, presets()["printers"][printer]["name"], "0.4", "pla", float(settings["layer_height"]))
             out[f"{f.stem}|{printer}|{goal}"] = {"up": up, **slice_3mf(api.export(up, prof, settings), m, orca)}
             print(f.stem, printer, goal, out[f"{f.stem}|{printer}|{goal}"]["print_time_min"], flush=True)
     CACHE.parent.mkdir(exist_ok=True)

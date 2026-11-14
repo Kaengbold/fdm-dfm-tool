@@ -74,7 +74,7 @@ Then give the agent the guide (how to use the tools, the units, how to explain t
 
 Project files: the agent saves its work (`save_project`: part, orientation, loads, zones, boxes, settings) as a `.json` you drop into the web app to see it in 3D; "Save project" in the app writes the same file for the agent (`open_project`, or `fdmdfm check project.json`).
 
-With OrcaSlicer installed, the agent can also slice for real (`slice_with_orcaslicer`: OrcaSlicer's own print time and filament use).
+With OrcaSlicer installed (any version, any printer in our list), the agent can also slice for real (`slice_with_orcaslicer`: OrcaSlicer's own print time and filament use). The printer, process and filament profiles for that come with this tool, so it doesn't depend on how your OrcaSlicer stores its own.
 
 This is the supported way to use a Claude, ChatGPT or Gemini *subscription* with the tool:
 the official client (Claude Code, Codex, Gemini CLI) runs the model, our MCP server only
@@ -132,4 +132,4 @@ print time/filament are rough. Use it to make better decisions, not to sign off 
 ## License
 
 [AGPL-3.0-or-later](LICENSE). Uses three.js (MIT), Pyodide (MPL-2.0), shapely (BSD),
-manifold-3d (Apache-2.0), occt-import-js and replicad-opencascadejs / OpenCascade (LGPL-2.1). The Atkinson Hyperlegible font (SIL OFL 1.1, Braille Institute) ships in `web/fonts/`.
+manifold-3d (Apache-2.0), occt-import-js and replicad-opencascadejs / OpenCascade (LGPL-2.1). The Atkinson Hyperlegible font (SIL OFL 1.1, Braille Institute) ships in `web/fonts/`. OrcaSlicer's printer / process / filament profiles (AGPL-3.0, from its source at the version named inside) ship flattened in `core/fdmcore/data/orca_profiles.json.gz`.

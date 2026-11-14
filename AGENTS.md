@@ -55,6 +55,7 @@ python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini sc
 node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)
 node tools/make_step_fixture.mjs               # regenerate the STEP test part (once: npm install --no-save --prefix tools replicad-opencascadejs@1.1.0)
 python tools/slicer_check.py                   # do installed OrcaSlicer / Bambu Studio / PrusaSlicer apply our 3MF settings?
+python tools/orca_profiles.py                  # regenerate the OrcaSlicer profiles local slicing ships with (pinned OrcaSlicer version)
 python tools/make_samples.py                   # regenerate web/samples (needs trimesh, manifold3d)
 python tools/make_corpus.py                    # regenerate core/tests/corpus (regression parts, same deps)
 python tools/vendor.py vendor                  # download the pinned browser libraries (the Pages build serves them itself)
