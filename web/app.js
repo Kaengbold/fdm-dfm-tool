@@ -908,7 +908,7 @@ function recolor() {
   if (strengthView()) return;
   if (shows("printing") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
-  const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
+  const spot = painting() && state.paint.length > 0;
   const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
@@ -917,8 +917,13 @@ function recolor() {
     if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
-  const spots = shows("strength") ? state.loads.filter((l) => l.point).map((l) => ({ point: l.point, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
-  if (spot) spots.push({ point: state.pickedPoint, radius: SPOT_RADIUS, color: REGION_COLORS.selected });
+  showPainted();
+}
+
+/** Spots and painted areas on the part: the loads on them, and the area being painted now. */
+function showPainted() {
+  const spots = shows("strength") ? state.loads.filter((l) => l.point || l.points).map((l) => ({ point: l.point, points: l.points, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
+  if (painting() && state.paint.length) spots.push({ points: state.paint, radius: brushRadius(), color: REGION_COLORS.selected });
   viewer.showSpots(spots);
 }
 
@@ -972,6 +977,7 @@ async function ensureRegions() {
 let downAt = null;
 $("viewer").addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 $("viewer").addEventListener("pointerup", async (e) => {
+  if (stroke.done) return (stroke.done = false); // that was painting, not a tap
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || !state.triangles) return;
   const hit = viewer.pickHit(e);
   if (!hit) return;
@@ -985,6 +991,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
+  state.paint = [hit.point];
   hoverTip.hidden = true;
   const info = state.regionInfo[state.selectedRegion];
   $("pick-info").textContent = info.hole_diameter
@@ -1002,15 +1009,72 @@ $("viewer").addEventListener("pointerup", async (e) => {
   else setStatus(`Picked: ${$("pick-info").textContent}. To hold or load it, or keep it clean or on the bed, open "${STEP_NAMES.strength}".`);
 });
 
-const SPOT_RADIUS = 3; // mm, for loads "only around the clicked spot"
-const where = (l) => (l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
+const where = (l) => (l.points ? `area ${l.points.length} ${l.point.map((v) => v.toFixed(1)).join(",")}`
+  : l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
 
-/** The clicked face, or the spot around the clicked point when "only around the spot" is ticked. */
+/** The tapped face, or the area painted with the brush. A painted load keeps all its spots
+ * (``points``, part coordinates) and, as ``point``, the one in its middle for the lock or arrow. */
 function target() {
-  return $("at-spot").checked
-    ? { point: state.pickedPoint, radius: SPOT_RADIUS, normal: state.regionInfo[state.selectedRegion]?.normal }
-    : { region: state.selectedRegion };
+  if (!painting() || !state.paint.length) return { region: state.selectedRegion };
+  const pts = state.paint;
+  const mean = [0, 1, 2].map((k) => pts.reduce((s, p) => s + p[k], 0) / pts.length);
+  const point = pts.reduce((a, p) => (Math.hypot(...p.map((v, k) => v - mean[k])) < Math.hypot(...a.map((v, k) => v - mean[k])) ? p : a));
+  return { points: pts.map((p) => p.map((v) => +v.toFixed(2))), radius: brushRadius(), point, normal: state.regionInfo[state.selectedRegion]?.normal };
 }
+
+// ---------- the brush (T-370): paint where it's held or loaded, instead of a whole face ----------
+state.paint = []; // part coordinates of the painted spots
+const painting = () => document.querySelector("[name=pick-mode]:checked")?.value === "paint" && !$("pick-panel").hidden && shows("strength");
+const brushRadius = () => Number($("brush-size").value) / 2;
+const stroke = { on: false, done: false };
+
+/** Add a spot under the pointer unless the brush already covered it (a stroke stays a few hundred spots at most). */
+function paintAt(hit) {
+  if (!hit || state.paint.length >= 400) return;
+  const near = brushRadius() * 0.5;
+  if (state.paint.some((p) => Math.hypot(p[0] - hit.point[0], p[1] - hit.point[1], p[2] - hit.point[2]) < near)) return;
+  state.paint.push(hit.point);
+  showPainted();
+}
+
+// Captured before the camera sees it: on the part, a press paints instead of turning the view.
+$("viewer").addEventListener("pointerdown", (e) => {
+  if (!painting() || e.button !== 0) return;
+  const hit = viewer.pickHit(e);
+  if (!hit) return; // beside the part: turn the camera as usual
+  viewer.controls.enabled = false;
+  stroke.on = true;
+  paintAt(hit);
+}, { capture: true });
+$("viewer").addEventListener("pointermove", (e) => stroke.on && paintAt(viewer.pickHit(e)));
+for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+  $("viewer").addEventListener(type, () => {
+    if (!stroke.on) return;
+    Object.assign(stroke, { on: false, done: type === "pointerup" });
+    viewer.controls.enabled = true;
+    previewPick();
+    recolor();
+  }, { capture: true });
+}
+for (const radio of document.querySelectorAll("[name=pick-mode]")) {
+  radio.onchange = () => {
+    const paint = radio.value === "paint";
+    $("paint-tools").hidden = !paint;
+    document.body.classList.toggle("painting", paint);
+    state.paint = paint && state.pickedPoint ? [state.pickedPoint] : [];
+    previewPick();
+    recolor();
+  };
+}
+$("brush-size").oninput = () => {
+  $("brush-size-out").textContent = `Ø${$("brush-size").value} mm`;
+  showPainted();
+};
+$("paint-clear").onclick = () => {
+  state.paint = [];
+  previewPick();
+  recolor();
+};
 
 function addLoad(load) {
   remember(load.kind === "fixed" ? "where it is held" : "a load");
@@ -1020,6 +1084,7 @@ function addLoad(load) {
   state.selectedRegion = -1;
   $("pick-panel").hidden = true;
   state.previewLoad = null;
+  state.paint = [];
   renderLoads();
   previewPick();
   recolor();
@@ -1266,7 +1331,6 @@ function endDemo() {
 }
 $("sa-demo").onclick = playDemo;
 $("viewer").addEventListener("pointerdown", endDemo);
-$("at-spot").onchange = recolor;
 
 const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" }; // "down": loads saved before T-372, agents
 const DEG = Math.PI / 180;
@@ -1325,7 +1389,7 @@ function loadEditor(l) {
 }
 
 const HOLD_TEXT = { clamped: "Held: clamped or glued", resting: "Held: resting (only pushes back)", screw: "Held: screw or bolt" };
-const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
+const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.points ? " (painted area)" : l.point ? " (at a spot)" : "");
 
 // The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
 const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,

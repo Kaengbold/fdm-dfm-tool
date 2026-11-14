@@ -228,9 +228,12 @@ export class Viewer {
     if (!this.spots) this.scene.add((this.spots = new THREE.Group()));
     for (const s of spots) {
       const material = new THREE.MeshBasicMaterial({ color: s.color, transparent: true, opacity: 0.5, depthWrite: false });
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(s.radius, 24, 16), material);
-      ball.position.set(...this.toShown(s.point));
-      this.spots.add(ball);
+      // One spot, or an area painted with the brush: many balls, drawn as one instanced mesh.
+      const points = s.points ?? [s.point];
+      const balls = new THREE.InstancedMesh(new THREE.SphereGeometry(s.radius, 16, 12), material, points.length);
+      const m = new THREE.Matrix4();
+      points.forEach((p, i) => balls.setMatrixAt(i, m.makeTranslation(...this.toShown(p))));
+      this.spots.add(balls);
     }
   }
 
