@@ -58,7 +58,8 @@ export class Viewer {
     this.part = null;
     this.framed = false;
 
-    addEventListener("resize", () => this.resize());
+    // The view's box changes with the window and with the level's layout (T-375: a card beside the settings).
+    new ResizeObserver(() => this.resize()).observe(this.el);
     this.resize();
     this.renderer.setAnimationLoop(() => {
       this.controls.update();
@@ -126,6 +127,27 @@ export class Viewer {
     this.scene.add(this.pieces);
     const sphere = new THREE.Box3().setFromObject(this.pieces).getBoundingSphere(new THREE.Sphere());
     this.frame({ center: sphere.center, radius: sphere.radius * 0.8 });
+  }
+
+  /** The part before this step's change (T-375 "Before"): plain grey, turned by ``rotation``; everything
+   * drawn on the part is hidden until hideBefore. */
+  showBefore(triangles, rotation) {
+    this.hideBefore();
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(placeTriangles(triangles, rotation).out, 3));
+    g.computeVertexNormals();
+    this.before = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: css("--ok"), roughness: 0.7 }));
+    this.beforeHidden = [this.part, this.markers, this.ghosts, this.spots, this.symbols, this.zones, this.fitView, this.field?.mesh]
+      .filter((o) => o?.visible);
+    for (const o of this.beforeHidden) o.visible = false;
+    this.scene.add(this.before);
+  }
+
+  hideBefore() {
+    if (!this.before) return;
+    dispose(this.before);
+    this.before = null;
+    for (const o of this.beforeHidden) o.visible = true;
   }
 
   hidePieces() {

@@ -151,6 +151,7 @@ const steps = new Steps({
     : !state.triangles ? "Load a part first"
     : step === "have" || state.check ? true : "Checking your part…",
   changed: () => {
+    showViewChanges();
     recolor();
     suggestDesignIfShown();
     if (shows("fits")) renderTolerance().catch(() => {}); // a new material or fit test changes it
@@ -505,6 +506,7 @@ async function selectOption(i) {
   clearWarp();
   clearEdits();
   recolor();
+  showViewChanges();
   await runCheck();
   // Orientation-specific: refresh, don't collapse. Not awaited; openProject waits for it before its own status.
   state.nozzleCompare = $("nozzle-block").open ? compareNozzles() : null;
@@ -842,6 +844,44 @@ function fmtTime(min) {
 /** The step shown now (in Expert's long page: the one scrolled to). null = show everything. */
 const viewStep = () => steps.current;
 
+// ---------- what the step changes on the part (T-375) ----------
+const VIEW_CHANGES = {
+  part: "your part as you loaded it",
+  have: "nothing on the shape: printer and material change every later check",
+  orient: "which face lies on the bed",
+  strength: "where it's held and where the load goes",
+  problems: "spots that may print badly, in colour",
+  settings: "nothing on the shape, only how the slicer prints it",
+  download: "nothing on the shape: these are the files for your slicer",
+  result: "how it lies on the bed, and spots that may print badly",
+};
+// Steps whose change "Before" can take back in the view: the part as loaded vs as it will lie on the bed.
+const COMPARE = new Set(["orient", "result"]);
+const AS_LOADED = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+/** The line over the 3D view that says what this step changes, and the Before / After switch where it has one. */
+function showViewChanges() {
+  const text = state.triangles && VIEW_CHANGES[steps.current];
+  $("view-changes").hidden = !text;
+  if (text) $("view-changes").replaceChildren("This step changes: ", el("b", {}, text));
+  $("view-compare").hidden = !(COMPARE.has(steps.current) && activeOption());
+  setCompare(false);
+}
+
+function setCompare(before) {
+  before = !!before && !!activeOption();
+  if (before) viewer.showBefore(state.triangles, AS_LOADED);
+  else viewer.hideBefore();
+  document.body.classList.toggle("view-before", before);
+  for (const b of $("view-compare").children) b.setAttribute("aria-pressed", String((b.dataset.compare === "before") === !!before));
+}
+$("view-size").onclick = () => {
+  const big = document.body.classList.toggle("view-big");
+  $("view-size").setAttribute("aria-pressed", String(big));
+  $("view-size").textContent = big ? "Smaller view" : "Bigger view";
+};
+for (const b of $("view-compare").children) b.onclick = () => setCompare(b.dataset.compare === "before");
+
 /** Does the 3D view show the things of ``block`` (strength, problems, design) now? Blocks move
  * between steps per level (Simple shows the load under "What you have"), so ask the page. */
 let pictureOf = null; // while the report takes pictures: draw only this block's things
@@ -857,6 +897,7 @@ function shows(block) {
 function recolor() {
   const option = activeOption();
   if (!option) return;
+  setCompare(false); // anything redrawn is the "after"
   viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : []);
   viewer.showFit(shows("fits") ? shownFit() : null);
