@@ -151,6 +151,7 @@ const steps = new Steps({
     : !state.triangles ? "Load a part first"
     : step === "have" || state.check ? true : "Checking your part…",
   changed: () => {
+    strengthShown();
     showViewChanges();
     recolor();
     suggestDesignIfShown();
@@ -418,6 +419,7 @@ async function partLoaded(info) {
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
   showUnitHint(info.unit_hint);
   renderLoads();
+  setStage("held");
   // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
   state.options = [];
   state.check = null;
@@ -892,7 +894,7 @@ function shows(block) {
   return at == null || $(`blk-${block}`)?.closest(".pane")?.dataset.pane === at;
 }
 
-/** Everything drawn on the part, for the step shown: loads and results in "Will it hold?", heat and
+/** Everything drawn on the part, for the step shown: loads and results in "Strength analysis", heat and
  * warping in "While printing", edit previews in "Design changes" — each step shows its own things only. */
 function recolor() {
   const option = activeOption();
@@ -990,10 +992,11 @@ $("viewer").addEventListener("pointerup", async (e) => {
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
-  previewAngle();
+  if (state.saStage === "extra") setStage("load"); // a tapped face is for holding or loading
+  else setStage(state.saStage);
   state.showHeat = false;
   recolor();
-  // Looking around the part in another step must not pull the user to "Will it hold?": the face
+  // Looking around the part in another step must not pull the user to "Strength analysis": the face
   // stays picked there for later, and the status line says where to use it.
   if (shows("strength")) steps.reveal($("pick-panel"));
   else setStatus(`Picked: ${$("pick-info").textContent}. To hold or load it, or keep it clean or on the bed, open "${STEP_NAMES.strength}".`);
@@ -1018,6 +1021,7 @@ function addLoad(load) {
   $("pick-panel").hidden = true;
   state.previewLoad = null;
   renderLoads();
+  previewPick();
   recolor();
 }
 
@@ -1099,15 +1103,169 @@ function faceAxes(n) {
   return { n: m, t1, t2: cross(m, t1) };
 }
 
-/** Show the angle choice, and its arrow on the part, while "at an angle" is picked. */
-function previewAngle() {
-  const on = $("dir").value === "angle" && !$("pick-panel").hidden && state.selectedRegion >= 0;
+/** What the tapped face would get, shown on the part before it's added: a lock while choosing where
+ * it's held, the arrow (with the angle and weight set) while choosing where the load goes. */
+function previewPick() {
+  const on = !$("pick-panel").hidden && state.selectedRegion >= 0;
   $("dir-angle").hidden = $("dir").value !== "angle";
   $("dir-angle-out").textContent = `${$("dir-lean").value}° lean, towards ${$("dir-toward").value}°`;
-  state.previewLoad = on ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
+  $("as-fixed").disabled = $("as-load").disabled = !on;
+  for (const b of [$("as-fixed"), $("as-load")]) b.title = on ? "" : "Tap a face first";
+  state.previewLoad = !on ? null
+    : state.saStage === "held" ? { ...target(), kind: "fixed" }
+    : state.saStage === "load" ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
   viewer.showLoadSymbols(loadSymbols());
 }
-for (const id of ["dir", "dir-lean", "dir-toward", "kg"]) $(id).addEventListener("input", previewAngle);
+for (const id of ["dir", "dir-lean", "dir-toward", "kg"]) $(id).addEventListener("input", previewPick);
+
+// ---------- the guided strength flow (T-369): 1 where it's held, 2 where the load goes, 3 extra settings ----------
+state.saStage = "held";
+
+/** Open one stage; a tapped face goes into it (the "tapped" line moves along). */
+function setStage(stage) {
+  state.saStage = stage;
+  for (const li of document.querySelectorAll(".sa-stage")) li.classList.toggle("open", li.dataset.stage === stage);
+  const body = document.querySelector(`.sa-stage[data-stage=${stage}] .sa-body`);
+  if (stage !== "extra") body.querySelector(".sa-do").after($("pick-panel"));
+  previewPick();
+}
+
+/** The first stage that still misses something: where to pick up when the step opens. */
+const firstOpenStage = () => !state.loads.some((l) => l.kind === "fixed") ? "held" : !state.loads.some((l) => l.kind === "force") ? "load" : "extra";
+
+/** A short line in each stage's head (what is set there), and its Next button once that is done. */
+function renderStages() {
+  const held = state.loads.filter((l) => l.kind === "fixed");
+  const forces = state.loads.filter((l) => l.kind === "force");
+  const count = (n, one) => (n === 1 ? `1 ${one}` : `${n} ${one}s`);
+  const sums = {
+    held: held.length ? count(held.length, "place") : "",
+    load: forces.length === 1 ? `${forces[0].kg} kg` : forces.length ? count(forces.length, "load") : "",
+    extra: $("constant-load").checked ? "on all the time" : "",
+  };
+  for (const li of document.querySelectorAll(".sa-stage")) {
+    li.querySelector(".sa-sum").textContent = sums[li.dataset.stage];
+    li.classList.toggle("done", Boolean(sums[li.dataset.stage]) && li.dataset.stage !== "extra");
+  }
+  document.querySelector("[data-next=load]").disabled = !held.length;
+  document.querySelector("[data-next=extra]").disabled = !forces.length;
+}
+for (const li of document.querySelectorAll(".sa-stage")) li.querySelector(".sa-head").onclick = () => setStage(li.dataset.stage);
+for (const b of document.querySelectorAll(".sa-next")) b.onclick = () => setStage(b.dataset.next);
+$("constant-load").addEventListener("change", renderStages);
+
+let strengthSeen = false;
+/** The strength flow came into view: open the stage that needs something, and show the demo the first time. */
+function strengthShown() {
+  const sees = Boolean(state.triangles) && shows("strength");
+  if (sees && !strengthSeen) {
+    setStage(firstOpenStage());
+    if (!store.get("fdm-sa-demo") && activeOption()) {
+      store.set("fdm-sa-demo", "1");
+      setTimeout(playDemo, 400);
+    }
+  }
+  strengthSeen = sees;
+  if (!sees) endDemo();
+}
+
+// ---------- "Show me how": the 3D view plays the flow once (T-369) ----------
+let demoRun = 0;
+
+/** Two spots for the demo, in part coordinates, like a bracket held at one end with a weight on the
+ * other: the ends of the part's longest side. The lock goes on the end that faces the camera (a lock
+ * behind the part can't be seen); the weight presses down from above on the highest spot of the other
+ * end, so its arrow shows from any usual view. */
+function demoSpots() {
+  const t = state.triangles;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < t.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], t[i + k]); hi[k] = Math.max(hi[k], t[i + k]); }
+  const axis = [0, 1, 2].reduce((a, k) => (hi[k] - lo[k] > hi[a] - lo[a] ? k : a), 0);
+  const R = viewer.placement.rotation;
+  const height = (p) => R[2][0] * p[0] + R[2][1] * p[1] + R[2][2] * p[2]; // up on the bed
+  const end = (sign) => {
+    const sum = [0, 0, 0];
+    let n = 0, top = null;
+    const edge = sign < 0 ? lo[axis] : hi[axis];
+    const near = 0.02 * (hi[axis] - lo[axis]) + 0.2;
+    for (let i = 0; i < t.length; i += 9) {
+      const c = [0, 1, 2].map((k) => (t[i + k] + t[i + 3 + k] + t[i + 6 + k]) / 3);
+      if (Math.abs(c[axis] - edge) > near) continue;
+      for (let k = 0; k < 3; k++) sum[k] += c[k];
+      n++;
+      if (!top || height(c) > height(top)) top = c;
+    }
+    const normal = [0, 0, 0];
+    normal[axis] = sign;
+    return { point: n ? sum.map((v) => v / n) : [...lo], top: top || [...hi], normal };
+  };
+  const [a, b] = [end(-1), end(1)];
+  const cam = viewer.camera.position;
+  const facing = (e) => {
+    const at = viewer.toShown(e.point), n = viewer.toShown(e.normal).map((v, i) => v - viewer.toShown([0, 0, 0])[i]);
+    return n[0] * (cam.x - at[0]) + n[1] * (cam.y - at[1]) + n[2] * (cam.z - at[2]);
+  };
+  const [hold, far] = facing(a) >= facing(b) ? [a, b] : [b, a];
+  const up = [R[2][0], R[2][1], R[2][2]];
+  return { hold, load: { point: far.top, normal: up, dir: up.map((v) => -v) } };
+}
+
+/** Turn the camera ``deg`` degrees round the bed's up axis, eased, over ``ms``. */
+function orbit(deg, ms, run) {
+  return new Promise((done) => {
+    const cam = viewer.camera.position, at = viewer.controls.target;
+    const [x0, y0] = [cam.x - at.x, cam.y - at.y];
+    const t0 = performance.now();
+    const tick = (now) => {
+      if (run !== demoRun) return done();
+      const k = Math.min(1, (now - t0) / ms);
+      const a = deg * DEG * (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);
+      cam.x = at.x + x0 * Math.cos(a) - y0 * Math.sin(a);
+      cam.y = at.y + x0 * Math.sin(a) + y0 * Math.cos(a);
+      if (k < 1) requestAnimationFrame(tick);
+      else done();
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+async function playDemo() {
+  if (!activeOption()) return;
+  const run = ++demoRun;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const say = (text) => { $("sa-demo-caption").hidden = false; $("sa-demo-caption").textContent = text; };
+  const { hold, load } = demoSpots();
+  const lock = { kind: "fixed", point: hold.point, normal: hold.normal };
+  const arrow = { kind: "force", load: null, ...load, label: "2 kg" };
+  const from = viewer.camera.position.clone();
+  say("1 · Turn the part: drag it to see the side you need");
+  if (!still) {
+    await orbit(50, 1300, run);
+    await orbit(-50, 1300, run);
+  } else await wait(1800);
+  if (run !== demoRun) return;
+  say("2 · Tap the face where it's held: a lock shows it");
+  viewer.showLoadSymbols([lock]);
+  await wait(2200);
+  if (run !== demoRun) return;
+  say("3 · Tap where the load goes, then set the weight: an arrow shows it");
+  viewer.showLoadSymbols([lock, arrow]);
+  await wait(2600);
+  if (run !== demoRun) return;
+  viewer.camera.position.copy(from);
+  endDemo();
+}
+
+/** Stop the demo (a tap, another step, or its end) and draw the real loads again. */
+function endDemo() {
+  if ($("sa-demo-caption").hidden) return;
+  demoRun++;
+  $("sa-demo-caption").hidden = true;
+  viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
+}
+$("sa-demo").onclick = playDemo;
+$("viewer").addEventListener("pointerdown", endDemo);
 $("at-spot").onchange = recolor;
 
 const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" }; // "down": loads saved before T-372, agents
@@ -1240,7 +1398,7 @@ function renderLoads() {
   $("run-topology").disabled = !readyForStrength();
   $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
   $("dynamics-need").hidden = readyForStrength();
-  $("pick-hint").hidden = state.loads.length > 1;
+  renderStages();
 }
 
 /** How the part will be printed (walls, solid top/bottom layers, infill 0–1), from the settings shown. */
@@ -2185,8 +2343,8 @@ async function resizeZone(i, margin, shape = state.zones[i].shape) {
 function renderZoneSuggestion() {
   const found = state.strength?.stress_zones ?? [];
   const added = state.zones.some((z) => z.stress);
-  $("zone-suggest").replaceChildren(...(!found.length ? [el("p", { className: "hint", textContent: "Run “Will it hold?” first and the stressed places are proposed here." })]
-    : added ? [el("p", { className: "hint", textContent: "The stressed places from the strength check are in the list. Run “Will it hold?” again to see what they change." })]
+  $("zone-suggest").replaceChildren(...(!found.length ? [el("p", { className: "hint", textContent: "Run the strength analysis first and the stressed places are proposed here." })]
+    : added ? [el("p", { className: "hint", textContent: "The stressed places from the strength check are in the list. Run the strength analysis again to see what they change." })]
     : [el("p", { textContent: `The strength check found ${found.length === 1 ? "one place" : `${found.length} places`} where the plastic works hardest.` }),
       el("button", { textContent: found.length === 1 ? "Make it a stronger area" : "Make them stronger areas", onclick: () => {
         remember("the stressed areas");
@@ -3291,7 +3449,7 @@ async function compute() {
     mark("strength", "working");
     const r = await runStrength();
     mark("strength", "done", r ? `safety ×${r.safety_factor.toFixed(1)}` : "");
-  } else mark("strength", "skipped", "no load set (optional: Will it hold?)");
+  } else mark("strength", "skipped", "no load set (optional: Strength analysis)");
   mark("settings", "done");
   steps.go("result");
 }
@@ -3362,7 +3520,7 @@ if (!store.get("fdm-guided") && !new URLSearchParams(location.search).has("level
 /** The heading a paragraph explains: the nearest heading before it, looking up to two levels out. */
 function infoHost(p) {
   for (let node = p, up = 0; node && up < 3; node = node.parentElement, up++) {
-    for (let s = node.previousElementSibling; s; s = s.previousElementSibling) if (s.matches("h2, h3, summary")) return s;
+    for (let s = node.previousElementSibling; s; s = s.previousElementSibling) if (s.matches("h2, h3, summary, label.toggle")) return s;
   }
   return null;
 }

@@ -44,7 +44,7 @@ ${section("How it lies on the bed", picture(r.overview, "The part on the bed"),
     `<p><b>${esc(r.orientation.label)}</b></p><ul>${r.orientation.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`,
     `<p>${esc(r.stats)}</p>`)}
 ${section("Problems", problems)}
-${result(r.strength, "Will it hold?") || ""}
+${result(r.strength, "Strength analysis") || ""}
 ${result(r.warp, "Warping") || ""}
 ${r.design ? section("Design changes", picture(r.design.picture, "Design changes"),
     `<p class="muted">Green = plastic added, red = cut away.</p><ul>${r.design.items.map((d) => `<li><b>${esc(d.title)}</b> — ${esc(d.description)}</li>`).join("")}</ul>`) : ""}
