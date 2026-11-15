@@ -257,6 +257,16 @@ def main():
         def design():
             run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             run.act(lambda: page.click("[data-sample=l_bracket]"))
+            options = page.evaluate("() => fdm.state.options")
+            cards = page.locator("#options > li")
+            for i, option in enumerate(options):
+                if option.get("support_g") is None:
+                    continue
+                text = cards.nth(i).inner_text()
+                assert option["support_summary"] in cards.nth(i).locator(".option-cost").inner_text(), text
+                assert option["support_summary"] in option["reasons"], option
+                assert "Needs supports" not in text, text
+                assert ("No support" in text) == (not option["support_needed"]), text
             edits = page.locator("#edits label").all_inner_texts()
             assert any("Ø8.0" in e for e in edits), f"expected teardrop for the Ø8 hole, got {edits}"
             run.act(lambda: page.fill("#param-teardrop_angle_deg", "30") or page.dispatch_event("#param-teardrop_angle_deg", "change"))

@@ -23,7 +23,7 @@ from .checks import RULE_IMPACT, orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh, to_binary_stl
-from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z
+from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
 from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
@@ -517,7 +517,7 @@ REFINE_BUDGET = 3e7  # faces × layers for all finalists together
 def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettings, p: Profile) -> None:
     """Re-score the finalists with sliced layers: real bed contact, real support volume, and
     support that lands on the part instead of the bed (see refine.py)."""
-    from .orientation import _size, stability_term
+    from .orientation import _size, explain, stability_term
     from .refine import support_stats
 
     L = _size(mesh)
@@ -538,6 +538,11 @@ def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettin
         }
         for k, v in new.items():
             r.penalize(k, v - r.terms.get(k, 0.0))
+        old_support_reason = explain(r, mesh)[1]
+        r.support_grams = st["support_volume"] * SUPPORT_FILL / 1000 * p.material["density_g_cm3"]
+        r.support_needed = st["support_area"] > 0
+        new_support_reason = explain(r, mesh)[1]
+        r.reasons = [new_support_reason if reason == old_support_reason else reason for reason in r.reasons]
         r.bed_area, r.support_volume = st["bed_area"], st["support_volume"]
         if st["small_spots"]:
             n = st["small_spots"]
@@ -626,7 +631,9 @@ def _pack(mesh: Mesh, r, label: str, settings: OrientationSettings, rotation: np
         "bed_area_mm2": r.bed_area,
         "height_mm": r.height,
         "safety_factor": safety,
-        "support_g": round(r.support_volume * SUPPORT_FILL / 1000 * p.material["density_g_cm3"], 1),
+        "support_g": round(r.support_grams, 1) if r.support_grams is not None else None,
+        "support_needed": r.support_needed,
+        "support_summary": support_summary(r.support_grams, bool(r.support_needed)) if r.support_grams is not None else None,
         "reasons": r.reasons,
         "score_terms": {k: round(v, 3) for k, v in r.terms.items()},
         "face_classes": classify_faces(mesh, r.up, settings).tobytes(),
