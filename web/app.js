@@ -311,7 +311,8 @@ async function openProject(bytes) {
   radio("mode", p.mode);
   $("constant-load").checked = Boolean(pr.constant_load);
   await loadFile(p.name, p.stl, p.faceIds);
-  if (pr.use_temp_c != null) await setUseTemp(pr.use_temp_c);
+  const wantedTemp = pr.use_temp_c ?? ROOM_C;
+  if (wantedTemp !== (useTemp() ?? ROOM_C)) await setUseTemp(wantedTemp);
   // Marks and settings first: the check for the project's orientation should already use them.
   const marks = Object.entries(p.faces ?? {}).flatMap(([kind, ids]) => ids.map((region) => ({ region, kind })));
   if (p.loads?.length || marks.length) await ensureRegions();
@@ -604,7 +605,7 @@ function renderOptions() {
 function optionCost(o) {
   if (o.support_g == null) return "";
   const st = state.check?.stats;
-  const support = o.support_g >= 1 ? `≈ ${Math.round(o.support_g)} g support` : "No support";
+  const support = o.support_summary;
   if (st?.cost == null || !st.total_g) return support;
   return `${support} · about ${((st.cost / st.total_g) * (st.filament_g + o.support_g)).toFixed(2)} for the filament`;
 }
