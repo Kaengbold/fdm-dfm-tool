@@ -156,7 +156,7 @@ def main():
         browser = p.chromium.launch(channel=channel, headless=not args.headed)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         # Expert level and no start guide, so every step finds its controls (the guide has its own step).
-        page.add_init_script("localStorage.setItem('fdm-guided', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
+        page.add_init_script("localStorage.setItem('fdm-guided', '1'); localStorage.setItem('fdm-sa-demo', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
         # Long simulations ask first; the test says "Run it" unless a step wants to see the question.
         page.add_init_script("""addEventListener('DOMContentLoaded', () => new MutationObserver(() => {
             const d = document.getElementById('long-run');
@@ -447,6 +447,7 @@ def main():
 
         def load_cases():
             # Another visible face (different region) gets a load in case 1 and a heavier one in case 2.
+            page.click("[data-next=load]")  # T-369: held is set, on to where the load goes
             x, y = page.evaluate(
                 "() => { const v = fdm.viewer, s = fdm.state, held = s.loads[0].region;"
                 " const n = v.part.geometry.getAttribute('position').count / 3;"
@@ -478,18 +479,30 @@ def main():
             page.evaluate("() => { fdm.state.loads = fdm.state.loads.filter((l) => l.kind === 'fixed'); }")
             page.mouse.click(x, y)
             page.wait_for_selector("#pick-panel:not([hidden])")
-            page.check("#at-spot")
-            assert page.evaluate("() => fdm.viewer.spots.children.length") == 1, "no preview ball for the spot"
+            # T-370: paint an area with the brush (a short drag over the face) instead of the whole face.
+            page.click("label:has(#pick-paint)")
+            camera = page.evaluate("() => fdm.viewer.camera.position.toArray()")
+            page.mouse.move(x, y)
+            page.mouse.down()
+            for k in range(1, 9):
+                page.mouse.move(x + 3 * k, y + k, steps=2)
+            page.mouse.up()
+            painted = page.evaluate("() => fdm.state.paint.length")
+            assert painted > 1, f"the drag painted {painted} spot(s)"
+            moved = max(abs(a - b) for a, b in zip(page.evaluate("() => fdm.viewer.camera.position.toArray()"), camera))
+            assert moved < 0.5, "the drag turned the view instead of painting"
+            assert page.evaluate("() => fdm.viewer.spots.children.at(-1).count") == painted, "painted spots not shown"
             page.fill("#kg", "4")
             page.click("#as-load")
-            page.evaluate("() => { document.getElementById('at-spot').checked = false; }")  # back to whole faces
+            page.evaluate("() => { const r = document.querySelector('[name=pick-mode][value=face]'); r.checked = true; r.dispatchEvent(new Event('change')); }")  # back to whole faces (the panel is closed now)
             loads = page.locator("#loads li").all_inner_texts()
-            assert any("(at a spot)" in l for l in loads), loads
+            assert any("(painted area)" in l for l in loads), loads
+            assert page.evaluate("() => fdm.state.loads.at(-1).points.length") == painted
             run.act(lambda: page.click("#run-strength"), 300_000)
             text = page.locator("#strength-result").inner_text()
             assert "safety" in text.lower(), text
             return f"loads: {loads} | {text.splitlines()[0]}"
-        run.step("strength with a load on a spot", spot_load)
+        run.step("strength with a load on a painted area", spot_load)
 
         def shaking():
             page.check("#dyn-shake")
@@ -521,6 +534,7 @@ def main():
         run.step("FEA view: legend, section, finer grid", fea_view)
 
         def shells():
+            page.click("[data-stage=extra] .sa-head")
             page.locator(".shells:not(#detailed) summary").click()
             page.fill("#sh-walls", "6")
             run.act(lambda: page.dispatch_event("#sh-walls", "change"), 300_000)
@@ -791,7 +805,7 @@ def main():
             dl.value.save_as(out)
             html = out.read_text(encoding="utf-8")
             pictures = html.count('<img src="data:image/jpeg')
-            assert pictures >= 3 and "Will it hold?" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
+            assert pictures >= 3 and "Strength analysis" in html and "Warping" in html and "Slicer settings" in html, (pictures, html[:300])
             return f"{len(html) // 1024} kB, {pictures} pictures"
         run.step("report with pictures", report_with_pictures)
 
@@ -1402,15 +1416,17 @@ def main():
             xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
               for (let f = 0; f < n; f++) { const [x, y] = v.screenPointOfFace(f); const el = document.elementFromPoint(x, y);
                 if (el && el.tagName === 'CANVAS' && v.pick({ clientX: x, clientY: y }) === f) return [x, y]; } return null; }""")
+            page.click("[data-stage=load] .sa-head")
             page.mouse.click(*xy)
             page.wait_for_selector("#pick-panel:not([hidden])", timeout=300_000)  # the first click loads the face tools
             arrows = page.evaluate("() => fdm.viewer.symbols?.children.length ?? 0")
+            assert arrows > 0, "no preview arrow on the tapped face"  # T-369: shown before it's added
             page.select_option("#dir", "angle")
             page.dispatch_event("#dir", "input")
             page.fill("#dir-lean", "90")
             page.dispatch_event("#dir-lean", "input")
             assert page.locator("#dir-angle").is_visible()
-            assert page.evaluate("() => fdm.viewer.symbols.children.length") > arrows, "no preview arrow"
+            assert page.evaluate("() => fdm.viewer.symbols.children.length") == arrows, "the preview arrow should turn, not be added"
             normal = page.evaluate("() => fdm.state.regionInfo[fdm.state.selectedRegion].normal")
             page.click("#as-load")
             d = page.evaluate("() => fdm.state.loads.at(-1).direction")
@@ -1529,6 +1545,89 @@ def main():
             page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
             return f"placed inside the wall: {got[0]['notes'][:1]}"
         run.step("hidden gap from a side face", hidden_gap_from_side)
+
+        def move_and_suggest_boxes():
+            """T-392: drag a box by its arrow in the 3D view, and let the app suggest boxes."""
+            x, y = page.evaluate(
+                "() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;"
+                " for (let f = 0; f < n; f += Math.max(1, Math.floor(n / 50))) { const [x, y] = v.screenPointOfFace(f);"
+                " const el = document.elementFromPoint(x, y); if (el && el.tagName === 'CANVAS' && v.pick({clientX: x, clientY: y}) >= 0) return [x, y]; } return [0, 0]; }"
+            )
+            page.select_option("#vol-kind", "support")
+            page.click("#vol-pick")
+            run.act(lambda: page.mouse.click(x, y))
+            before = page.evaluate("() => fdm.state.volumes[0]")
+            page.locator("#vol-list li").first.get_by_role("button", name="Move", exact=True).click()
+            assert page.evaluate("() => fdm.viewer.handles.children.length") == 3, "no move arrows"
+            # The x arrow on screen: from the arrows' middle to its tip; drag the tip further out.
+            mid, tip = page.evaluate("""() => {
+              const v = fdm.viewer, a = v.handles.children[0], r = v.renderer.domElement.getBoundingClientRect();
+              const screen = (p) => { const q = p.clone().project(v.camera); return [r.left + (q.x + 1) / 2 * r.width, r.top + (1 - q.y) / 2 * r.height]; };
+              return [screen(v.handles.userData.mid), screen(a.localToWorld(a.children[1].position.clone()))];
+            }""")
+            to = [tip[0] + 0.6 * (tip[0] - mid[0]), tip[1] + 0.6 * (tip[1] - mid[1])]
+            camera = page.evaluate("() => fdm.viewer.camera.position.toArray()")
+            page.mouse.move(*tip)
+            page.mouse.down()
+            page.mouse.move(*to, steps=8)
+            page.mouse.up()
+            page.wait_for_function("() => fdm.state.volumes[0].offset", timeout=60_000)
+            after = page.evaluate("() => fdm.state.volumes[0]")
+            moved = [b - a for a, b in zip(before["lo"], after["lo"])]
+            assert abs(moved[0]) > 0.4 or abs(moved[1]) > 0.4, f"box not moved: {moved}"
+            size = lambda v: [h - l for l, h in zip(v["lo"], v["hi"])]
+            assert all(abs(a - b) < 1e-6 for a, b in zip(size(before), size(after))), "the box changed size"
+            turned = max(abs(a - b) for a, b in zip(page.evaluate("() => fdm.viewer.camera.position.toArray()"), camera))
+            assert turned < 0.5, "the drag turned the view"
+            page.locator("#vol-list li").first.get_by_role("button", name="Remove").click()
+            # Suggestions: the face that needs the most support, marked "keep clean", gets a no-support box.
+            # Lying its best way the mushroom needs none: take the orientation with the most support.
+            most = page.evaluate("() => fdm.state.options.map((o) => o.face_classes.filter((c) => c === 2).length).reduce((b, n, i, a) => (n > a[b] ? i : b), 0)")
+            page.evaluate("() => fdm.steps.go('orient')")
+            run.act(lambda: page.locator("#options > li").nth(most).click())
+            page.evaluate("() => fdm.steps.go('extra')")
+            page.evaluate("""() => {
+              const s = fdm.state, cls = s.options[s.active].face_classes, n = new Map();
+              for (let f = 0; f < cls.length; f++) if (cls[f] === 2) n.set(s.faceRegions[f], (n.get(s.faceRegions[f]) ?? 0) + 1);
+              const region = [...n].sort((a, b) => b[1] - a[1])[0][0];
+              s.marks = [{ region, kind: 'clean' }];
+            }""")
+            run.act(lambda: page.click("#vol-suggest"))
+            kinds = page.evaluate("() => fdm.state.suggested.map((v) => v.kind)")
+            assert "blocker" in kinds, f"no no-support box suggested: {kinds} | {page.locator('#status').inner_text()}"
+            dashed = page.evaluate("() => fdm.viewer.zones.children.some((c) => c.isLineSegments && c.material.isLineDashedMaterial)")
+            assert dashed, "suggestions not drawn dashed"
+            page.click("#vol-use")
+            assert "blocker" in page.evaluate("() => fdm.state.volumes.map((v) => v.kind)"), "suggestions not added"
+            assert page.locator("#vol-suggested").is_hidden()
+            page.evaluate("() => { fdm.state.marks = []; }")
+            return f"moved by {[round(m, 1) for m in moved]} mm; suggested {kinds}"
+        run.step("move boxes and suggested boxes", move_and_suggest_boxes)
+
+        def less_text():
+            """T-382: explanations fold behind an ⓘ next to their heading; "Explain" walks through what is shown."""
+            page.evaluate("() => fdm.steps.go('printing')")
+            folded = page.evaluate("() => [...document.querySelectorAll('.info-text')].filter((p) => p.hidden).length")
+            assert folded >= 15, f"only {folded} explanations folded away"
+            btn = page.locator("[data-pane=printing] .info-btn").first
+            text = page.locator("#" + btn.get_attribute("aria-controls"))
+            assert text.is_hidden()
+            btn.click()
+            assert text.is_visible() and btn.get_attribute("aria-expanded") == "true", "the ⓘ doesn't open its text"
+            btn.click()
+            assert text.is_hidden()
+            page.click("#explain")
+            assert page.locator("#tour").is_visible()
+            count = page.locator("#tour-count").inner_text()
+            stops = int(count.split(" of ")[1])
+            assert stops >= 4, count
+            page.click("#tour-next")
+            page.click("#tour-next")
+            assert page.locator("#tour-count").inner_text().startswith("3 of"), page.locator("#tour-count").inner_text()
+            page.keyboard.press("Escape")
+            assert page.locator("#tour").is_hidden(), "Esc doesn't end the walk-through"
+            return f"{folded} explanations behind an ⓘ; walk-through with {stops} stops here"
+        run.step("less text: ⓘ explanations and the Explain walk-through", less_text)
 
         def simple_compute():
             """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that

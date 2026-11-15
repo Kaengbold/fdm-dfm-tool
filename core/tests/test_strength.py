@@ -251,3 +251,25 @@ def test_stronger_orientation_offered_when_it_holds_more():
     o = api.stronger_orientation([0, 0, 1], loads, {"material": "pla"})
     assert o["up"] is not None and abs(o["up"][2]) < 0.01 and o["safety_factor"] > 1.5 * o["current"]
     assert api.stronger_orientation(o["up"], loads, {"material": "pla"})["up"] is None
+
+
+def test_painted_area_holds_like_the_face_it_covers():
+    """A brush stroke (T-370): spots painted over the whole end of a bar hold it about as well as that
+    end face, and much better than one small spot in its middle."""
+    from fdmcore.mesh import to_binary_stl
+
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 40, 10), 0, 6))), "bar")
+    end = next(r["id"] for r in api.regions()["regions"] if r["normal"][0] < -0.9)
+    pull = {"point": [40, 5, 3], "radius": 3, "kind": "force", "kg": 5, "direction": "down"}
+    painted = [[0, y, z] for y in (1, 3, 5, 7, 9) for z in (1, 3, 5)]
+
+    def safety(held):
+        return api.strength([0, 0, 1], [held, pull])["safety_factor"]
+
+    face = safety({"region": end, "kind": "fixed"})
+    brush = safety({"points": painted, "radius": 1.5, "kind": "fixed"})
+    spot = safety({"point": [0, 5, 3], "radius": 1.5, "kind": "fixed"})
+    assert brush == pytest.approx(face, rel=0.25)
+    assert brush > 1.3 * spot
+    with pytest.raises(ValueError, match="painted area"):
+        api.strength([0, 0, 1], [{"points": [[0, 50, 50], [0, 52, 50]], "radius": 1, "kind": "fixed"}, pull])

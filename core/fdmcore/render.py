@@ -261,8 +261,9 @@ def _load_marks(api, s, loads, rotation, part) -> list[tuple[np.ndarray, str]]:
     for load in loads:
         if "region" in load and load["region"] in info:
             at, normal = np.asarray(info[load["region"]]["centroid"]), np.asarray(info[load["region"]]["normal"])
-        elif load.get("point") is not None:
-            at, normal = np.asarray(load["point"], float), np.array([0, 0, 1.0])
+        elif load.get("points") or load.get("point") is not None:  # a spot, or the middle one of a painted area
+            spots = np.asarray(load.get("points") or [load["point"]], float).reshape(-1, 3)
+            at, normal = spots[np.argmin(np.linalg.norm(spots - spots.mean(axis=0), axis=1))], np.array([0, 0, 1.0])
         else:
             continue
         if load["kind"] == "fixed":

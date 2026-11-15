@@ -133,7 +133,9 @@ const state = {
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
-  volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what}
+  volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what, offset (moved, part mm)}
+  moving: -1, // the box whose move arrows show
+  suggested: [], // boxes the app suggests (T-392), like volumes plus why and use (ticked)
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
   fastenerNotes: {}, // region -> {size, use, text}: the screw, insert or nut in a hole (set_fastener)
   fitSel: null, // the hole, post or slot selected in Tolerances & tuning: {key, regions, label}
@@ -151,6 +153,7 @@ const steps = new Steps({
     : !state.triangles ? "Load a part first"
     : step === "have" || state.check ? true : "Checking your part…",
   changed: () => {
+    strengthShown();
     showViewChanges();
     recolor();
     suggestDesignIfShown();
@@ -418,6 +421,7 @@ async function partLoaded(info) {
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
   showUnitHint(info.unit_hint);
   renderLoads();
+  setStage("held");
   // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
   state.options = [];
   state.check = null;
@@ -502,6 +506,8 @@ async function selectOption(i) {
   state.showSwing = false;
   renderGcode();
   setZones([]); // zones belong to one orientation
+  state.moving = -1;
+  setSuggested([]);
   setVolumes([]);
   clearWarp();
   clearEdits();
@@ -892,7 +898,7 @@ function shows(block) {
   return at == null || $(`blk-${block}`)?.closest(".pane")?.dataset.pane === at;
 }
 
-/** Everything drawn on the part, for the step shown: loads and results in "Will it hold?", heat and
+/** Everything drawn on the part, for the step shown: loads and results in "Strength analysis", heat and
  * warping in "While printing", edit previews in "Design changes" — each step shows its own things only. */
 function recolor() {
   const option = activeOption();
@@ -906,7 +912,7 @@ function recolor() {
   if (strengthView()) return;
   if (shows("printing") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
-  const spot = $("at-spot").checked && !$("pick-panel").hidden && state.pickedPoint;
+  const spot = painting() && state.paint.length > 0;
   const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
   viewer.colorByClass(option.face_classes, (f) => {
     if (!state.faceRegions || !regions) return null;
@@ -915,8 +921,13 @@ function recolor() {
     if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
     return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
   });
-  const spots = shows("strength") ? state.loads.filter((l) => l.point).map((l) => ({ point: l.point, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
-  if (spot) spots.push({ point: state.pickedPoint, radius: SPOT_RADIUS, color: REGION_COLORS.selected });
+  showPainted();
+}
+
+/** Spots and painted areas on the part: the loads on them, and the area being painted now. */
+function showPainted() {
+  const spots = shows("strength") ? state.loads.filter((l) => l.point || l.points).map((l) => ({ point: l.point, points: l.points, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
+  if (painting() && state.paint.length) spots.push({ points: state.paint, radius: brushRadius(), color: REGION_COLORS.selected });
   viewer.showSpots(spots);
 }
 
@@ -970,6 +981,7 @@ async function ensureRegions() {
 let downAt = null;
 $("viewer").addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
 $("viewer").addEventListener("pointerup", async (e) => {
+  if (stroke.done) return (stroke.done = false); // that was painting, not a tap
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || !state.triangles) return;
   const hit = viewer.pickHit(e);
   if (!hit) return;
@@ -983,6 +995,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   state.selectedRegion = state.faceRegions[hit.face];
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
+  state.paint = [hit.point];
   hoverTip.hidden = true;
   const info = state.regionInfo[state.selectedRegion];
   $("pick-info").textContent = info.hole_diameter
@@ -990,24 +1003,82 @@ $("viewer").addEventListener("pointerup", async (e) => {
     : `${info.kind} face, ${Math.round(info.area_mm2)} mm²`;
   $("hold").value = info.hole_diameter ? "screw" : "clamped";
   $("pick-panel").hidden = false;
-  previewAngle();
+  if (state.saStage === "extra") setStage("load"); // a tapped face is for holding or loading
+  else setStage(state.saStage);
   state.showHeat = false;
   recolor();
-  // Looking around the part in another step must not pull the user to "Will it hold?": the face
+  // Looking around the part in another step must not pull the user to "Strength analysis": the face
   // stays picked there for later, and the status line says where to use it.
   if (shows("strength")) steps.reveal($("pick-panel"));
   else setStatus(`Picked: ${$("pick-info").textContent}. To hold or load it, or keep it clean or on the bed, open "${STEP_NAMES.strength}".`);
 });
 
-const SPOT_RADIUS = 3; // mm, for loads "only around the clicked spot"
-const where = (l) => (l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
+const where = (l) => (l.points ? `area ${l.points.length} ${l.point.map((v) => v.toFixed(1)).join(",")}`
+  : l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
 
-/** The clicked face, or the spot around the clicked point when "only around the spot" is ticked. */
+/** The tapped face, or the area painted with the brush. A painted load keeps all its spots
+ * (``points``, part coordinates) and, as ``point``, the one in its middle for the lock or arrow. */
 function target() {
-  return $("at-spot").checked
-    ? { point: state.pickedPoint, radius: SPOT_RADIUS, normal: state.regionInfo[state.selectedRegion]?.normal }
-    : { region: state.selectedRegion };
+  if (!painting() || !state.paint.length) return { region: state.selectedRegion };
+  const pts = state.paint;
+  const mean = [0, 1, 2].map((k) => pts.reduce((s, p) => s + p[k], 0) / pts.length);
+  const point = pts.reduce((a, p) => (Math.hypot(...p.map((v, k) => v - mean[k])) < Math.hypot(...a.map((v, k) => v - mean[k])) ? p : a));
+  return { points: pts.map((p) => p.map((v) => +v.toFixed(2))), radius: brushRadius(), point, normal: state.regionInfo[state.selectedRegion]?.normal };
 }
+
+// ---------- the brush (T-370): paint where it's held or loaded, instead of a whole face ----------
+state.paint = []; // part coordinates of the painted spots
+const painting = () => document.querySelector("[name=pick-mode]:checked")?.value === "paint" && !$("pick-panel").hidden && shows("strength");
+const brushRadius = () => Number($("brush-size").value) / 2;
+const stroke = { on: false, done: false };
+
+/** Add a spot under the pointer unless the brush already covered it (a stroke stays a few hundred spots at most). */
+function paintAt(hit) {
+  if (!hit || state.paint.length >= 400) return;
+  const near = brushRadius() * 0.5;
+  if (state.paint.some((p) => Math.hypot(p[0] - hit.point[0], p[1] - hit.point[1], p[2] - hit.point[2]) < near)) return;
+  state.paint.push(hit.point);
+  showPainted();
+}
+
+// Captured before the camera sees it: on the part, a press paints instead of turning the view.
+$("viewer").addEventListener("pointerdown", (e) => {
+  if (!painting() || e.button !== 0) return;
+  const hit = viewer.pickHit(e);
+  if (!hit) return; // beside the part: turn the camera as usual
+  viewer.controls.enabled = false;
+  stroke.on = true;
+  paintAt(hit);
+}, { capture: true });
+$("viewer").addEventListener("pointermove", (e) => stroke.on && paintAt(viewer.pickHit(e)));
+for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+  $("viewer").addEventListener(type, () => {
+    if (!stroke.on) return;
+    Object.assign(stroke, { on: false, done: type === "pointerup" });
+    viewer.controls.enabled = true;
+    previewPick();
+    recolor();
+  }, { capture: true });
+}
+for (const radio of document.querySelectorAll("[name=pick-mode]")) {
+  radio.onchange = () => {
+    const paint = radio.value === "paint";
+    $("paint-tools").hidden = !paint;
+    document.body.classList.toggle("painting", paint);
+    state.paint = paint && state.pickedPoint ? [state.pickedPoint] : [];
+    previewPick();
+    recolor();
+  };
+}
+$("brush-size").oninput = () => {
+  $("brush-size-out").textContent = `Ø${$("brush-size").value} mm`;
+  showPainted();
+};
+$("paint-clear").onclick = () => {
+  state.paint = [];
+  previewPick();
+  recolor();
+};
 
 function addLoad(load) {
   remember(load.kind === "fixed" ? "where it is held" : "a load");
@@ -1017,7 +1088,9 @@ function addLoad(load) {
   state.selectedRegion = -1;
   $("pick-panel").hidden = true;
   state.previewLoad = null;
+  state.paint = [];
   renderLoads();
+  previewPick();
   recolor();
 }
 
@@ -1099,16 +1172,169 @@ function faceAxes(n) {
   return { n: m, t1, t2: cross(m, t1) };
 }
 
-/** Show the angle choice, and its arrow on the part, while "at an angle" is picked. */
-function previewAngle() {
-  const on = $("dir").value === "angle" && !$("pick-panel").hidden && state.selectedRegion >= 0;
+/** What the tapped face would get, shown on the part before it's added: a lock while choosing where
+ * it's held, the arrow (with the angle and weight set) while choosing where the load goes. */
+function previewPick() {
+  const on = !$("pick-panel").hidden && state.selectedRegion >= 0;
   $("dir-angle").hidden = $("dir").value !== "angle";
   $("dir-angle-out").textContent = `${$("dir-lean").value}° lean, towards ${$("dir-toward").value}°`;
-  state.previewLoad = on ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
+  $("as-fixed").disabled = $("as-load").disabled = !on;
+  for (const b of [$("as-fixed"), $("as-load")]) b.title = on ? "" : "Tap a face first";
+  state.previewLoad = !on ? null
+    : state.saStage === "held" ? { ...target(), kind: "fixed" }
+    : state.saStage === "load" ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
   viewer.showLoadSymbols(loadSymbols());
 }
-for (const id of ["dir", "dir-lean", "dir-toward", "kg"]) $(id).addEventListener("input", previewAngle);
-$("at-spot").onchange = recolor;
+for (const id of ["dir", "dir-lean", "dir-toward", "kg"]) $(id).addEventListener("input", previewPick);
+
+// ---------- the guided strength flow (T-369): 1 where it's held, 2 where the load goes, 3 extra settings ----------
+state.saStage = "held";
+
+/** Open one stage; a tapped face goes into it (the "tapped" line moves along). */
+function setStage(stage) {
+  state.saStage = stage;
+  for (const li of document.querySelectorAll(".sa-stage")) li.classList.toggle("open", li.dataset.stage === stage);
+  const body = document.querySelector(`.sa-stage[data-stage=${stage}] .sa-body`);
+  if (stage !== "extra") body.querySelector(".sa-do").after($("pick-panel"));
+  previewPick();
+}
+
+/** The first stage that still misses something: where to pick up when the step opens. */
+const firstOpenStage = () => !state.loads.some((l) => l.kind === "fixed") ? "held" : !state.loads.some((l) => l.kind === "force") ? "load" : "extra";
+
+/** A short line in each stage's head (what is set there), and its Next button once that is done. */
+function renderStages() {
+  const held = state.loads.filter((l) => l.kind === "fixed");
+  const forces = state.loads.filter((l) => l.kind === "force");
+  const count = (n, one) => (n === 1 ? `1 ${one}` : `${n} ${one}s`);
+  const sums = {
+    held: held.length ? count(held.length, "place") : "",
+    load: forces.length === 1 ? `${forces[0].kg} kg` : forces.length ? count(forces.length, "load") : "",
+    extra: $("constant-load").checked ? "on all the time" : "",
+  };
+  for (const li of document.querySelectorAll(".sa-stage")) {
+    li.querySelector(".sa-sum").textContent = sums[li.dataset.stage];
+    li.classList.toggle("done", Boolean(sums[li.dataset.stage]) && li.dataset.stage !== "extra");
+  }
+  document.querySelector("[data-next=load]").disabled = !held.length;
+  document.querySelector("[data-next=extra]").disabled = !forces.length;
+}
+for (const li of document.querySelectorAll(".sa-stage")) li.querySelector(".sa-head").onclick = () => setStage(li.dataset.stage);
+for (const b of document.querySelectorAll(".sa-next")) b.onclick = () => setStage(b.dataset.next);
+$("constant-load").addEventListener("change", renderStages);
+
+let strengthSeen = false;
+/** The strength flow came into view: open the stage that needs something, and show the demo the first time. */
+function strengthShown() {
+  const sees = Boolean(state.triangles) && shows("strength");
+  if (sees && !strengthSeen) {
+    setStage(firstOpenStage());
+    if (!store.get("fdm-sa-demo") && activeOption()) {
+      store.set("fdm-sa-demo", "1");
+      setTimeout(playDemo, 400);
+    }
+  }
+  strengthSeen = sees;
+  if (!sees) endDemo();
+}
+
+// ---------- "Show me how": the 3D view plays the flow once (T-369) ----------
+let demoRun = 0;
+
+/** Two spots for the demo, in part coordinates, like a bracket held at one end with a weight on the
+ * other: the ends of the part's longest side. The lock goes on the end that faces the camera (a lock
+ * behind the part can't be seen); the weight presses down from above on the highest spot of the other
+ * end, so its arrow shows from any usual view. */
+function demoSpots() {
+  const t = state.triangles;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < t.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], t[i + k]); hi[k] = Math.max(hi[k], t[i + k]); }
+  const axis = [0, 1, 2].reduce((a, k) => (hi[k] - lo[k] > hi[a] - lo[a] ? k : a), 0);
+  const R = viewer.placement.rotation;
+  const height = (p) => R[2][0] * p[0] + R[2][1] * p[1] + R[2][2] * p[2]; // up on the bed
+  const end = (sign) => {
+    const sum = [0, 0, 0];
+    let n = 0, top = null;
+    const edge = sign < 0 ? lo[axis] : hi[axis];
+    const near = 0.02 * (hi[axis] - lo[axis]) + 0.2;
+    for (let i = 0; i < t.length; i += 9) {
+      const c = [0, 1, 2].map((k) => (t[i + k] + t[i + 3 + k] + t[i + 6 + k]) / 3);
+      if (Math.abs(c[axis] - edge) > near) continue;
+      for (let k = 0; k < 3; k++) sum[k] += c[k];
+      n++;
+      if (!top || height(c) > height(top)) top = c;
+    }
+    const normal = [0, 0, 0];
+    normal[axis] = sign;
+    return { point: n ? sum.map((v) => v / n) : [...lo], top: top || [...hi], normal };
+  };
+  const [a, b] = [end(-1), end(1)];
+  const cam = viewer.camera.position;
+  const facing = (e) => {
+    const at = viewer.toShown(e.point), n = viewer.toShown(e.normal).map((v, i) => v - viewer.toShown([0, 0, 0])[i]);
+    return n[0] * (cam.x - at[0]) + n[1] * (cam.y - at[1]) + n[2] * (cam.z - at[2]);
+  };
+  const [hold, far] = facing(a) >= facing(b) ? [a, b] : [b, a];
+  const up = [R[2][0], R[2][1], R[2][2]];
+  return { hold, load: { point: far.top, normal: up, dir: up.map((v) => -v) } };
+}
+
+/** Turn the camera ``deg`` degrees round the bed's up axis, eased, over ``ms``. */
+function orbit(deg, ms, run) {
+  return new Promise((done) => {
+    const cam = viewer.camera.position, at = viewer.controls.target;
+    const [x0, y0] = [cam.x - at.x, cam.y - at.y];
+    const t0 = performance.now();
+    const tick = (now) => {
+      if (run !== demoRun) return done();
+      const k = Math.min(1, (now - t0) / ms);
+      const a = deg * DEG * (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);
+      cam.x = at.x + x0 * Math.cos(a) - y0 * Math.sin(a);
+      cam.y = at.y + x0 * Math.sin(a) + y0 * Math.cos(a);
+      if (k < 1) requestAnimationFrame(tick);
+      else done();
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+async function playDemo() {
+  if (!activeOption()) return;
+  const run = ++demoRun;
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const say = (text) => { $("sa-demo-caption").hidden = false; $("sa-demo-caption").textContent = text; };
+  const { hold, load } = demoSpots();
+  const lock = { kind: "fixed", point: hold.point, normal: hold.normal };
+  const arrow = { kind: "force", load: null, ...load, label: "2 kg" };
+  const from = viewer.camera.position.clone();
+  say("1 · Turn the part: drag it to see the side you need");
+  if (!still) {
+    await orbit(50, 1300, run);
+    await orbit(-50, 1300, run);
+  } else await wait(1800);
+  if (run !== demoRun) return;
+  say("2 · Tap the face where it's held: a lock shows it");
+  viewer.showLoadSymbols([lock]);
+  await wait(2200);
+  if (run !== demoRun) return;
+  say("3 · Tap where the load goes, then set the weight: an arrow shows it");
+  viewer.showLoadSymbols([lock, arrow]);
+  await wait(2600);
+  if (run !== demoRun) return;
+  viewer.camera.position.copy(from);
+  endDemo();
+}
+
+/** Stop the demo (a tap, another step, or its end) and draw the real loads again. */
+function endDemo() {
+  if ($("sa-demo-caption").hidden) return;
+  demoRun++;
+  $("sa-demo-caption").hidden = true;
+  viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
+}
+$("sa-demo").onclick = playDemo;
+$("viewer").addEventListener("pointerdown", endDemo);
 
 const DIR_LABEL = { push: "pushing", pull: "pulling", down: "hanging down" }; // "down": loads saved before T-372, agents
 const DEG = Math.PI / 180;
@@ -1167,7 +1393,7 @@ function loadEditor(l) {
 }
 
 const HOLD_TEXT = { clamped: "Held: clamped or glued", resting: "Held: resting (only pushes back)", screw: "Held: screw or bolt" };
-const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.point ? " (at a spot)" : "");
+const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.points ? " (painted area)" : l.point ? " (at a spot)" : "");
 
 // The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
 const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,
@@ -1240,7 +1466,7 @@ function renderLoads() {
   $("run-topology").disabled = !readyForStrength();
   $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
   $("dynamics-need").hidden = readyForStrength();
-  $("pick-hint").hidden = state.loads.length > 1;
+  renderStages();
 }
 
 /** How the part will be printed (walls, solid top/bottom layers, infill 0–1), from the settings shown. */
@@ -2061,11 +2287,16 @@ const volumesShown = () => zonesShown() || shows("extra");
 const VOLUME_COLOR = { support: "--support", blocker: "--ok", void: "--fixed", keep_clear: "--clean", add_solid: "--bed", cut_solid: "--force" };
 
 /** Zones (orange) and the advanced design boxes (their own colours) in the 3D view. */
+let boxDrag = null; // {i, axis, start, along, corners}: a drag on a box's move arrow (T-392)
+
 function drawBoxes() {
+  const moving = volumesShown() ? state.volumes[state.moving] : null;
   viewer.showZones([
     ...(zonesShown() ? state.zones.map((z) => ({ corners: z.corners_print, shape: z.shape })) : []),
-    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind], shape: v.shape })) : []),
+    ...(volumesShown() ? state.volumes.map((v) => ({ corners: v === moving && boxDrag ? boxDrag.corners : v.corners_print, color: VOLUME_COLOR[v.kind], shape: v.shape })) : []),
+    ...(volumesShown() ? state.suggested.filter((v) => v.use).map((v) => ({ corners: v.corners_print, color: VOLUME_COLOR[v.kind], faint: true })) : []),
   ]);
+  viewer.showMoveHandles(moving ? boxDrag?.corners ?? moving.corners_print : null);
 }
 
 /** What the slicer and the strength check get: zones plus the advanced design boxes. */
@@ -2185,8 +2416,8 @@ async function resizeZone(i, margin, shape = state.zones[i].shape) {
 function renderZoneSuggestion() {
   const found = state.strength?.stress_zones ?? [];
   const added = state.zones.some((z) => z.stress);
-  $("zone-suggest").replaceChildren(...(!found.length ? [el("p", { className: "hint", textContent: "Run “Will it hold?” first and the stressed places are proposed here." })]
-    : added ? [el("p", { className: "hint", textContent: "The stressed places from the strength check are in the list. Run “Will it hold?” again to see what they change." })]
+  $("zone-suggest").replaceChildren(...(!found.length ? [el("p", { className: "hint", textContent: "Run the strength analysis first and the stressed places are proposed here." })]
+    : added ? [el("p", { className: "hint", textContent: "The stressed places from the strength check are in the list. Run the strength analysis again to see what they change." })]
     : [el("p", { textContent: `The strength check found ${found.length === 1 ? "one place" : `${found.length} places`} where the plastic works hardest.` }),
       el("button", { textContent: found.length === 1 ? "Make it a stronger area" : "Make them stronger areas", onclick: () => {
         remember("the stressed areas");
@@ -2306,14 +2537,144 @@ async function pickSnap(hit) {
 
 async function resizeVolume(i, margin, shape = state.volumes[i].shape ?? "box") {
   const old = state.volumes[i];
-  const v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin, shape }));
+  let v = await busy("Resizing the box…", () => call("volume_at", { up: activeOption().up, kind: old.kind, profile: profile(), ...old.from, margin, shape }));
+  if (old.offset) v = await call("volume_move", { up: activeOption().up, box: v, by: old.offset, profile: profile() }); // it was moved: stay there
   remember("the box's size");
   setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, margin } : q)));
 }
 
+// ---------- move a box (T-392): drag its arrows in the 3D view ----------
+const MOVE_STEP_MM = 0.5;
+
+$("viewer").addEventListener("pointerdown", (e) => {
+  const axis = state.moving >= 0 && volumesShown() ? viewer.pickHandle(e) : null;
+  if (axis == null) return;
+  boxDrag = { i: state.moving, axis, start: viewer.alongAxis(axis, e), along: 0, corners: state.volumes[state.moving].corners_print };
+  viewer.controls.enabled = false; // before OrbitControls sees this press (capture phase)
+}, { capture: true });
+addEventListener("pointermove", (e) => {
+  if (!boxDrag) return;
+  const { i, axis, start } = boxDrag;
+  boxDrag.along = Math.round((viewer.alongAxis(axis, e) - start) / MOVE_STEP_MM) * MOVE_STEP_MM;
+  boxDrag.corners = state.volumes[i].corners_print.map((c) => c.map((v, k) => (k === axis ? v + boxDrag.along : v)));
+  drawBoxes(); // the box and its arrows follow; the engine places it on release
+});
+addEventListener("pointerup", async () => {
+  if (!boxDrag) return;
+  const { i, axis, along } = boxDrag;
+  downAt = null; // not a click on the part
+  viewer.controls.enabled = true;
+  if (!along) {
+    boxDrag = null;
+    return drawBoxes();
+  }
+  // Shown (bed) frame -> part: the move turned back by the part's placement on the bed.
+  const R = viewer.placement.rotation;
+  const by = [0, 1, 2].map((k) => R[axis][k] * along);
+  const old = state.volumes[i];
+  try {
+    const v = await call("volume_move", { up: activeOption().up, box: old, by, profile: profile() });
+    remember("moving a box");
+    const offset = [0, 1, 2].map((k) => (old.offset?.[k] ?? 0) + by[k]);
+    boxDrag = null;
+    setVolumes(state.volumes.map((q, k) => (k === i ? { ...old, ...v, offset } : q)));
+    setStatus(`Moved ${Math.abs(along)} mm. ${v.notes[0] ?? ""}`);
+  } catch (err) {
+    boxDrag = null;
+    drawBoxes();
+    setStatus(String(err.message ?? err).replace(/^.*Error: /, ""));
+  }
+});
+
+// ---------- place them for me (T-392): boxes from the overhang and strength results ----------
+const DROOP_SHARE = 0.5; // of a face's triangles "may droop" before it gets a support box
+const MIN_FACE_MM2 = 20; // smaller faces print fine either way
+const MAX_SUGGESTED = 6;
+
+/** What to place where, from what the app already knows: faces that may droop (support), faces marked
+ * clean that would get supports (no support), and the weakest spot of the strength analysis (hidden gap). */
+function boxIdeas() {
+  const cls = activeOption().face_classes;
+  const counts = new Map(); // region -> [faces, may droop, needs support]
+  for (let f = 0; f < cls.length; f++) {
+    const c = counts.get(state.faceRegions[f]) ?? [0, 0, 0];
+    c[0]++;
+    if (cls[f] === 1) c[1]++;
+    if (cls[f] === 2) c[2]++;
+    counts.set(state.faceRegions[f], c);
+  }
+  const clean = new Set(state.marks.filter((m) => m.kind === "clean").map((m) => m.region));
+  const ideas = [];
+  for (const [region, [n, droop, support]] of counts) {
+    const info = state.regionInfo[region];
+    if (!info || info.area_mm2 < MIN_FACE_MM2) continue;
+    if (clean.has(region) && support / n > 0.3) {
+      ideas.push({ kind: "blocker", from: { region }, area: info.area_mm2,
+        why: "You want this face clean, and the slicer would put supports on it. Without them it prints in the air: fine if it droops only a little." });
+    } else if (droop / n >= DROOP_SHARE && support / n < 0.2) {
+      ideas.push({ kind: "support", from: { region }, area: info.area_mm2,
+        why: "This face may droop: the slicer's automatic supports often leave a slope like this out. A support box makes sure it gets one." });
+    }
+  }
+  ideas.sort((a, b) => b.area - a.area);
+  const weak = state.strength?.weak_marker;
+  if (weak) {
+    const R = viewer.placement.rotation;
+    const normal = [0, 1, 2].map((k) => R[0][k] * weak.normal[0] + R[1][k] * weak.normal[1] + R[2][k] * weak.normal[2]);
+    ideas.unshift({ kind: "void", from: { point: viewer.toPart(weak.point), normal }, area: Infinity,
+      why: "The weakest spot in the strength analysis: the slicer prints walls all round a hidden gap, so the plastic there comes out solid." });
+  }
+  return ideas.slice(0, MAX_SUGGESTED);
+}
+
+$("vol-suggest").onclick = async () => {
+  if (!activeOption()) return;
+  await ensureRegions();
+  const ideas = boxIdeas();
+  const placed = [];
+  await busy("Placing suggested boxes…", async () => {
+    for (const idea of ideas) {
+      try {
+        const v = await call("volume_at", { up: activeOption().up, kind: idea.kind, profile: profile(), ...idea.from });
+        const info = idea.from.region != null ? state.regionInfo[idea.from.region] : null;
+        const what = info ? (info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`) : "the weakest spot";
+        placed.push({ ...v, from: idea.from, what, why: idea.why, use: true });
+      } catch { /* a box that doesn't fit here is just not suggested */ }
+    }
+  });
+  setSuggested(placed);
+  const many = (n) => `${n} box${n > 1 ? "es" : ""}`;
+  setStatus(placed.length ? `${many(placed.length)} suggested (dashed): untick any you don't want, then "Use these".`
+    : state.strength ? "Nothing to add: no face that may droop, no clean face with supports."
+    : "Nothing to add yet. Run the strength analysis first for a hidden gap at the weakest spot.");
+};
+
+function setSuggested(list) {
+  state.suggested = list;
+  $("vol-suggested").hidden = !list.length;
+  $("vol-suggest-list").replaceChildren(...list.map((v) => {
+    const tick = el("input", { type: "checkbox", checked: v.use, onchange: () => { v.use = tick.checked; drawBoxes(); } });
+    const li = el("li", {}, el("label", { className: "toggle" }, tick, el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` })),
+      el("p", { className: "hint", textContent: v.why }));
+    li.dataset.kind = v.kind;
+    return li;
+  }));
+  drawBoxes();
+}
+$("vol-use").onclick = () => {
+  const use = state.suggested.filter((v) => v.use).map(({ use, why, ...v }) => v);
+  if (!use.length) return;
+  remember("the suggested boxes");
+  setSuggested([]);
+  setVolumes([...state.volumes, ...use]);
+  setStatus(`${use.length} box${use.length > 1 ? "es" : ""} added: they go into the 3MF.`);
+};
+$("vol-dismiss").onclick = () => setSuggested([]);
+
 /** Advanced design boxes: shown in the 3D view, listed with their notes, sent with the zones. */
 function setVolumes(volumes) {
   state.volumes = volumes;
+  if (state.moving >= volumes.length) state.moving = -1;
   drawBoxes();
   $("zones-for").hidden = !printZones().some((z) => z.kind !== "keep_clear");
   $("vol-list").replaceChildren(...volumes.map((v, i) => {
@@ -2322,13 +2683,22 @@ function setVolumes(volumes) {
     const size = pin
       ? el("label", {}, "Width ", num(+(v.margin * 2).toFixed(1), 0.2, 4, 0.1, (e) => resizeVolume(i, Math.max(0.1, Number(e.target.value) / 2 || 0.3))), " mm")
       : el("label", {}, "Reaches ", num(v.margin, 0, 30, 0.5, (e) => resizeVolume(i, Math.max(0, Number(e.target.value) || 0))), " mm past it");
+    const move = el("button", { className: "small", textContent: state.moving === i ? "Done moving" : "Move",
+      "aria-pressed": String(state.moving === i), title: "Drag the coloured arrows on the box in the 3D view",
+      onclick: () => {
+        state.moving = state.moving === i ? -1 : i;
+        setVolumes(state.volumes);
+        if (state.moving === i) setStatus("Drag one of the coloured arrows on the box to move it.");
+      } });
     const li = el("li", {},
       el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` }),
       el("div", { className: "row" }, size, pin ? "" : shapePicker(v.shape, (shape) => resizeVolume(i, v.margin, shape))),
       ...v.notes.map((n) => el("p", { className: "hint", textContent: n })),
       SOLID_KINDS.includes(v.kind) ? el("button", { textContent: "Apply to the model", onclick: () => applySolid(i) }) : "",
+      move,
       el("button", { className: "link", textContent: "Remove", onclick: () => {
         remember("removing a box");
+        state.moving = -1;
         setVolumes(state.volumes.filter((_, k) => k !== i));
       } }));
     li.dataset.kind = v.kind;
@@ -3291,7 +3661,7 @@ async function compute() {
     mark("strength", "working");
     const r = await runStrength();
     mark("strength", "done", r ? `safety ×${r.safety_factor.toFixed(1)}` : "");
-  } else mark("strength", "skipped", "no load set (optional: Will it hold?)");
+  } else mark("strength", "skipped", "no load set (optional: Strength analysis)");
   mark("settings", "done");
   steps.go("result");
 }
@@ -3356,6 +3726,107 @@ function openGuide() {
 }
 $("show-guide").onclick = openGuide;
 if (!store.get("fdm-guided") && !new URLSearchParams(location.search).has("level")) openGuide();
+
+// ---------- less text (T-382): explanations behind an ⓘ, and "Explain" walks through what is shown ----------
+
+/** The heading a paragraph explains: the nearest heading before it, looking up to two levels out. */
+function infoHost(p) {
+  for (let node = p, up = 0; node && up < 3; node = node.parentElement, up++) {
+    for (let s = node.previousElementSibling; s; s = s.previousElementSibling) if (s.matches("h2, h3, summary, label.toggle")) return s;
+  }
+  return null;
+}
+
+/** Each paragraph marked data-info folds away behind a small ⓘ at the end of its heading: the screen
+ * shows what to do, the why is one tap away. The paragraph itself stays where it was (it just opens). */
+function foldInfo() {
+  let n = 0;
+  for (const p of document.querySelectorAll("[data-info]")) {
+    const host = infoHost(p);
+    if (!host) continue;
+    p.id ||= `info-${++n}`;
+    p.hidden = true;
+    p.classList.add("info-text");
+    const b = el("button", { type: "button", className: "info-btn", textContent: "i", title: "What is this?" });
+    b.setAttribute("aria-label", `About: ${host.textContent.trim()}`);
+    b.setAttribute("aria-expanded", "false");
+    b.setAttribute("aria-controls", p.id);
+    b.onclick = (e) => {
+      e.preventDefault(); // inside a <summary>: open the text, not the section
+      e.stopPropagation();
+      p.hidden = !p.hidden;
+      b.setAttribute("aria-expanded", String(!p.hidden));
+    };
+    host.append(" ", b);
+    p.infoHost = host;
+  }
+}
+foldInfo();
+
+const onScreen = (node) => node.getClientRects().length > 0 && !node.closest("[hidden]");
+const TOUR_START = [
+  ["#steps", "The steps", "Go through them in order. A tick means that step is done; tap any step to go back to it."],
+  [".levels", "How much to show", "Simple shows only what you need to print. Switch up for more choices and checks, any time."],
+  ["#viewer", "Your part in 3D", "Drag to turn it, scroll or pinch to zoom. Tap a face to pick it: to hold it, load it or keep it clean."],
+];
+
+/** The stops for what is on screen now: the steps, the levels, the 3D view, then every explained heading
+ * that is visible, in page order. Built fresh each time, so it always matches the page. */
+function tourStops() {
+  const stops = TOUR_START.map(([sel, title, text]) => ({ node: document.querySelector(sel), title, text }));
+  for (const p of document.querySelectorAll(".info-text")) {
+    const host = p.infoHost;
+    if (host && onScreen(host)) stops.push({ node: host, title: host.textContent.replace(/\s*i$/, "").trim(), text: p.textContent.trim() });
+  }
+  return stops.filter((s) => s.node && onScreen(s.node));
+}
+
+const tour = { stops: [], at: 0 };
+function showStop() {
+  const stop = tour.stops[tour.at];
+  stop.node.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  $("tour-count").textContent = `${tour.at + 1} of ${tour.stops.length}`;
+  $("tour-title").textContent = stop.title;
+  $("tour-text").textContent = stop.text;
+  $("tour-back").disabled = tour.at === 0;
+  $("tour-next").textContent = tour.at === tour.stops.length - 1 ? "Done" : "Next";
+  setTimeout(placeTour, 350); // after the scroll
+  $("tour-next").focus();
+}
+
+/** The ring around the thing explained, the card next to it (below, else above, kept on screen). */
+function placeTour() {
+  if ($("tour").hidden) return;
+  const r = tour.stops[tour.at].node.getBoundingClientRect();
+  const pad = 6;
+  Object.assign($("tour").querySelector(".tour-ring").style, {
+    left: `${r.left - pad}px`, top: `${r.top - pad}px`, width: `${r.width + 2 * pad}px`, height: `${r.height + 2 * pad}px` });
+  const card = $("tour").querySelector(".tour-card");
+  const h = card.offsetHeight, w = card.offsetWidth;
+  const below = r.bottom + pad + 10 + h < innerHeight;
+  const top = below ? r.bottom + pad + 10 : Math.max(10, r.top - pad - 10 - h);
+  const left = Math.min(Math.max(10, r.left), innerWidth - w - 10);
+  Object.assign(card.style, { top: `${Math.min(top, innerHeight - h - 10)}px`, left: `${left}px` });
+}
+
+function startTour() {
+  tour.stops = tourStops();
+  tour.at = 0;
+  if (!tour.stops.length) return;
+  $("tour").hidden = false;
+  showStop();
+}
+function endTour() {
+  $("tour").hidden = true;
+  $("explain").focus();
+}
+$("explain").onclick = startTour;
+$("tour-next").onclick = () => (tour.at < tour.stops.length - 1 ? (tour.at++, showStop()) : endTour());
+$("tour-back").onclick = () => tour.at > 0 && (tour.at--, showStop());
+$("tour-skip").onclick = endTour;
+addEventListener("keydown", (e) => e.key === "Escape" && !$("tour").hidden && endTour());
+addEventListener("resize", placeTour);
+addEventListener("scroll", placeTour, true);
 
 // ---------- input ----------
 $("file").onchange = async (e) => {
