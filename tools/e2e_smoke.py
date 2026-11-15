@@ -271,14 +271,7 @@ def main():
             chosen = page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)")
             run.act(lambda: page.dispatch_event("#param-teardrop_angle_deg", "change"))
             assert page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)") == chosen, "re-suggest lost ticks"
-            with page.expect_download(timeout=120_000) as dl:
-                page.evaluate("() => document.getElementById('dl-project').click()")
-            out = OUT / "suggestion_selection.json"
-            dl.value.save_as(out)
-            run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
-            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
-            assert page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)") == chosen, "project lost ticks"
-            return f"{count} unticked suggestions; all, none, re-suggest and project ticks kept"
+            return f"{count} unticked suggestions; all, none and re-suggest ticks kept"
         run.step("suggestions start unticked and keep user choices", suggestion_selection)
 
         def design():

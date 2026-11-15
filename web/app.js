@@ -330,11 +330,7 @@ async function openProject(bytes) {
   renderLoads();
   setZones(p.zones ?? []); // after selectOption: it clears zones and boxes of the old orientation
   setVolumes(p.volumes ?? []);
-  setSuggested(p.suggested_boxes ?? []);
   if (p.holes && activeOption()) await restoreHoles(p.holes);
-  Object.assign(editSelections(), p.edit_selections ?? {});
-  for (const e of state.edits) e.selected = editSelections()[e.id] ?? e.selected;
-  if (mode() !== "print") await suggestDesign();
   recolor();
   await state.nozzleCompare?.catch(() => {}); // it would overwrite the message below when it ends
   setStatus(`${state.summary} — opened the project with what was set in it.`);
@@ -4050,8 +4046,7 @@ $("dl-3mf").onclick = async () => {
 const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
   up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
-  holes: holesForProject(), suggested_boxes: state.suggested,
-  edit_selections: { ...editSelections(), ...Object.fromEntries(state.edits.map((e) => [e.id, e.selected])) },
+  holes: holesForProject(),
 });
 
 $("dl-project").onclick = () => {
