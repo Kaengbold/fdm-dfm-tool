@@ -311,7 +311,8 @@ async function openProject(bytes) {
   radio("mode", p.mode);
   $("constant-load").checked = Boolean(pr.constant_load);
   await loadFile(p.name, p.stl, p.faceIds);
-  if (pr.use_temp_c != null) await setUseTemp(pr.use_temp_c);
+  const wantedTemp = pr.use_temp_c ?? ROOM_C;
+  if (wantedTemp !== (useTemp() ?? ROOM_C)) await setUseTemp(wantedTemp);
   // Marks and settings first: the check for the project's orientation should already use them.
   const marks = Object.entries(p.faces ?? {}).flatMap(([kind, ids]) => ids.map((region) => ({ region, kind })));
   if (p.loads?.length || marks.length) await ensureRegions();
