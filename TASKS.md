@@ -436,7 +436,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### A. Quick fixes
 
-- [ ] **T-395 P1** [A] "Where is it used?" starts at "Outdoors in winter (−20 °C)" instead of "Indoors". · files: `web/index.html` (`#use-temp`), `tools/e2e_smoke.py` · owner: —
+- [ ] **T-395 P1** [A] "Where is it used?" starts at "Outdoors in winter (−20 °C)" instead of "Indoors". · files: `web/index.html` (`#use-temp`), `tools/e2e_smoke.py` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-395-indoors-default`)
   - Seen: the `<select id="use-temp">` has no `selected` option, so the browser takes the first one (value `-20`). Both walk-throughs showed it. Simple hides the field, so the user can't even see it. `useTemp()` in `web/app.js` then sends `use_temp_c: -20` with every check and strength run.
   - Do: mark the "Indoors (room temperature)" option (`value=""`) as `selected`. Check the project file path too: `setUseTemp` and `openProject` must still set other values.
   - Done when: a fresh visit shows "Indoors"; `profile().use_temp_c` is `null`; a browser test step asserts it.
