@@ -398,6 +398,365 @@ From the user's notes after a full pass through the site (screenshots in the ses
 
 - [ ] **T-392 P2** Move placed boxes in space (drag them), and place support / no-support boxes and hidden gaps automatically from the overhang and strength results; manual boxes alone add little over the slicer. Builds on T-251, after T-363. · files: `web/app.js`, `web/viewer.js`, `core/fdmcore/api.py` · owner: Claude (task/T-392-move-auto-boxes)
 
+## Audit round 4 (2026-11-15, Claude: usability, scalability, user needs, design)
+
+A read-only audit of the web tool. Everything a task needs is written in the task; no chat is needed.
+
+**How it was checked** (so the "Seen" lines can be repeated):
+- Headless Edge (Playwright, 1440 × 900 and a 390 × 844 phone size), walking Simple, Basic and Advanced with the sample parts.
+- The tools run for real on `l_bracket`: strength (5 kg on one face, another face held), lightest settings, shaking and knocks, warping (PLA on the P1S, ABS on the A1), design changes applied, 3MF and report downloaded, Cancel during a run.
+- Three generated organic parts (a bumpy blob, a stand-in for a scan or sculpt) with 80,000 / 320,000 / 980,000 triangles.
+- Natively: every suggested design change applied one by one and all together on the 10 sample parts, the 10 corpus parts and the 80,000-triangle blob (112 changes), and the slicer settings of those 21 parts compared (PLA, Bambu Lab P1S, 0.4 mm, Balanced).
+- Not checked: a real phone, a real slicer opening the 3MF, a real print, STEP files, G-code import, the fit tools, autosave / restore, offline use, slow connections.
+
+**What already works, keep it:** boot 3–5 s and a sample loads in 2–3 s; no account, no upload; the working bar (what runs, time left, what it updates, Cancel); finding cards (plain title, one-line reason, fix chip, tap shows the place); the 3MF with settings on the part; the calm look (DESIGN.md).
+
+**Hosting costs nothing for the simulations:** every calculation runs in the visitor's browser (Pyodide in a web worker). The host only serves static files; the Python runtime (~15 MB) and scipy (~10 MB) come from a public CDN once. T-448 writes this down for users.
+
+**Groups.** Each task carries a group letter in brackets. Tasks of one group touch the same files and ideas, so one agent can take a whole group on one branch per task, one after another, without colliding with another group. Suggested order: **A** first (small fixes, each under an hour), then **B** and **C** (what the tool says must be right, and the first minute), then **F**, **G**, **H**. **D** is a rebuild of the navigation and needs the user's yes first (it reverses parts of T-375 and T-378). Inside a group the tasks are in build order.
+
+| Group | Theme | Main files | Tasks |
+|---|---|---|---|
+| A | Quick fixes, each small and alone | `web/index.html`, `web/app.js`, `web/style.css` | T-395 – T-404 |
+| B | Advice that must be right: orientation, finding text, organic shapes | `core/fdmcore/orientation.py`, `api.py`, `checks.py`, `data/rules.yaml` | T-405 – T-410 |
+| C | The first minute: start, Simple flow, result screen | `web/index.html`, `web/app.js`, `web/steps.js` | T-411 – T-416, T-465 |
+| D | Navigation rebuild: two modes, a short spine and a toolbox, smaller code files | `web/steps.js`, `web/app.js`, `web/index.html` | T-417 – T-420 |
+| E | The 3D view shows the problem | `web/viewer.js`, `web/app.js` | T-421 – T-423 |
+| F | Slicer settings: made for this part, shown as a difference, handed to the slicer | `core/fdmcore/recommend.py`, `api.py`, `web/app.js` | T-424 – T-431 |
+| G | Design changes: tied to a problem, checked after applying, advice with numbers | `core/fdmcore/features.py`, `additions.py`, `web/app.js`, `web/geometry.js` | T-432 – T-441 |
+| H | Strength results: honest and proven | `web/app.js`, `web/viewer.js`, `core/fdmcore/strength.py`, `api.py` | T-442 – T-445 |
+| I | From the printed part back into the tool | `web/index.html`, `web/app.js`, `core/fdmcore/api.py` | T-446 – T-447 |
+| J | Reach: publish, install, printers, slicers, languages, projects | README, `web/`, `core/fdmcore/data/` | T-448 – T-455 |
+| K | Phone layout | `web/style.css`, `web/index.html` | T-456 – T-457 |
+| L | Big and broken parts: speed, memory, start-up | `core/fdmcore/`, `web/worker.js`, `web/app.js` | T-458 – T-461 |
+| M | Tests that would have caught this | `core/tests/`, `tools/` | T-462 – T-464, T-466 |
+
+**Decisions (2026-11-15):** no phone app, the phone only reads reports: decided (T-457, done). Move away what the slicer does better: decided, yes to the proposed list (T-431, now a build task). Two modes instead of four levels (T-417) and the bigger 3D view on part steps (T-465): put off until relevant; group D waits.
+
+### A. Quick fixes
+
+- [ ] **T-395 P1** [A] "Where is it used?" starts at "Outdoors in winter (−20 °C)" instead of "Indoors". · files: `web/index.html` (`#use-temp`), `tools/e2e_smoke.py` · owner: —
+  - Seen: the `<select id="use-temp">` has no `selected` option, so the browser takes the first one (value `-20`). Both walk-throughs showed it. Simple hides the field, so the user can't even see it. `useTemp()` in `web/app.js` then sends `use_temp_c: -20` with every check and strength run.
+  - Do: mark the "Indoors (room temperature)" option (`value=""`) as `selected`. Check the project file path too: `setUseTemp` and `openProject` must still set other values.
+  - Done when: a fresh visit shows "Indoors"; `profile().use_temp_c` is `null`; a browser test step asserts it.
+- [ ] **T-396 P1** [A] Internal task numbers shown to users in the "Not finished yet" boxes. · files: `web/index.html` (`data-wip` on `#blk-strength`), `web/style.css` (`.wip`) · owner: —
+  - Seen: "Will it hold?" shows "Not finished yet: rough estimate, not yet checked against real test prints (T-032)."
+  - Do: remove "(T-032)" from the text. The bigger change (a small "Estimate" badge instead of the dashed yellow frame) is T-444; this task is only the wording, so it can ship today.
+  - Done when: no `T-` number is visible anywhere in the app (`grep -n "T-[0-9]" web/index.html` finds only comments).
+- [ ] **T-397 P1** [A] Simple, step "What you have": two main buttons ("Compute" and "Next: Will it hold?"), and Next reaches the result without Compute. · files: `web/index.html` (`#compute`), `web/app.js` (`compute`), `web/steps.js` · owner: —
+  - Seen: both are solid green. DESIGN.md says one primary per step. The checks already run when the part loads, so "Compute" only repeats them.
+  - Do: remove the "Compute" button from the pane. Keep its good part, the list of what the tool is doing (`#compute-steps`): show it on the Result step while work is running (the last step's button "Show my result" starts it when something is still missing, e.g. strength with loads set).
+  - Done when: every step in Simple has exactly one primary button, in the panel foot; the browser test for T-374 is updated.
+- [ ] **T-398 P1** [A] Orientation card says "Needs supports under about 43 mm²" and "No support" on the same card. · files: `core/fdmcore/orientation.py` (`explain`), `web/app.js` (`optionCost`) · owner: —
+  - Seen: L-bracket, Basic, Option 1. The reason line comes from the quick face test in `explain`, the cost line from the sliced support weight (`support_g < 1` → "No support"). They disagree for small areas.
+  - Do: one source. When `support_g` is known, drop the "Needs supports under …" reason and let the cost line speak; or write "A little support (under 1 g)" when the area is > 0 and the weight < 1 g.
+  - Done when: no card shows both; unit test on `l_bracket`.
+- [ ] **T-399 P1** [A] Suggested design changes arrive ticked. · files: `web/app.js` (`suggestDesign`, where `selected` is set) · owner: —
+  - Seen: on the L-bracket all 8–9 suggestions were ticked on arrival; "Apply selected changes" then changes the part's shape in ways the user didn't ask for (see T-436).
+  - Do: start every suggestion unticked. Keep ticked only what the user asked for directly (a fit they sized, a screw they set). Add "Tick all" / "None".
+  - Done when: a fresh part shows 0 ticked; the browser tests that rely on pre-ticked boxes tick them first.
+- [ ] **T-400 P2** [A] Hide the colour key and the "Best orientation" label when they say nothing. · files: `web/app.js` (`recolor`, `showViewChanges`), `web/index.html` (`#view-key`) · owner: —
+  - Seen: Hook and L-bracket are plain grey, yet the key lists "Prints fine / May droop / Needs support / On the bed".
+  - Do: show only the key entries whose colour is on the part now (count the face classes in `recolor`). No coloured face → no key.
+  - Done when: Hook in Simple shows no key; `feature_test` shows only the colours it uses.
+- [ ] **T-401 P2** [A] Strength colours: red means "6 % of the strength used" on a part with ×17.7 safety. · files: `web/app.js` (`strengthView`, `renderLegend`), `web/viewer.js` (`FIELD_BANDS`, `fieldColor`) · owner: —
+  - Seen: L-bracket, 5 kg: the legend runs 0–6 % and the top band is red. The scale stretches to the highest value on the part.
+  - Do: for "Strength used (%)" fix the scale to what matters: 0 → 100 % of the allowed load (the safety the check asks for: ×2, or ×3 with a constant load). Red only at or above 100 %. Offer "Stretch the colours" as a switch for people who want to see the pattern.
+  - Done when: the same run shows the L-bracket mostly blue, no red; a part that fails shows red at the weak spot.
+- [ ] **T-402 P2** [A] Disabled buttons don't say why. · files: `web/app.js`, `web/index.html` · owner: —
+  - Seen: "Check strength" and "Find the lightest settings that hold" are greyed out until a held face and a load exist, with no reason on them.
+  - Do: every disabled action shows its reason as text next to it (not only a tooltip: phones have none), e.g. "Tap a face and mark where it is held and where the load goes". Same for `#run-dynamics`, `#run-topology`.
+  - Done when: no disabled button without a visible reason in any step.
+- [ ] **T-403 P2** [A] After Cancel, say that the engine is restarting. · files: `web/app.js` (`cancelEngine`, `busy`) · owner: —
+  - Seen: Cancel works, but the next action waited about 11 s (a new worker boots and gets the part again) with only "Cancelled — the last result stays shown."
+  - Do: status "Cancelled. Getting ready again…" with the working bar until `restoring` is done, then "Ready".
+  - Done when: the browser test's cancel step sees both messages.
+- [ ] **T-404 P2** [A] Slicer settings: the reason is only in a hover tooltip. · files: `web/app.js` (`renderSettings`) · owner: —
+  - Seen: "Hover a row for why" — not findable, and not there on a touch screen.
+  - Do: show the reason as a muted second line under each setting's name. (T-427 later turns the table into a difference list; this is the small step.)
+  - Done when: every row shows its reason without hovering.
+
+### B. Advice that must be right
+
+- [ ] **T-405 P1** [B] The recommended orientation loses against the tool's own numbers. · files: `core/fdmcore/orientation.py` (`_score`, `OrientationSettings` weights, `stability_term`), `core/fdmcore/api.py` (`orientations`), `core/tests/test_orientation*.py` · owner: —
+  - Seen (`web/samples/feature_test.stl`, PLA, P1S, Balanced): Option 1 "Recommended" stands the 100 × 60 × 40 mm plate on a 400 mm² edge, 60 mm tall, ≈ 3 g support. Option 2 lies flat on 5,973 mm² with ≈ 2 g support and is "Ranked lower: needs more support". The recommended pose then gets the finding "Tall part can tip over". Also `l_bracket`: recommended 475 mm² contact against 1,772 mm². And the 80,000-triangle blob is stood on a point and gets "Small contact with the bed".
+  - Do: (1) Rank with the same numbers the cards show: sliced support weight (`support_g`), bed contact, height. (2) After the checks ran on the finalists, an option whose own check says `tipping_risk` or `small_bed_contact` may not be first while another finalist has neither. (3) Add the print time of each finalist to the score (taller = longer). (4) Write down the weights and why in the docstring.
+  - Done when: `feature_test` and `tray`-like flat parts are recommended flat; no recommended option has more support *and* less contact *and* more height than another option; regression tests for `feature_test`, `l_bracket`, the corpus parts (expected picks in `core/tests/test_corpus.py` still hold).
+- [ ] **T-406 P1** [B] "Ranked lower" reasons that are false. · files: `core/fdmcore/orientation.py` (score parts, `why_lower`), `core/fdmcore/api.py` · owner: —
+  - Seen: "Ranked lower: needs more support" on the option with *less* support weight (2 g against 3 g).
+  - Do: build the sentence from the numbers shown on the two cards (support g, contact mm², height, time), not from the internal score part. If no shown number is worse, say what is (e.g. "a face you marked gets support marks").
+  - Done when: a test goes over all sample parts and fails when a "needs more support" option has ≤ the support weight of the pick (same for "prints taller").
+- [ ] **T-407 P1** [B] Finding texts guess at the user's design. · files: `core/fdmcore/data/rules.yaml` · owner: —
+  - Seen: any narrow gap says "The CAD model shows separate moving components in a print-in-place hinge or bearing"; any small hole says "The CAD model has an exact diameter hole for a bolt or pin"; the blob got "The CAD model shows crisp letters, logos, or shallow grooves". The `why` texts were drafted by an LLM as stories.
+  - Do: rewrite every `why` to say only what the check measured and what happens when printing, in one or two short sentences, e.g. "Two faces are 0.15 mm apart. Gaps under 0.2 mm fuse into one piece." No "The CAD model shows …", no guessed purpose. The measured numbers already sit in each finding's `detail`.
+  - Done when: `grep -c "The CAD model" core/fdmcore/data/rules.yaml` is 0; each `why` is ≤ 2 sentences (this also serves T-382).
+- [ ] **T-408 P1** [B] Know what kind of model it is: CAD part or organic shape (scan, sculpt, figure). · files: `core/fdmcore/api.py` (`load`), `core/fdmcore/regions.py`, `core/fdmcore/checks.py`, `core/fdmcore/features.py`, `web/app.js` · owner: —
+  - Seen: the blob (no flat face, no hole) got "Raised or engraved detail too shallow", "Fine detail squashed on the bed", and many `rounded_edge` features.
+  - Do: at load, measure the share of the surface that lies in flat or cylindrical regions (`find_regions`). Below a threshold (to find on the samples + the blob; put it in `thresholds.yaml`) the part is "organic". For organic parts: switch off the checks that need CAD features (`first_layer_detail`, engraved / raised detail, `small_hole_undersized`, feature detection), keep overhang / support / bed contact / tipping / cooling / warping. Return `kind: "cad" | "organic"` from `load`; the app shows "Looks like a sculpted model: checks for holes and fine CAD detail are off" with a switch to turn them on.
+  - Done when: the blob (`tools/` generator from T-462) gets no engraved-detail or first-layer-detail finding; all samples stay "cad" with the same findings.
+- [ ] **T-409 P2** [B] "Just print it" must not show CAD words or design fixes first. · files: `web/app.js` (`findingCard`, `FIX_PATH`), `core/fdmcore/api.py` (`check`, mode filter) · owner: —
+  - Seen: finding cards lead with the chip "Fix: change the design" even for someone who downloaded the model; the first fix shown is `fixes[0]`, whatever its kind.
+  - Do: in mode `print`, order the fixes slicer → printer & material → design, and show the first slicer / process fix as the chip. Every rule already needs one (AGENTS.md). Organic parts (T-408) default to `print`.
+  - Done when: in mode `print` no card's chip says "change the design".
+- [ ] **T-410 P2** [B] "Shaking and knocks": the drop result looks far too harsh. · files: `core/fdmcore/api.py` (`dynamics`), `core/fdmcore/fea.py`, `research/extra_simulations.md` · owner: —
+  - Seen: L-bracket, 5 kg, drop 50 mm: "hits about 51× as hard … the part gives only 0.04 mm … safety drops from ×17.7 to ×0.3: it will likely break". The factor comes from the part's own tiny static bend alone, as if the falling thing, the mounting and the plastic gave nothing.
+  - Do: check the formula against a source (impact factor `1 + sqrt(1 + 2h/δ)`), then add what really gives: the mount and the falling object (a default extra give, in `thresholds.yaml`, editable in All settings), and say in the text what is assumed. Show the result as a range ("between ×0.3 and ×2, depending on how hard the things are"). Source in the PR.
+  - Done when: the text names its assumptions; a unit test pins the L-bracket case; the card carries the "Estimate" badge (T-444).
+
+### C. The first minute
+
+- [ ] **T-411 P1** [C] Start with the part, not with a choice of level. · files: `web/index.html` (`#guide`), `web/app.js` (`openGuide`, `GUIDE`) · owner: —
+  - Seen: a first visit opens "What do you want to do?" with Simple / Basic / Advanced / Expert before the visitor knows what any of them means.
+  - Do: no dialog on the first visit. Open on the drop zone in Simple. The "Guide" button stays for later. After the first result, one line offers more: "Want to check strength, fits or design changes? Show more tools" (switches level). If T-417 is accepted, this becomes its start screen.
+  - Done when: a fresh visit (no `fdm-guided`) shows the drop zone at once; the browser test's guide step opens it with the button.
+- [ ] **T-412 P1** [C] Sample parts that show what the tool can do. · files: `web/index.html` (`.samples`), `tools/make_samples.py`, `web/samples/` · owner: —
+  - Seen: "Hook" (first sample people try) ends in "Prints as designed" with a grey part: nothing to see. Eight sample buttons with names like "Neck" and "Test block".
+  - Do: three samples with a line each, in this order: one with a clear problem and a clear fix (an overhang or a sideways hole that changes the orientation), one that needs a strength check (a hook with a suggested load already set), one enclosure (fits and screws). The others move behind "More samples". A sample may carry a project (loads set) so "Will it hold?" has something to show.
+  - Done when: the first sample shows at least one coloured area and one finding with a slicer fix.
+- [ ] **T-413 P1** [C] Simple's Result: the answer first. · files: `web/steps.js` (`MOVED`), `web/index.html` (pane `result`, `#stats`), `web/app.js` (`renderVerdict`, `statsText`) · owner: —
+  - Seen: Result shows the verdict, then "Copies on the plate", "Grip texture (fuzzy skin)", then the download. Print time and filament are missing (`#stats` sits in the Problems pane and isn't moved to Result). Big empty space below.
+  - Do: order on Result: (1) verdict, (2) "About 34 min · 11 g of filament · about 0.25 for the filament" on one line, (3) the top three problems, each with a small picture of the place (T-423) and its one fix, "Show all" below, (4) the download button, (5) one line "What happens next" (T-415), (6) "More options" closed: copies, grip texture, report, share, slicer settings.
+  - Done when: time and grams show in Simple's Result; copies and fuzzy skin are not above the download.
+- [ ] **T-414 P1** [C] "Will it hold?" in Simple: say it's optional and guide it. · files: `web/index.html` (pane `strength`), `web/app.js`, see T-369 · owner: —
+  - Seen: the step shows a paragraph, a checkbox about constant load and a disabled button. Nothing says it can be skipped.
+  - Do: belongs with T-369 (guided strength flow: 1 where it's held → 2 where the load goes). Add here: a headline "Does something push or pull on it? (optional)", a secondary button "Skip: just show my result", and the reason on the disabled button (T-402). The constant-load checkbox moves after the load is set.
+  - Done when: a beginner can leave the step with one obvious button; with T-369 done, the two numbered stages highlight on the part what to tap.
+- [ ] **T-415 P2** [C] Say what to do after the download. · files: `web/app.js` (after `dl-3mf`), `web/index.html` · owner: —
+  - Seen: after "Download 3MF for your slicer" nothing more happens. A beginner doesn't know that the file opens in the slicer, or that their own printer and filament profile still has to be picked there.
+  - Do: after the download show three short steps: "1 Open the file in OrcaSlicer, Bambu Studio or PrusaSlicer. 2 Pick your printer and filament there as usual. 3 Slice and print: the walls, infill, supports and brim are already set on the part." Add "It printed badly?" → the failed-print path (T-447).
+  - Done when: the steps show once per download and can be closed.
+- [ ] **T-416 P2** [C] Orientation cards people can read at a glance. · files: `web/app.js` (`renderOptions`, `optionCost`), `web/viewer.js` (small picture of a pose), `core/fdmcore/orientation.py` (`explain`) · owner: —
+  - Seen: "Option 1 / Option 2 / Option 3", "Flat contact with the bed: 475 mm²", "Print height 30.0 mm".
+  - Do: each card gets a small picture of the part in that pose (render off-screen with the viewer, cache per `up`), a name from what lies down ("On its big flat side", "Standing on the short edge", "As in your file"), and one trade-off line in everyday terms: "No support · 34 min · 11 g". The numbers (mm², mm) go behind "Details". Time per option needs the estimate per finalist (shared with T-405).
+  - Done when: no card title says "Option n"; each card has a picture; the mm² numbers are one click away.
+
+- [ ] **T-465 P2** [C] Simple and Basic: give the 3D view the room when it has something to show. · files: `web/style.css` (the `min-width: 821px` rules for `simple` / `basic`), `web/app.js` (`showViewChanges`) · owner: — · changes part of T-375 · **put off by the user (2026-11-15): decide when relevant, after the view shows problems (T-400, T-421)**
+  - Seen (1440 × 900): the settings panel takes 58 % of the width and is half empty on most steps; the part sits in a side card. On "Problems" and "On the bed" the part is what the user needs to look at.
+  - Do: keep settings-first on steps with only form fields (What you have, Slicer settings, Download). On steps about the part (On the bed, Problems, Will it hold?, Result) swap the shares: view about 60 %, panel about 40 %, with a smooth change. Numbers on demand: a "Details" switch on each card shows the measured values (angles, areas, the assumptions) for people who want them.
+  - Done when: on "Problems" the 3D view is the bigger zone at 1440 × 900 and nothing in the panel wraps badly at 40 %.
+
+### D. Navigation rebuild (needs the user's yes first)
+
+- [ ] **T-417 P1** [D] Decide: two modes instead of four levels. · files: PRODUCT.md, DESIGN.md, PLAN.md (decision only) · owner: — · **put off by the user (2026-11-15): decide when it becomes relevant, after groups A, B and C. Don't start T-418 – T-420 before.**
+  - Suggested way in, when the time comes: stage 1 (cheap, can be undone) shows only two names in the header, "Check" (= today's Simple) and "Workbench" (= today's Advanced); Basic and Expert stay reachable by link (`?level=`). Stage 2 (T-418 – T-420) only after stage 1 was used for a while.
+  - Why: four levels are hard to choose from and hard to build for: every new feature has to be placed four times (`data-min`, `MOVED` in `steps.js`), and Basic and Expert have no clear user. Proposal: **Check** (guided: part → what you have → result → download) and **Workbench** (every tool, any order). Simple becomes Check; Basic, Advanced and Expert become Workbench, with "All settings" inside it.
+  - Note: this reverses parts of T-375 (settings-first layout for Simple and Basic) and replaces T-378 (Expert as steps). Ask the user before building; record the answer here and in PRODUCT.md.
+  - Done when: the decision is written down; T-418 – T-420 are confirmed or dropped.
+- [ ] **T-418 P1** [D] Workbench: a short spine and a toolbox, instead of a 12-step line. · files: `web/steps.js`, `web/index.html`, `web/app.js`, `web/style.css` · owner: — · after T-417
+  - Seen: Advanced has 12 numbered steps. Most are optional tools (Forces on the part, While printing, Tolerances & tuning, Design changes, Advanced design changes), yet each gets a green tick just for being passed, and "Design changes" is a step even while it is switched off.
+  - Do: spine (numbered, in order): Your part → What you have → Result (orientation + problems) → Download. Toolbox (not numbered, open in any order, from the rail and from links in findings): Strength, Shaking and knocks, Warping and cooling, Fits and screws, Design changes, Split, Slicer settings, Sliced-print check (G-code). A tool shows a tick only when it was really run, and "has news" when a finding points to it. Folds T-377 (lighter shape as its own tool) in.
+  - Done when: an experienced user reaches "Fits and screws" in one click after loading a part; no tick appears for a tool that wasn't used.
+- [ ] **T-419 P2** [D] Split `web/app.js` (3,700 lines, one shared `state`, about 200 functions) into modules per tool. · files: `web/app.js` → `web/app/*.js`, `web/index.html`, `web/sw.js`, `.github/workflows/pages.yml` (CSP hashes), `tools/e2e_smoke.py` · owner: —
+  - Why: every agent task touches `app.js` and `index.html`, so parallel work collides, and a tool can't be read alone.
+  - Do: plain ES modules, no build step (AGENTS.md): `engine.js` (worker, `call`, `busy`, cancel), `state.js`, then one module per tool that owns its pane's markup and handlers (`orientation.js`, `problems.js`, `strength.js`, `sims.js`, `fits.js`, `design.js`, `volumes.js`, `settings.js`, `download.js`, `presets.js`, `versions.js`, `autosave.js`). Move code, don't rewrite it; one PR per two or three modules; the browser test stays green after each.
+  - Done when: no file in `web/` is over ~800 lines; `index.html` holds the shell only.
+- [ ] **T-420 P2** [D] Split `core/fdmcore/api.py` (3,000 lines) the same way. · files: `core/fdmcore/api.py` → `core/fdmcore/api/*.py`, `tools/make_manifest.py`, `web/worker.js` (`NEEDS_SCIPY`) · owner: —
+  - Do: keep `api.dispatch` and `METHODS` as the one entry; move the methods into modules by area (load, orientation, check, strength, design, export, presets). Run `python tools/make_manifest.py` after (a test fails otherwise) and `node tools/pyodide_check.mjs`.
+  - Done when: same `METHODS` keys, all tests green, MCP server and CLI unchanged.
+
+### E. The 3D view shows the problem
+
+- [ ] **T-421 P1** [E] Turn the view to the problem. · files: `web/viewer.js` (camera, `showFindings`), `web/app.js` (`recolor`, `renderCheck`) · owner: —
+  - Seen: overhangs and supports are on the underside, the camera looks from above: the part stays grey while the list says "needs support under 1,287 mm²".
+  - Do: after a check, if any face is coloured "needs support" or "may droop" and none is visible from the camera, turn the camera (smoothly, once) to where most coloured area faces it, and say "Turned to show the underside". Add a button "Look from below" and a see-through switch for the bed plate.
+  - Done when: `feature_test` shows red / amber faces without the user turning it.
+- [ ] **T-422 P2** [E] Opening a finding flies the camera inside the part. · files: `web/viewer.js` (`showFindings`, the fly-to animation) · owner: —
+  - Seen: "Gap between moving parts fuses shut" on `feature_test`: the view zooms so close that only a grey wall, a red wire box and a white disc are left; no sense of where on the part it is.
+  - Do: frame the finding with context: the place takes about a third of the view, the camera stays outside the part's bounding box, and it looks along the place's outward direction. Offer "Back to the whole part".
+  - Done when: for every finding of every sample, the screenshot after the click shows part outline around the marked place (add to the browser test as a pixel check: not > 80 % one colour).
+- [ ] **T-423 P2** [E] Small pictures of a place, for cards and the result. · files: `web/viewer.js` (off-screen render), `web/app.js`, `web/report.js` · owner: —
+  - Do: one function `viewer.thumbnail({ up, focus, size })` that renders to a small image without disturbing the main view. Used by the orientation cards (T-416), the top-three problems on Result (T-413) and the report (it already makes pictures: `pictureWith`; share the code).
+  - Done when: thumbnails render in under 100 ms each on the samples and are cached until the part or orientation changes.
+
+### F. Slicer settings: made for this part
+
+- [ ] **T-424 P1** [F] Walls, infill and top layers from the part's shape, not only from the goal. · files: `core/fdmcore/recommend.py` (`goal_plan`, `recommend_settings`), `core/fdmcore/checks.py` (wall thickness stats), `core/fdmcore/data/thresholds.yaml`, `core/tests/` · owner: —
+  - Seen: across 21 different parts (PLA, P1S, Balanced): layer height 0.2 on all 21, infill 15 % gyroid on all 21, top / bottom 4 / 3 on all 21, elephant foot 0.15 on all 21, walls 3 on 19 and 4 on 2. Only on/off extras (supports, brim, ironing, bridge speed, hole compensation) react to the part. The core values come from the table `GOAL_PLANS`.
+  - Do: measure from the slices: the typical and thinnest wall thickness, the share of the volume that is thick (would be infill), the top area. Then: (1) a part whose walls are ≤ 2 × walls × line width is solid anyway: say so, set walls so they fill it exactly, and call infill "hardly used here". (2) A thick block: fewer walls don't help; infill carries: pick density from the goal and the block's size. (3) Low infill (≤ 10 %) → one more top layer so the top closes. (4) Thin walls that are not a whole number of lines → Arachne (already there) and the reason. Keep the goal as the starting point.
+  - Done when: the 21 parts give at least 6 different (walls, infill, top) triples; each change carries a reason (T-426); tests pin three typical parts (thin shell, thick block, mixed).
+- [ ] **T-425 P1** [F] Layer height from the shape. · files: `core/fdmcore/recommend.py`, `core/fdmcore/checks.py` (`shallow_slope_stairs`, `fine_detail_rough`), `core/fdmcore/export3mf.py` (height ranges exist: `fineWanted` in `web/app.js`) · owner: —
+  - Do: thinner layers (e.g. 0.12–0.16 on a 0.4 nozzle) when shallow slopes or fine detail cover a real share of the visible surface; thicker (0.24–0.28) for plain blocks with the goal Fast or Balanced and nothing that needs detail. Where only a height band needs it, keep the existing height ranges and say "thin layers only from 12 to 18 mm".
+  - Done when: `detail_plate` and a sloped part get a different layer height than `tray`; time estimates follow.
+- [ ] **T-426 P1** [F] Reasons that name the part. · files: `core/fdmcore/recommend.py` (`put` reasons) · owner: —
+  - Seen: "Good balance of strength and speed", "Matches your goal", "Good default for a 0.4 mm nozzle": the same on every part.
+  - Do: every reason states the fact of this part that led to the value: "3 walls: your thinnest wall is 1.4 mm, so it prints solid", "Brim ears: the base is 100 mm long and ABS lifts from about 45 mm on an open printer", "Supports on: 1,287 mm² hang in the air". Where the value is only the goal's default, say so: "From your goal Balanced; nothing on this part asks for more".
+  - Done when: a test fails if two parts with different shape facts get an identical reason text for a part-driven setting.
+- [ ] **T-427 P1** [F] Show the settings as a difference, with a tick per row. · files: `web/app.js` (`renderSettings`, `effectiveSettings`), `core/fdmcore/export3mf.py`, `web/index.html` · owner: —
+  - Seen: the table lists values (Layer height 0.2 mm, Walls 3 …) under "What we change from your slicer's defaults", but the tool doesn't know those defaults.
+  - Do: three columns: setting · "usual" (the goal default, or the user's own profile once T-428 is in) · "for this part", with the reason under it. Rows that equal the usual value are folded under "Unchanged". Each row has a tick: unticked rows don't go into the 3MF (experienced users keep their own tuned values).
+  - Done when: an unticked setting is absent from `Metadata/model_settings.config` and `Slic3r_PE_model.config` in the exported 3MF (test).
+- [ ] **T-428 P2** [F] Import the user's own slicer print profile. · files: `web/mypresets.js` (`fromOrcaFilament` exists for filament), `web/app.js`, `core/fdmcore/profile.py`, `core/fdmcore/slicer_cli.py` (key names) · owner: —
+  - Why: experienced users have tuned process profiles. Today only a filament profile can be imported.
+  - Do: "Import your print settings (OrcaSlicer / Bambu Studio process .json, PrusaSlicer .ini)". Read walls, infill, pattern, layer height, top / bottom, support, brim, speeds. Store in this browser. Then T-427's "usual" column shows the user's values and only real differences are suggested. Profiles that `inherits` a system profile: use the shipped `orca_profiles.json.gz` to fill what's missing (never read the user's install paths).
+  - Done when: importing a profile with 4 walls makes the Walls row show "yours: 4" and suggest a change only when the part needs it.
+- [ ] **T-429 P2** [F] Feed the strength result into the default settings. · files: `web/app.js` (`runOptimise`, `overrides`), `core/fdmcore/api.py` (`optimise_strength`) · owner: —
+  - Seen: "Find the lightest settings that hold" gives a truly part-specific answer (L-bracket: 2 walls, 10 % infill, 7 g) but only as a button result the user must apply.
+  - Do: once a load is set and the check ran, the settings step shows "For your 5 kg load: 2 walls and 10 % infill are enough (×12.5)" as the suggested values, marked as coming from the load; one click keeps the goal default instead.
+  - Done when: the settings list reflects a finished strength run without extra clicks, and says why.
+- [ ] **T-430 P2** [F] Open the result in the slicer with one click. · files: `web/app.js` (`dl-3mf`), README · owner: —
+  - Seen: the only way is download, find the file, open it.
+  - Do: find out first what works from a browser page (write it in `research/`): OrcaSlicer, Bambu Studio and PrusaSlicer URL schemes (they open a *web address* of a file, which a static site can't provide for a local part), the File System Access API ("save into a folder the slicer watches"), a registered file handler when installed as an app (T-449). Build what works; otherwise keep the download and say plainly "then open it in your slicer".
+  - Done when: the research note states what is possible, and the best working path is built.
+- [ ] **T-431 P2** [F] Move away what the slicer does better (decided 2026-11-15, user: yes to the list below; demote, don't delete code). · files: `web/index.html`, `web/steps.js`, `web/app.js`, PRODUCT.md · owner: —
+  - Decided, per item: **Copies on the plate** → under "More options" on Result / Download (it sits above the download today). **Grip texture (fuzzy skin)** → no permanent checkbox; offered as a suggestion when the check finds a handle or knob (finding `grip_texture`), still reachable under "More options". **Support / no-support boxes** → out of the main flow into the toolbox (until T-418 exists: stay in "Advanced design changes", with the line "your slicer's paint-on supports do this too"). **Hidden gaps and "Stronger in one area" zones** → keep and make them easy to find: no slicer places them from a strength result. **Cut into pieces that fit the bed** → toolbox, with the line "your slicer can cut too"; lead with cutting for strength or fewer supports (T-347), which the slicer can't. **Nozzle comparison** → stays where it is. Write the principle into PRODUCT.md (Product Principles): "Show first what only this tool can do."
+  - Build done when: copies and fuzzy skin are not above the download; the `grip_texture` finding offers the texture as its slicer fix with one click; each moved feature still works (browser test steps updated).
+  - The slicer is better at: real print time and filament, making and painting supports, seam position, layer preview, arranging a plate, cutting with connectors, multi-colour, built-in calibration prints, sending to the printer. Only this tool does: plain-words reasons, strength under a real load with layer direction, warping risk per material and printer, sizing holes for fits and screws, design fixes written back to STEP, settings derived from the part, use by an AI agent.
+  - The proposal the decision was made from: move "Copies on the plate" and "Grip texture (fuzzy skin)" under "More options" (T-413); move support / no-support boxes (Advanced design changes) and "Too big: cut it into pieces" out of the main flow into the toolbox (T-418), each with a line "your slicer can do this too". T-392 (auto-placed boxes) only if it adds something the slicer's paint-on supports don't.
+
+### G. Design changes
+
+- [ ] **T-432 P1** [G] Every suggested change belongs to a finding. · files: `core/fdmcore/features.py` (`design_edits`, `_corner_chamfers`, `_foot_chamfer`), `core/fdmcore/api.py` (`design`), `web/app.js` (`suggestDesign`) · owner: —
+  - Seen (112 suggestions on 21 parts): 81 were "Round sharp corner", 19 "0.5 mm chamfer along the bottom edge", 8 ledge fills, 2 teardrops, 2 thicker walls, 1 sacrificial layer. Hook, mushroom, pegboard hook and shelf bracket have **no** finding in PLA and still get 5–8 changes each.
+  - Do: an edit is offered only when a finding with its `rule` is in the current check (`_edit` already carries `rule`): corner rounding only with `warping` / `sharp_bed_corners`, the foot chamfer only with `elephant_foot` *and* when the slicer's elephant-foot compensation (always set) isn't enough: say which. Show each edit under its finding ("Fixes: Corners of a long base lift off the bed"). Edits without a finding go into a closed fold "Other ideas".
+  - Done when: a part with 0 findings shows 0 suggested changes outside "Other ideas"; test over the 21 parts.
+- [ ] **T-433 P1** [G] Don't round or chamfer working shapes: gear teeth, threads, snap hooks, fit faces. · files: `core/fdmcore/features.py` (`_corner_chamfers`, `_sharp_corners` in `checks.py`, `_foot_chamfer`) · owner: —
+  - Seen: `core/tests/corpus/gear.stl`: "Round sharp corner 7, 8, 17, 18, 27, 28, 37, 38" are tooth corners, and the bottom chamfer runs along the whole tooth outline.
+  - Do: skip corners on a repeating pattern around a centre (teeth, splines, knurls: many equal corners at equal angles), corners closer together than a few line widths, the outline of holes and posts the user sized a fit for, and detected threads (`find_threads`). When skipped for that reason, say it once: "Left the teeth alone".
+  - Done when: `gear` gets no corner rounding and no chamfer along the teeth; `tray` still gets its four corners (with the warping finding).
+- [ ] **T-434 P1** [G] Check every change after applying it, and refuse the bad ones. · files: `web/geometry.js` (`applyEdits`), `web/app.js` (`applyEdits`, `testDesignEdit`), `core/fdmcore/booleans.py`, `core/fdmcore/api.py` · owner: —
+  - Seen: all 112 changes applied and left one closed solid on the simple samples, but the user reports broken results on complex parts, and nothing checks the result today except "is it closed".
+  - Do: after each applied edit compare with before: (1) the volume moved the right way (a cut removes, an add adds) and by about the edit's own volume; (2) the outer size didn't grow unless the edit says it may; (3) the number of separate pieces didn't change; (4) the result is closed; (5) after the re-check, the finding the edit belongs to is gone or smaller, and no new "Can fail" finding appeared. If one fails: undo that edit, keep the others, and say which one and why in plain words ("Left out 'Teardrop for the Ø8 hole': it would have cut the part in two"). Offer T-435's advice for it instead.
+  - Done when: a deliberately bad edit (test: a cutter through the whole part) is refused with a message; the 112 good ones still apply.
+- [ ] **T-435 P1** [G] Advice with exact numbers on the part, for everything that can't be applied safely. · files: `core/fdmcore/features.py`, `core/fdmcore/api.py` (`design`), `web/app.js`, `web/viewer.js` (dimension labels), `core/fdmcore/reports.py` · owner: —
+  - Why: the tool edits a triangle mesh by cutting and adding shapes built from flat slices. That is reliable on flat-sided features and fragile on curved or detailed ones, and it never gives a real CAD feature: the user redoes it in CAD anyway. What a designer needs is the number and the place.
+  - Do: every design fix exists as advice: a label on the part and a list line, e.g. "Make this hole Ø3.4 mm (now Ø3.0)", "Make this wall 1.35 mm = 3 lines (now 1.0)", "Open this gap to 0.3 mm (now 0.15)", "Round this inside corner with r 2 mm". "Copy the list" for the CAD session, and it goes into the report. Auto-apply stays for the short proven list (teardrop, corner rounding, ledge fill, sacrificial layer, thicker thin wall, sized hole / post / slot), each guarded by T-434.
+  - Done when: every finding with a design fix shows a number and a place, whether or not it can be applied.
+- [ ] **T-436 P1** [G] No thickening of a part that is strong enough; no silent growth. · files: `core/fdmcore/features.py` (`_thicker_weak_spot`, `_stress_chamfers`), `core/fdmcore/additions.py` (`ledge_chamfers`), `web/app.js` · owner: —
+  - Seen: (1) after a strength run with "Fine, safety ×17.7", applying the ticked changes grew the L-bracket from 60 × 30 × 40 to 61.5 × 31.4 × 41 mm. Most likely "Thicker at the weak spot by 1.5 mm" (the number matches; not traced to the end: confirm first). (2) Six of eight "45° fill under the ledge" changes on `feature_test` grew the outer size by 0.15 mm in Y.
+  - Do: offer "thicker at the weak spot" and the stress chamfer only when the verdict is not "fine". Every edit that changes the outer size says so on its line ("Outer size grows by 1.5 mm in X: check what it fits into") and after applying ("now 61.5 × 31.4 × 41 mm, was 60 × 30 × 40"). Fix the ledge fill so it stays inside the part's outline (clip the added piece to the bounding outline of the layers it joins).
+  - Done when: a "fine" part offers no thickening; no ledge fill changes the bounding box (test on `feature_test`).
+- [ ] **T-437 P2** [G] Offer screw and fit sizing by itself when the holes look like standard ones. · files: `core/fdmcore/features.py` (`fastener_plan`, `fit_size`, `detect_features`), `core/fdmcore/api.py`, `web/app.js` (`renderFits`, findings) · owner: —
+  - Seen: the sizing exists and is good (M-sizes; screw into plastic, heat-set insert, nut from the top or side, through bolt; boss and nut pocket; press / snug / sliding / loose fits) but only after the user finds "Tolerances & tuning" and picks a hole by hand.
+  - Do: when a round hole is within 0.3 mm of a standard pilot, clearance or insert size (table `fasteners` in `thresholds.yaml`), add a finding-like card: "Ø3.0 hole: is an M3 screw going through? Then model Ø3.4" with buttons for the likely uses. One answer applies to all equal holes ("all four Ø2.8 holes").
+  - Done when: `enclosure` (four Ø2.8 holes in posts) asks once about M3 and sizes all four.
+- [ ] **T-438 P2** [G] Wall thickness and line width advice. · files: `core/fdmcore/checks.py`, `core/fdmcore/additions.py` (`thicken_walls`), `core/fdmcore/recommend.py`, `data/rules.yaml` · owner: —
+  - Seen: walls under two lines get thickened; nothing else. Line width is fixed from the nozzle and never suggested.
+  - Do: (1) Walls that are not near a whole number of lines (e.g. 1.0 mm with 0.45 lines) → design advice "1.35 mm prints as 3 clean lines" and slicer fix "Arachne, or line width 0.5 so two lines fill it". (2) A minimum wall for parts that carry a load (from the strength result or a rule of thumb with a source). (3) Very uneven wall thickness (thick next to thin) → warping / sink hint. Rules need a `rules.yaml` entry with a slicer or process fix and a source (AGENTS.md).
+  - Done when: `test_block` (0.30 and 0.58 mm walls) and a 1.0 mm shell get the right advice; tests.
+- [ ] **T-439 P2** [G] Hinges and moving gaps: a fix, not only a warning. · files: `core/fdmcore/checks.py` (`gap_fuses`, `_flat_hinges`, `_upright_hinges`), `core/fdmcore/features.py`, `data/rules.yaml` · owner: —
+  - Seen: the tool warns about living hinges printed the wrong way and gaps that fuse; it offers no geometry for either.
+  - Do: for a gap under the fuse limit: advice with the number (T-435) and, for flat-sided gaps, an edit that opens it to the material's printable gap (reuse `_gap_edits`). For a living hinge: thickness and length advice per material (PP / PETG / PLA differ; source needed), and "lay it flat" as the orientation fix. Print-in-place pins: clearance per side and a 45° underside. Don't generate whole hinges: out of scope.
+  - Done when: `feature_test`'s 0.15 mm gap offers "open to 0.3 mm" as advice and as an edit that passes T-434.
+- [ ] **T-440 P2** [G] Inside-corner fillets and print-friendly chamfers without a strength run. · files: `core/fdmcore/features.py` (`concave_edges`, `_stress_chamfers`, `_round_prints`) · owner: —
+  - Seen: inside corners are only treated after a strength check, at the weak spot. Bottom edges get a 45° chamfer only as "elephant foot".
+  - Do: with a load-bearing finding (`thin_neck`, `weak_upright_pin`, a snap) offer a fillet at the sharp inside corner at its foot; where a rounded edge on the underside would overhang, suggest a chamfer instead of a fillet ("prints without support"). As advice first (T-435); as an edit where `_corner_pieces` is proven.
+  - Done when: `tall_pin` and `dumbbell` (a neck) offer a foot fillet without running strength.
+- [ ] **T-441 P2** [G] Find out where design changes break on complex parts. · files: `core/tests/corpus/`, `core/tests/test_design_edits.py` (new), `tools/` · owner: — · needs parts from the user
+  - Seen: the user reports broken changes on complex parts; the samples are too simple to show it (28–1,656 triangles, flat-sided).
+  - Do: ask the user for two or three parts where it broke (or build stand-ins: a curved housing with ribs, a part with filleted edges everywhere, a STEP with small fillets). Run the T-463 harness on them; file one task per kind of failure with the part and the edit named.
+  - Done when: each reported breakage is reproduced in a test, then fixed or covered by T-434's refusal.
+
+### H. Strength results: honest and proven
+
+- [ ] **T-442 P1** [H] Bands instead of "×17.7". · files: `web/app.js` (`renderStrength`, `compute`, `renderVersions`), `core/fdmcore/api.py` (`strength` verdict text) · owner: —
+  - Why: the check uses about 14,000 cubes of 1 mm and material values not yet checked against prints. One decimal promises a precision it doesn't have.
+  - Do: lead with a band in words: "Plenty of reserve" (≥ ×5), "Enough" (≥ the needed ×2 or ×3), "Marginal" (×1 to needed), "Likely to break" (< ×1), with a bar that shows where in the band. The number stays behind "Details" as "about ×18" (no decimal above ×10, one decimal below). Same in the versions table and the report.
+  - Done when: no headline shows a decimal safety factor above ×10.
+- [ ] **T-443 P1** [H] Prove the strength check with real prints (continues T-032). · files: `core/tests/`, `research/`, README "Accuracy" · owner: — · needs the user's printer
+  - Do: five to ten small parts with a known load case (hook, bracket, beam, pin; flat and standing), each printed in PLA and PETG, loaded until it breaks (bucket and water, or a luggage scale). Record predicted against real break load in a table in `research/strength_validation.md`, tune the layer-strength factors, and link the table from the "Estimate" badge (T-444). The calibration bar exists (`calibration_part("layer_strength")`).
+  - Done when: the table exists with at least five parts, and the typical error is written next to every strength result ("usually within ±x %").
+- [ ] **T-444 P2** [H] "Estimate" badge instead of the dashed "Not finished yet" boxes. · files: `web/style.css` (`.wip`), `web/index.html` (`data-wip`), DESIGN.md · owner: —
+  - Seen: "Will it hold?" and "Design changes" sit in a dashed yellow frame with a yellow bar. It reads as "broken".
+  - Do: a small pill "Estimate" next to the heading; a click shows one sentence on what that means and, once T-443 is done, how far off it usually is. No frame. Document the badge in DESIGN.md (chips and badges).
+  - Done when: no `.wip` frame is left; the badge follows DESIGN.md (no part colours, sentence case).
+- [ ] **T-445 P2** [H] The strength result text is too long. · files: `web/app.js` (`renderStrength`, `strengthViewControls`), part of T-382 · owner: —
+  - Seen: the result is a paragraph of six sentences, then nine view controls.
+  - Do: three lines: the band (T-442), where it's weakest (with "Show it"), the one thing that helps most. Everything else ("It's right next to where the part is held …", grid size, total load, the colour and cut controls, "Check accuracy with a finer grid") behind "More".
+  - Done when: the result fits the panel without scrolling at 1440 × 900.
+
+### I. From the printed part back into the tool
+
+- [ ] **T-446 P2** [I] Calibration as its own flow. · files: `web/index.html` (`#calibration`, now inside the "My printers & materials" form), `web/app.js`, see T-388 (one combined test print), T-170 · owner: —
+  - Seen: the test prints (layer strength, warping, fit, overhang, bridge) and their forms are hidden inside the form for a new material. Nobody finds them, and they are what makes the numbers fit the user's printer.
+  - Do: a tool "Tune to my printer" (toolbox, T-418): what it improves, the test print(s) to download, then a short form per result. Show in every result which numbers are measured and which are typical ("Fits: measured on your printer", "Strength: typical PLA"). Works without making a new material first (it creates "My PLA on my P1S").
+  - Done when: a user can go from the start screen to a saved calibration without opening "New material…".
+- [ ] **T-447 P2** [I] "My print failed": bring the path back, without AI. · files: `web/index.html` (`#failed-block`, hidden since T-383), `web/app.js`, `core/fdmcore/data/symptoms.yaml`, `core/fdmcore/api.py` (`diagnose`) · owner: — · relates to T-384 (parked: the AI photo part)
+  - Why: a failed print is the most common reason a hobbyist looks for help, and the code exists: pick the symptom → the usual causes and fixes, and first what this part's check had flagged.
+  - Do: reachable from the start screen ("A print went wrong?") and after a download (T-415). Works without a part loaded (general causes) and better with one (what the check flagged). Pictures of each symptom so it can be picked by eye. The AI photo path stays parked.
+  - Done when: the path is reachable in two clicks and the browser test covers one symptom with and without a part.
+
+### J. Reach
+
+- [ ] **T-448 P1** [J] Say clearly where things run and what it costs. · files: README.md, `web/index.html` (a line near the drop zone or in the Guide) · owner: —
+  - Do: README section "Where it runs": everything is calculated in your browser, on your computer; the site is static files, so hosting it is free and no part ever leaves your computer; the first visit downloads the Python runtime (~15 MB) and, for strength and design tools, scipy (~10 MB) from a public CDN; later visits work offline. Note for anyone hosting it: no server costs, only static bandwidth.
+  - Done when: README and the Guide say it in plain words.
+- [ ] **T-449 P1** [J] Publish it (finishes T-071) and make it installable. · files: `.github/workflows/pages.yml`, `web/sw.js`, new `web/manifest.webmanifest`, `web/index.html` · owner: — · needs the user (enable Pages)
+  - Seen: there is no public address yet; a user has to run `python -m http.server`. This is the single biggest step for usability.
+  - Do: enable GitHub Pages (source: GitHub Actions; the workflow exists and self-hosts the libraries). Add a web app manifest and icons so "Install app" works in Edge / Chrome (offline use is already there). Put the address in the README.
+  - Done when: the address works on a clean browser; the browser smoke test can run against it (`--url`).
+- [ ] **T-450 P2** [J] Local mode for people who are not developers. · files: `core/pyproject.toml`, README.md, `agents/` · owner: —
+  - Seen: `pip install -e "core[local]"` plus an MCP config line by hand.
+  - Do: one command that needs no checkout (`uvx fdmdfm …` / `pipx install fdmdfm`), a command `fdmdfm setup` that writes the MCP entry for Claude Code / Codex / Gemini CLI after asking, and `fdmdfm open part.stl` that starts the local page with the part. No dependence on the user's install paths or slicer version (ship pinned data).
+  - Done when: a fresh machine gets from nothing to a first agent call with two commands, documented.
+- [ ] **T-451 P2** [J] More printers through profile import. · files: `web/mypresets.js`, `core/fdmcore/data/presets.yaml`, `core/fdmcore/data/orca_profiles.json.gz`, `web/app.js` · owner: — · continues T-026
+  - Seen: 15 printers. Nothing says what to pick when yours is missing. Adding one means "Copy as YAML" into a pull request.
+  - Do: (1) "My printer isn't listed" → pick the closest by three questions (enclosed? bed size? direct drive?) or (2) choose it from the shipped OrcaSlicer machine profiles (bed size, enclosure, nozzle read from there). Show which values are from the profile and which are assumed.
+  - Done when: any printer in the shipped Orca profile set can be picked; the list says "+ about N more".
+- [ ] **T-452 P2** [J] Cura users. · files: `core/fdmcore/export3mf.py`, `web/app.js`, README · owner: —
+  - Seen: the 3MF carries settings for OrcaSlicer / Bambu Studio and PrusaSlicer. Cura reads the model but none of the settings; an informal poll (r/3Dprinting, Jan 2025, 123 votes) had Cura first.
+  - Do: find out whether Cura takes per-model settings from a 3MF or needs a project file (`research/`). If not possible: for "Cura" in the slicer choice, show the settings as a short list to type in, with Cura's names, and export the turned STL.
+  - Done when: a Cura user gets the orientation and a settings list with Cura's own names.
+- [ ] **T-453 P2** [J] A list of saved projects in the browser. · files: `web/app.js` (autosave: one slot `current` in IndexedDB), `web/index.html` · owner: —
+  - Do: keep the last ~10 projects (name, date, small picture, verdict), opened from the start screen; "Save project" still writes a file. Limit by size, oldest out first; a clear "Delete all".
+  - Done when: two parts worked on in a row can both be reopened.
+- [ ] **T-454 P3** [J] Prepare for other languages. · files: `web/index.html`, `web/app.js`, `core/fdmcore/data/rules.yaml`, engine texts in `api.py` / `checks.py` · owner: —
+  - Seen: user text is spread over HTML, JS string templates, YAML and Python f-strings. English only for now (PRODUCT.md).
+  - Do: don't translate yet. Decide the shape (message keys with parameters; the engine returns key + numbers, the app formats) and move new text to it from now on; write the rule in AGENTS.md. Easiest after T-382 cut the text.
+  - Done when: the approach is written down and one pane uses it as the example.
+- [ ] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: —
+  - Add under Users: (1) beginner with a downloaded model: "will this print on my A1?" → verdict, time, grams, one file, no CAD words; (2) functional maker with own CAD: bracket, hook, enclosure that must hold → strength, fits, design advice back to CAD; (3) tinkerer with a tuned profile → a real difference to their profile, numbers, pick and choose; (4) small seller / print farm: the same part many times → failure risk, time and cost, saved projects; (5) teacher or club → a report to share and plain reasons; (6) agent user → easy local install.
+  - Done when: PRODUCT.md lists them and each new feature task names which one it serves.
+
+### K. Phone layout
+
+- [ ] **T-456 P2** [K] Phone: content first. · files: `web/style.css` (`@media (max-width: 820px)`), `web/index.html` · owner: — · continues T-081
+  - Seen (390 × 844): header, level switch, step strip and 3D view take more than half the screen before any content; on Result the sticky foot (status line + Back) lies over "Download the report".
+  - Do: header in one row (name, a menu button holding level and Guide); step strip as dots with the current name; the 3D view 30 vh and collapsible to a strip; the foot only as high as its buttons, and the panel gets bottom padding of the foot's height so nothing hides under it.
+  - Done when: at 390 × 844 the step's heading and first control are visible without scrolling, and no control is covered by the foot (browser test with a phone viewport).
+- [x] **T-457 P3** [K] Decide: no phone app; the phone reads reports. · files: PRODUCT.md · owner: Claude — decided 2026-11-15 (user: no phone app). Written into PRODUCT.md ("Operating Context"): on a phone the site has to do two things well, read a shared report and the failed-print path (T-447); the rest only has to work. T-456 is sized to that.
+  - Why: prints started from a phone are one-tap, pre-sliced models (e.g. Bambu Handy, about 1.6 M installs; no public number for the share of prints) and need no check. A part that needs more than a default profile is at a desk, where the CAD or slicer file is. Simulations on a phone would be slow (not measured).
+  - Proposal: no native app. The phone layout must do two things well: read a shared report, and later the failed-print path at the printer (T-447). Editing loads, fits and design changes on a phone is not a goal.
+  - Done when: written into PRODUCT.md ("Operating Context").
+
+### L. Big and broken parts
+
+- [ ] **T-458 P1** [L] Curved parts are slow even when small. · files: `core/fdmcore/orientation.py` (`candidate_directions`), `core/fdmcore/api.py` (`orientations`, the sliced refinement), `core/fdmcore/slicer.py`, `core/fdmcore/checks.py` · owner: — · continues T-004
+  - Seen (browser, one core): the blob with 80,000 triangles: load + orient + check 53 s; 320,000: 46 s; 980,000: 77 s. The flat-sided samples take 2–3 s. So it is the curved surface (many candidate directions, many-cornered outlines), not the triangle count.
+  - Do: profile the 80,000 blob in Pyodide (`node tools/pyodide_check.mjs part.stl`). Likely: cap and cluster candidate directions for organic parts (T-408 gives the kind), simplify layer outlines before the checks, check fewer finalists in full. Show progress with what is being done.
+  - Done when: the 80,000 blob is under 15 s in Pyodide with the same pick; numbers in this line.
+- [ ] **T-459 P2** [L] Tell the user when a file is broken. · files: `core/fdmcore/formats.py`, `core/fdmcore/mesh.py`, `core/fdmcore/api.py` (`load`), `web/app.js` · owner: —
+  - Seen: PLAN lists "mesh repair check" as not built; holes and bad meshes are worked around silently.
+  - Do: at load, count open edges, flipped faces, separate shells and zero-area triangles (numpy only). Report in plain words ("This file has 3 holes in its surface: results may be off; your slicer's repair can fix it") with the places marked. No auto-repair in the browser (GEOS / robustness risk); say how to repair in the slicer.
+  - Done when: a cube with one face removed gives the message; clean samples give none.
+- [ ] **T-460 P2** [L] Memory with big parts. · files: `web/app.js` (`state.versions`, `state.source`, `autosave`, `projectText`) · owner: —
+  - Seen in code: every version keeps its own copy of the part's bytes, `state.source` another, and autosave writes the whole part as text into IndexedDB every minute when something changed. Measured page memory: 242 MB at 980,000 triangles with one version.
+  - Do: versions share unchanged bytes (keep edits as a list on top of the original where possible); autosave stores the part once as binary (a Blob) and the settings as text; cap versions by total size, not only count.
+  - Done when: five versions of a 300,000-triangle part stay under twice the memory of one.
+- [ ] **T-461 P2** [L] Faster, cacheable engine start. · files: `web/worker.js` (`boot`), `tools/make_manifest.py`, `web/sw.js`, `.github/workflows/pages.yml` · owner: —
+  - Seen in code: the ~35 engine files are fetched one after another, each with `?v=<time>`, so nothing is ever cached by the browser, on every start.
+  - Do: fetch in parallel (`Promise.all`), and use a content hash per file in the manifest instead of the time, so unchanged files come from the cache; or ship the engine as one zip that Pyodide unpacks. Measure the start on a slow connection (browser dev tools "Slow 4G") before and after.
+  - Done when: a second visit loads no engine file again; start time before / after is in this line.
+
+### M. Tests that would have caught this
+
+- [ ] **T-462 P1** [M] Organic and heavy test parts. · files: `tools/make_corpus.py`, `core/tests/corpus/`, `core/tests/test_corpus.py`, `tools/pyodide_check.mjs` · owner: —
+  - Do: add generated organic parts (the bumpy blob: a sphere-like surface with radius `30·(1 + 0.15·sin 7u·sin 5v + 0.05·sin(23u + 11v))`, z scaled to 80 mm, at 20,000 and 80,000 triangles) and one filleted, ribbed housing. Expectations: not stood on a point, no CAD-detail findings (T-408), time limit (T-458). Real downloaded parts stay with T-003.
+  - Done when: the parts and their expectations run in the corpus test.
+- [ ] **T-463 P1** [M] Apply every suggested design change in the tests. · files: new `core/tests/test_design_edits.py`, `core/fdmcore/booleans.py` · owner: —
+  - Do: for every sample and corpus part: get `design` edits for the best orientation, apply each alone and all together with `booleans.apply_edits` (needs `manifold3d`: skip when missing), and assert: closed, volume moved the right way, outer size unchanged unless the edit says so, piece count unchanged, the edit's finding gone after a re-check. (The audit's run found 112 edits, 0 failures to apply, 6 that grew the outer size.)
+  - Done when: the test runs in CI with the engine tests and fails on a growing ledge fill until T-436 fixes it.
+- [ ] **T-464 P2** [M] Sanity tests for advice. · files: `core/tests/` · owner: —
+  - Do: over all sample and corpus parts: (1) the recommended orientation is not worse on support weight, bed contact and height at once than another option (T-405); (2) no "ranked lower" reason contradicts the shown numbers (T-406); (3) the settings of clearly different parts are not all equal (T-424); (4) no user-visible text contains `T-` + digits or "The CAD model shows" (T-396, T-407); (5) the default profile has no use temperature (T-395, browser test).
+  - Done when: each check exists and fails on today's `main` where the audit found the problem.
+
+- [ ] **T-467 P2** [M] Check what the audit could not. · files: none (findings become new tasks here) · owner: — · needs the user's printer, slicers and phone · overlaps T-005
+  - Not checked in the audit, so nothing is planned for what may be wrong there: (1) the 3MF opened in OrcaSlicer, Bambu Studio and PrusaSlicer: are the orientation and each setting really applied (`python tools/slicer_check.py`)? (2) a real print of one sample with the suggested settings, against the prediction (time, grams, the flagged problems); (3) a real phone: turning the part with a finger against scrolling the page, picking a face, speed; (4) STEP files: import, design changes written back as STEP; (5) G-code import and the detailed check; (6) the fit tools ("Tolerances & tuning": holes, screws, slots, mating part); (7) autosave / "Continue where you left off", and offline use after a first visit; (8) the first visit on a slow connection; (9) the local mode: MCP server and command line from a fresh install.
+  - Done when: each point has a line here with what was found, and every problem is its own task.
+- [ ] **T-466 P3** [M] A quick browser test next to the full one. · files: `tools/e2e_smoke.py`, `.github/workflows/` · owner: —
+  - Seen: the browser test takes about 15 minutes and only runs when a pull request is labelled, so most changes to `web/` go in without it.
+  - Do: `python tools/e2e_smoke.py --quick` (about 2 minutes): boot, one sample through Simple to the 3MF download, one finding opened, one level switch, the phone viewport's start screen. Run it on every pull request that touches `web/`; the full run stays on the label.
+  - Done when: `--quick` runs under 3 minutes locally and in CI.
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).

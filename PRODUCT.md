@@ -16,7 +16,7 @@ Drop in a part, get the best orientation, what will go wrong, slicer settings th
 Runs entirely in the browser, free and open source (AGPL-3.0-or-later), no account, no upload. Every check is deterministic code; AI is optional. Exports a 3MF with per-part settings, so the user's own slicer profiles stay theirs.
 
 ## Operating Context
-Used at a desk next to the printer, between CAD and slicer, on desktop mostly. Phones only for Simple and Basic. Parts arrive as STL, 3MF or STEP.
+Used at a desk next to the printer, between CAD and slicer, on desktop mostly. No phone app (decided 2026-11-15): the file to check lives on a computer, and prints started from a phone are pre-sliced and need no check. On a phone the site has to do two things well: read a shared report, and the failed-print path at the printer. Everything else only has to work there. Parts arrive as STL, 3MF or STEP.
 
 ## Capabilities and Constraints
 - Four levels: Simple (printer and material, optional load, one result), Basic (all choices, no deep simulation), Advanced (everything, step by step), Expert (everything on one long page, later).
