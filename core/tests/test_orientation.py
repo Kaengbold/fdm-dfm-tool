@@ -100,6 +100,53 @@ def test_api_orientations_payload():
         assert o["reasons"]
 
 
+def test_l_bracket_support_text_uses_sliced_result(monkeypatch):
+    from fdmcore import refine
+
+    bridge_decisions = []
+    bridgeable = refine._bridgeable
+
+    def record_bridge(piece, anchors, limit):
+        result = bridgeable(piece, anchors, limit)
+        bridge_decisions.append(result)
+        return result
+
+    api.load(sample("l_bracket"), "l_bracket")
+    options = api.orientations()
+    best = options["orientations"][0]
+    assert best["support_area_mm2"] == pytest.approx(42.613306)
+    monkeypatch.setattr(refine, "_bridgeable", record_bridge)
+    stats = refine.support_stats(api.orient(api._session.mesh, best["rotation"]), api.Profile.from_dict(None))
+    assert bridge_decisions and all(bridge_decisions)
+    assert stats["support_area"] == stats["support_volume"] == 0
+    assert best["support_g"] == 0
+    for option in [options["as_loaded"], *options["orientations"]]:
+        assert option["support_summary"] in option["reasons"]
+        assert not any(reason.startswith("Needs supports") for reason in option["reasons"])
+        assert (option["support_summary"] == "No support") == (not option["support_needed"])
+        assert not any(reason == "Prints without supports" for reason in option["reasons"])
+
+
+@pytest.mark.parametrize("grams, needed, expected", [
+    (0, False, "No support"),
+    (0.001, True, "A little support (under 1 g)"),
+    (0.9, True, "A little support (under 1 g)"),
+    (1, True, "About 1 g support"),
+])
+def test_support_summary(grams, needed, expected):
+    from fdmcore.orientation import support_summary
+
+    assert support_summary(grams, needed) == expected
+
+
+def test_unrefined_support_reason_stays():
+    from fdmcore.orientation import evaluate
+
+    result = evaluate(load_stl(sample("l_bracket")), [0, -1, 0])
+    assert result.support_grams is None
+    assert "Needs supports under about 43 mm²" in result.reasons
+
+
 @pytest.mark.parametrize(
     "name, expected_up",
     [

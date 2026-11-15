@@ -605,7 +605,7 @@ function renderOptions() {
 function optionCost(o) {
   if (o.support_g == null) return "";
   const st = state.check?.stats;
-  const support = o.support_g >= 1 ? `≈ ${Math.round(o.support_g)} g support` : "No support";
+  const support = o.support_summary;
   if (st?.cost == null || !st.total_g) return support;
   return `${support} · about ${((st.cost / st.total_g) * (st.filament_g + o.support_g)).toFixed(2)} for the filament`;
 }
