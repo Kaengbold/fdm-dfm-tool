@@ -436,11 +436,13 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### A. Quick fixes
 
-- [ ] **T-395 P1** [A] "Where is it used?" starts at "Outdoors in winter (−20 °C)" instead of "Indoors". · files: `web/index.html` (`#use-temp`), `tools/e2e_smoke.py` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-395-indoors-default`)
+- [x] **T-395 P1** [A] "Where is it used?" starts at "Outdoors in winter (−20 °C)" instead of "Indoors". · files: `web/index.html` (`#use-temp`), `tools/e2e_smoke.py` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-395-indoors-default`)
+  - Done: fresh visits start at Indoors and send no use temperature; projects restore their temperature in either direction without an extra check when it is unchanged. All 79 browser smoke steps and 308 engine tests passed.
   - Seen: the `<select id="use-temp">` has no `selected` option, so the browser takes the first one (value `-20`). Both walk-throughs showed it. Simple hides the field, so the user can't even see it. `useTemp()` in `web/app.js` then sends `use_temp_c: -20` with every check and strength run.
   - Do: mark the "Indoors (room temperature)" option (`value=""`) as `selected`. Check the project file path too: `setUseTemp` and `openProject` must still set other values.
   - Done when: a fresh visit shows "Indoors"; `profile().use_temp_c` is `null`; a browser test step asserts it.
-- [ ] **T-396 P1** [A] Internal task numbers shown to users in the "Not finished yet" boxes. · files: `web/index.html` (`data-wip` on `#blk-strength`), `web/style.css` (`.wip`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-396-no-task-numbers`)
+- [x] **T-396 P1** [A] Internal task numbers shown to users in the "Not finished yet" boxes. · files: `web/index.html` (`data-wip` on `#blk-strength`), `web/style.css` (`.wip`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-396-no-task-numbers`)
+  - Outcome: removed the internal number from the strength hint; audited app and engine text and added a browser guard. Browser smoke: 0 failures; engine: 308 tests passed.
   - Seen: "Will it hold?" shows "Not finished yet: rough estimate, not yet checked against real test prints (T-032)."
   - Do: remove "(T-032)" from the text. The bigger change (a small "Estimate" badge instead of the dashed yellow frame) is T-444; this task is only the wording, so it can ship today.
   - Done when: no `T-` number is visible anywhere in the app (`grep -n "T-[0-9]" web/index.html` finds only comments).
@@ -448,7 +450,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: both are solid green. DESIGN.md says one primary per step. The checks already run when the part loads, so "Compute" only repeats them.
   - Do: remove the "Compute" button from the pane. Keep its good part, the list of what the tool is doing (`#compute-steps`): show it on the Result step while work is running (the last step's button "Show my result" starts it when something is still missing, e.g. strength with loads set).
   - Done when: every step in Simple has exactly one primary button, in the panel foot; the browser test for T-374 is updated.
-- [ ] **T-398 P1** [A] Orientation card says "Needs supports under about 43 mm²" and "No support" on the same card. · files: `core/fdmcore/orientation.py` (`explain`), `web/app.js` (`optionCost`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-398-support-one-source`)
+- [x] **T-398 P1** [A] Orientation card says "Needs supports under about 43 mm²" and "No support" on the same card. · files: `core/fdmcore/orientation.py` (`explain`), `web/app.js` (`optionCost`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-398-support-one-source`)
+  - Outcome: Reasons and card costs share the sliced support summary; l_bracket bridges need no support, tiny real supports say under 1 g. All 314 engine tests and the full browser smoke test pass.
   - Seen: L-bracket, Basic, Option 1. The reason line comes from the quick face test in `explain`, the cost line from the sliced support weight (`support_g < 1` → "No support"). They disagree for small areas.
   - Do: one source. When `support_g` is known, drop the "Needs supports under …" reason and let the cost line speak; or write "A little support (under 1 g)" when the area is > 0 and the weight < 1 g.
   - Done when: no card shows both; unit test on `l_bracket`.

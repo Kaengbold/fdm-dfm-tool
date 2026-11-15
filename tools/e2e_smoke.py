@@ -166,6 +166,23 @@ def main():
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
 
+        def indoors_default():
+            assert page.input_value("#use-temp") == ""
+            assert page.locator("#use-temp option:checked").inner_text() == "Indoors (room temperature)"
+            return "Indoors (room temperature)"
+        run.step("fresh visit uses indoors", indoors_default)
+
+        def no_internal_task_numbers():
+            # innerText omits the data-wip text rendered by CSS, so check those hints too,
+            # including ones in steps the user has not opened yet.
+            text = page.locator("body").inner_text()
+            hints = page.locator("[data-wip]").evaluate_all("els => els.map(el => el.dataset.wip)")
+            hits = re.findall(r"T-\d+", "\n".join([text, *hints]))
+            assert not hits, f"internal task numbers shown to users: {hits}"
+            return "page text and unfinished-feature hints contain no internal task numbers"
+
+        run.step("no internal task numbers", no_internal_task_numbers)
+
         def blocked_storage():
             """Private mode / strict cookie settings: every storage call throws. The app must still start."""
             other = browser.new_page()
@@ -201,7 +218,29 @@ def main():
 
         for name in SAMPLES:
             def load(name=name):
-                status = run.act(lambda: page.click(f"[data-sample={name}]"))
+                if name == SAMPLES[0]:
+                    # Inspect the real check profile without loading an extra part before the guide.
+                    page.evaluate("""() => {
+                      window.checkProfile = null;
+                      window.originalPostMessage = Worker.prototype.postMessage;
+                      Worker.prototype.postMessage = function(message, ...args) {
+                        if (message.method === 'check') window.checkProfile = message.args.profile;
+                        return window.originalPostMessage.call(this, message, ...args);
+                      };
+                    }""")
+                    try:
+                        status = run.act(lambda: page.click(f"[data-sample={name}]"))
+                        sent = page.evaluate("() => window.checkProfile")
+                        assert sent is not None, "first sample finished without sending a check request"
+                        assert sent["use_temp_c"] is None, sent
+                    finally:
+                        page.evaluate("""() => {
+                          Worker.prototype.postMessage = window.originalPostMessage;
+                          delete window.originalPostMessage;
+                          delete window.checkProfile;
+                        }""")
+                else:
+                    status = run.act(lambda: page.click(f"[data-sample={name}]"))
                 assert page.locator("#options > li").count() >= 2, "no orientation options"
                 return f"{status} | top: {page.locator('#options > li').first.inner_text().splitlines()[1:3]} | findings: {findings(page)}"
             run.step(f"sample {name}", load)
@@ -278,6 +317,16 @@ def main():
             if not page.locator("input[name=mode][value=both]").is_checked():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             run.act(lambda: page.click("[data-sample=l_bracket]"))
+            options = page.evaluate("() => fdm.state.options")
+            cards = page.locator("#options > li")
+            for i, option in enumerate(options):
+                if option.get("support_g") is None:
+                    continue
+                text = cards.nth(i).inner_text()
+                assert option["support_summary"] in cards.nth(i).locator(".option-cost").inner_text(), text
+                assert option["support_summary"] in option["reasons"], option
+                assert "Needs supports" not in text, text
+                assert ("No support" in text) == (not option["support_needed"]), text
             edits = page.locator("#edits label").all_inner_texts()
             assert any("Ø8.0" in e for e in edits), f"expected teardrop for the Ø8 hole, got {edits}"
             run.act(lambda: page.fill("#param-teardrop_angle_deg", "30") or page.dispatch_event("#param-teardrop_angle_deg", "change"))
@@ -924,6 +973,7 @@ def main():
                 page.evaluate("() => document.getElementById('dl-project').click()")
             out = OUT / "project.json"
             dl.value.save_as(out)
+            run.act(lambda: page.select_option("#use-temp", "-20"))
             run.act(lambda: page.click("[data-sample=mushroom]"))
             run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
             # Several engine calls in a row (load, orient, check, the project's orientation): wait for the last step.
@@ -932,7 +982,19 @@ def main():
                                 " walls: fdm.state.overrides.wall_loops, name: fdm.state.name })")
             assert got["label"] == "From the project" and got["loads"] == 2 and got["walls"] == "5", got
             assert all(abs(a - b) < 1e-6 for a, b in zip(got["up"], up)) and got["name"].startswith("hook"), (got, up)
-            return f"{out.stat().st_size // 1024} kB, {got}"
+            assert page.input_value("#use-temp") == "", "room-temperature project did not reset to Indoors"
+            # The opposite direction must still restore a saved non-room temperature.
+            import json
+
+            project = json.loads(out.read_text(encoding="utf-8"))
+            project["profile"]["use_temp_c"] = 35
+            warm = OUT / "project_warm.json"
+            warm.write_text(json.dumps(project), encoding="utf-8")
+            run.act(lambda: page.set_input_files("#file", str(warm)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            assert page.input_value("#use-temp") == "35", "project temperature was not restored"
+            run.act(lambda: page.select_option("#use-temp", ""))
+            return f"{out.stat().st_size // 1024} kB, {got}; restored Indoors and 35 C"
         run.step("save and reopen a project", project_round_trip)
 
         def bodies_and_units():

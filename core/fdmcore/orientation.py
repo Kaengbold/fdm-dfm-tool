@@ -61,6 +61,8 @@ class OrientationResult:
     reasons: list[str] = field(default_factory=list)
     # Score split into parts (sum == score), so the UI can say why an option ranks lower.
     terms: dict[str, float] = field(default_factory=dict)
+    support_grams: float | None = None  # only known after sliced refinement
+    support_needed: bool | None = None
 
     def penalize(self, term: str, value: float) -> None:
         self.terms[term] = self.terms.get(term, 0.0) + value
@@ -166,12 +168,23 @@ def explain(r: OrientationResult, mesh: Mesh) -> list[str]:
         reasons.append(f"Flat contact with the bed: {r.bed_area:.0f} mm²")
     else:
         reasons.append("No flat face on the bed — needs a brim or supports to stay put")
-    if r.support_area < 0.005 * areas.sum():
+    if r.support_grams is not None:
+        reasons.append(support_summary(r.support_grams, bool(r.support_needed)))
+    elif r.support_area < 0.005 * areas.sum():
         reasons.append("Prints without supports")
     else:
         reasons.append(f"Needs supports under about {r.support_area:.0f} mm²")
     reasons.append(f"Print height {r.height:.1f} mm")
     return reasons
+
+
+def support_summary(grams: float, needed: bool) -> str:
+    """Use sliced support presence even when its weight rounds down to zero."""
+    if not needed:
+        return "No support"
+    if grams < 1:
+        return "A little support (under 1 g)"
+    return f"About {grams:.0f} g support"
 
 
 def _area_sample(mesh: Mesh, n: int) -> tuple[Mesh, float]:
