@@ -254,13 +254,42 @@ def main():
             return f"{rows} nozzle rows; strength goal -> {walls} walls"
         run.step("nozzle comparison + goal", nozzles_and_goal)
 
-        def design():
+        def suggestion_selection():
             run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('design')")
+            boxes = page.locator("#edits input[type=checkbox]")
+            count = boxes.count()
+            assert count > 0, "no suggestions to choose"
+            assert page.locator("#edits input:checked").count() == 0, "fresh suggestions ticked"
+            assert page.locator("#apply-edits").is_disabled(), "empty selection can be applied"
+            page.click("#edits-all")
+            assert page.locator("#edits input:checked").count() == count
+            page.click("#edits-none")
+            assert page.locator("#edits input:checked").count() == 0
+            boxes.first.check()
+            chosen = page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)")
+            run.act(lambda: page.dispatch_event("#param-teardrop_angle_deg", "change"))
+            assert page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)") == chosen, "re-suggest lost ticks"
+            with page.expect_download(timeout=120_000) as dl:
+                page.evaluate("() => document.getElementById('dl-project').click()")
+            out = OUT / "suggestion_selection.json"
+            dl.value.save_as(out)
+            run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            assert page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)") == chosen, "project lost ticks"
+            return f"{count} unticked suggestions; all, none, re-suggest and project ticks kept"
+        run.step("suggestions start unticked and keep user choices", suggestion_selection)
+
+        def design():
+            if not page.locator("input[name=mode][value=both]").is_checked():
+                run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             run.act(lambda: page.click("[data-sample=l_bracket]"))
             edits = page.locator("#edits label").all_inner_texts()
             assert any("Ø8.0" in e for e in edits), f"expected teardrop for the Ø8 hole, got {edits}"
             run.act(lambda: page.fill("#param-teardrop_angle_deg", "30") or page.dispatch_event("#param-teardrop_angle_deg", "change"))
             assert any("30° point" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop angle input had no effect"
+            page.click("#edits-all")
             run.act(lambda: page.click("#apply-edits"))
             again = page.locator("#edits label").all_inner_texts()
             state = page.evaluate("() => ({active: fdm.state.active, up: fdm.state.options[fdm.state.active].up, name: fdm.state.name})")
@@ -290,6 +319,7 @@ def main():
             assert sum("Thicken" in e for e in edits) == 2, f"expected two thin walls to thicken, got {edits}"
             ops = page.evaluate("() => fdm.state.edits.map((e) => e.op)")
             page.evaluate("() => fdm.steps.go('design')")  # previews show while Design changes is in view
+            page.click("#edits-all")
             page.wait_for_timeout(800)
             assert "add" in ops and len(page.evaluate("() => fdm.viewer.ghosts.children.map((c) => c.material.color.getHexString())")) == len(ops)
             run.act(lambda: page.click("#apply-edits"))
@@ -303,6 +333,7 @@ def main():
             run.act(lambda: page.click("[data-sample=test_block]"))
             run.act(lambda: page.locator("#options > li").nth(1).click())
             up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            page.click("#edits-all")
             assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
             run.act(lambda: page.click("#apply-edits"))
             now = page.evaluate("() => ({ up: fdm.state.options[fdm.state.active].up, version: fdm.state.version })")
@@ -336,6 +367,7 @@ def main():
               marks: fdm.state.marks.map((m) => [m.kind, fdm.state.regionInfo[m.region].normal.map(Math.round)].join()) })""")  # noqa: E731
             before = where()
             page.evaluate("() => fdm.steps.go('design')")
+            page.click("#edits-all")
             assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
             run.act(lambda: page.click("#apply-edits"), 300_000)
             changed = where()
@@ -367,6 +399,7 @@ def main():
             note = page.locator("#fits li", has_text="Ø8.0 mm hole").locator(".fit:not(.fastener) p").inner_text()
             edits = page.locator("#edits label").all_inner_texts()
             assert any("sliding fit" in e for e in edits), edits
+            assert page.locator("#edits label", has_text="sliding fit").locator("input").is_checked(), "sized fit not ticked"
             # The sized hole is the selection: its row marked, a line saying so, its faces coloured.
             assert "picked" in (page.locator("#fits li", has_text="Ø8.0 mm hole").get_attribute("class") or ""), "sized hole not marked"
             selected = page.locator("#fit-selected").inner_text()
@@ -387,6 +420,7 @@ def main():
             edits = page.locator("#edits label").all_inner_texts()
             # Lying in this orientation: the M3 clearance hole (3.4 mm) plus the sideways allowance.
             assert any("Nut pocket for the M3 nut" in e for e in edits) and any("→ Ø3.50 mm hole" in e for e in edits), edits
+            assert page.locator("#edits label", has_text="Nut pocket for the M3 nut").locator("input").is_checked(), "requested nut pocket not ticked"
             assert not any("Teardrop for the horizontal Ø6.0" in e for e in edits), "teardrop at the old size kept"
             return note[:120]
 
@@ -932,8 +966,7 @@ def main():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             boxes = page.locator("#edits label")
             for i in range(boxes.count()):  # keep only the teardrop
-                if "Teardrop" not in boxes.nth(i).inner_text():
-                    boxes.nth(i).locator("input").uncheck()
+                boxes.nth(i).locator("input").set_checked("Teardrop" in boxes.nth(i).inner_text())
             run.act(lambda: page.click("#apply-edits"))
             assert page.locator("#dl-step").is_visible(), "no STEP download after editing a STEP part"
             with page.expect_download(timeout=300_000) as dl:
@@ -1595,6 +1628,13 @@ def main():
             run.act(lambda: page.click("#vol-suggest"))
             kinds = page.evaluate("() => fdm.state.suggested.map((v) => v.kind)")
             assert "blocker" in kinds, f"no no-support box suggested: {kinds} | {page.locator('#status').inner_text()}"
+            assert page.locator("#vol-suggest-list input:checked").count() == 0, "suggested boxes arrived ticked"
+            assert page.locator("#vol-use").is_disabled()
+            page.click("#vol-all")
+            assert page.locator("#vol-suggest-list input:checked").count() == len(kinds)
+            page.click("#vol-none")
+            assert page.locator("#vol-suggest-list input:checked").count() == 0
+            page.click("#vol-all")
             dashed = page.evaluate("() => fdm.viewer.zones.children.some((c) => c.isLineSegments && c.material.isLineDashedMaterial)")
             assert dashed, "suggestions not drawn dashed"
             page.click("#vol-use")

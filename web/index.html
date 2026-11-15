@@ -492,6 +492,10 @@
               <p class="hint" id="features-summary">Looking for shape changes for this orientation…</p>
               <ul id="features" class="features"></ul>
               <h3>Suggested changes <small class="hint">tick the ones you want</small></h3>
+              <div id="edit-selection" class="row" hidden>
+                <button id="edits-all" class="small">Tick all</button>
+                <button id="edits-none" class="small">None</button>
+              </div>
               <ol id="edits" class="edits"></ol>
               <div id="edit-params" class="edit-params" hidden>
                 <label>Round bed corners <input id="param-chamfer_mm" data-param="chamfer_mm" type="number" step="0.5" /> mm</label>
@@ -533,6 +537,10 @@
               <button id="vol-suggest">Suggest boxes</button>
               <div id="vol-suggested" hidden>
                 <ul id="vol-suggest-list" class="zone-list vol-list"></ul>
+                <div class="row">
+                  <button id="vol-all" class="small">Tick all</button>
+                  <button id="vol-none" class="small">None</button>
+                </div>
                 <div class="row">
                   <button id="vol-use" class="primary">Use these</button>
                   <button id="vol-dismiss" class="link">Not now</button>

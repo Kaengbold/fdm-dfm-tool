@@ -452,7 +452,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: L-bracket, Basic, Option 1. The reason line comes from the quick face test in `explain`, the cost line from the sliced support weight (`support_g < 1` → "No support"). They disagree for small areas.
   - Do: one source. When `support_g` is known, drop the "Needs supports under …" reason and let the cost line speak; or write "A little support (under 1 g)" when the area is > 0 and the weight < 1 g.
   - Done when: no card shows both; unit test on `l_bracket`.
-- [ ] **T-399 P1** [A] Suggested design changes arrive ticked. · files: `web/app.js` (`suggestDesign`, where `selected` is set) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-399-suggestions-unticked`)
+- [x] **T-399 P1** [A] Suggested design changes arrive ticked. · files: `web/app.js` (`suggestDesign`, where `selected` is set) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-399-suggestions-unticked`) · outcome: Suggestions start unticked, direct requests and saved choices stay selected, and Tick all / None control each list; local browser smoke passed with 0 failures and pytest passed all 308 tests.
   - Seen: on the L-bracket all 8–9 suggestions were ticked on arrival; "Apply selected changes" then changes the part's shape in ways the user didn't ask for (see T-436).
   - Do: start every suggestion unticked. Keep ticked only what the user asked for directly (a fit they sized, a screw they set). Add "Tick all" / "None".
   - Done when: a fresh part shows 0 ticked; the browser tests that rely on pre-ticked boxes tick them first.
