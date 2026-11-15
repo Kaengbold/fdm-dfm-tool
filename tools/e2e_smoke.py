@@ -166,6 +166,17 @@ def main():
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
 
+        def no_internal_task_numbers():
+            # innerText omits the data-wip text rendered by CSS, so check those hints too,
+            # including ones in steps the user has not opened yet.
+            text = page.locator("body").inner_text()
+            hints = page.locator("[data-wip]").evaluate_all("els => els.map(el => el.dataset.wip)")
+            hits = re.findall(r"T-\d+", "\n".join([text, *hints]))
+            assert not hits, f"internal task numbers shown to users: {hits}"
+            return "page text and unfinished-feature hints contain no internal task numbers"
+
+        run.step("no internal task numbers", no_internal_task_numbers)
+
         def blocked_storage():
             """Private mode / strict cookie settings: every storage call throws. The app must still start."""
             other = browser.new_page()

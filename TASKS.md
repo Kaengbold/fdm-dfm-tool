@@ -440,7 +440,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: the `<select id="use-temp">` has no `selected` option, so the browser takes the first one (value `-20`). Both walk-throughs showed it. Simple hides the field, so the user can't even see it. `useTemp()` in `web/app.js` then sends `use_temp_c: -20` with every check and strength run.
   - Do: mark the "Indoors (room temperature)" option (`value=""`) as `selected`. Check the project file path too: `setUseTemp` and `openProject` must still set other values.
   - Done when: a fresh visit shows "Indoors"; `profile().use_temp_c` is `null`; a browser test step asserts it.
-- [ ] **T-396 P1** [A] Internal task numbers shown to users in the "Not finished yet" boxes. · files: `web/index.html` (`data-wip` on `#blk-strength`), `web/style.css` (`.wip`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-396-no-task-numbers`)
+- [x] **T-396 P1** [A] Internal task numbers shown to users in the "Not finished yet" boxes. · files: `web/index.html` (`data-wip` on `#blk-strength`), `web/style.css` (`.wip`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-396-no-task-numbers`)
+  - Outcome: removed the internal number from the strength hint; audited app and engine text and added a browser guard. Browser smoke: 0 failures; engine: 308 tests passed.
   - Seen: "Will it hold?" shows "Not finished yet: rough estimate, not yet checked against real test prints (T-032)."
   - Do: remove "(T-032)" from the text. The bigger change (a small "Estimate" badge instead of the dashed yellow frame) is T-444; this task is only the wording, so it can ship today.
   - Done when: no `T-` number is visible anywhere in the app (`grep -n "T-[0-9]" web/index.html` finds only comments).
