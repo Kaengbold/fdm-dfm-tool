@@ -440,7 +440,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: the `<select id="use-temp">` has no `selected` option, so the browser takes the first one (value `-20`). Both walk-throughs showed it. Simple hides the field, so the user can't even see it. `useTemp()` in `web/app.js` then sends `use_temp_c: -20` with every check and strength run.
   - Do: mark the "Indoors (room temperature)" option (`value=""`) as `selected`. Check the project file path too: `setUseTemp` and `openProject` must still set other values.
   - Done when: a fresh visit shows "Indoors"; `profile().use_temp_c` is `null`; a browser test step asserts it.
-- [ ] **T-396 P1** [A] Internal task numbers shown to users in the "Not finished yet" boxes. · files: `web/index.html` (`data-wip` on `#blk-strength`), `web/style.css` (`.wip`) · owner: —
+- [ ] **T-396 P1** [A] Internal task numbers shown to users in the "Not finished yet" boxes. · files: `web/index.html` (`data-wip` on `#blk-strength`), `web/style.css` (`.wip`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-396-no-task-numbers`)
   - Seen: "Will it hold?" shows "Not finished yet: rough estimate, not yet checked against real test prints (T-032)."
   - Do: remove "(T-032)" from the text. The bigger change (a small "Estimate" badge instead of the dashed yellow frame) is T-444; this task is only the wording, so it can ship today.
   - Done when: no `T-` number is visible anywhere in the app (`grep -n "T-[0-9]" web/index.html` finds only comments).
@@ -448,11 +448,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: both are solid green. DESIGN.md says one primary per step. The checks already run when the part loads, so "Compute" only repeats them.
   - Do: remove the "Compute" button from the pane. Keep its good part, the list of what the tool is doing (`#compute-steps`): show it on the Result step while work is running (the last step's button "Show my result" starts it when something is still missing, e.g. strength with loads set).
   - Done when: every step in Simple has exactly one primary button, in the panel foot; the browser test for T-374 is updated.
-- [ ] **T-398 P1** [A] Orientation card says "Needs supports under about 43 mm²" and "No support" on the same card. · files: `core/fdmcore/orientation.py` (`explain`), `web/app.js` (`optionCost`) · owner: —
+- [ ] **T-398 P1** [A] Orientation card says "Needs supports under about 43 mm²" and "No support" on the same card. · files: `core/fdmcore/orientation.py` (`explain`), `web/app.js` (`optionCost`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-398-support-one-source`)
   - Seen: L-bracket, Basic, Option 1. The reason line comes from the quick face test in `explain`, the cost line from the sliced support weight (`support_g < 1` → "No support"). They disagree for small areas.
   - Do: one source. When `support_g` is known, drop the "Needs supports under …" reason and let the cost line speak; or write "A little support (under 1 g)" when the area is > 0 and the weight < 1 g.
   - Done when: no card shows both; unit test on `l_bracket`.
-- [ ] **T-399 P1** [A] Suggested design changes arrive ticked. · files: `web/app.js` (`suggestDesign`, where `selected` is set) · owner: —
+- [ ] **T-399 P1** [A] Suggested design changes arrive ticked. · files: `web/app.js` (`suggestDesign`, where `selected` is set) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-399-suggestions-unticked`)
   - Seen: on the L-bracket all 8–9 suggestions were ticked on arrival; "Apply selected changes" then changes the part's shape in ways the user didn't ask for (see T-436).
   - Do: start every suggestion unticked. Keep ticked only what the user asked for directly (a fit they sized, a screw they set). Add "Tick all" / "None".
   - Done when: a fresh part shows 0 ticked; the browser tests that rely on pre-ticked boxes tick them first.
