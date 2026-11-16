@@ -4145,6 +4145,15 @@ $("dl-3mf").onclick = async () => {
 
 $("after-dl-close").onclick = () => ($("after-dl").hidden = true);
 
+// "Estimate" pills: a click shows or hides the one sentence on what that means.
+for (const pill of document.querySelectorAll(".estimate")) {
+  pill.onclick = () => {
+    const open = pill.getAttribute("aria-expanded") !== "true";
+    pill.setAttribute("aria-expanded", String(open));
+    $(pill.getAttribute("aria-controls")).hidden = !open;
+  };
+}
+
 /** The open part and what was set on it, as a project file (web/project.js). */
 const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
