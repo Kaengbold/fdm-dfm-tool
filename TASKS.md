@@ -689,7 +689,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### J. Reach
 
-- [ ] **T-448 P1** [J] Say clearly where things run and what it costs. · files: README.md, `web/index.html` (a line near the drop zone or in the Guide) · owner: Claude, built with Gemini Flash (`task/T-448-where-it-runs`)
+- [x] **T-448 P1** [J] Say clearly where things run and what it costs. · files: README.md, `web/index.html` (a line near the drop zone or in the Guide) · owner: Claude, built with Gemini Flash (`task/T-448-where-it-runs`)
+  - Outcome: README section "Where it runs and what it costs" (browser only, no account / AI / key, free static hosting, Pyodide ~15 MB + scipy ~10 MB on first use, served by the site itself or jsDelivr locally, offline after), one line in the Guide and under the drop zone. Text only.
   - Do: README section "Where it runs": everything is calculated in your browser, on your computer; the site is static files, so hosting it is free and no part ever leaves your computer; the first visit downloads the Python runtime (~15 MB) and, for strength and design tools, scipy (~10 MB) from a public CDN; later visits work offline. Note for anyone hosting it: no server costs, only static bandwidth.
   - Done when: README and the Guide say it in plain words.
 - [ ] **T-449 P1** [J] Publish it (finishes T-071) and make it installable. · files: `.github/workflows/pages.yml`, `web/sw.js`, new `web/manifest.webmanifest`, `web/index.html` · owner: — · needs the user (enable Pages)
