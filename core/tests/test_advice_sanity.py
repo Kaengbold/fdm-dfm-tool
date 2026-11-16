@@ -40,7 +40,6 @@ def _support(o):
     return o["support_g"] if o["support_g"] is not None else o["support_area_mm2"]
 
 
-@pytest.mark.xfail(strict=True, reason="T-405: the recommended orientation loses on the tool's own numbers")
 def test_recommended_not_beaten_on_support_bed_and_height_at_once(advice):
     beaten = [f"{name}: {o['label']} has less support ({_support(o)} < {_support(best)}), more bed contact"
               f" ({o['bed_area_mm2']:.0f} > {best['bed_area_mm2']:.0f} mm²) and is lower ({o['height_mm']:.0f} < {best['height_mm']:.0f} mm)"
@@ -57,7 +56,6 @@ CLAIMS = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason="T-406: 'ranked lower' reasons that the shown numbers contradict")
 def test_ranked_lower_reasons_match_the_numbers(advice):
     false = [f"{name}: {o['label']} says '{claim}' (support {_support(o)} vs {_support(best)}, height {o['height_mm']:.0f}"
              f" vs {best['height_mm']:.0f} mm, bed {o['bed_area_mm2']:.0f} vs {best['bed_area_mm2']:.0f} mm²)"
