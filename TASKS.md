@@ -498,7 +498,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: "Ranked lower: needs more support" on the option with *less* support weight (2 g against 3 g).
   - Do: build the sentence from the numbers shown on the two cards (support g, contact mm², height, time), not from the internal score part. If no shown number is worse, say what is (e.g. "a face you marked gets support marks").
   - Done when: a test goes over all sample parts and fails when a "needs more support" option has ≤ the support weight of the pick (same for "prints taller").
-- [ ] **T-407 P1** [B] Finding texts guess at the user's design. · files: `core/fdmcore/data/rules.yaml` · owner: —
+- [ ] **T-407 P1** [B] Finding texts guess at the user's design. · files: `core/fdmcore/data/rules.yaml` · owner: Claude, built with Gemini Flash (`task/T-407-measured-why`)
   - Seen: any narrow gap says "The CAD model shows separate moving components in a print-in-place hinge or bearing"; any small hole says "The CAD model has an exact diameter hole for a bolt or pin"; the blob got "The CAD model shows crisp letters, logos, or shallow grooves". The `why` texts were drafted by an LLM as stories.
   - Do: rewrite every `why` to say only what the check measured and what happens when printing, in one or two short sentences, e.g. "Two faces are 0.15 mm apart. Gaps under 0.2 mm fuse into one piece." No "The CAD model shows …", no guessed purpose. The measured numbers already sit in each finding's `detail`.
   - Done when: `grep -c "The CAD model" core/fdmcore/data/rules.yaml` is 0; each `why` is ≤ 2 sentences (this also serves T-382).
@@ -529,7 +529,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: Result shows the verdict, then "Copies on the plate", "Grip texture (fuzzy skin)", then the download. Print time and filament are missing (`#stats` sits in the Problems pane and isn't moved to Result). Big empty space below.
   - Do: order on Result: (1) verdict, (2) "About 34 min · 11 g of filament · about 0.25 for the filament" on one line, (3) the top three problems, each with a small picture of the place (T-423) and its one fix, "Show all" below, (4) the download button, (5) one line "What happens next" (T-415), (6) "More options" closed: copies, grip texture, report, share, slicer settings.
   - Done when: time and grams show in Simple's Result; copies and fuzzy skin are not above the download.
-- [ ] **T-414 P2** [C] "Strength analysis" in Simple: say it's optional. · files: `web/index.html` (pane `strength`), `web/app.js` · owner: —
+- [ ] **T-414 P2** [C] "Strength analysis" in Simple: say it's optional. · files: `web/index.html` (pane `strength`), `web/app.js` · owner: Claude, built with Gemini Flash (`task/T-414-strength-optional`)
   - Seen (re-checked 2026-11-15): T-369 is done, the step now guides in three numbered stages with "Show me how". What is left: nothing says the step can be skipped (the foot button "Show my result" does skip it, but reads as the end of the step), and "Check strength" is greyed out without a reason (T-402).
   - Do: a line under the heading "Does something push or pull on it? Optional." and, while no load is set, the foot button reads "Skip: show my result"; once a load is set and checked it reads "Show my result".
   - Done when: a beginner can tell from the screen alone that the step can be skipped.
@@ -667,7 +667,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 - [ ] **T-443 P1** [H] Prove the strength check with real prints (continues T-032). · files: `core/tests/`, `research/`, README "Accuracy" · owner: — · needs the user's printer
   - Do: five to ten small parts with a known load case (hook, bracket, beam, pin; flat and standing), each printed in PLA and PETG, loaded until it breaks (bucket and water, or a luggage scale). Record predicted against real break load in a table in `research/strength_validation.md`, tune the layer-strength factors, and link the table from the "Estimate" badge (T-444). The calibration bar exists (`calibration_part("layer_strength")`).
   - Done when: the table exists with at least five parts, and the typical error is written next to every strength result ("usually within ±x %").
-- [ ] **T-444 P2** [H] "Estimate" badge instead of the dashed "Not finished yet" boxes. · files: `web/style.css` (`.wip`), `web/index.html` (`data-wip`), DESIGN.md · owner: —
+- [ ] **T-444 P2** [H] "Estimate" badge instead of the dashed "Not finished yet" boxes. · files: `web/style.css` (`.wip`), `web/index.html` (`data-wip`), DESIGN.md · owner: Claude, built with Gemini Flash (`task/T-444-estimate-badge`)
   - Seen: "Will it hold?" and "Design changes" sit in a dashed yellow frame with a yellow bar. It reads as "broken".
   - Do: a small pill "Estimate" next to the heading; a click shows one sentence on what that means and, once T-443 is done, how far off it usually is. No frame. Document the badge in DESIGN.md (chips and badges).
   - Done when: no `.wip` frame is left; the badge follows DESIGN.md (no part colours, sentence case).
