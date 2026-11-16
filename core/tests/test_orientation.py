@@ -210,16 +210,23 @@ def test_upright_mark_stands_a_hole_up():
     assert "The face you picked stands upright" in ranked[0]["reasons"]
 
 
-def test_pulled_mushroom_prints_on_its_side_for_strength():
-    """Pulling the stem along its axis: upright, the layers are pulled apart. With the strength goal the
-    side wins even when both would hold; with balanced, the other option says how much stronger it is."""
+def test_pulled_mushroom_offers_strength_without_recommending_a_tip():
+    """Pulling the stem favours its side, but that pose tips on a narrow footprint.
+    T-405's bed-safety guard takes priority; still offer the stronger direction
+    and explain its strength advantage instead of silently removing it.
+    """
     from fdmcore import api
 
     api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
     api.regions()
     loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 5, "direction": "pull"}]
-    best = api.orientations({"material": "pla", "goal": "strength"}, loads=loads)["orientations"][0]
-    assert abs(best["up"][2]) < 0.1, best["up"]
+    ranked = api.orientations({"material": "pla", "goal": "strength"}, loads=loads)["orientations"]
+    best = ranked[0]
+    assert abs(best["up"][2]) == pytest.approx(1)
+    strongest = max(ranked, key=lambda option: option["safety_factor"])
+    assert abs(strongest["up"][2]) < 0.1
+    assert strongest["safety_factor"] > best["safety_factor"]
+    assert "tipping_risk" in {finding["rule"] for finding in api.check(strongest["up"])["findings"]}
     opts = api.orientations({"material": "pla"}, loads=loads)["orientations"]
     weaker = [o for o in opts if abs(o["up"][2]) > 0.9]
     assert weaker and any("holds" in r and "more" in r for r in weaker[0]["reasons"])
@@ -251,9 +258,10 @@ def test_standing_on_small_feet_is_explained():
     assert r["orientations"][0]["up"] == pytest.approx([0, 0, -1])  # top down: one solid patch on the bed
 
 
-def test_big_footprint_only_counts_for_warping_materials():
-    """L-bracket: ABS wants its big base on the bed; PLA doesn't need the footprint and prints it on its
-    side (lower, no supports either way)."""
+def test_warping_materials_trade_more_height_for_contact():
+    """ABS gives the broad base more weight. PLA's smaller contact bonus still
+    favours the lower, faster side pose when neither option needs support.
+    """
     api.load(sample("l_bracket"), "l_bracket")
     pick = lambda material: api.orientations({"printer": "bambu_p1s", "material": material})["orientations"][0]["up"]
     assert pick("abs") == pytest.approx([0, 0, 1])
@@ -329,3 +337,144 @@ def test_kept_direction_stays_an_option():
     odd = list(np.array([1.0, 1.0, 0.3]) / np.linalg.norm([1.0, 1.0, 0.3]))  # no generic search picks this
     r = api.orientations(keep=odd)
     assert np.dot(r["orientations"][r["kept"]]["up"], odd) > 0.999
+
+
+def assert_not_pareto_dominated(options):
+    best = options[0]
+    pick = (best["support_g"], -best["bed_area_mm2"], best["height_mm"])
+    for option in options[1:]:
+        alternative = (option["support_g"], -option["bed_area_mm2"], option["height_mm"])
+        assert not (all(left <= right for left, right in zip(alternative, pick))
+                    and any(left < right for left, right in zip(alternative, pick))), (best, option)
+
+
+@pytest.mark.parametrize("path", sorted(SAMPLES.glob("*.stl")), ids=lambda path: path.stem)
+def test_sample_pick_is_not_dominated_or_avoidably_unstable(path):
+    api.load(path.read_bytes(), path.stem)
+    options = api.orientations({"printer": "bambu_p1s", "material": "pla"})["orientations"]
+    assert_not_pareto_dominated(options)
+    bed_rules = {"tipping_risk", "small_bed_contact"}
+    risks = lambda option: bed_rules & {finding["rule"] for finding in api.check(option["up"])["findings"]}
+    if risks(options[0]):
+        assert all(risks(option) for option in options[1:])
+
+
+@pytest.mark.parametrize("goal", ["balanced", "speed", "material"])
+def test_feature_test_plate_is_recommended_flat(goal):
+    api.load(sample("feature_test"), "feature_test")
+    options = api.orientations({"printer": "bambu_p1s", "material": "pla", "goal": goal})["orientations"]
+    best = options[0]
+    assert best["up"] == pytest.approx([0, 0, 1])
+    assert best["bed_area_mm2"] > 5900
+    assert best["height_mm"] == pytest.approx(40)
+    assert_not_pareto_dominated(options)
+
+
+def test_finalist_support_and_time_use_displayed_measurements():
+    from fdmcore.checks import _estimate
+    from fdmcore.orientation import _size
+
+    api.load(sample("feature_test"), "feature_test")
+    profile = api.Profile.from_dict(None)
+    result = api.orientations()
+    options = [*result["orientations"], result["as_loaded"]]
+    support_scale = _size(api._session.mesh)**3 * api.SUPPORT_FILL / 1000 * profile.material["density_g_cm3"]
+    time_ratios = []
+    for option in options:
+        terms = option["score_terms"]
+        assert terms["support"] == pytest.approx(option["support_g"] / support_scale, abs=0.001)
+        layers = api.slice_mesh(api.orient(api._session.mesh, np.array(option["rotation"])), profile.layer_height)
+        minutes = _estimate(layers, profile)["print_time_min"]
+        time_ratios.append(terms["time"] / minutes)
+        assert sum(terms.values()) == pytest.approx(option["score"], abs=0.01)
+    assert time_ratios == pytest.approx([time_ratios[0]] * len(options), rel=0.005)
+
+
+@pytest.mark.parametrize("rule", ["tipping_risk", "small_bed_contact"])
+def test_bed_checks_override_a_better_score(monkeypatch, rule):
+    from fdmcore import checks
+
+    bed_findings = checks._bed_findings
+    refine = api._refine
+
+    def force_score(mesh, results, placed, settings, profile):
+        refine(mesh, results, placed, settings, profile)
+        for result in results:
+            if np.allclose(result.up, [0, 0, 1]):
+                result.penalize("faces", 100)
+
+    def bed_risk(layers, profile, thresholds):
+        found = bed_findings(layers, profile, thresholds)
+        return [{**finding, "rule": rule} if finding["rule"] == "tipping_risk" else finding for finding in found]
+
+    monkeypatch.setattr(api, "_refine", force_score)
+    monkeypatch.setattr(checks, "_bed_findings", bed_risk)
+    api.load(sample("feature_test"), "feature_test")
+    best, edge = api.orientations()["orientations"]
+    assert best["up"] == pytest.approx([0, 0, 1])
+    assert best["score"] > edge["score"]
+
+
+def test_pareto_guard_overrides_other_score_terms(monkeypatch):
+    from fdmcore import checks
+
+    refine = api._refine
+
+    def force_score(mesh, results, placed, settings, profile):
+        refine(mesh, results, placed, settings, profile)
+        for result in results:
+            if np.allclose(result.up, [0, 0, 1]):
+                result.penalize("faces", 100)
+
+    api.load(sample("feature_test"), "feature_test")
+    monkeypatch.setattr(api, "_refine", force_score)
+    monkeypatch.setattr(checks, "_bed_findings", lambda layers, profile, thresholds: [])
+    options = api.orientations()["orientations"]
+    assert_not_pareto_dominated(options)
+    assert options[0]["up"] == pytest.approx([0, 0, 1])
+    assert options[0]["score"] > options[1]["score"]
+    assert options[0]["score_terms"]["bed"] < 0
+
+
+def test_only_finalists_get_bed_and_time_checks(monkeypatch):
+    from fdmcore import checks
+
+    sliced = []
+    slice_mesh = checks.slice_mesh
+
+    def record_slice(mesh, layer_height, max_layers):
+        sliced.append(mesh)
+        return slice_mesh(mesh, layer_height, max_layers)
+
+    monkeypatch.setattr(checks, "slice_mesh", record_slice)
+    api.load(sample("l_bracket"), "l_bracket")
+    api.orientations(top=1)
+    assert 2 <= len(sliced) <= 4
+
+
+def test_bumpy_blob_pick_is_not_dominated():
+    """Regenerate the audit's smooth 80k-face shape without a large binary fixture.
+
+    There is no flat face: every option can still need adhesion help. The ranking
+    must remain finite and Pareto-consistent even when no safe finalist exists.
+    """
+    longitude = np.linspace(0, 2 * np.pi, 200, endpoint=False)
+    latitude = np.linspace(0, np.pi, 202)
+    azimuth, polar = np.meshgrid(longitude, latitude)
+    radius = 30 * (1 + 0.15 * np.sin(7 * azimuth) * np.sin(5 * polar)
+                   + 0.05 * np.sin(23 * azimuth + 11 * polar))
+    vertices = radius[..., None] * np.stack([np.sin(polar) * np.cos(azimuth),
+                                            np.sin(polar) * np.sin(azimuth), np.cos(polar)], axis=-1)
+    vertices[0], vertices[-1] = [0, 0, 30], [0, 0, -30]
+    vertices[..., 2] *= 80 / np.ptp(vertices[..., 2])
+    row, column = np.meshgrid(np.arange(201), np.arange(200), indexing="ij")
+    lower = row * 200 + column
+    beside = row * 200 + (column + 1) % 200
+    faces = np.concatenate([np.stack([lower, lower + 200, beside], axis=-1)[1:].reshape(-1, 3),
+                            np.stack([beside, lower + 200, beside + 200], axis=-1)[:-1].reshape(-1, 3)])
+    mesh = Mesh(vertices.reshape(-1, 3)[faces])
+    assert mesh.face_count == 80_000
+    api.load(to_binary_stl(mesh), "bumpy_blob")
+    options = api.orientations()["orientations"]
+    assert_not_pareto_dominated(options)
+    assert all(np.isfinite(option["score"]) for option in options)

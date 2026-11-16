@@ -388,9 +388,14 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     if kept is not None and all(r is not kept for r in candidates):
         candidates.append(kept)
     placed = {id(r): _placement(s.mesh, r, p) for r in [*candidates, as_loaded]}
+    from .orientation import rank_finalists
+
     with stage(0.95 if loads or p.goal == "strength" else 0.2, 1.0):
-        _refine(s.mesh, [*candidates, as_loaded], placed, settings, p)
-    candidates.sort(key=lambda r: (not placed[id(r)][1]["fits"], r.score))
+        with stage(0.0, 0.6):
+            _refine(s.mesh, [*candidates, as_loaded], placed, settings, p)
+        with stage(0.6, 1.0):
+            candidates = rank_finalists(s.mesh, candidates, placed, settings, p, SUPPORT_FILL, extra=(as_loaded,),
+                                       layer_budget=REFINE_BUDGET)
     candidates = candidates[:top]
     if kept is not None and all(r is not kept for r in candidates):
         candidates.append(kept)
