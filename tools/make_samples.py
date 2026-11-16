@@ -4,7 +4,10 @@ Usage: python tools/make_samples.py
 """
 
 from pathlib import Path
+import base64
+import json
 
+import numpy as np
 import trimesh
 from trimesh.creation import box, cylinder
 
@@ -21,6 +24,34 @@ def mushroom():
     stem = at(box([10, 10, 20]), z=10)
     cap = at(box([40, 40, 6]), z=23)
     return trimesh.boolean.union([stem, cap], engine="manifold")
+
+
+def hole_block():
+    """Three crossing holes: even the best square pose has sideways holes needing help."""
+    body = at(box([30, 30, 30]), z=15)
+    holes = []
+    for axis in ([1, 0, 0], [0, 1, 0], [0, 0, 1]):
+        hole = cylinder(radius=6, height=40, sections=48)
+        hole.apply_transform(trimesh.geometry.align_vectors([0, 0, 1], axis))
+        holes.append(at(hole, z=15))
+    return trimesh.boolean.difference([body, *holes], engine="manifold")
+
+
+def loaded_hook_project(mesh):
+    """Example load, not a rated capacity. Explicit planar face ids keep the loads stable."""
+    normals = mesh.face_normals
+    planes = np.column_stack([normals, np.einsum("ij,ij->i", normals, mesh.triangles_center)])
+    _, ids = np.unique(np.round(planes, 5), axis=0, return_inverse=True)
+    held = np.flatnonzero(np.isclose(normals[:, 1], -1) & np.isclose(mesh.triangles_center[:, 1], -2))[0]
+    arm = np.flatnonzero(np.isclose(normals[:, 2], 1) & np.isclose(mesh.triangles_center[:, 2], 10.5))[0]
+    project = {
+        "format": "fdm-check-project", "version": 1,
+        "part": {"name": "hook.stl", "stl": base64.b64encode(mesh.export(file_type="stl")).decode("ascii"),
+                 "face_ids": ids.tolist()},
+        "loads": [{"region": int(ids[held]), "kind": "fixed"},
+                  {"region": int(ids[arm]), "kind": "force", "kg": 2, "direction": [0, 0, -1], "case": 1}],
+    }
+    (OUT / "loaded_hook.json").write_text(json.dumps(project, indent=1) + "\n", encoding="utf-8")
 
 
 def l_bracket():
@@ -133,6 +164,7 @@ def feature_test():
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     for name, fn in {
+        "hole_block": hole_block,
         "mushroom": mushroom,
         "l_bracket": l_bracket,
         "hook": hook,
@@ -147,4 +179,6 @@ if __name__ == "__main__":
         m = fn()
         assert m.is_watertight, name
         m.export(OUT / f"{name}.stl")
+        if name == "hook":
+            loaded_hook_project(m)
         print(f"{name}: {len(m.faces)} faces, volume {m.volume:.0f} mm³")
