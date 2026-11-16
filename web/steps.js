@@ -44,6 +44,8 @@ export class Steps {
     this.busy = new Map(); // step -> number of running jobs that will update it
     this.panes = Object.fromEntries([...document.querySelectorAll(".pane")].map((p) => [p.dataset.pane, p]));
     this.home = Object.fromEntries([...document.querySelectorAll("[id^=blk-]")].map((b) => [b.id, b.parentElement]));
+    this.downloadHome = document.createComment("Download button's place outside Simple Result");
+    document.getElementById("dl-3mf").before(this.downloadHome);
     for (const [step, list] of Object.entries(AFFECTS)) {
       const note = document.createElement("p");
       note.className = "affects";
@@ -163,6 +165,7 @@ export class Steps {
     for (const [name, pane] of Object.entries(this.panes)) {
       pane.hidden = expert ? !steps.includes(name) : name !== this.current;
     }
+    this.renderActions();
     for (const note of document.querySelectorAll(".affects")) {
       const names = note.dataset.affects.split(" ").filter((s) => steps.includes(s)).map((s) => STEP_NAMES[s]);
       note.hidden = !names.length;
@@ -185,6 +188,24 @@ export class Steps {
       next.disabled = ready !== true;
       next.textContent = ready !== true ? ready : following === "result" ? "Show my result" : `Next: ${STEP_NAMES[following]}`;
     }
+  }
+
+  /** Simple has one primary at the foot; its in-pane actions stay available as secondary buttons. */
+  renderActions() {
+    const simple = this.level === "simple";
+    const download = document.getElementById("dl-3mf");
+    const atResult = simple && this.current === "result";
+    const home = atResult ? document.querySelector(".foot-buttons") : this.downloadHome.parentElement;
+    if (download.parentElement !== home) {
+      if (atResult) home.append(download);
+      else this.downloadHome.after(download);
+    }
+    for (const button of document.querySelectorAll(".pane button.primary, .pane button.pane-primary")) {
+      button.classList.add("pane-primary"); // remember its style when switching back to another level
+      button.classList.toggle("primary", !simple);
+    }
+    download.classList.toggle("primary", !simple || atResult);
+    download.classList.toggle("big", !simple);
   }
 
   renderList() {

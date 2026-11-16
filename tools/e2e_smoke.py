@@ -1691,23 +1691,81 @@ def main():
             return f"{folded} explanations behind an ⓘ; walk-through with {stops} stops here"
         run.step("less text: ⓘ explanations and the Explain walk-through", less_text)
 
-        def simple_compute():
-            """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that
-            ticks off what the tool does."""
+        def simple_result():
+            """T-374 / T-397: one primary per step, with missing work started by Show my result."""
+            def primary_at_foot(button):
+                visible = page.locator(".panes button.primary:visible, .pane-foot button.primary:visible")
+                assert visible.count() == 1, visible.all_inner_texts()
+                assert visible.first.get_attribute("id") == button, visible.all_inner_texts()
+                assert page.locator(f".pane-foot #{button}").is_visible(), f"{button} is not at the foot"
+
             page.click("input[name=level][value=simple] >> xpath=..")
             page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
+            primary_at_foot("step-next")
             run.act(lambda: page.click("[data-sample=mushroom]"))
-            page.evaluate("() => fdm.steps.go('have')")
             assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
-            run.act(lambda: page.click("#compute"), 300_000)
+            assert page.locator("#compute").count() == 0, "redundant Compute button remains"
+            primary_at_foot("step-next")
+            page.evaluate("() => { window.simpleCompleted = { options: fdm.state.options, check: fdm.state.check }; }")
+            before = run.done()
+            page.click("#step-next")
+            assert page.evaluate("() => fdm.steps.current") == "strength"
+            primary_at_foot("step-next")
+            assert page.locator("#step-next").inner_text() == "Show my result"
+            page.click("#step-next")
+            assert run.done() == before, "completed checks were run again with no load set"
             items = page.locator("#compute-steps li")
             states = items.evaluate_all("lis => lis.map((li) => li.className)")
-            assert len(states) == 4 and all(c in ("done", "skipped") for c in states), states
+            assert states == ["done", "done", "skipped", "done"], states
+            assert "no load set" in items.nth(2).inner_text()
             assert page.evaluate("() => fdm.steps.current") == "result"
-            page.click("input[name=level][value=expert] >> xpath=..")
-            assert page.locator("#compute").is_hidden(), "Compute is for Simple only"
+            primary_at_foot("dl-3mf")
+            with page.expect_download() as download:
+                run.act(lambda: page.click("#dl-3mf"))
+            assert download.value.suggested_filename.endswith(".3mf")
+
+            # Set loads without running Check strength. Show my result must supply that missing work.
+            page.evaluate("""async () => {
+              const r = await fdm.call('regions'), s = fdm.state;
+              s.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              s.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === 'flat').sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              s.loads = [{ region: cap.i, kind: 'fixed' }, { region: end.i, kind: 'force', kg: 0.01, direction: 'pull', case: 1 }];
+            }""")
+            page.click("#step-back")
+
+            def show_missing_result():
+                page.click("#step-next")
+                assert page.evaluate("() => fdm.steps.current") == "result"
+                assert page.locator("#compute-steps li.working").is_visible(), "missing work has no progress list"
+                primary_at_foot("dl-3mf")
+
+            run.act(show_missing_result, 300_000)
+            assert page.evaluate("() => !!fdm.state.strength"), "missing strength check was skipped"
+            assert items.evaluate_all("lis => lis.every(li => li.className === 'done')")
+            assert page.evaluate("() => fdm.state.options === simpleCompleted.options && fdm.state.check === simpleCompleted.check"), "orientation or printability was needlessly repeated"
+            page.evaluate("() => { window.simpleStrength = fdm.state.strength; }")
+            before = run.done()
+            page.click("#step-back")
+            page.click("#step-next")
+            assert run.done() == before, "a current strength result was run again"
+            assert page.evaluate("() => fdm.state.strength === simpleStrength")
+            # An old strength result is no longer sufficient after the load changes.
+            page.click("#step-back")
+            page.evaluate("() => { fdm.state.loads[1].kg = 0.02; }")
+            run.act(show_missing_result, 300_000)
+            assert page.evaluate("() => fdm.state.strength !== simpleStrength"), "changed load reused stale strength"
+
+            for level in ("basic", "advanced", "expert"):
+                page.click(f"input[name=level][value={level}] >> xpath=..")
+                assert page.locator("#blk-download #dl-3mf.primary.big").count() == 1, f"download not restored in {level}"
+                assert page.locator("#run-strength.primary").count() == 1, f"strength action not restored in {level}"
+                assert page.locator(".sa-next.primary").count() == 2, f"strength stages not restored in {level}"
+            page.evaluate("() => { delete window.simpleCompleted; delete window.simpleStrength; }")
             return " | ".join(items.all_inner_texts())
-        run.step("simple: goal and Compute", simple_compute)
+        run.step("simple: one primary and missing work on Result", simple_result)
 
         def tick_and_recheck():
             """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
