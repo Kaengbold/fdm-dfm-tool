@@ -275,6 +275,8 @@ summary::marker { color: var(--accent); }
 .samples span { flex-basis: 100%; }
 .samples button { font-size: 13px; padding: 4px 10px; }
 .unit-hint { padding: 9px 11px; background: var(--warn-soft); border-radius: var(--r); font-size: 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.kind-hint { padding: 9px 11px; background: var(--soft); border-radius: var(--r); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+.kind-hint label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
 
 /* ---------- orientation ---------- */
 .cards, #options { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }

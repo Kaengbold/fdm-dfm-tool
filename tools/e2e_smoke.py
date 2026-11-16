@@ -306,6 +306,33 @@ def main():
             return f"feature test key matches {classes}; unused yellow hidden; key clears on pose switch"
         run.step("colour key contains only colours on the part", feature_colour_key)
 
+        def organic_model():
+            import sys
+
+            sys.path.insert(0, str(ROOT / "core"))
+            sys.path.insert(0, str(ROOT / "core" / "tests"))
+            from fdmcore.mesh import to_binary_stl
+            from test_organic import blob
+
+            sculpt = OUT / "sculpt.stl"
+            sculpt.write_bytes(to_binary_stl(blob()))
+            cad_rules = "['first_layer_detail', 'shallow_relief', 'side_detail_small', 'fine_detail_rough', 'small_hole_undersized', 'gap_fuses', 'flat_gap_fuses', 'weak_upright_pin', 'insert_wall_thin', 'screw_wall_thin']"
+            count = f"() => fdm.state.check.findings.filter(f => {cad_rules}.includes(f.rule)).length"
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: page.set_input_files("#file", str(sculpt)), 300_000)
+            page.wait_for_function("() => fdm.state.check && fdm.state.name === 'sculpt.stl'", timeout=300_000)
+            assert page.is_visible("#kind-hint"), "no notice for a sculpted model"
+            assert not page.is_checked("#cad-checks")
+            assert page.evaluate(count) == 0, "CAD-only findings on a sculpted model"
+            run.act(lambda: page.check("#cad-checks"))
+            page.wait_for_function(f"() => ({count})() > 0", timeout=300_000)
+            back = page.evaluate(count)
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: page.click("[data-sample=hook]"))
+            assert page.is_hidden("#kind-hint"), "notice stays on a CAD part"
+            return f"sculpt: notice shown, 0 CAD-only findings; {back} with the switch on; hidden again on Hook"
+        run.step("sculpted model turns CAD checks off", organic_model)
+
         def modes():
             out = []
             for mode in ("design", "both", "print"):

@@ -437,6 +437,7 @@ async function partLoaded(info) {
   const body = info.bodies.length ? ` (${info.bodies[info.body].name})` : "";
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
   showUnitHint(info.unit_hint);
+  showKind(info);
   renderLoads();
   setStage("held");
   // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
@@ -458,6 +459,20 @@ async function partLoaded(info) {
   if (!up) state.picked = null; // a new part: no orientation picked on it yet
   await findOrientations(false, up);
 }
+
+/** Sculpts, scans and figures (T-408): the engine turns off the checks that assume CAD intent; say so,
+ * with a switch for a CAD part that was taken for a sculpt. */
+function showKind(info) {
+  $("kind-hint").hidden = info.kind !== "organic";
+  $("cad-checks").checked = info.cad_checks;
+}
+$("cad-checks").onchange = async (e) => {
+  await call("set_cad_checks", { on: e.target.checked });
+  if (state.faceRegions) { // hole names on the faces come from the detected features
+    state.regionInfo = (await call("regions")).regions;
+  }
+  await runCheck();
+};
 
 /** Parts exported in inches, centimetres or metres arrive 25.4× / 10× / 1000× off; offer a one-click fix. */
 function showUnitHint(hint) {

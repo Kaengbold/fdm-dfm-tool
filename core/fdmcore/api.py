@@ -52,6 +52,8 @@ class Session:
     gaps: dict = field(default_factory=dict)  # (face, face) -> {"partner_mm", "fit", "warp_mm"}: slots and tabs (set_gap)
     warp: dict | None = None  # the last warping simulation: up, model, displacement (part frame)
     coarse: list | None = None  # curves exported with too few facets (checks.coarse_surfaces), computed on demand
+    kind: str = "cad"  # "cad" or "organic" (scan, sculpt, figure): _model_kind, T-408
+    cad_checks: bool = True  # hole / gap / pin / lettering checks and feature detection (off for organic parts)
 
 
 _session: Session | None = None
@@ -265,6 +267,7 @@ def load(data: bytes, name: str = "part", face_ids: list[int] | None = None) -> 
     else:
         regions = None
     _session = Session(bodies[0][1], name, regions, bodies=bodies)
+    _set_kind("cad" if face_ids is not None else None)
     return _info()
 
 
@@ -274,6 +277,7 @@ def select_body(index: int) -> dict:
     if not 0 <= index < len(s.bodies):
         raise ValueError("No such body")
     s.mesh, s.body, s.regions, s.load_case, s.tags = s.bodies[index][1], index, None, None, {}
+    _set_kind()
     return _info()
 
 
@@ -301,7 +305,37 @@ def _info() -> dict:
         "body": s.body,
         "bodies": [{"name": n, "faces": m.face_count, "volume_mm3": abs(m.volume())} for n, m in s.bodies] if len(s.bodies) > 1 else [],
         "unit_hint": unit_hint(size, biggest_bed),
+        "kind": s.kind,
+        "cad_checks": s.cad_checks,
     }
+
+
+def _set_kind(kind: str | None = None) -> None:
+    """CAD part or organic shape (scan, sculpt, figure): organic parts start with the CAD checks off."""
+    from .regions import planar_share
+
+    s = _require()
+    if kind is None:
+        below = load_data("thresholds")["organic"]["planar_share_below"]
+        kind = "organic" if planar_share(s.mesh) < below else "cad"
+    s.kind, s.cad_checks = kind, kind == "cad"
+
+
+def set_cad_checks(on: bool) -> dict:
+    """Turn the checks that assume CAD intent (holes, gaps, pins, lettering, detected features) on or off,
+    e.g. back on for a CAD part that was taken for a sculpted one."""
+    s = _require()
+    s.cad_checks = bool(on)
+    return {"kind": s.kind, "cad_checks": s.cad_checks}
+
+
+def _features(mesh: Mesh | None = None) -> list[dict]:
+    """Detected holes, bosses and rounded edges; none while the CAD checks are off (an organic shape is
+    all curves, so every bump would be taken for a boss or a fillet)."""
+    from .features import detect_features
+
+    s = _require()
+    return detect_features(mesh or s.mesh, s.regions, s.tags) if s.cad_checks else []
 
 
 def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | None = None, faces: dict | None = None,
@@ -1046,10 +1080,9 @@ def _box_zone(box: dict):
 
 def _upright_round(region: int, up) -> bool:
     """Is face ``region`` a round hole or post whose axis stands upright for this build direction?"""
-    from .features import accepted, detect_features
+    from .features import accepted
 
-    s = _require()
-    for f in accepted(detect_features(s.mesh, s.regions, s.tags)):
+    for f in accepted(_features()):
         if f["region"] == region:
             return abs(np.dot(f["axis"], np.asarray(up, float) / np.linalg.norm(up))) > 0.98
     return False
@@ -1383,9 +1416,9 @@ def regions() -> dict:
         s.regions = find_regions(s.mesh)
     info = region_info(s.mesh, s.regions)
     # Name round holes, so the UI can say "held by a screw here" when one is picked.
-    from .features import accepted, detect_features
+    from .features import accepted
 
-    for f in accepted(detect_features(s.mesh, s.regions, s.tags)):
+    for f in accepted(_features()):
         if f["type"] == "hole":
             info[f["region"]]["hole_diameter"] = f["diameter"]
     return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
@@ -2166,7 +2199,7 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     ``params`` adjusts edit sizes (see features.PARAMS); the values used come back in ``params``.
     ``keep_clear``: boxes (volume_at, kind "keep_clear") that must stay empty: edits adding plastic
     there come back with ``clash``."""
-    from .features import PARAMS, design_edits, detect_features, edit_params
+    from .features import PARAMS, design_edits, edit_params
     from .regions import find_regions
 
     s = _require()
@@ -2174,7 +2207,7 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
     return {
-        "features": detect_features(s.mesh, s.regions, s.tags),
+        "features": _features(),
         "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
                                                 gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners), up, keep_clear),
         "params": edit_params(params),
@@ -2186,13 +2219,13 @@ def set_fit(region: int, up, partner_mm: float | None = None, fit: str = "slidin
     """Say what goes into a round hole (or what a round post goes into): the mating part's diameter
     and the fit ("press", "snug", "sliding", "loose"). Returns the diameter to model and why; design()
     then offers the resize as an edit. ``partner_mm`` None forgets it."""
-    from .features import accepted, detect_features, fit_size
+    from .features import accepted, fit_size
     from .regions import find_regions
 
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
-    feats = {f["region"]: f for f in accepted(detect_features(s.mesh, s.regions, s.tags))}
+    feats = {f["region"]: f for f in accepted(_features())}
     if region not in feats:
         raise ValueError(f"Face {region} is not a round hole or post")
     if partner_mm is None:
@@ -2212,13 +2245,13 @@ def set_fastener(region: int, up, size: str | None = "M3", use: str = "screw", p
     the plastic, "insert" heat-set insert, "nut_top" bolt with a nut in a pocket at the upper end,
     "nut_side" nut pushed in from the side, "bolt" through). Returns the hole size, depth, wall and
     nut pocket to model, and the slicer fix; design() then offers the changes. ``size`` None forgets it."""
-    from .features import accepted, detect_features, fastener_plan
+    from .features import accepted, fastener_plan
     from .regions import find_regions
 
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
-    feats = {f["region"]: f for f in accepted(detect_features(s.mesh, s.regions, s.tags))}
+    feats = {f["region"]: f for f in accepted(_features())}
     if region not in feats or feats[region]["type"] != "hole":
         raise ValueError(f"Face {region} is not a round hole")
     if size is None:
@@ -2357,7 +2390,7 @@ def _warp_squeeze_hole(feature: dict, up) -> float:
 def tag_feature(region: int, tag: str | None) -> dict:
     """Confirm or correct a detected feature: ``tag`` "hole", "boss" or "none" (not a feature);
     None forgets the answer. Rejected holes get no edits and no hole findings."""
-    from .features import TAGS, detect_features
+    from .features import TAGS
     from .regions import find_regions
 
     s = _require()
@@ -2369,7 +2402,7 @@ def tag_feature(region: int, tag: str | None) -> dict:
         s.tags.pop(int(region), None)
     else:
         s.tags[int(region)] = tag
-    return {"features": detect_features(s.mesh, s.regions, s.tags)}
+    return {"features": _features()}
 
 
 def session_state() -> dict:
@@ -2516,6 +2549,9 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
     if spots is not None:
         result["findings"] += _spot_findings(spots, p, result["findings"])
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
+    if not s.cad_checks:
+        cad_rules = set(load_data("thresholds")["organic"]["cad_rules"])
+        result["findings"] = [f for f in result["findings"] if f["rule"] not in cad_rules]
     result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
     result["findings"] += _thread_findings(oriented, rotation, p)
     result["findings"] += _grip_findings(s.name)
@@ -2538,6 +2574,8 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         "settings": recommend_settings(p, result["findings"], result["stats"]) if mode != "design" else [],
         "z_strength_factor": result["z_strength_factor"],
         "face_temp": _face_temp(oriented, result["stats"]["layer_heat"], spots),
+        "kind": s.kind,
+        "cad_checks": s.cad_checks,
     }
 
 
@@ -3013,6 +3051,7 @@ METHODS = {
     "custom_presets": custom_presets,
     "calibration_part": calibration_part,
     "load": load,
+    "set_cad_checks": set_cad_checks,
     "load_gcode": load_gcode,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
