@@ -23,6 +23,18 @@ PATTERN_REASON = {
 }
 
 REF_LINE_MM, REF_LAYER_MM = 0.45, 0.2  # the 0.4 mm nozzle the plans above are written for
+GOAL_NAMES = {"balanced": "Balanced", "strength": "Strong", "speed": "Fast", "material": "Light"}  # as the app shows them
+
+
+def part_fact(findings: list[dict], *rules: str) -> str:
+    """This part's measured fact behind a setting: the start of the first matching finding's detail
+    ("Only 35 mm² touches the bed"), so the reason names the part instead of repeating a generic line.
+    Empty when none of ``rules`` was found."""
+    for f in findings:
+        if f["rule"] in rules:
+            fact = f.get("detail", "").split(" — ")[0].split(" (")[0].split(": its top")[0].strip()
+            return fact[:1].lower() + fact[1:] if fact[1:2].islower() else fact
+    return ""
 
 
 def grip_settings(profile: Profile) -> dict[str, str]:
@@ -63,24 +75,30 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         out.append({"key": key, "value": str(value), "label": label, "reason": reason})
 
     goal = profile.goal
+    # Values that come from the goal alone say so; values this part asked for name its measured fact.
+    from_goal = f"From your goal {GOAL_NAMES.get(goal, goal)}; nothing on this part asks for more"
     put("layer_height", plan["layer_height"], "Layer height",
-        "Thicker layers print faster" if goal == "speed" else f"Good default for a {profile.nozzle} mm nozzle")
+        f"Thicker layers print faster (your goal {GOAL_NAMES['speed']})" if goal == "speed"
+        else f"From your goal {GOAL_NAMES.get(goal, goal)} for a {profile.nozzle} mm nozzle; nothing on this part asks for finer layers")
 
     walls, infill = plan["walls"], plan["infill"]
-    if rules & {"weak_upright_pin", "thin_neck", "single_line_wall"} and walls < 4 and goal not in ("speed", "material"):
+    weak = ("weak_upright_pin", "thin_neck", "single_line_wall")
+    if rules & set(weak) and walls < 4 and goal not in ("speed", "material"):
         walls = 4
-    put("wall_loops", walls, "Walls", {"strength": "Walls carry most of the strength", "speed": "Fewer walls print faster",
-                                       "material": "Fewer walls save plastic"}.get(goal, "Good balance of strength and speed")
-        + (" — raised for weak spots found" if walls > plan["walls"] else ""))
+    put("wall_loops", walls, "Walls", f"Raised to {walls} for a weak spot: {part_fact(findings, *weak)}" if walls > plan["walls"]
+        else {"strength": "Walls carry most of the strength", "speed": "Fewer walls print faster",
+              "material": "Fewer walls save plastic"}.get(goal, from_goal))
     put("sparse_infill_density", f"{infill}%", "Infill", {"strength": "Denser infill backs up the walls",
                                                           "speed": "Less infill prints faster",
-                                                          "material": "Very little infill saves plastic"}.get(goal, "Matches your goal"))
+                                                          "material": "Very little infill saves plastic"}.get(goal, from_goal))
     put("sparse_infill_pattern", plan["pattern"], "Infill pattern", PATTERN_REASON[plan["pattern"]])
     put("top_shell_layers", plan["top"], "Top layers", "More solid layers on top make it stiffer" if goal == "strength" else "Enough for a closed top surface")
     put("bottom_shell_layers", plan["bottom"], "Bottom layers", "More solid layers at the bottom make it stiffer" if goal == "strength" else "Enough for a closed bottom")
 
+    overhang = stats.get("support_area_mm2", 0)
     if stats.get("needs_support") or "long_bridge" in rules:
-        put("enable_support", 1, "Supports", "Some areas hang in the air in this orientation")
+        put("enable_support", 1, "Supports", f"{overhang:,.0f} mm² hang in the air in this orientation" if overhang >= 1
+            else f"Holds up a long bridge: {part_fact(findings, 'long_bridge')}")
         put("support_type", "tree(auto)", "Support type", "Tree supports use less material and break off easily")
         # Orca's threshold is measured from the horizontal; ours from vertical.
         put("support_threshold_angle", round(90 - mat["max_overhang_deg"]), "Support threshold",
@@ -89,22 +107,25 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
             put("support_interface_pattern", "rectilinear_interlaced", "Support interface",
                 "Dense interface; print it in a material that doesn't bond to the part (e.g. PETG for PLA) for clean undersides")
     else:
-        put("enable_support", 0, "Supports", "Nothing needs support in this orientation")
+        put("enable_support", 0, "Supports", f"Only {overhang:,.0f} mm² overhang, little enough to print without" if overhang >= 1
+            else "Nothing hangs in the air in this orientation")
 
     if rules & {"small_bed_contact", "tipping_risk"}:
         width = T["warping"]["brim_width_mm"] if "warping" in rules or mat["warp_risk"] == "high" else 5
-        put("brim_type", "outer_only", "Brim", "Holds the part down: small contact or a tall part")
+        put("brim_type", "outer_only", "Brim", f"Holds the part down: {part_fact(findings, 'small_bed_contact', 'tipping_risk')}")
         put("brim_width", width, "Brim width", "Wide enough to stop corners lifting")
     elif "warping" in rules:
         # Only the corners lift: ears at the sharp corners hold them with far less brim to cut off
         # (OrcaSlicer wiki, Brim: Mouse ears). PrusaSlicer has none and gets an outer brim instead.
-        put("brim_type", "brim_ears", "Brim", "Small ears at the corners, where warping starts; less to cut off than a full brim")
+        put("brim_type", "brim_ears", "Brim", f"Ears at the corners, where warping starts ({part_fact(findings, 'warping')});"
+            " less to cut off than a full brim")
         put("brim_width", T["warping"]["brim_width_mm"], "Brim width", "Wide enough to stop corners lifting")
     else:
         put("brim_type", "no_brim", "Brim", "Enough bed contact without one")
 
     if rules & {"too_thin_to_print", "fine_detail_rough", "single_line_wall"}:
-        put("wall_generator", "arachne", "Wall generator", "Arachne varies line width so thin details still print")
+        put("wall_generator", "arachne", "Wall generator", "Arachne varies line width so thin details still print: "
+            + part_fact(findings, "too_thin_to_print", "fine_detail_rough", "single_line_wall"))
     # Measured on the user's own prints (My materials): corrects every hole / outline, measured beats the default.
     hole_err, outer_err = mat.get("hole_error_mm"), mat.get("outer_error_mm")
     if hole_err is not None and abs(hole_err) >= T["holes"]["measured_min_mm"]:
@@ -114,24 +135,26 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         put("xy_contour_compensation", round(-outer_err / 2, 3), "Outer size compensation",
             f"Your prints come out {abs(outer_err):.2f} mm {'bigger' if outer_err > 0 else 'smaller'} outside than modelled (you measured it): this corrects it")
     if "small_hole_undersized" in rules and not any(s["key"] == "xy_hole_compensation" for s in out):
-        put("xy_hole_compensation", T["holes"]["xy_hole_compensation_mm"], "Hole compensation", "Small holes print undersized; this opens them up")
+        put("xy_hole_compensation", T["holes"]["xy_hole_compensation_mm"], "Hole compensation",
+            f"Opens up small holes: {part_fact(findings, 'small_hole_undersized')}")
         put("hole_to_polyhole", 1, "Polyholes", "Prints round holes as polygons with fewer, longer sides: they come out much closer to size (OrcaSlicer only: Bambu Studio and PrusaSlicer ignore it)")
     if rules & {"small_layers_cooling", "tall_thin_feature"}:
-        put("slow_down_for_layer_cooling", 1, "Slow down small layers", "Gives small layers time to cool")
+        put("slow_down_for_layer_cooling", 1, "Slow down small layers",
+            f"Gives small layers time to cool: {part_fact(findings, 'small_layers_cooling', 'tall_thin_feature')}")
     # The first layer is squashed onto the bed and bulges out; pulling it in a little keeps bottom
     # edges straight. Most printer profiles ship 0.1-0.2 mm; harmless when the profile already has it.
     put("elefant_foot_compensation", 0.15, "Elephant foot compensation",
         "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
         else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight")
     if stats.get("top_flat_mm2", 0) >= T["ironing"]["min_top_area_mm2"] and goal in ("balanced", "strength"):
-        put("ironing_type", "topmost", "Ironing", "The flat top comes out smooth: the nozzle passes over it once more with almost no"
-            " plastic (adds a few minutes)")
+        put("ironing_type", "topmost", "Ironing", f"The {stats['top_flat_mm2']:,.0f} mm² flat top comes out smooth: the nozzle passes"
+            " over it once more with almost no plastic (adds a few minutes)")
     if stats.get("round_share", 0) >= T["seam"]["round_share"] and goal != "speed":
         put("seam_slope_type", "external", "Scarf seam", "Round outline with no corner to hide the seam in: the scarf seam"
             " blends the start and end of each loop instead of leaving a line of blobs (OrcaSlicer / Bambu Studio)")
     if rules & {"gap_fuses", "shrinkage_size_error"}:
         put("precise_outer_wall", 1, "Precise wall", "Keeps the outer wall from bulging outwards, so outside sizes and gaps come"
-            " out closer to the model (OrcaSlicer; other slicers ignore it)")
+            f" out closer to the model ({part_fact(findings, 'gap_fuses', 'shrinkage_size_error')}; OrcaSlicer only, other slicers ignore it)")
     if rules & {"bridge_sag", "long_bridge", "sideways_hole_oval"}:
-        put("bridge_speed", 25, "Bridge speed", "Slower bridges sag less")
+        put("bridge_speed", 25, "Bridge speed", f"Slower bridges sag less: {part_fact(findings, 'long_bridge', 'bridge_sag', 'sideways_hole_oval')}")
     return out
