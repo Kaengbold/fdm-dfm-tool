@@ -120,6 +120,16 @@ addEventListener("unhandledrejection", (e) => e.reason instanceof Cancelled && e
 
 // ---------- state ----------
 const viewer = new Viewer($("viewer"));
+const bedSeeThrough = el("input", { id: "bed-see-through", type: "checkbox", onchange: (e) => viewer.setBedSeeThrough(e.target.checked) });
+const undersideNotice = el("p", { id: "view-turn-note", className: "view-changes", role: "status", hidden: true });
+const undersideTools = el("div", { className: "view-tools", hidden: true },
+  el("button", { id: "look-below", type: "button", className: "small", textContent: "Look from below", onclick: () => {
+    viewer.setBedSeeThrough(true);
+    bedSeeThrough.checked = true;
+    viewer.lookFromBelow();
+  } }),
+  el("label", {}, bedSeeThrough, "See-through bed"));
+$("viewer").querySelector(".view-info").append(undersideTools, undersideNotice);
 const state = {
   name: "part",
   triangles: null,
@@ -939,6 +949,8 @@ function shows(block) {
 function recolor() {
   const key = $("view-key");
   key.hidden = true;
+  undersideTools.hidden = !state.check || ![null, "orient", "problems", "result"].includes(viewStep());
+  undersideNotice.hidden = true;
   const option = activeOption();
   if (!option) return;
   setCompare(false); // anything redrawn is the "after"
@@ -967,6 +979,14 @@ function recolor() {
   for (const entry of key.children) entry.hidden = !counts[Number(entry.dataset.faceClass)];
   // Grey and the underside on the bed need no explanation on an otherwise trouble-free part.
   key.hidden = !(counts[1] || counts[2]);
+  if (!undersideTools.hidden) {
+    const turned = viewer.revealProblems(option.face_classes, state.check);
+    if (turned) {
+      undersideNotice.textContent = turned;
+      undersideNotice.hidden = false;
+    }
+    bedSeeThrough.checked = viewer.bedSeeThrough;
+  }
   showPainted();
 }
 

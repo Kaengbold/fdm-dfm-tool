@@ -55,6 +55,8 @@ export class Viewer {
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 5000);
     this.camera.position.set(150, -200, 150);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.addEventListener("start", () => this.cancelCameraMove());
+    this.revealedChecks = new WeakSet();
     this.part = null;
     this.framed = false;
 
@@ -82,10 +84,22 @@ export class Viewer {
     const grid = new THREE.GridHelper(Math.max(w, d), Math.round(Math.max(w, d) / 10), "#bac4bd", "#ccd4ce");
     grid.rotation.x = Math.PI / 2;
     this.bedGroup.add(plate, grid);
+    this.setBedSeeThrough(this.bedSeeThrough ?? false);
+  }
+
+  setBedSeeThrough(seeThrough) {
+    this.bedSeeThrough = seeThrough;
+    for (const object of this.bedGroup.children) {
+      object.material.transparent = seeThrough;
+      object.material.opacity = seeThrough ? 0.12 : 1;
+      object.material.depthWrite = !seeThrough;
+      object.material.needsUpdate = true;
+    }
   }
 
   /** Show triangles (float32, part coords) rotated into print orientation. */
   showPart(triangles, rotation) {
+    this.cancelCameraMove();
     this.hidePieces();
     const { out: positions, shift } = placeTriangles(triangles, rotation);
     this.placement = { rotation, shift };
@@ -569,6 +583,7 @@ export class Viewer {
   }
 
   frame({ center, radius }) {
+    this.cancelCameraMove();
     this.controls.target.copy(center);
     this.camera.position.copy(center).add(new THREE.Vector3(1.2, -1.6, 1.1).multiplyScalar(radius * 1.6));
     this.framed = true;
@@ -663,24 +678,134 @@ export class Viewer {
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     const span = Math.max(Math.hypot(x1 - x0, y1 - y0, z1 - z0), 20);
 
-    const startTarget = this.controls.target.clone();
-    const startPos = this.camera.position.clone();
     const dir = from ? from.clone().normalize() : this.camera.position.clone().sub(this.controls.target).normalize();
     if (dir.lengthSq() < 0.01) dir.set(1.2, -1.6, 1.1).normalize();
     const endTarget = center;
     const endPos = center.clone().add(dir.multiplyScalar(Math.max(span * 2.4, 45)));
 
+    this.moveCamera(endPos, endTarget);
+  }
+
+  cancelCameraMove() {
+    cancelAnimationFrame(this.cameraMove);
+    this.cameraMove = null;
+  }
+
+  /** One cancellable eased move, shared by finding focus and whole-part turns. */
+  moveCamera(endPos, endTarget) {
+    this.cancelCameraMove();
+    const startTarget = this.controls.target.clone();
+    const startPos = this.camera.position.clone();
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
     const t0 = performance.now();
     const dur = 350;
     const anim = (now) => {
-      const p = Math.min((now - t0) / dur, 1);
+      const p = reduced ? 1 : Math.min((now - t0) / dur, 1);
       const ease = p * (2 - p);
       this.controls.target.lerpVectors(startTarget, endTarget, ease);
       this.camera.position.lerpVectors(startPos, endPos, ease);
       this.controls.update();
-      if (p < 1) requestAnimationFrame(anim);
+      this.cameraMove = p < 1 ? requestAnimationFrame(anim) : null;
     };
-    requestAnimationFrame(anim);
+    this.cameraMove = requestAnimationFrame(anim);
+  }
+
+  lookFromBelow() {
+    this.turnTo(new THREE.Vector3(1.2, -1.6, -1.5).normalize());
+  }
+
+  /** Keep the whole part in view, including in a narrow portrait viewport. */
+  turnTo(direction) {
+    if (!this.part) return;
+    this.moveCamera(this.eyeForDirection(direction), this.part.geometry.boundingSphere.center);
+  }
+
+  eyeForDirection(direction) {
+    const { center, radius } = this.part.geometry.boundingSphere;
+    const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * Math.min(1, this.camera.aspect));
+    const distance = Math.max(radius / Math.sin(halfFov) * 1.1, 1);
+    return center.clone().addScaledVector(direction, distance);
+  }
+
+  /** Bounded, area-weighted samples of support/droop faces; ignore degenerate triangles. */
+  problemSamples(classes) {
+    const positions = this.part.geometry.attributes.position;
+    let area = 0;
+    const samples = [];
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), normal = new THREE.Vector3();
+    // Two linear passes keep allocations bounded even on a dense uploaded mesh.
+    for (let pass = 0; pass < 2; pass++) {
+      let end = 0;
+      for (let f = 0; f < classes.length; f++) {
+        if (classes[f] !== 1 && classes[f] !== 2) continue;
+        a.fromBufferAttribute(positions, f * 3);
+        b.fromBufferAttribute(positions, f * 3 + 1);
+        c.fromBufferAttribute(positions, f * 3 + 2);
+        normal.crossVectors(b.sub(a), c.sub(a));
+        const weight = normal.length();
+        if (!weight) continue;
+        end += weight;
+        if (pass === 0) continue;
+        while (samples.length < 24 && area * (samples.length + 0.5) / 24 <= end) {
+          samples.push({ point: a.clone().addScaledVector(b, 1 / 3).addScaledVector(c, 1 / 3), normal: normal.clone().normalize() });
+        }
+      }
+      if (pass === 0) area = end;
+    }
+    return samples;
+  }
+
+  /** Test the actual eye position, with occlusion and clipping, rather than normals alone. */
+  problemsVisible(samples) {
+    this.camera.updateMatrixWorld();
+    this.part.updateMatrixWorld();
+    const ray = new THREE.Raycaster();
+    const epsilon = Math.max(this.part.geometry.boundingSphere.radius * 1e-5, 1e-5);
+    return samples.some(({ point, normal }) => {
+      const toward = this.camera.position.clone().sub(point);
+      if (normal.dot(toward) <= 0) return false;
+      const screen = point.clone().project(this.camera);
+      if (Math.abs(screen.x) > 1 || Math.abs(screen.y) > 1 || Math.abs(screen.z) > 1) return false;
+      ray.set(this.camera.position, toward.normalize().negate());
+      const hit = ray.intersectObject(this.part, false)[0];
+      return hit && hit.point.distanceTo(point) < epsilon;
+    });
+  }
+
+  /** Once per check: turn only when all sampled coloured area is hidden. */
+  revealProblems(classes, check) {
+    if (!this.part || !check || this.revealedChecks.has(check)) return false;
+    this.revealedChecks.add(check);
+    const samples = this.problemSamples(classes);
+    if (!samples.length || this.problemsVisible(samples)) return false;
+    const big = classes.length > 50000;
+    const tested = big ? samples.filter((_, i) => i % 4 === 0) : samples;
+    const ray = new THREE.Raycaster();
+    const epsilon = Math.max(this.part.geometry.boundingSphere.radius * 1e-5, 1e-5);
+    let best = null;
+    // A steep view from below can hide an overhang behind the part's own base. Score rays
+    // against the part too, including shallow views underneath shelves and bridges.
+    for (const z of big ? [-0.85, -0.12, 0.5] : [-0.85, -0.35, -0.12, 0.25, 0.75]) {
+      for (let a = 0; a < Math.PI * 2; a += big ? Math.PI / 2 : Math.PI / 4) {
+        const d = new THREE.Vector3(Math.cos(a), Math.sin(a), z * 2).normalize();
+        const eye = this.eyeForDirection(d);
+        let score = 0;
+        for (const { point, normal } of tested) {
+          const toward = eye.clone().sub(point).normalize();
+          const facing = normal.dot(toward);
+          if (facing <= 0) continue;
+          ray.set(eye, toward.negate());
+          const hit = ray.intersectObject(this.part, false)[0];
+          if (hit && hit.point.distanceTo(point) < epsilon) score += facing;
+        }
+        if (!best || score > best.score) best = { d, score };
+      }
+    }
+    if (!best?.score) return false;
+    if (best.d.z < 0) this.setBedSeeThrough(true);
+    this.turnTo(best.d);
+    return best.d.z < 0 ? "Turned to show the underside" : "Turned to show the problem";
   }
 
   resetCamera() {
