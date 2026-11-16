@@ -713,10 +713,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: 15 printers. Nothing says what to pick when yours is missing. Adding one means "Copy as YAML" into a pull request.
   - Do: (1) "My printer isn't listed" → pick the closest by three questions (enclosed? bed size? direct drive?) or (2) choose it from the shipped OrcaSlicer machine profiles (bed size, enclosure, nozzle read from there). Show which values are from the profile and which are assumed.
   - Done when: any printer in the shipped Orca profile set can be picked; the list says "+ about N more".
-- [ ] **T-452 P2** [J] Cura users. · files: `core/fdmcore/export3mf.py`, `web/app.js`, README · owner: Claude, research with Gemini Flash (`task/T-452-cura`)
+- [x] **T-452 P2** [J] Cura users. · files: `core/fdmcore/export3mf.py`, `web/app.js`, README · owner: Claude, research with Gemini Flash (`task/T-452-cura`)
   - Seen: the 3MF carries settings for OrcaSlicer / Bambu Studio and PrusaSlicer. Cura reads the model but none of the settings; an informal poll (r/3Dprinting, Jan 2025, 123 votes) had Cura first.
   - Do: find out whether Cura takes per-model settings from a 3MF or needs a project file (`research/`). If not possible: for "Cura" in the slicer choice, show the settings as a short list to type in, with Cura's names, and export the turned STL.
   - Done when: a Cura user gets the orientation and a settings list with Cura's own names.
+  - Outcome: Cura does read per-model settings from a plain 3MF (`cura:` metadata on the object, Cura's ThreeMFReader + libSavitar; Gemini's first answer said no, the source says yes): the export writes walls, infill, top/bottom, supports, overhang angle, hole and first-layer expansion, ironing, bridge speed and fuzzy skin under Cura's names; layer height, support type and brim are global in Cura and named in the download hint. research/gemini_cura_3mf.md. Not tried in Cura itself (not installed): one real check belongs to T-467.
 - [ ] **T-453 P2** [J] A list of saved projects in the browser. · files: `web/app.js` (autosave: one slot `current` in IndexedDB), `web/index.html` · owner: —
   - Do: keep the last ~10 projects (name, date, small picture, verdict), opened from the start screen; "Save project" still writes a file. Limit by size, oldest out first; a clear "Delete all".
   - Done when: two parts worked on in a row can both be reopened.
