@@ -261,8 +261,9 @@
         </section>
 
         <section class="pane" data-pane="strength">
-          <h2>Strength analysis</h2>
-          <div id="blk-strength" class="strength wip" data-wip="rough estimate, not yet checked against real test prints.">
+          <h2>Strength analysis <button type="button" class="estimate" aria-expanded="false" aria-controls="est-strength">Estimate</button></h2>
+          <p id="est-strength" class="hint estimate-note" hidden>An estimate: worked out by the tool, not yet checked against real test prints.</p>
+          <div id="blk-strength" class="strength">
             <button type="button" id="sa-demo" class="link">Show me how</button>
             <div id="pick-panel" class="pick-panel" hidden>
               <p class="hint">Tapped: <span id="pick-info"></span></p>
@@ -482,11 +483,12 @@
         </section>
 
         <section class="pane" data-pane="design">
-          <h2>Design changes <small><span class="swatch cut"></span>cut away <span class="swatch add"></span>added</small></h2>
+          <h2>Design changes <button type="button" class="estimate" aria-expanded="false" aria-controls="est-design">Estimate</button> <small><span class="swatch cut"></span>cut away <span class="swatch add"></span>added</small></h2>
+          <p id="est-design" class="hint estimate-note" hidden>An estimate: the tool checks each change, but not yet on many real parts. Look at the preview before applying, and check fits after thickening walls.</p>
           <div id="blk-design">
             <p id="design-off" class="note">Design changes are off while "What can you change?" is <b>Just print it</b>.
               <button type="button" id="design-on" class="link">Show design changes</button></p>
-            <div id="design-block" class="wip" data-wip="edits are checked by the tool, not yet on many real parts. Look at the preview before applying, and check fits after thickening walls.">
+            <div id="design-block">
               <h3>Holes and posts</h3>
               <p class="hint" id="features-summary">Looking for shape changes for this orientation…</p>
               <ul id="features" class="features"></ul>

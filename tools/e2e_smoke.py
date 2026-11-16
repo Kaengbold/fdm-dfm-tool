@@ -173,15 +173,29 @@ def main():
         run.step("fresh visit uses indoors", indoors_default)
 
         def no_internal_task_numbers():
-            # innerText omits the data-wip text rendered by CSS, so check those hints too,
+            # innerText omits hidden text, so check the "Estimate" notes too,
             # including ones in steps the user has not opened yet.
             text = page.locator("body").inner_text()
-            hints = page.locator("[data-wip]").evaluate_all("els => els.map(el => el.dataset.wip)")
+            hints = page.locator(".estimate-note").evaluate_all("els => els.map(el => el.textContent)")
             hits = re.findall(r"T-\d+", "\n".join([text, *hints]))
             assert not hits, f"internal task numbers shown to users: {hits}"
-            return "page text and unfinished-feature hints contain no internal task numbers"
+            return "page text and estimate notes contain no internal task numbers"
 
         run.step("no internal task numbers", no_internal_task_numbers)
+
+        def estimate_badges():
+            """T-444: estimates carry a pill that explains itself on a click, not a dashed frame."""
+            assert page.locator(".wip, [data-wip]").count() == 0, "a dashed 'Not finished yet' frame is left"
+            assert page.locator(".estimate").count() == 2
+            # The pane may not be open yet (no part loaded), so click through the DOM and read `hidden`.
+            toggle = """() => { const p = document.querySelector('[aria-controls=est-strength]'); p.click();
+              return [document.getElementById('est-strength').hidden, p.getAttribute('aria-expanded')]; }"""
+            assert page.evaluate("() => document.getElementById('est-strength').hidden")
+            assert page.evaluate(toggle) == [False, "true"], "the note did not open"
+            assert page.evaluate(toggle) == [True, "false"], "the note did not close"
+            return "two estimate pills, the note opens and closes"
+
+        run.step("estimate badges", estimate_badges)
 
         def blocked_storage():
             """Private mode / strict cookie settings: every storage call throws. The app must still start."""

@@ -268,6 +268,7 @@ The level switch (Simple / Basic / Advanced / Expert) and in-pane choices ("What
 - **Severity badge:** pill, 12px 700. Problem = Bad on Bad Soft, Warning = Warn on Warn Soft, Tip = Muted on Soft.
 - **Fix chip:** pill naming the kind of fix: slicer (green on Pale Leaf), geometry (violet on pale violet), process (teal on pale teal).
 - **Tag:** Good on Good Soft pill, e.g. "best" on an orientation option.
+- **Estimate badge:** Muted on Soft pill, 12px 700, a button next to a heading whose numbers are estimates (strength, design changes). A click shows one sentence on what that means. No frame around the section.
 
 ### Cards / Containers
 - **Corner Style:** 6px.
