@@ -65,6 +65,9 @@ class OrientationResult:
     terms: dict[str, float] = field(default_factory=dict)
     support_grams: float | None = None  # only known after sliced refinement
     support_needed: bool | None = None
+    print_time_min: float | None = None  # reuse the finalist estimate for its card and comparison
+    bed_rules: tuple[str, ...] = ()  # retain the findings that can override the score
+    face_penalties: dict[str, float] = field(default_factory=dict)
 
     def penalize(self, term: str, value: float) -> None:
         self.terms[term] = self.terms.get(term, 0.0) + value
@@ -307,8 +310,11 @@ def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, s
         report(index / (len(results) + len(extra)), "Checking bed contact and print time")
         layers = slice_mesh(orient(mesh, placed[id(result)][0]), profile.layer_height, sections)
         findings = _bed_findings(layers, profile, thresholds)
-        risky[id(result)] = any(finding["rule"] in {"tipping_risk", "small_bed_contact"} for finding in findings)
+        result.bed_rules = tuple(finding["rule"] for finding in findings
+                                 if finding["rule"] in {"tipping_risk", "small_bed_contact"})
+        risky[id(result)] = bool(result.bed_rules)
         times[id(result)] = _estimate(layers, profile)["print_time_min"]
+        result.print_time_min = times[id(result)]
     fastest = min(times[id(result)] for result in results)
     for result in [*results, *extra]:
         fraction = result.bed_area / size**2
