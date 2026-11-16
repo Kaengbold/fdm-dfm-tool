@@ -111,6 +111,15 @@ def findings(page) -> list[str]:
     return page.locator("#findings .findings > li > details > summary").all_inner_texts()
 
 
+def click_sample(page, name):
+    """Older fixtures live under More samples; open it like a visitor before clicking."""
+    button = page.locator(f"[data-sample={name}]")
+    fold = button.locator("xpath=ancestor::details[1]")
+    if fold.count() and not fold.evaluate("d => d.open"):
+        fold.locator("summary").click()
+    button.click()
+
+
 REVIEW_PROMPT = (
     "Do not run commands or edit files. This is a screenshot of a browser app that analyses 3D-print parts "
     "(sidebar with settings/findings, 3D view of the part on a print bed). List concrete visual problems only: "
@@ -258,6 +267,35 @@ def main():
             return f"guide -> {simple[0]}; back to expert"
         run.step("levels and start guide", levels_and_guide)
 
+        def showcase_samples():
+            assert page.locator(".more-samples").evaluate("d => !d.open"), "More samples starts open"
+            names = page.locator(".sample-example [data-sample]").evaluate_all("bs => bs.map(b => b.dataset.sample)")
+            assert names == ["hole_block", "loaded_hook", "enclosure"], names
+            for width in (390, 1500):
+                page.set_viewport_size({"width": width, "height": 950})
+                assert page.locator(".samples").evaluate("e => e.scrollWidth <= e.clientWidth"), "sample list overflows"
+            page.click("input[name=level][value=simple] >> xpath=..")
+            run.act(lambda: click_sample(page, "hole_block"))
+            page.evaluate("() => fdm.steps.go('result')")
+            classes = page.evaluate("() => [...fdm.state.options[fdm.state.active].face_classes]")
+            assert any(c in (1, 2) for c in classes), "first sample has no warning colours"
+            assert page.locator("#view-key").is_visible()
+            assert page.evaluate("() => fdm.state.check.findings.some(f => f.fixes.some(fx => fx.domain === 'slicer'))"), "no slicer fix"
+            page.click("input[name=level][value=expert] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: click_sample(page, "loaded_hook"))
+            page.wait_for_function("() => fdm.state.loads.some(l => l.kind === 'force')")
+            page.evaluate("() => fdm.steps.go('strength')")
+            loads = page.evaluate("() => fdm.state.loads")
+            assert any(l["kind"] == "fixed" for l in loads), loads
+            force = next(l for l in loads if l["kind"] == "force")
+            assert force["kg"] == 2 and force["direction"] == [0, 0, -1], force
+            assert page.locator("#run-strength").is_enabled(), "example load cannot be checked"
+            page.evaluate("() => fdm.steps.go('part')")
+            return "three explained samples; sideways holes coloured with slicer fix; hook has held face and downward 2 kg example load"
+
+        run.step("showcase samples", showcase_samples)
+
         for name in SAMPLES:
             def load(name=name):
                 if name == SAMPLES[0]:
@@ -271,7 +309,7 @@ def main():
                       };
                     }""")
                     try:
-                        status = run.act(lambda: page.click(f"[data-sample={name}]"))
+                        status = run.act(lambda: click_sample(page, name))
                         sent = page.evaluate("() => window.checkProfile")
                         assert sent is not None, "first sample finished without sending a check request"
                         assert sent["use_temp_c"] is None, sent
@@ -282,7 +320,7 @@ def main():
                           delete window.checkProfile;
                         }""")
                 else:
-                    status = run.act(lambda: page.click(f"[data-sample={name}]"))
+                    status = run.act(lambda: click_sample(page, name))
                 assert page.locator("#options > li").count() >= 2, "no orientation options"
                 return f"{status} | top: {page.locator('#options > li').first.inner_text().splitlines()[1:3]} | findings: {findings(page)}"
             run.step(f"sample {name}", load)
@@ -290,7 +328,7 @@ def main():
         def quiet_hook_key():
             page.click("input[name=level][value=simple] >> xpath=..")
             page.evaluate("() => fdm.steps.go('part')")
-            run.act(lambda: page.click("[data-sample=hook]"))
+            run.act(lambda: click_sample(page, "hook"))
             assert page.is_hidden("#view-label"), "orientation ranking shown on the setup step"
             page.evaluate("() => fdm.steps.go('result')")
             assert page.is_hidden("#view-key"), "trouble-free Hook still shows a colour key"
@@ -351,7 +389,7 @@ def main():
             try:
                 other.goto(f"http://127.0.0.1:{port}/web/")
                 other_run.booted()
-                other_run.act(lambda: other.click("[data-sample=hook]"))
+                other_run.act(lambda: click_sample(other, "hook"))
                 other.click("#step-next")
                 other.click("#step-next")
                 assert other.locator("#more-tools").is_visible()
@@ -371,7 +409,7 @@ def main():
 
         def feature_colour_key():
             page.evaluate("() => fdm.steps.go('part')")
-            run.act(lambda: page.click("[data-sample=feature_test]"))
+            run.act(lambda: click_sample(page, "feature_test"))
             page.evaluate("() => fdm.steps.go('problems')")
             classes = page.evaluate("() => [...new Set(fdm.state.options[fdm.state.active].face_classes)].sort()")
             assert 1 in classes or 2 in classes, f"feature test has no warning colours: {classes}"
@@ -397,7 +435,7 @@ def main():
             page.check("#bed-see-through")
             # Hook's second pose has support but no yellow: absent entries must disappear too.
             page.evaluate("() => fdm.steps.go('part')")
-            run.act(lambda: page.click("[data-sample=hook]"))
+            run.act(lambda: click_sample(page, "hook"))
             run.act(lambda: page.locator("#options > li").nth(1).click())
             page.evaluate("() => fdm.steps.go('problems')")
             assert page.is_visible("#view-key") and page.is_hidden('#view-key > li[data-face-class="1"]')
@@ -428,7 +466,7 @@ def main():
             page.wait_for_function(f"() => ({count})() > 0", timeout=300_000)
             back = page.evaluate(count)
             page.evaluate("() => fdm.steps.go('part')")
-            run.act(lambda: page.click("[data-sample=hook]"))
+            run.act(lambda: click_sample(page, "hook"))
             assert page.is_hidden("#kind-hint"), "notice stays on a CAD part"
             return f"sculpt: notice shown, 0 CAD-only findings; {back} with the switch on; hidden again on Hook"
         run.step("sculpted model turns CAD checks off", organic_model)
@@ -456,7 +494,7 @@ def main():
         run.step("support grams on each orientation card", option_costs)
 
         def orientation_updates_findings():
-            run.act(lambda: page.click("[data-sample=hook]"))
+            run.act(lambda: click_sample(page, "hook"))
             seen = {}
             for i in range(page.locator("#options > li").count()):
                 run.act(lambda i=i: page.locator("#options > li").nth(i).click())
@@ -471,7 +509,7 @@ def main():
         run.step("orientation switch updates findings", orientation_updates_findings)
 
         def nozzles_and_goal():
-            run.act(lambda: page.click("[data-sample=detail_plate]"))
+            run.act(lambda: click_sample(page, "detail_plate"))
             run.act(lambda: page.click("#nozzle-block > summary"))
             rows = page.locator("#nozzle-table tr").count() - 1
             assert rows == 4, f"expected 4 nozzle rows, got {rows}"
@@ -483,7 +521,7 @@ def main():
 
         def suggestion_selection():
             run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             page.evaluate("() => fdm.steps.go('design')")
             boxes = page.locator("#edits input[type=checkbox]")
             count = boxes.count()
@@ -546,7 +584,7 @@ def main():
             # Reorder saved boxes: their choices belong to their source, never to a list position.
             saved["suggested_boxes"] = dict(reversed(list(saved["suggested_boxes"].items())))
             out.write_text(json.dumps(saved), encoding="utf-8")
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
             page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
             assert page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))") == edits
@@ -574,7 +612,7 @@ def main():
         def design():
             if not page.locator("input[name=mode][value=both]").is_checked():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             options = page.evaluate("() => fdm.state.options")
             cards = page.locator("#options > li")
             for i, option in enumerate(options):
@@ -614,7 +652,7 @@ def main():
         run.step("model versions + Ctrl+Z", versions_and_undo)
 
         def added_material():
-            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: click_sample(page, "test_block"))
             edits = page.locator("#edits label").all_inner_texts()
             assert sum("Thicken" in e for e in edits) == 2, f"expected two thin walls to thicken, got {edits}"
             ops = page.evaluate("() => fdm.state.edits.map((e) => e.op)")
@@ -630,7 +668,7 @@ def main():
 
         def design_keeps_orientation():
             """T-353: a design change made with another orientation picked keeps that orientation."""
-            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: click_sample(page, "test_block"))
             run.act(lambda: page.locator("#options > li").nth(1).click())
             up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
             page.click("#edits-all")
@@ -647,7 +685,7 @@ def main():
         def versions_keep_loads():
             """T-355: loads, held faces, face marks and slicer settings stay on the part when a design change makes a
             new version and when switching back."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             if page.locator("#design-on").is_visible():  # design changes off (run on its own)
                 run.act(lambda: page.click("#design-on"))
             page.evaluate("""async () => {
@@ -679,7 +717,7 @@ def main():
         run.step("model versions keep loads, marks and settings", versions_keep_loads)
 
         def feature_confirm():
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             row = page.locator("#features li", has_text="Ø8.0 mm hole")
             assert row.count() == 1, page.locator("#features").inner_text()
             run.act(lambda: row.get_by_role("button", name="Not a hole").click())
@@ -1198,7 +1236,7 @@ def main():
         run.step("asks before a long simulation", asks_before_long_runs)
 
         def marked_faces():
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             before = page.evaluate("() => fdm.state.options[0].up.map(Math.round)")
             # Mark the stem end (the flat face pointing -Z as modelled) "on the bed".
             stem = page.evaluate("async () => (await fdm.call('regions')).regions.filter((r) => r.kind === 'flat')"
@@ -1210,7 +1248,7 @@ def main():
         run.step("marked face steers orientation", marked_faces)
 
         def cancel():
-            run.act(lambda: page.click("[data-sample=enclosure]"))
+            run.act(lambda: click_sample(page, "enclosure"))
             before = page.evaluate("() => fdm.state.options.length")
             # A hole answer and a fit: the restarted engine must still know them (T-300).
             told = page.evaluate("""async () => {
@@ -1254,7 +1292,7 @@ def main():
         run.step("progress + cancel", cancel)
 
         def lighter_shape():
-            run.act(lambda: page.click("[data-sample=hook]"))
+            run.act(lambda: click_sample(page, "hook"))
             page.evaluate("async () => { const r = await fdm.call('regions'); const flat = r.regions.filter((x) => x.kind === 'flat');"
                           " fdm.state.loads = [{ region: flat[0].id, kind: 'fixed' }, { region: flat[1].id, kind: 'force', kg: 2 }]; }")
             page.evaluate("() => { const k = document.getElementById('topo-keep'); k.value = '50'; k.oninput(); }")
@@ -1269,7 +1307,7 @@ def main():
         run.step("suggest a lighter shape", lighter_shape)
 
         def copy_report():
-            run.act(lambda: page.click("[data-sample=hook]"))
+            run.act(lambda: click_sample(page, "hook"))
             page.context.grant_permissions(["clipboard-read", "clipboard-write"])
             page.click("#copy-report")
             page.wait_for_function("() => document.getElementById('status').textContent.startsWith('Copied')")
@@ -1292,7 +1330,7 @@ def main():
             out = OUT / "project.json"
             dl.value.save_as(out)
             run.act(lambda: page.select_option("#use-temp", "-20"))
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
             # Several engine calls in a row (load, orient, check, the project's orientation): wait for the last step.
             page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
@@ -1362,7 +1400,7 @@ def main():
 
         def test_design_change():
             # Mushroom held by its cap and pulled on the stem: the weak spot is the inside corner at the stem.
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             page.evaluate("""async () => {
               const r = await fdm.call("regions");
               fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
@@ -1395,7 +1433,7 @@ def main():
         def design_change_in_view():
             """T-360: a design change pointed at in the list is turned into view, not hidden behind the part
             (the mushroom on its side, rounds at the stem's foot behind the cap)."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             side = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) < 0.1)")
             assert side >= 0, page.evaluate("() => fdm.state.options.map((o) => o.up)")
             if side != page.evaluate("() => fdm.state.active"):
@@ -1502,12 +1540,12 @@ def main():
 
         def offline():
             # The reload above ran under the service worker, so the engine and libraries are cached now.
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             page.context.set_offline(True)
             try:
                 page.reload()
                 run.booted()
-                status = run.act(lambda: page.click("[data-sample=mushroom]"))
+                status = run.act(lambda: click_sample(page, "mushroom"))
                 assert page.locator("#options > li").count() >= 2, "no orientations offline"
             finally:
                 page.context.set_offline(False)
@@ -1515,7 +1553,7 @@ def main():
         run.step("works offline after a visit", offline)
 
         def solids_and_snap():
-            run.act(lambda: page.click("[data-sample=l_bracket]"))  # last: it changes the model
+            run.act(lambda: click_sample(page, "l_bracket"))  # last: it changes the model
             page.evaluate("() => fdm.steps.go('extra')")
             spot = (
                 "() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;"
@@ -1593,7 +1631,7 @@ def main():
 
         def screws_in_project():
             # A screw choice goes into the project file and is sized again when it opens (T-320 follow-up).
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             page.evaluate("async () => { const up = fdm.state.options[fdm.state.active].up;"
                           " const hole = (await fdm.call('design', { up })).features.find((f) => f.type === 'hole');"
                           " const r = await fdm.call('set_fastener', { region: hole.region, up, size: 'M3', use: 'insert' });"
@@ -1603,7 +1641,7 @@ def main():
             out = OUT / "screws_project.json"
             dl.value.save_as(out)
             assert '"use": "insert"' in out.read_text(encoding="utf-8").replace('":"', '": "'), "no screw in the project file"
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
             page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
             notes = page.evaluate("() => Object.values(fdm.state.fastenerNotes)")
@@ -1697,7 +1735,7 @@ def main():
                     struct.pack_into("<f", body, at, struct.unpack_from("<f", body, at)[0] + 40.3)
             mate = OUT / "bracket_on_top.stl"
             mate.write_bytes(raw[:84] + bytes(body))
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             page.evaluate("() => fdm.steps.go('fits')")
             run.act(lambda: page.set_input_files("#mate-file", str(mate)), 300_000)
             # Going to the step starts jobs of its own, so "idle" can come before the result: wait for it.
@@ -1735,7 +1773,7 @@ def main():
                 page.evaluate("() => document.getElementById('dl-3mf').click()")
             conf = zipfile.ZipFile(io.BytesIO(Path(dl.value.path()).read_bytes())).read("Metadata/model_settings.config").decode()
             assert 'key="fuzzy_skin" value="external"' in conf, "no fuzzy skin in the 3MF"
-            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: click_sample(page, "test_block"))
             assert not page.evaluate("() => document.getElementById('dl-grip').checked"), "grip box kept for another part"
             return "suggested for knob.stl, fuzzy skin in the 3MF, off for the next part"
         run.step("grip texture on a knob", grip_texture)
@@ -1743,7 +1781,7 @@ def main():
         def printer_tolerance():
             """T-385: one card for the printer's tolerance: the gaps in use, the fit test, and the hole compensation
             (a slicer setting in the 3MF)."""
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             page.evaluate("() => fdm.steps.go('fits')")
             page.wait_for_function("() => document.getElementById('tol-text').textContent.length > 0", timeout=60_000)
             text = page.locator("#tol-text").inner_text()
@@ -1759,7 +1797,7 @@ def main():
             import io
             import zipfile
 
-            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: click_sample(page, "test_block"))
             page.evaluate("() => fdm.steps.go('download')")
             page.fill("#dl-copies", "4")
             page.dispatch_event("#dl-copies", "change")
@@ -1770,7 +1808,7 @@ def main():
                 page.evaluate("() => document.getElementById('dl-3mf').click()")
             model = zipfile.ZipFile(io.BytesIO(Path(dl.value.path()).read_bytes())).read("3D/3dmodel.model").decode()
             assert model.count("<item ") == 4, model.count("<item ")
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             assert page.evaluate("() => document.getElementById('dl-copies').value") == "1", "copies kept for another part"
             return text
         run.step("copies on one plate", plate_copies)
@@ -1800,7 +1838,7 @@ def main():
         run.step("grip fins for a press fit", grip_fins)
         def share_file():
             # Share: the report with the part inside; opened here again it brings the part and its settings back (T-350).
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             run.act(lambda: page.select_option("#material", "petg"), 300_000)
             page.evaluate("() => fdm.steps.go('download')")
             with page.expect_download(timeout=300_000) as dl:
@@ -1809,7 +1847,7 @@ def main():
             dl.value.save_as(shared)
             html = shared.read_text(encoding="utf-8")
             assert shared.name == "l_bracket_share.html" and "The part is inside this file" in html and 'id="fdm-check-project"' in html
-            run.act(lambda: page.click("[data-sample=test_block]"))
+            run.act(lambda: click_sample(page, "test_block"))
             run.act(lambda: page.select_option("#material", "pla"), 300_000)
             run.act(lambda: page.set_input_files("#file", str(shared)), 300_000)
             page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
@@ -1820,7 +1858,7 @@ def main():
 
         def strength_scale():
             # T-401: a lightly loaded bracket must not look dangerous just because it has a peak.
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             page.evaluate("""async () => {
               const r = await fdm.call("regions");
               fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
@@ -1907,7 +1945,7 @@ def main():
         def load_at_an_angle():
             """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
             to the tapped face, with the arrow shown on the part while it's set."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             page.evaluate("() => fdm.steps.go('strength')")
             assert "down" not in page.eval_on_selector_all("#dir option", "os => os.map((o) => o.value)")
             xy = page.evaluate("""() => { const v = fdm.viewer; const n = v.part.geometry.getAttribute('position').count / 3;
@@ -1935,7 +1973,7 @@ def main():
 
         def offer_stronger_orientation():
             """T-368: the first failing strength check on a part offers a stronger orientation, once."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             standing = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) > 0.9)")
             if standing != page.evaluate("() => fdm.state.active"):
                 run.act(lambda: page.locator("#options > li").nth(standing).click())
@@ -1963,7 +2001,7 @@ def main():
 
         def turn_by_hand():
             """T-380: the user can turn the part themselves: 90° steps or any angle, as a "Your own" option."""
-            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            run.act(lambda: click_sample(page, "l_bracket"))
             page.evaluate("() => fdm.steps.go('orient')")
             page.locator("#turn-own > summary").click()
             up = lambda: page.evaluate("() => fdm.state.options[fdm.state.active].up")  # noqa: E731
@@ -2015,7 +2053,7 @@ def main():
         def hidden_gap_from_side():
             """T-363: a hidden gap clicked on a side face goes into the wall (it was placed along the surface or
             refused), and its outline is drawn over the part so it can be seen inside it."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             page.evaluate("() => fdm.steps.go('extra')")
             xy = page.evaluate("""() => {
               const v = fdm.viewer, p = v.part.geometry.getAttribute('position'), n = p.count / 3;
@@ -2144,7 +2182,7 @@ def main():
             page.click("input[name=level][value=simple] >> xpath=..")
             page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
             primary_at_foot("step-next")
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
             assert page.locator("#compute").count() == 0, "redundant Compute button remains"
             primary_at_foot("step-next")
@@ -2214,7 +2252,7 @@ def main():
 
         def tick_and_recheck():
             """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             page.evaluate("""async () => {
               const r = await fdm.call("regions");
               fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
@@ -2259,7 +2297,7 @@ def main():
         def design_ideas_tested():
             """T-367: design ideas under "How can I make it stronger?" are tested on copies straight away and shown
             with their result; nothing is applied."""
-            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: click_sample(page, "mushroom"))
             page.evaluate("""async () => {
               const r = await fdm.call("regions");
               fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);

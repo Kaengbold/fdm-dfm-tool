@@ -4025,8 +4025,14 @@ drop.addEventListener("drop", async (e) => {
 });
 document.querySelectorAll("[data-sample]").forEach((btn) => {
   btn.onclick = async () => {
-    const res = await fetch(`samples/${btn.dataset.sample}.stl`);
-    openFile(`${btn.dataset.sample}.stl`, new Uint8Array(await res.arrayBuffer()));
+    const name = btn.dataset.project ?? `${btn.dataset.sample}.stl`;
+    try {
+      const res = await fetch(`samples/${name}`);
+      if (!res.ok) throw new Error("Couldn't load this sample. Try again.");
+      await openFile(name, new Uint8Array(await res.arrayBuffer()));
+    } catch (err) {
+      setStatus(err.message, true);
+    }
   };
 });
 

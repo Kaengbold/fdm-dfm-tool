@@ -274,6 +274,9 @@ summary::marker { color: var(--accent); }
 .samples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px; color: var(--muted); }
 .samples span { flex-basis: 100%; }
 .samples button { font-size: 13px; padding: 4px 10px; }
+.sample-example, .more-samples { flex-basis: 100%; min-width: 0; }
+.sample-example p { margin: 4px 0 6px; }
+.more-samples button { margin-top: 6px; }
 .unit-hint { padding: 9px 11px; background: var(--warn-soft); border-radius: var(--r); font-size: 14px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .kind-hint { padding: 9px 11px; background: var(--soft); border-radius: var(--r); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
 .kind-hint label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
