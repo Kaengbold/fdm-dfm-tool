@@ -186,14 +186,14 @@ def main():
         def estimate_badges():
             """T-444: estimates carry a pill that explains itself on a click, not a dashed frame."""
             assert page.locator(".wip, [data-wip]").count() == 0, "a dashed 'Not finished yet' frame is left"
-            assert page.locator(".estimate").count() == 2
+            assert page.locator(".estimate").count() == 3  # strength, design changes, shaking and knocks
             # The pane may not be open yet (no part loaded), so click through the DOM and read `hidden`.
             toggle = """() => { const p = document.querySelector('[aria-controls=est-strength]'); p.click();
               return [document.getElementById('est-strength').hidden, p.getAttribute('aria-expanded')]; }"""
             assert page.evaluate("() => document.getElementById('est-strength').hidden")
             assert page.evaluate(toggle) == [False, "true"], "the note did not open"
             assert page.evaluate(toggle) == [True, "false"], "the note did not close"
-            return "two estimate pills, the note opens and closes"
+            return "three estimate pills, the note opens and closes"
 
         run.step("estimate badges", estimate_badges)
 
