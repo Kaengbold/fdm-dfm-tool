@@ -3,6 +3,7 @@
 Rules: see [AGENTS.md](AGENTS.md). Claim a task by filling in `owner` (name + branch) before
 starting. Status: `[ ]` open · `[~]` in progress / partly done · `[x]` done · `[-]` dropped.
 Priority: **P1** = needed for a usable public beta, P2 = important, P3 = nice to have.
+A new feature task names the use case it serves (`serves: 1, 3`; the numbered list in [PRODUCT.md](PRODUCT.md#use-cases-to-design-for)).
 
 ## Verification (do these first — they decide what's real)
 
@@ -722,9 +723,10 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: user text is spread over HTML, JS string templates, YAML and Python f-strings. English only for now (PRODUCT.md).
   - Do: don't translate yet. Decide the shape (message keys with parameters; the engine returns key + numbers, the app formats) and move new text to it from now on; write the rule in AGENTS.md. Easiest after T-382 cut the text.
   - Done when: the approach is written down and one pane uses it as the example.
-- [ ] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: Claude, built with Gemini Flash (`task/T-455-use-cases`)
+- [x] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: Claude, built with Gemini Flash (`task/T-455-use-cases`)
   - Add under Users: (1) beginner with a downloaded model: "will this print on my A1?" → verdict, time, grams, one file, no CAD words; (2) functional maker with own CAD: bracket, hook, enclosure that must hold → strength, fits, design advice back to CAD; (3) tinkerer with a tuned profile → a real difference to their profile, numbers, pick and choose; (4) small seller / print farm: the same part many times → failure risk, time and cost, saved projects; (5) teacher or club → a report to share and plain reasons; (6) agent user → easy local install.
   - Done when: PRODUCT.md lists them and each new feature task names which one it serves.
+  - Outcome: six use cases added under Users in PRODUCT.md (drafted by Gemini Flash from the list above, reviewed); the TASKS.md header asks new feature tasks to name the ones they serve (`serves: 1, 3`).
 
 ### K. Phone layout
 
