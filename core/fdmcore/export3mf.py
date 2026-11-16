@@ -74,6 +74,57 @@ def prusa_settings(settings: dict[str, str]) -> dict[str, str]:
     return out
 
 
+CURA_NS = "http://software.ultimaker.com/xml/cura/3mf/2015/10"
+# OrcaSlicer key -> Cura key, for the settings Cura takes per model (``settable_per_mesh`` in Cura's
+# fdmprinter.def.json, 5.9). Cura reads them from ``cura:`` metadata on the object of a plain 3MF
+# (plugins/3MFReader/ThreeMFReader.py with libSavitar). Layer height, support type, brim and minimum
+# layer time are global in Cura: CURA_GLOBAL lists them for the user to set by hand.
+CURA_KEYS = {
+    "wall_loops": "wall_line_count",
+    "top_shell_layers": "top_layers",
+    "bottom_shell_layers": "bottom_layers",
+    "xy_hole_compensation": "hole_xy_offset",
+    "xy_contour_compensation": "xy_offset",
+}
+CURA_GLOBAL = {"layer_height": "Layer Height", "support_type": "Support Structure", "brim_type": "Build Plate Adhesion Type",
+               "brim_width": "Brim Width", "slow_down_for_layer_cooling": "Minimum Layer Time"}
+CURA_PATTERNS = {"gyroid", "grid", "lightning"}
+
+
+def cura_settings(settings: dict[str, str]) -> dict[str, str]:
+    """The per-model part of ``settings`` under Cura's names and units."""
+    out = {CURA_KEYS[k]: str(v) for k, v in settings.items() if k in CURA_KEYS}
+    if "sparse_infill_density" in settings:
+        out["infill_sparse_density"] = str(settings["sparse_infill_density"]).rstrip("%")
+    if settings.get("sparse_infill_pattern") in CURA_PATTERNS:
+        out["infill_pattern"] = settings["sparse_infill_pattern"]
+    if "enable_support" in settings:
+        out["support_enable"] = "True" if str(settings["enable_support"]) == "1" else "False"
+    if "support_threshold_angle" in settings:  # OrcaSlicer measures from the horizontal, Cura from the vertical
+        out["support_angle"] = f"{90 - float(settings['support_threshold_angle']):g}"
+    if "elefant_foot_compensation" in settings:  # Cura pulls the first layer in with a negative expansion
+        out["xy_offset_layer_0"] = f"{-float(settings['elefant_foot_compensation']):g}"
+    if settings.get("ironing_type", "no ironing") != "no ironing":
+        out["ironing_enabled"] = "True"
+        out["ironing_only_highest_layer"] = "True" if settings["ironing_type"] == "topmost" else "False"
+    if "bridge_speed" in settings:
+        out.update(bridge_settings_enabled="True", bridge_wall_speed=str(settings["bridge_speed"]),
+                   bridge_skin_speed=str(settings["bridge_speed"]))
+    if settings.get("fuzzy_skin", "none") != "none":
+        out["magic_fuzzy_skin_enabled"] = "True"
+        out["magic_fuzzy_skin_outside_only"] = "True" if settings["fuzzy_skin"] == "external" else "False"
+        for ours, theirs in (("fuzzy_skin_thickness", "magic_fuzzy_skin_thickness"), ("fuzzy_skin_point_distance", "magic_fuzzy_skin_point_dist")):
+            if ours in settings:
+                out[theirs] = str(settings[ours])
+    return out
+
+
+def _cura_meta(settings: dict[str, str]) -> str:
+    """Cura's per-model settings as the object's metadata group (3MF core spec: before the mesh)."""
+    rows = "\n".join(f'    <metadata name={quoteattr("cura:" + k)} preserve="1">{v}</metadata>' for k, v in cura_settings(settings).items())
+    return f"\n   <metadatagroup>\n{rows}\n   </metadatagroup>" if rows else ""
+
+
 LAYOUTS = ("orca", "prusa")
 # Extra volumes in the part: OrcaSlicer / Bambu Studio part subtype, PrusaSlicer volume_type, label.
 VOLUME_TYPES = {
@@ -106,10 +157,10 @@ def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None =
     vxml = "\n".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>' for x, y, z in verts)
     txml = _triangles_xml(faces, paint)
     model = f"""<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06" xmlns:cura="{CURA_NS}">
  <metadata name="Application">FDM DFM Tool</metadata>
  <resources>
-  <object id="1" name={quoteattr(name)} type="model">
+  <object id="1" name={quoteattr(name)} type="model">{_cura_meta(settings or {})}
    <mesh>
     <vertices>
 {vxml}
