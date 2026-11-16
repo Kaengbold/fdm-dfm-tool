@@ -3820,7 +3820,9 @@ function setLevel(level) {
   setTimeout(() => viewer.resize()); // the step list comes and goes (Expert), so the 3D view changes size
 }
 for (const r of document.querySelectorAll("input[name=level]")) r.onchange = () => setLevel(r.value);
-setLevel(new URLSearchParams(location.search).get("level") ?? store.get("fdm-level") ?? "simple");
+// Start with a part before asking newcomers how much of the workbench they want to see.
+setLevel(new URLSearchParams(location.search).get("level") ?? (store.get("fdm-guided") ? store.get("fdm-level") : "simple") ?? "simple");
+store.set("fdm-guided", "1");
 
 /** Set "What can you change?" like a click would (it re-checks the part). */
 function setMode(value) {
@@ -3857,7 +3859,20 @@ function openGuide() {
   $("guide").showModal();
 }
 $("show-guide").onclick = openGuide;
-if (!store.get("fdm-guided") && !new URLSearchParams(location.search).has("level")) openGuide();
+
+// This invitation lives in Simple's Result pane, so it waits until the visitor has an answer.
+$("more-tools").hidden = !!store.get("fdm-more-tools");
+function dismissMoreTools() {
+  $("more-tools").hidden = true; // keep it dismissed for this visit even when storage is blocked
+  store.set("fdm-more-tools", "1");
+}
+$("dismiss-more-tools").onclick = dismissMoreTools;
+$("show-more-tools").onclick = () => {
+  dismissMoreTools();
+  setLevel(GUIDE.steps.level); // Advanced is the first level with strength, fits AND design changes.
+  setMode(GUIDE.steps.mode);
+  steps.go("strength");
+};
 
 // ---------- less text (T-382): explanations behind an ⓘ, and "Explain" walks through what is shown ----------
 
