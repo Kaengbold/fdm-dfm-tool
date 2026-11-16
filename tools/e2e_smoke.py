@@ -711,6 +711,26 @@ def main():
             return text.splitlines()[1][:160] + note
         run.step("find the lightest settings that hold", optimise)
 
+        def visible_setting_reasons():
+            page.evaluate("() => fdm.steps.go('settings')")
+            reasons = page.locator("#settings .setting-reason")
+            assert reasons.count() > 0, "no setting reasons rendered"
+            assert reasons.first.is_visible(), "setting reason needs hovering"
+            assert all(text.strip() for text in reasons.all_inner_texts()), "empty reason line"
+            assert "Hover a row" not in page.locator("#settings-block").text_content()
+            assert page.locator("#settings tr[title]").count() == 0, "duplicate reason tooltip"
+            viewport = page.viewport_size
+            try:
+                page.set_viewport_size({"width": 375, "height": 812})
+                assert reasons.first.is_visible(), "setting reason hidden on phones"
+                assert page.locator("#settings").evaluate(
+                    "table => table.scrollWidth <= table.clientWidth && table.getBoundingClientRect().right <= innerWidth"
+                ), "settings overflow phone width"
+            finally:
+                page.set_viewport_size(viewport)
+            return f"{reasons.count()} visible reason lines; phone width fits"
+        run.step("slicer setting reasons are visible", visible_setting_reasons)
+
         def picked_zone():
             page.evaluate("() => fdm.steps.go('settings')")
             page.click("#zone-pick")

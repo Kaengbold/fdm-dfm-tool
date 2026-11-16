@@ -815,8 +815,9 @@ function renderSettings() {
   $("settings-block").hidden = !settings.length;
   $("settings").replaceChildren(
     ...settings.map((s) =>
-      el("tr", { title: s.reason },
-        el("td", {}, s.label, s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : ""),
+      el("tr", {},
+        el("td", {}, s.label, s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : "",
+          s.reason ? el("small", { className: "setting-reason", textContent: s.reason }) : ""),
         el("td", { textContent: settingText(s.key, s.value) })),
     ),
   );
