@@ -76,6 +76,56 @@ def _sparse_top(plan: dict, stats: dict, S: dict, reasons: dict[str, str]) -> No
     reasons["top"] = f"{fact} over {plan['infill']}% infill; one extra solid top layer helps close the gaps"
 
 
+def _shape_layers(plan: dict, profile: Profile, stats: dict, findings: list[dict], reasons: dict[str, str]) -> None:
+    """Keep fine layers local where possible; speed up only a measured plain shape."""
+    S = load_data("thresholds")["shape_layers"]
+    area = stats.get("visible_surface_mm2", 0)
+    if not area:
+        return
+    nozzle, old = float(profile.nozzle), plan["layer_height"]
+    slopes = [f["metrics"] for f in findings if f["rule"] == "shallow_slope_stairs"]
+    rough = [f for f in findings if f["rule"] == "fine_detail_rough"]
+    detail = stats.get("fine_detail_surface_mm2", 0)
+    detail_used = bool(rough) and detail / area >= S["detail_surface_share"]
+    slope_area = sum(r["area_mm2"] for r in slopes)
+    height = stats["height_mm"]
+    if slopes:
+        plan["fine_layers"] = slopes
+    if detail_used:
+        plan["layer_height"] = min(old, round(nozzle * S["detail_nozzle_ratio"], 2))
+        reasons["layer_height"] = (f"This part has about {detail:,.0f} mm² of fine-detail sides ({detail / area:.0%} of its visible surface): "
+                                   f"{part_fact(findings, 'fine_detail_rough')}; thinner layers reduce vertical steps, "
+                                   "but narrow details still need Arachne or a smaller nozzle")
+    elif slopes:
+        bands = ", ".join(f"{r['z0']:g} to {r['z1']:g} mm" for r in slopes)
+        if slope_area / area >= S["slope_surface_share"] and sum(r["z1"] - r["z0"] for r in slopes) / height >= S["whole_height_share"]:
+            plan["layer_height"] = min(old, round(nozzle * S["slope_nozzle_ratio"], 2))
+            reasons["layer_height"] = f"Shallow slopes cover {slope_area:,.0f} mm² ({slope_area / area:.0%}) of this part's visible surface over {bands}; thinner layers reduce the steps"
+        else:
+            reasons["layer_height"] = (f"This part's shallow slopes cover {slope_area:,.0f} mm²; keep {old:g} mm elsewhere. "
+                                       f"Use thin layers only from {bands} (the height ranges in the 3MF)")
+    else:
+        # An XY detail warning is not cured by thin layers, but it rules out sacrificing detail for speed.
+        detail_rules = {"too_thin_to_print", "fine_detail_rough", "single_line_wall", "hole_closes", "gap_fuses",
+                        "first_layer_detail", "shallow_relief", "side_detail_small", "modelled_thread", "sideways_hole_oval",
+                        "small_hole_undersized", "weak_upright_pin", "thin_neck", "snap_fit_upright", "living_hinge"}
+        if (profile.goal in ("balanced", "speed") and not any(f["rule"] in detail_rules for f in findings)
+                and stats.get("plain_surface_share", 0) >= S["plain_surface_share"]
+                and stats.get("wall_min_mm", 0) >= S["min_wall_lines"] * profile.line_width):
+            ratio = S["fast_nozzle_ratio"] if profile.goal == "speed" else S["balanced_nozzle_ratio"]
+            plan["layer_height"] = max(old, round(nozzle * ratio, 2))
+            reasons["layer_height"] = (f"This part has {area:,.0f} mm² of flat or upright surface; its thinnest walls measure about {stats['wall_min_mm']:.2f} mm; "
+                                       f"no slopes or fine-detail warnings need thinner layers, so {GOAL_NAMES[profile.goal]} can print thicker layers")
+    # Finer layers must not quietly make top/bottom skins thinner.
+    if plan["layer_height"] < old:
+        for key in ("top", "bottom"):
+            skin = plan[key] * old
+            plan[key] = ceil(skin / plan["layer_height"] - 1e-6)
+            reason = (f"Finer layers for this part's {detail if detail_used else slope_area:,.0f} mm² of detail; "
+                      f"keep at least {skin:.2f} mm of solid {key} with {plan['layer_height']:g} mm layers")
+            reasons[key] = f"{reasons[key]}. {reason}" if key in reasons else reason
+
+
 def shape_plan(profile: Profile, stats: dict, findings: list[dict]) -> tuple[dict, dict[str, str]]:
     """Start with the goal; change only what the measured walls/interior ask for.
 
@@ -91,6 +141,7 @@ def shape_plan(profile: Profile, stats: dict, findings: list[dict]) -> tuple[dic
         reasons["walls"] = f"Raised to 4 for a weak spot: {part_fact(findings, *weak)}"
     if "wall_typical_mm" not in stats:
         _sparse_top(plan, stats, S, reasons)
+        _shape_layers(plan, profile, stats, findings, reasons)
         return plan, reasons
 
     typical, thinnest, upper = (stats[k] for k in ("wall_typical_mm", "wall_min_mm", "wall_upper_mm"))
@@ -117,6 +168,7 @@ def shape_plan(profile: Profile, stats: dict, findings: list[dict]) -> tuple[dic
             reasons["walls"] = (f"{fact}; keep {plan['walls']} loops from your goal {GOAL_NAMES[profile.goal]}. "
                                 f"The {core_cm3:.1f} cm³ interior needs infill too; fewer walls would not fill it")
     _sparse_top(plan, stats, S, reasons)
+    _shape_layers(plan, profile, stats, findings, reasons)
     return plan, reasons
 
 
@@ -135,15 +187,14 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
     # Values that come from the goal alone say so; values this part asked for name its measured fact.
     from_goal = f"From your goal {GOAL_NAMES.get(goal, goal)}; nothing on this part asks for more"
     put("layer_height", plan["layer_height"], "Layer height",
-        f"Thicker layers print faster (your goal {GOAL_NAMES['speed']})" if goal == "speed"
-        else f"From your goal {GOAL_NAMES.get(goal, goal)} for a {profile.nozzle} mm nozzle; nothing on this part asks for finer layers")
+        shape_reasons.get("layer_height", f"From your goal {GOAL_NAMES.get(goal, goal)} for a {profile.nozzle} mm nozzle; nothing on this part asks for finer layers"))
 
     walls, infill = plan["walls"], plan["infill"]
     put("wall_loops", walls, "Walls", shape_reasons.get("walls", from_goal))
     put("sparse_infill_density", f"{infill}%", "Infill", shape_reasons.get("infill", from_goal))
     put("sparse_infill_pattern", plan["pattern"], "Infill pattern", PATTERN_REASON[plan["pattern"]])
     put("top_shell_layers", plan["top"], "Top layers", shape_reasons.get("top", from_goal))
-    put("bottom_shell_layers", plan["bottom"], "Bottom layers", from_goal)
+    put("bottom_shell_layers", plan["bottom"], "Bottom layers", shape_reasons.get("bottom", from_goal))
 
     overhang = stats.get("support_area_mm2", 0)
     if stats.get("needs_support") or "long_bridge" in rules:
