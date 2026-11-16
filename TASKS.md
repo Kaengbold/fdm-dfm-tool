@@ -475,7 +475,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: Cancel works, but the next action waited about 11 s (a new worker boots and gets the part again) with only "Cancelled — the last result stays shown."
   - Do: status "Cancelled. Getting ready again…" with the working bar until `restoring` is done, then "Ready".
   - Done when: the browser test's cancel step sees both messages.
-- [~] **T-404 P2** [A] Slicer settings: the reason is only in a hover tooltip. · files: `web/app.js` (`renderSettings`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-404-setting-reasons`)
+- [x] **T-404 P2** [A] Slicer settings: the reason is only in a hover tooltip. · files: `web/app.js` (`renderSettings`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-404-setting-reasons`)
+  - Outcome: each slicer setting shows its reason as a muted line under its name (no hover needed, fits phone width); the "Hover a row for why" hint and duplicate tooltip are gone. Browser smoke 0 failures (80 steps), engine 314 passed.
   - Seen: "Hover a row for why" — not findable, and not there on a touch screen.
   - Do: show the reason as a muted second line under each setting's name. (T-427 later turns the table into a difference list; this is the small step.)
   - Done when: every row shows its reason without hovering.
