@@ -159,6 +159,9 @@ const steps = new Steps({
     : !state.triangles ? "Load a part first"
     : step === "result" && steps.current !== "result" && steps.busy.has("result") ? "Checking your part…"
     : step === "have" || state.check ? true : "Checking your part…",
+  // Strength is optional: with no load set, its foot button says it is skipped. With a load set,
+  // "Show my result" runs the missing check (T-397), so it isn't a skip.
+  skippable: (step) => step === "strength" && !state.loads.some((l) => l.kind === "force"),
   changed: () => {
     strengthShown();
     showViewChanges();
@@ -1497,6 +1500,7 @@ function renderLoads() {
   offWhy($("run-topology"), readyForStrength() ? "" : "Needs where it's held and a load: set them in Strength analysis first.");
   dynamicsWhy();
   renderStages();
+  steps.render(); // the foot button says "Skip" only while no load is set
 }
 
 /** How the part will be printed (walls, solid top/bottom layers, infill 0–1), from the settings shown. */

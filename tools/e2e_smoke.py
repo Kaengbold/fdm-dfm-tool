@@ -1890,7 +1890,9 @@ def main():
             page.click("#step-next")
             assert page.evaluate("() => fdm.steps.current") == "strength"
             primary_at_foot("step-next")
-            assert page.locator("#step-next").inner_text() == "Show my result"
+            # T-414: with no load set, the step says it is optional and the foot button says it skips it.
+            assert page.locator("#step-next").inner_text() == "Skip: show my result"
+            assert "Optional" in page.locator("[data-pane=strength]").inner_text()
             page.click("#step-next")
             assert run.done() == before, "completed checks were run again with no load set"
             items = page.locator("#compute-steps li")
@@ -1916,6 +1918,7 @@ def main():
             page.click("#step-back")
 
             def show_missing_result():
+                assert page.locator("#step-next").inner_text() == "Show my result", "a load is set: not a skip"
                 page.click("#step-next")
                 assert page.evaluate("() => fdm.steps.current") == "result"
                 assert page.locator("#compute-steps li.working").is_visible(), "missing work has no progress list"
