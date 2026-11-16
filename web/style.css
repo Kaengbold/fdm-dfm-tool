@@ -297,6 +297,9 @@ summary::marker { color: var(--accent); }
 .failed-block h4 { margin: 10px 0 4px; font-size: 14px; }
 .failed-block ul { margin: 0; padding-left: 18px; }
 .failed-block .mine li { color: var(--warn); }
+.failed-symptoms { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.failed-symptoms button { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.failed-symptoms img { width: 100%; height: 90px; object-fit: contain; }
 
 /* ---------- problems ---------- */
 .impact-groups { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; }

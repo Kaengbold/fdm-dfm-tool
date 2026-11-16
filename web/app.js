@@ -4046,21 +4046,33 @@ $("mate-file").onchange = async (e) => {
 
 // "My print failed": the user picks what went wrong; the usual causes and fixes, and first what this part's
 // check flagged that predicted it (api.diagnose, symptoms.yaml).
-$("failed-block").ontoggle = async () => {
-  if (!$("failed-block").open || $("failed-symptom").options.length > 1) return;
+async function openFailed() {
+  $("failed-result").replaceChildren();
+  $("failed-block").showModal();
+  if ($("failed-symptoms").childElementCount) return;
+  await engineReady;
   const { symptoms } = await call("diagnose", {});
-  $("failed-symptom").append(...symptoms.map((s) => el("option", { value: s.id, textContent: s.label })));
-};
-$("failed-symptom").onchange = async () => {
-  const symptom = $("failed-symptom").value;
-  if (!symptom) return $("failed-result").replaceChildren();
+  $("failed-symptoms").replaceChildren(...symptoms.map((s) => {
+    const img = el("img", { src: `img/symptoms/${s.id}.svg`, alt: "" });
+    img.onerror = () => img.remove();
+    const button = el("button", { type: "button" }, img, el("span", { textContent: s.label }));
+    button.dataset.symptom = s.id;
+    button.onclick = () => showFailedSymptom(s.id);
+    return button;
+  }));
+}
+$("failed-start").onclick = openFailed;
+$("failed-after-dl").onclick = openFailed;
+$("failed-guide").onclick = () => { $("guide").close(); openFailed(); };
+$("failed-close").onclick = () => $("failed-block").close();
+async function showFailedSymptom(symptom) {
   const r = await call("diagnose", { symptom, findings: state.check?.findings ?? [] });
   const mine = r.on_your_part.length
     ? [el("h4", { textContent: "Flagged on your part" }), el("ul", { className: "mine" }, ...r.on_your_part.map((f) => el("li", { textContent: `${f.title}: ${f.detail}` })))]
     : [el("p", { className: "hint", textContent: state.check ? "The check didn't flag this on your part: look at the usual causes." : "Load the part to see what the check found on it." })];
   $("failed-result").replaceChildren(...mine, el("h4", { textContent: "Usual causes" }), el("p", { textContent: r.why }),
     el("h4", { textContent: "What helps" }), el("ul", {}, ...r.fixes.map((f) => el("li", {}, el("span", { className: `chip ${f.domain}`, textContent: DOMAIN_LABEL[f.domain] }), " ", f.text))));
-};
+}
 
 // Mistakes in the printer / material presets and the slicer values set here (api.setup_check), before the 3MF goes out.
 async function setupWarnings() {

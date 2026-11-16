@@ -101,6 +101,7 @@
               <button data-sample="dumbbell">Neck</button>
               <button data-sample="feature_test" title="Something for every check and design change, to try them all">Feature test</button>
             </div>
+            <button type="button" id="failed-start" class="ghost">A print went wrong?</button>
           </div>
         </section>
 
@@ -631,6 +632,7 @@
                 <li>Pick your printer and filament there as usual.</li>
                 <li>Slice and print: the walls, infill, supports and brim are already set on the part.</li>
               </ol>
+              <button type="button" id="failed-after-dl" class="ghost small">It printed badly?</button>
               <button type="button" id="after-dl-close" class="ghost small">Got it</button>
             </div>
             <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, joined with pins or a dovetail; shown on the bed first">Too big: cut it into pieces that fit</button>
@@ -651,12 +653,6 @@
               <button id="dl-project" title="The part with everything set on it (orientation, loads, zones, settings): open it here again later, or give it to your AI agent">Save project</button>
               <button id="copy-report" title="A text summary of the part, its problems and the settings, for an AI chat or a forum post">Copy for your AI chat</button>
             </div>
-            <!-- Switched off for now (T-383): it becomes its own path from the start guide (T-384); the code stays. -->
-            <details id="failed-block" class="failed-block" hidden>
-              <summary>My print failed</summary>
-              <label class="field">What went wrong? <select id="failed-symptom"><option value="">Pick one…</option></select></label>
-              <div id="failed-result"></div>
-            </details>
           </div>
         </section>
 
@@ -681,6 +677,12 @@
       </footer>
     </section>
 
+    <dialog id="failed-block" class="expert failed-block" aria-labelledby="failed-title">
+      <div class="expert-head"><h2 id="failed-title">My print failed</h2><button type="button" id="failed-close" class="ghost">Close</button></div>
+      <p>What went wrong? Pick what looks closest.</p>
+      <div id="failed-symptoms" class="failed-symptoms"></div>
+      <div id="failed-result" aria-live="polite"></div>
+    </dialog>
     <dialog id="long-run" class="guide long-run">
       <h2 id="long-title">This takes a while</h2>
       <p id="long-text"></p>
@@ -713,7 +715,7 @@
       <button data-guide="steps"><b>Advanced</b><span>Also detailed strength views, optional simulations (warping, shaking and knocks, your G-code) and design changes.</span></button>
       <button data-guide="expert"><b>Expert</b><span>Every tool on one long page.</span></button>
       <h3>Help me fix my print failures</h3>
-      <button class="soon" disabled><b>Fix a failed print</b><span>Coming soon: show a photo or pick what went wrong, and your own AI agent suggests fixes.</span></button>
+      <button type="button" id="failed-guide"><b>Fix a failed print</b><span>Pick what went wrong to see causes and fixes.</span></button>
     </dialog>
     <div id="tour" class="tour" hidden>
       <div class="tour-ring"></div>

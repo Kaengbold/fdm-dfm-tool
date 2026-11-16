@@ -31,6 +31,16 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        # Pictures can arrive on a separate branch. A blank response still exercises
+        # the image error fallback without logging expected 404s as app errors.
+        if self.path.startswith("/web/img/symptoms/") and not Path(self.translate_path(self.path)).is_file():
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.end_headers()
+            return
+        super().do_GET()
+
 
 def serve() -> int:
     handler = functools.partial(QuietHandler, directory=str(ROOT))
@@ -166,6 +176,16 @@ def main():
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
 
+        def failed_without_part():
+            page.click("#failed-start")
+            page.locator('[data-symptom="warped_corner"]').click(timeout=60_000)
+            page.get_by_text("Usual causes", exact=True).wait_for(timeout=60_000)
+            assert "layers cool" in page.locator("#failed-result").inner_text()
+            assert not page.locator("#failed-result .mine").count()
+            page.click("#failed-close")
+            return "warped corner: usual causes without a part"
+        run.step("failed print without a part", failed_without_part)
+
         def part_first():
             assert page.evaluate("() => document.body.dataset.level") == "simple"
             assert page.evaluate("() => fdm.steps.current") == "part"
@@ -244,7 +264,7 @@ def main():
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
-            assert page.locator("#guide button.soon").is_disabled(), "fix-my-print path should be coming soon"
+            assert page.locator("#failed-guide").is_enabled(), "fix-my-print path unavailable in the guide"
 
             # T-374: strength is a step of its own in Simple; the optional fold stays hidden.
             assert page.evaluate("() => document.getElementById('load-optional').hidden && fdm.steps.steps.includes('strength')"), "Simple: strength not a step"
@@ -1015,6 +1035,20 @@ def main():
             assert "modifier_part" in conf and 'value="80%"' in conf, "picked zone not in the 3MF"
             # T-415: after a 3MF download the next steps show, and "Got it" closes them.
             assert page.evaluate("() => !document.getElementById('after-dl').hidden"), "no next steps after the download"
+            page.click("#failed-after-dl")
+            symptom = page.evaluate("""async () => {
+              const { symptoms } = await fdm.call("diagnose", {});
+              for (const s of symptoms) {
+                const r = await fdm.call("diagnose", { symptom: s.id, findings: fdm.state.check.findings });
+                if (r.on_your_part.length) return s.id;
+              }
+              return null;
+            }""")
+            assert symptom, "the checked sample has no matching symptom"
+            page.locator(f'[data-symptom="{symptom}"]').click()
+            page.locator("#failed-result .mine li").first.wait_for(timeout=60_000)
+            assert page.get_by_text("Flagged on your part", exact=True).is_visible()
+            page.click("#failed-close")
             page.evaluate("() => document.getElementById('after-dl-close').click()")
             assert page.evaluate("() => document.getElementById('after-dl').hidden"), "next steps did not close"
             label = item.locator("strong").inner_text()
@@ -1651,21 +1685,6 @@ def main():
             assert 'opt_key="layer_height">0.080' in ranges, ranges
             return text
         run.step("thinner layers on a shallow slope", fine_slopes)
-
-        def print_failed():
-            # "My print failed" on the sloped roof: rough top -> the shallow slope the check flagged comes first (T-344).
-            page.evaluate("() => { const d = document.getElementById('failed-block'); d.open = true; d.dispatchEvent(new Event('toggle')); }")
-            page.wait_for_function("() => document.getElementById('failed-symptom').options.length > 5", timeout=60_000)
-            page.select_option("#failed-symptom", "rough_overhang")
-            page.wait_for_function("() => document.querySelector('#failed-result .mine li')", timeout=60_000)
-            mine = page.locator("#failed-result .mine li").all_inner_texts()
-            assert any("Shallow slope" in m for m in mine), mine
-            return mine[0][:100]
-        # Switched off in the levels for now (T-383); its step comes back with the "fix my print" path (T-384).
-        def print_failed_off():
-            assert page.locator("#failed-block").is_hidden(), "\"My print failed\" shown"
-            return "hidden"
-        run.step("my print failed is switched off", print_failed_off)
 
         def mating_part():
             # Two parts of one assembly: a copy of the bracket 0.3 mm above it -> 0.30 mm per side, loose (T-348).
