@@ -881,30 +881,58 @@ $("show-temp").onchange = () => {
 const OWN_LABEL = { xy_hole_compensation: "Hole compensation", hole_to_polyhole: "Polyholes" };
 
 /** Recommended settings with the user's applied strength suggestions on top. */
-function effectiveSettings() {
+function effectiveSettings(includeUnchecked = false) {
   if (!state.check) return [];
+  // Keep choices while turning/rechecking this part; a new mesh starts with all rows included.
+  const choices = effectiveSettings.omitted ??= new WeakMap();
+  if (!choices.has(state.triangles)) choices.set(state.triangles, new Set());
+  const omitted = choices.get(state.triangles);
   const list = state.check.settings.map((s) => (s.key in state.overrides ? { ...s, value: state.overrides[s.key], changed: true } : s));
   for (const [key, value] of Object.entries(state.overrides)) {
     if (!list.some((s) => s.key === key)) list.push({ key, value, label: OWN_LABEL[key] ?? key, reason: OWN_LABEL[key] ? "Set by you" : "From strength check", changed: true });
   }
-  return list;
+  return includeUnchecked ? list : list.filter((s) => !omitted.has(s.key));
 }
 
 function renderSettings() {
   if (state.check) renderSetup(); // values set by hand may be a mistake (layer too thick, support gap 0)
-  const settings = effectiveSettings();
+  const settings = effectiveSettings(true);
+  const omitted = state.check ? effectiveSettings.omitted.get(state.triangles) : new Set();
   const value = (key) => settings.find((s) => s.key === key)?.value;
   $("hole-comp").value = Number(value("xy_hole_compensation") ?? 0);
   $("polyholes").checked = ["1", "true"].includes(String(value("hole_to_polyhole")));
   $("settings-block").hidden = !settings.length;
+  const expanded = $("settings").querySelector("[data-unchanged]")?.hidden === false;
+  const unchanged = (s) => s.usual != null && (String(s.value) === String(s.usual)
+    || (Number.isFinite(Number(s.value)) && Number(s.value) === Number(s.usual)));
+  const row = (s) => {
+    const tick = el("input", { type: "checkbox", checked: !omitted.has(s.key), onchange: (event) => {
+        if (event.target.checked) omitted.delete(s.key); else omitted.add(s.key);
+        renderSettings();
+        renderVerdict();
+      } });
+    tick.setAttribute("aria-label", `Include ${s.label} in 3MF`);
+    const tr = el("tr", {}, el("td", {}, el("label", {}, tick, el("span", {}, s.label,
+      s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : ""))),
+      el("td", { textContent: s.usual == null ? "Not set by goal" : settingText(s.key, s.usual) }),
+      el("td", {}, settingText(s.key, s.value), s.reason ? el("small", { className: "setting-reason", textContent: s.reason }) : ""));
+    tr.dataset.setting = s.key;
+    return tr;
+  };
+  const same = settings.filter(unchanged);
+  const folded = el("tbody", { id: "settings-unchanged", hidden: !expanded }, ...same.map(row));
+  folded.dataset.unchanged = "";
+  const toggle = el("button", { type: "button", className: "link", textContent: `Unchanged (${same.length})`,
+    onclick: () => {
+      folded.hidden = !folded.hidden;
+      toggle.setAttribute("aria-expanded", String(!folded.hidden));
+    } });
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", folded.id);
   $("settings").replaceChildren(
-    ...settings.map((s) =>
-      el("tr", {},
-        el("td", {}, s.label, s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : "",
-          s.reason ? el("small", { className: "setting-reason", textContent: s.reason }) : ""),
-        el("td", { textContent: settingText(s.key, s.value) })),
-    ),
-  );
+    el("thead", {}, el("tr", {}, ...["Setting", "Usual (goal)", "For this part"].map((textContent) => el("th", { scope: "col", textContent })))),
+    el("tbody", {}, ...settings.filter((s) => !unchanged(s)).map(row)),
+    ...(same.length ? [el("tbody", {}, el("tr", {}, el("td", { colSpan: 3 }, toggle))), folded] : []));
   renderShells();
 }
 

@@ -178,10 +178,15 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
     mat = profile.material
     T = load_data("thresholds")
     plan, shape_reasons = shape_plan(profile, stats, findings)
+    # Send the actual goal baseline with each row; the browser must not guess slicer defaults.
+    base = goal_plan(profile)
+    usual = {"layer_height": str(base["layer_height"]), "wall_loops": str(base["walls"]),
+             "sparse_infill_density": f"{base['infill']}%", "sparse_infill_pattern": base["pattern"],
+             "top_shell_layers": str(base["top"]), "bottom_shell_layers": str(base["bottom"])}
     out: list[dict] = []
 
     def put(key, value, label, reason):
-        out.append({"key": key, "value": str(value), "label": label, "reason": reason})
+        out.append({"key": key, "value": str(value), "label": label, "reason": reason, "usual": usual.get(key)})
 
     goal = profile.goal
     # Values that come from the goal alone say so; values this part asked for name its measured fact.

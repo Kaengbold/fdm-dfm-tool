@@ -1195,6 +1195,34 @@ def main():
             return f"{reasons.count()} visible reason lines; phone width fits"
         run.step("slicer setting reasons are visible", visible_setting_reasons)
 
+        def settings_difference_export():
+            import io
+            import zipfile
+            from xml.etree import ElementTree as ET
+
+            page.evaluate("() => fdm.steps.go('settings')")
+            assert page.locator("#settings th").all_inner_texts() == ["Setting", "Usual (goal)", "For this part"]
+            assert page.locator("#settings-unchanged").is_hidden(), "unchanged rows start open"
+            page.get_by_role("button", name=re.compile(r"^Unchanged \(")).click()
+            walls = page.locator('#settings tr[data-setting="wall_loops"] input')
+            assert walls.is_checked(), "new part starts with a setting excluded"
+            walls.uncheck()
+            assert not walls.is_checked(), "render lost the unchecked choice"
+            page.evaluate("() => fdm.steps.go('download')")
+            with page.expect_download(timeout=300_000) as dl:
+                page.evaluate("() => document.getElementById('dl-3mf').click()")
+            archive = zipfile.ZipFile(io.BytesIO(Path(dl.value.path()).read_bytes()))
+            for name, omitted in [("Metadata/model_settings.config", "wall_loops"),
+                                  ("Metadata/Slic3r_PE_model.config", "perimeters")]:
+                keys = {m.attrib["key"] for m in ET.fromstring(archive.read(name)).iter("metadata")}
+                assert omitted not in keys, (name, keys)
+                assert "layer_height" in keys, "checked setting was dropped too"
+            page.evaluate("() => fdm.steps.go('settings')")
+            assert not walls.is_checked(), "changing steps lost the unchecked choice"
+            walls.check()
+            return "goal defaults shown; unchanged rows folded; unticked walls absent from both 3MF configs"
+        run.step("settings differences and per-row export choice", settings_difference_export)
+
         def picked_zone():
             page.evaluate("() => fdm.steps.go('settings')")
             page.click("#zone-pick")
