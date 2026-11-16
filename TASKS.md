@@ -464,7 +464,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: Hook and L-bracket are plain grey, yet the key lists "Prints fine / May droop / Needs support / On the bed".
   - Do: show only the key entries whose colour is on the part now (count the face classes in `recolor`). No coloured face → no key.
   - Done when: Hook in Simple shows no key; `feature_test` shows only the colours it uses.
-- [ ] **T-401 P2** [A] Strength colours: red means "6 % of the strength used" on a part with ×17.7 safety. · files: `web/app.js` (`strengthView`, `renderLegend`), `web/viewer.js` (`FIELD_BANDS`, `fieldColor`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-401-strength-scale`)
+- [x] **T-401 P2** [A] Strength colours: red means "6 % of the strength used" on a part with ×17.7 safety. · files: `web/app.js` (`strengthView`, `renderLegend`), `web/viewer.js` (`FIELD_BANDS`, `fieldColor`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-401-strength-scale`)
+  - Outcome: "Strength used" colours run 0–100 % of the load the part should carry (with the ×2 / ×3 safety the check asks for), red only at or above it; the cut view and the report use the same scale; "Stretch the colours" (Advanced) shows the old stretched scale. Browser smoke 0 failures (80 steps), engine 314 passed.
   - Seen: L-bracket, 5 kg: the legend runs 0–6 % and the top band is red. The scale stretches to the highest value on the part.
   - Do: for "Strength used (%)" fix the scale to what matters: 0 → 100 % of the allowed load (the safety the check asks for: ×2, or ×3 with a constant load). Red only at or above 100 %. Offer "Stretch the colours" as a switch for people who want to see the pattern.
   - Done when: the same run shows the L-bracket mostly blue, no red; a part that fails shows red at the weak spot.

@@ -30,6 +30,8 @@ def test_constant_load_needs_more_margin():
     sf = r["safety_factor"]
     assert 2 <= sf < 3, sf  # the hook in PLA lies between the two margins
     stays = api.strength([1, 0, 0], loads, {"material": "pla", "constant_load": True})
+    assert type(r["required_safety"]) is float and r["required_safety"] == 2.0
+    assert type(stays["required_safety"]) is float and stays["required_safety"] == 3.0
     assert r["verdict"] == "fine" and stays["verdict"] == "borderline"
     assert "creep" in stays["explanation"]
 
