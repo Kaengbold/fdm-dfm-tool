@@ -342,6 +342,12 @@ async function openProject(bytes) {
   setZones(p.zones ?? []); // after selectOption: it clears zones and boxes of the old orientation
   setVolumes(p.volumes ?? []);
   if (p.holes && activeOption()) await restoreHoles(p.holes);
+  // Loading, orientation and sized holes rebuild the list: apply saved ids in the final suggestion result.
+  await state.designPending?.catch(() => {});
+  if (p.edit_selections && mode() !== "print") await suggestDesign(p.edit_selections);
+  else if (p.edit_selections) Object.assign(editSelections(), p.edit_selections);
+  // Keep pending boxes too: a weakest-spot box's strength result isn't part of a project.
+  setSuggested(Object.values(p.suggested_boxes ?? {}));
   recolor();
   await state.nozzleCompare?.catch(() => {}); // it would overwrite the message below when it ends
   setStatus(`${state.summary} — opened the project with what was set in it.`);
@@ -2651,6 +2657,7 @@ addEventListener("pointerup", async () => {
 const DROOP_SHARE = 0.5; // of a face's triangles "may droop" before it gets a support box
 const MIN_FACE_MM2 = 20; // smaller faces print fine either way
 const MAX_SUGGESTED = 6;
+const suggestedBoxKey = (v) => JSON.stringify([v.kind, v.from.region ?? null, v.from.point ?? null, v.from.normal ?? null]);
 
 /** What to place where, from what the app already knows: faces that may droop (support), faces marked
  * clean that would get supports (no support), and the weakest spot of the strength analysis (hidden gap). */
@@ -2692,8 +2699,7 @@ $("vol-suggest").onclick = async () => {
   if (!activeOption()) return;
   await ensureRegions();
   const ideas = boxIdeas();
-  const key = (v) => JSON.stringify([v.kind, v.from]);
-  const choices = new Map(state.suggested.map((v) => [key(v), v.use]));
+  const choices = new Map(state.suggested.map((v) => [suggestedBoxKey(v), v.use]));
   const placed = [];
   await busy("Placing suggested boxes…", async () => {
     for (const idea of ideas) {
@@ -2701,7 +2707,7 @@ $("vol-suggest").onclick = async () => {
         const v = await call("volume_at", { up: activeOption().up, kind: idea.kind, profile: profile(), ...idea.from });
         const info = idea.from.region != null ? state.regionInfo[idea.from.region] : null;
         const what = info ? (info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`) : "the weakest spot";
-        placed.push({ ...v, from: idea.from, what, why: idea.why, use: choices.get(key(idea)) ?? false });
+        placed.push({ ...v, from: idea.from, what, why: idea.why, use: choices.get(suggestedBoxKey(idea)) ?? false });
       } catch { /* a box that doesn't fit here is just not suggested */ }
     }
   });
@@ -2832,6 +2838,8 @@ function showSelectedGhosts(highlight = null) {
 
 /** Choices belong to this model version; keep them even when a re-check rebuilds the list. */
 const editSelections = () => (state.versions[state.version].editSelections ??= {});
+const editsForProject = () => ({ ...editSelections(), ...Object.fromEntries(state.edits.map((e) => [e.id, e.selected])) });
+const suggestedForProject = () => Object.fromEntries(state.suggested.map((v) => [suggestedBoxKey(v), v]));
 function selectEdits(selected) {
   for (const e of state.edits) editSelections()[e.id] = e.selected = selected;
   document.querySelectorAll("#edits input[type=checkbox]").forEach((box) => (box.checked = selected));
@@ -2848,9 +2856,9 @@ function suggestDesignIfShown() {
   if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
 }
 
-async function suggestDesign() {
+async function suggestDesign(savedChoices = null) {
   state.designFor = activeOption().up.join();
-  return busy("Looking for design improvements…", async () => {
+  return state.designPending = busy("Looking for design improvements…", async () => {
     const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
     const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
@@ -2860,6 +2868,7 @@ async function suggestDesign() {
     // Only the size the user requested (not optional fins or extra plastic) starts ticked.
     const choices = editSelections();
     for (const e of state.edits) choices[e.id] = e.selected;
+    if (savedChoices) Object.assign(choices, savedChoices);
     state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
       selected: choices[e.id] ?? (!e.clash && /^(fit-|gap-|fastener-(?!boss-)|solid-)/.test(e.id)) }));
     $("edit-selection").hidden = !state.edits.length;
@@ -3153,7 +3162,7 @@ async function tagFeature(region, tag) {
 /** Edit sizes from the inputs; empty until the first suggestion filled them in (engine defaults). */
 const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
-document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
+document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = () => suggestDesign()));
 
 /** The rounded corners (or the thicker weak spot) on a new version, checked again: the strength before and after side by side. */
 const EDIT_NAME = { "stress-chamfer": "the rounded corners", "thicken-weak": "the thicker weak spot" };
@@ -4126,6 +4135,7 @@ const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
   up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
   holes: holesForProject(),
+  edit_selections: editsForProject(), suggested_boxes: suggestedForProject(),
 });
 
 $("dl-project").onclick = () => {
@@ -4260,7 +4270,7 @@ async function autosave() {
   if (!state.triangles || !activeOption() || busyCount) return;
   // Cheap fingerprint first: writing out the whole part every minute would be wasted work.
   const sig = JSON.stringify([state.name, state.version, state.triangles.length, activeOption().up, state.loads, faceMarks(),
-    state.zones, state.volumes, state.overrides, profile(), mode()]);
+    state.zones, state.volumes, state.overrides, profile(), mode(), editsForProject(), suggestedForProject()]);
   if (sig === autosaved) return;
   autosaved = sig;
   await autosaveStore("readwrite", (s) => s.put({ text: projectText(), name: state.name, time: Date.now() }, AUTOSAVE_KEY));
