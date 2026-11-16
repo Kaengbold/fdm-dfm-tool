@@ -514,10 +514,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: finding cards lead with the chip "Fix: change the design" even for someone who downloaded the model; the first fix shown is `fixes[0]`, whatever its kind.
   - Do: in mode `print`, order the fixes slicer → printer & material → design, and show the first slicer / process fix as the chip. Every rule already needs one (AGENTS.md). Organic parts (T-408) default to `print`.
   - Done when: in mode `print` no card's chip says "change the design".
-- [ ] **T-410 P2** [B] "Shaking and knocks": the drop result looks far too harsh. · files: `core/fdmcore/api.py` (`dynamics`), `core/fdmcore/fea.py`, `research/extra_simulations.md` · owner: Claude, research with Gemini Flash (`task/T-410-drop-range`)
+- [x] **T-410 P2** [B] "Shaking and knocks": the drop result looks far too harsh. · files: `core/fdmcore/api.py` (`dynamics`), `core/fdmcore/fea.py`, `research/extra_simulations.md` · owner: Claude, research with Gemini Flash (`task/T-410-drop-range`)
   - Seen: L-bracket, 5 kg, drop 50 mm: "hits about 51× as hard … the part gives only 0.04 mm … safety drops from ×17.7 to ×0.3: it will likely break". The factor comes from the part's own tiny static bend alone, as if the falling thing, the mounting and the plastic gave nothing.
   - Do: check the formula against a source (impact factor `1 + sqrt(1 + 2h/δ)`), then add what really gives: the mount and the falling object (a default extra give, in `thresholds.yaml`, editable in All settings), and say in the text what is assumed. Show the result as a range ("between ×0.3 and ×2, depending on how hard the things are"). Source in the PR.
   - Done when: the text names its assumptions; a unit test pins the L-bracket case; the card carries the "Estimate" badge (T-444).
+  - Outcome: formula checked (Hibbeler, energy method); the mount and the falling thing are springs in series with the part: thresholds.yaml `drop` hard end 1000 N/mm (Eurocode 5 screw slip + Hertz contact), soft end 25 N/mm (estimate), editable in All settings. L-bracket 5 kg / 50 mm: 8–35× and safety ×0.6–×2.4 instead of ×51 / ×0.3; the text names its assumptions; `test_drop_counts_the_give_of_mount_and_falling_thing` pins it; the card has the Estimate badge. Energy lost to damping is left out (stays on the harsh side). research/gemini_drop_impact.md.
 
 ### C. The first minute
 

@@ -55,3 +55,26 @@ def test_dynamics_runs_only_what_is_asked_and_prints_like_strength():
     assert knock["static_safety"] > api.dynamics([0, 0, 1], loads, {}, drop_mm=20, shake=False)["static_safety"]
     swing = api.dynamics([0, 0, 1], loads, {})
     assert swing["static_safety"] is None and swing["frequency_hz"] > 0 and "drops" not in swing["explanation"]
+
+
+def test_drop_counts_the_give_of_mount_and_falling_thing():
+    """T-410, the audit's L-bracket: 5 kg dropped 50 mm onto it. The part alone bends 0.04 mm, which gave x51 and
+    "it will likely break"; the mount and the falling thing give too (springs in series, thresholds.yaml "drop"),
+    so the answer is a range from a hard object on a part screwed into wood to something soft."""
+    from pathlib import Path
+
+    from fdmcore.profile import load_data
+
+    api.load((Path(__file__).parents[2] / "web" / "samples" / "l_bracket.stl").read_bytes(), "l_bracket")
+    up = api.orientations()["orientations"][0]["up"]
+    loads = [{"region": region_facing([0, 1, 0]), "kind": "fixed"}, {"region": region_facing([0, 0, 1]), "kind": "force", "kg": 5, "direction": "down"}]
+    r = api.dynamics(up, loads, {"material": "pla"}, drop_mm=50, shake=False)
+    D, weight = load_data("thresholds")["drop"], 5 * 9.81
+    assert 0.03 < r["sag_mm"] < 0.05
+    assert r["impact_factor"] == pytest.approx(impact_factor(50, r["sag_mm"] + weight / D["hard_n_per_mm"]), rel=0.02)
+    assert r["impact_factor_soft"] == pytest.approx(impact_factor(50, r["sag_mm"] + weight / D["soft_n_per_mm"]), rel=0.02)
+    assert 7 < r["impact_factor_soft"] < 10 < 30 < r["impact_factor"] < impact_factor(50, r["sag_mm"]) - 10  # well under the rigid x51
+    assert r["impact_safety"] < 1 < 2 < r["impact_safety_soft"]
+    text = r["explanation"]
+    assert "screwed into wood" in text and "rubber-footed" in text and "between ×" in text  # names what it assumes
+    assert "a hard one may break it" in text

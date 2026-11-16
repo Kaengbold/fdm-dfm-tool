@@ -298,6 +298,13 @@ flex:                             # parts that bend on purpose, and thick blocks
   thick_mm: 16.0                  # sections thicker than this all round are solid blocks
   thick_min_cm3: 15.0             # ... reported when this much of the part is that thick
   thick_min_share: 0.25           # ... and at least this share of it
+drop:
+  # A load dropping onto the part: impact factor 1 + sqrt(1 + 2h/d) [Hibbeler, Mechanics of Materials, impact
+  # loading], where d is how far everything gives under the load held still. Not only the part gives: the mount
+  # and the falling thing are springs in series with it, d = d_part + load / stiffness. Without them a stiff part
+  # gives almost nothing and the factor runs away (a 0.04 mm bend and a 50 mm drop: x51).
+  hard_n_per_mm: 1000             # hard end: a hard object on a part screwed into wood. Screw slip in wood about 1500 N/mm (EN 1995-1-1 K_ser = rho^1.5 d / 23, 4 mm screw) in series with hard-on-plastic contact about 2500 N/mm (Hertz)
+  soft_n_per_mm: 25               # soft end: something rubber-footed or padded falling, or a plug in drywall (estimate: 2 mm under 5 kg, no measured source)
 
 shape_settings:
   # Shape-based adjustments to the goal plan. Engineering heuristics, not strength predictions.

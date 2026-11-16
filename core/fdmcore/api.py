@@ -1773,7 +1773,8 @@ def dynamics(up, loads: list[dict], profile: dict | None = None, drop_mm: float 
     cases = _load_case(loads)
     sh = _shells(p, walls, infill, top, bottom, zones)
     model = cases[0].model
-    out = {"drop_mm": drop_mm, "frequency_hz": None, "sag_mm": None, "impact_factor": None, "static_safety": None, "impact_safety": None}
+    out = {"drop_mm": drop_mm, "frequency_hz": None, "sag_mm": None, "impact_factor": None, "static_safety": None, "impact_safety": None,
+           "impact_factor_soft": None, "impact_safety_soft": None}
     if shake:
         hz, shape = vibration(cases[0], up, p, sh, mounted_kg)
         fine = refine(s.mesh.triangles, model.grid.h)
@@ -1785,9 +1786,14 @@ def dynamics(up, loads: list[dict], profile: dict | None = None, drop_mm: float 
         worst = cases[[c.number for c in cases].index(r["case"])]
         loaded = np.linalg.norm(worst.forces, axis=1) > 0
         sag = float(np.abs(np.einsum("ij,ij->i", r["u"][loaded], worst.forces[loaded] / np.linalg.norm(worst.forces[loaded], axis=1, keepdims=True))).mean())
-        factor = impact_factor(drop_mm, sag)
-        out.update(sag_mm=round(sag, 3), impact_factor=round(factor, 2), static_safety=r["safety_factor"],
-                   impact_safety=r["safety_factor"] / factor if np.isfinite(r["safety_factor"]) else None)
+        # The mount and the falling thing give too (springs in series with the part): a range from a hard
+        # thing on a part screwed into wood to something soft, the stiffnesses from thresholds.yaml "drop".
+        D = load_data("thresholds")["drop"]
+        weight_n = float(np.linalg.norm(worst.forces[loaded], axis=1).sum())
+        hard, soft = (impact_factor(drop_mm, sag + weight_n / D[k]) for k in ("hard_n_per_mm", "soft_n_per_mm"))
+        sf = r["safety_factor"] if np.isfinite(r["safety_factor"]) else None
+        out.update(sag_mm=round(sag, 3), impact_factor=round(hard, 2), impact_factor_soft=round(soft, 2), static_safety=r["safety_factor"],
+                   impact_safety=None if sf is None else sf / hard, impact_safety_soft=None if sf is None else sf / soft)
     out["explanation"] = _dynamics_story(out)
     return out
 
@@ -1800,10 +1806,13 @@ def _dynamics_story(r: dict) -> str:
                  if hz < 200 else "high: everyday shaking won't make it resonate")
         out = f"It swings fastest-free at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
     if r["drop_mm"] > 0 and r["impact_safety"] is not None:
-        isf = r["impact_safety"]
-        out += (f"{' ' if out else ''}If the load drops {r['drop_mm']:.0f} mm onto it, it hits about {r['impact_factor']:.1f}× as hard as when held still"
-                f" (the part gives only {r['sag_mm']:.2f} mm), so the safety drops from ×{r['static_safety']:.1f} to ×{isf:.1f}"
-                + (": still fine." if isf >= 2 else ": it may break when that happens." if isf >= 1 else ": it will likely break."))
+        hard, soft = r["impact_safety"], r["impact_safety_soft"]
+        verdict = (": still fine." if hard >= 2 else ": it will likely break." if soft < 1
+                   else ": a soft thing is fine, a hard one may break it." if soft >= 2 else ": it may break when that happens.")
+        out += (f"{' ' if out else ''}If the load drops {r['drop_mm']:.0f} mm onto it, it hits about {r['impact_factor_soft']:.0f}–{r['impact_factor']:.0f}×"
+                f" as hard as when held still, depending on how hard the falling thing and the mount are (assumed: from something"
+                f" soft or rubber-footed to a hard object on a part screwed into wood; the part itself gives {r['sag_mm']:.2f} mm)."
+                f" The safety drops from ×{r['static_safety']:.1f} to between ×{hard:.1f} and ×{soft:.1f}" + verdict)
     return out
 
 
