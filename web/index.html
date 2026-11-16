@@ -82,7 +82,7 @@
             <label id="drop" class="drop">
               <input id="file" type="file" accept=".stl,.3mf,.step,.stp,.json,.html" hidden />
               <strong>Drop an STL, 3MF or STEP file (or a saved project) here</strong>
-              <span>or click to choose one. It stays on your computer.</span>
+              <span>or click to choose one. It stays on your computer: everything is worked out here in your browser.</span>
             </label>
             <label id="body-pick" class="field" hidden>This file has several bodies. Check <select id="body"></select></label>
             <div id="unit-hint" class="unit-hint" hidden><span id="unit-text"></span> <button id="unit-scale"></button> <button id="unit-scale-2" hidden></button></div>
@@ -296,7 +296,7 @@
                       <option value="resting">resting on something (can lift off)</option>
                       <option value="screw">a screw or bolt in this hole</option>
                     </select>
-                    <button id="as-fixed" class="mark-held" disabled title="Tap a face first">Holds here</button>
+                    <button id="as-fixed" class="mark-held" disabled>Holds here</button>
                   </div>
                   <button type="button" class="primary sa-next" data-next="load" disabled>Next: where the load goes</button>
                 </div>
@@ -324,7 +324,7 @@
                     <label data-min="advanced">in <select id="load-case" aria-label="Load case">
                       <option value="1">case 1</option><option value="2">case 2</option><option value="3">case 3</option>
                     </select></label>
-                    <button id="as-load" class="mark-load" disabled title="Tap a face first">Load here</button>
+                    <button id="as-load" class="mark-load" disabled>Load here</button>
                   </div>
                   <p class="hint" data-min="advanced">Loads in the same case act together. Use separate cases for different situations (hanging, being knocked sideways): the weakest one counts.</p>
                   <button type="button" class="primary sa-next" data-next="extra" disabled>Next: extra settings</button>
@@ -381,7 +381,6 @@
               <label class="toggle"><input id="dyn-drop" type="checkbox" /> Knocks: the load can drop onto it</label>
               <label class="field sub" id="dyn-drop-row" hidden>Drop height <span><input id="dyn-mm" type="number" value="50" min="0" step="10" /> mm</span></label>
               <button id="run-dynamics" disabled>Run these checks <small class="eta" data-eta="dynamics"></small></button>
-              <p id="dynamics-need" class="hint">Set where it is held and a load in <b>Strength analysis</b> first.</p>
               <p id="dynamics-result" class="dynamics-result"></p>
             </div>
             <!-- Switched off for now (T-379, user: not really useful); the code stays for later. -->
@@ -619,6 +618,15 @@
             <label id="pause-sliced" class="file-button" hidden title="Bambu Studio ignores the pause in the 3MF. Slice there, export the plate's sliced file (or the G-code), choose it here and print the file you get back">Add the pause to a file sliced in Bambu Studio…<input id="pause-file" type="file" accept=".gcode,.gco,.g,.3mf" hidden /></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
             <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>
+            <div id="after-dl" class="sim-card after-dl" hidden>
+              <h3>Next, in your slicer</h3>
+              <ol>
+                <li>Open the file in OrcaSlicer, Bambu Studio or PrusaSlicer.</li>
+                <li>Pick your printer and filament there as usual.</li>
+                <li>Slice and print: the walls, infill, supports and brim are already set on the part.</li>
+              </ol>
+              <button type="button" id="after-dl-close" class="ghost small">Got it</button>
+            </div>
             <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, joined with pins or a dovetail; shown on the bed first">Too big: cut it into pieces that fit</button>
             <button id="dl-split-support" hidden title="Cut where the part is narrowest so each piece prints its own best way, with much less support">Less support: print it in two pieces</button>
             <div id="split-panel" class="split-panel" hidden>
@@ -688,6 +696,7 @@
     </dialog>
     <dialog id="guide" class="guide">
       <h2>What do you want to do?</h2>
+      <p class="hint">Everything runs here in your browser: your files never leave your computer, and there is no account and nothing to pay.</p>
       <h3>Make my print better</h3>
       <p class="hint">How much do you want to see? You can switch any time at the top.</p>
       <button data-guide="settings"><b>Simple</b><span>Pick your printer and material. Get the problems, settings and a file to print.</span></button>

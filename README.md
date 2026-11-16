@@ -27,6 +27,18 @@ Autodesk Fusion users: an add-in in [`fusion/`](fusion/README.md) runs the same 
 
 Presets: Bambu Lab A1 / A1 mini / P1S / X1C / H2D, Prusa MK4S / MINI+ / CORE One / XL, Creality K1C / K2 Plus / Ender-3 V3 SE / KE, Elegoo Centauri Carbon, Anycubic Kobra 3 · PLA, PLA+, PETG, ABS, ASA, PC, TPU 95A, PA-CF · 0.2–0.8 mm nozzles.
 
+## Where it runs and what it costs
+
+In short:
+
+- Everything is worked out in your web browser, on your own computer. Your part files are never uploaded anywhere.
+- The app has no AI built in and asks for no account and no API key.
+- The site is only static files. Anyone can host it for free (for example on GitHub Pages); there is no server that does the work, so there are no server costs, only the bandwidth for the files.
+- On your first visit, your browser downloads the Python runtime the engine runs in (Pyodide, about 15 MB). The strength and design tools download one more package (scipy, about 10 MB) the first time you use them.
+- Where these come from: the published site serves these files itself. When you run it locally with `python -m http.server`, they come from the public jsDelivr CDN instead.
+- After the first visit, the app keeps what it downloaded, so it starts faster and also works offline.
+- Your own computer does the calculating, so big parts or long simulations (strength, warping) can take a while and keep your computer busy. You can cancel a long run at any time.
+
 ## Try it locally
 
 No build step. From the repository root:
@@ -35,9 +47,7 @@ No build step. From the repository root:
 python -m http.server 8000
 ```
 
-Then open <http://localhost:8000/web/>. The first visit downloads the Python runtime
-(Pyodide, ~15 MB); strength and design tools fetch scipy (~10 MB) when first used. After that the
-app also works offline (a service worker keeps what it downloaded).
+Then open <http://localhost:8000/web/>. What it downloads on the first visit: see [Where it runs](#where-it-runs-and-what-it-costs).
 
 To publish it, enable GitHub Pages with source "GitHub Actions": `.github/workflows/pages.yml`
 deploys `web/` and the engine on every push to `main`.

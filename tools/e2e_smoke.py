@@ -507,6 +507,21 @@ def main():
             return f"{label}: {note[:90]}"
         run.step("slots and flat gaps", flat_gap)
 
+        why = lambda sel: page.evaluate(  # noqa: E731 - the visible reason line under a disabled button (T-402)
+            """(sel) => { const b = document.querySelector(sel); const n = (b.closest('.row, .actions') ?? b).nextElementSibling;
+              return { off: b.disabled, why: n && n.classList.contains('why-off') && !n.hidden ? n.textContent : '' }; }""", sel)
+
+        def disabled_say_why():
+            """T-402: every disabled button in the strength flow says why in text (phones show no tooltips)."""
+            page.evaluate("() => fdm.steps.go('strength')")
+            assert not page.evaluate("() => fdm.state.loads.length"), "test expects a part without loads here"
+            for sel, words in (("#as-fixed", "Tap a face"), ("[data-next=load]", "held"), ("#run-strength", "where it's held and where the load goes"),
+                               ("#run-dynamics", "Strength analysis"), ("#run-topology", "Strength analysis")):
+                got = why(sel)
+                assert got["off"] and words in got["why"], (sel, got)
+            return why("#run-strength")["why"]
+        run.step("disabled buttons say why", disabled_say_why)
+
         def pick_face():
             # Click the centre of the triangle nearest to the camera's view centre that is visible.
             x, y = page.evaluate(
@@ -517,7 +532,10 @@ def main():
             page.mouse.click(x, y)  # first pick may download scipy for face grouping
             page.wait_for_selector("#pick-panel:not([hidden])", timeout=180_000)
             info = page.locator("#pick-info").inner_text()
+            assert why("#as-fixed") == {"off": False, "why": ""}, why("#as-fixed")
             page.click("#as-fixed")
+            assert why("[data-next=load]") == {"off": False, "why": ""}, why("[data-next=load]")
+            assert "add a load" in why("#run-strength")["why"], why("#run-strength")
             return f"{info}; loads: {page.locator('#loads li').all_inner_texts()}"
         run.step("pick a face + mark fixed", pick_face)
 
@@ -754,6 +772,10 @@ def main():
 
             conf = zipfile.ZipFile(dl.value.path()).read("Metadata/model_settings.config").decode()
             assert "modifier_part" in conf and 'value="80%"' in conf, "picked zone not in the 3MF"
+            # T-415: after a 3MF download the next steps show, and "Got it" closes them.
+            assert page.evaluate("() => !document.getElementById('after-dl').hidden"), "no next steps after the download"
+            page.evaluate("() => document.getElementById('after-dl-close').click()")
+            assert page.evaluate("() => document.getElementById('after-dl').hidden"), "next steps did not close"
             label = item.locator("strong").inner_text()
             page.click("#zone-card h3")  # Ctrl+Z isn't undo while typing in a field
             page.keyboard.press("Control+z")  # back to a box
@@ -1945,12 +1967,15 @@ def main():
             run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
             recheck = page.get_by_role("button", name="Re-check with the ticked changes")
             assert recheck.is_disabled(), "re-check enabled with nothing ticked"
+            recheck_why = page.locator("#strength-options .why-off")
+            assert recheck_why.is_visible() and "Tick" in recheck_why.inner_text(), "no reason under the re-check button"
             page.locator("#strength-options summary", has_text="Slicer settings").evaluate("s => s.parentElement.open = true")
             ticks = page.locator("#strength-options li.slicer input[type=checkbox]")
             assert ticks.count() >= 2, f"{ticks.count()} slicer ideas"
             ticks.nth(0).check()
             ticks.nth(1).check()
             assert page.locator("#strength-options li.slicer input:checked").count() == 2 and recheck.is_enabled()
+            assert not recheck_why.is_visible(), "reason still shown with changes ticked"
             before = page.evaluate("() => ({ ...fdm.state.overrides })")
             run.act(lambda: recheck.click(), 300_000)
             after = page.evaluate("() => ({ ...fdm.state.overrides })")
