@@ -4076,12 +4076,15 @@ $("dl-3mf").onclick = async () => {
     const fine_layers = $("dl-fine").checked ? fineWanted() : [];
     const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked, copies: state.copies ?? 1 });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
+    $("after-dl").hidden = false; // what to do with the file, once per download
     const seam = faceMarks()?.clean?.length ? " The seam is kept off the faces you marked “keep clean”." : "";
     const grip = $("dl-grip").checked ? " Fuzzy skin is on for the outside walls." : "";
     const copies = (state.copies ?? 1) > 1 ? ` ${state.copies} copies on the plate.` : "";
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.${seam}${grip}${copies}`);
   });
 };
+
+$("after-dl-close").onclick = () => ($("after-dl").hidden = true);
 
 /** The open part and what was set on it, as a project file (web/project.js). */
 const projectText = () => writeProject({
