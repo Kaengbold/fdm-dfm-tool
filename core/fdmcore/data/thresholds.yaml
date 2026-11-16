@@ -302,7 +302,9 @@ shape_settings:
   low_infill_extra_top: 1
   # Density = goal + size offset (clamped below); cm3 of interior after walls/skins.
   # Larger interiors need more backing for their skins. These deliberately broad bins are estimates.
+  # Never below the goal: on a small interior less infill saves next to nothing and makes hooks and
+  # brackets weaker, and the sources above only back more density under wide skins.
   core_size_cm3: [1, 8, 30, 100]
-  density_offset: [-10, -5, 0, 5, 10]
+  density_offset: [0, 0, 0, 5, 10]
   min_infill_percent: 5
   max_infill_percent: 40

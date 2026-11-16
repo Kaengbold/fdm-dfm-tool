@@ -53,20 +53,20 @@ def test_mixed_part_keeps_walls_for_its_block_and_closes_top_over_low_infill():
     _, stats, settings = measured(mixed, height=15)
     assert stats["wall_min_mm"] == pytest.approx(1.6)
     assert 0.4 < stats["infill_volume_share"] < 0.8
-    assert triple(settings) == ("3", "10%", "5")
+    assert triple(settings) == ("3", "15%", "4")  # a small interior keeps the goal's infill
     assert settings["wall_generator"]["value"] == "arachne"
     assert "1.60 mm" in settings["wall_generator"]["reason"]
-    assert "10%" in settings["top_shell_layers"]["reason"]
-    assert "464 mm²" in settings["top_shell_layers"]["reason"]
 
 
 @pytest.mark.parametrize("goal", ("balanced", "strength", "speed", "material"))
 def test_goal_remains_starting_point_and_low_infill_gets_extra_top(goal):
+    """A small interior never gets less infill than the goal: it saves next to nothing and weakens
+    hooks and brackets. Low infill from the goal itself still closes the top with one more layer."""
     p, _, settings = measured(box(0, 0, 8, 8), height=8, goal=goal)
     base = goal_plan(p)
     assert int(settings["wall_loops"]["value"]) == base["walls"]
     infill = int(settings["sparse_infill_density"]["value"].rstrip("%"))
-    assert infill == max(5, base["infill"] - 10)
+    assert infill == base["infill"]
     assert int(settings["top_shell_layers"]["value"]) == base["top"] + (infill <= 10)
     assert settings["bottom_shell_layers"]["value"] == str(base["bottom"])
 
