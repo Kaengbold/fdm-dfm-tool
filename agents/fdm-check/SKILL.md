@@ -16,7 +16,8 @@ same (`fdmdfm --help`; JSON on stdout, errors as one line on stderr).
 2. `list_presets` → ids for `printer`, `material`, `nozzle`. Pass the same three to every later call.
    The user's own printer or filament: `set_custom_presets`.
 3. `load_part(path)`. Check `unit_hint` (a part exported in inches is 25.4× too small: `scale_part`)
-   and `bodies` (several bodies: `select_body`).
+   and `bodies` (several bodies: `select_body`). `kind: "organic"` (a scan, sculpt or figure) means the
+   checks for holes, gaps, pins and lettering are off; `set_cad_checks(true)` if it is really a CAD part.
 4. `find_orientations` → pick the first unless the user has a reason. Its `up` is the build
    direction you pass to everything else.
 5. `check_print(up)` → findings (each with plain `title`, `detail`, `why` and `fixes` for the design,
