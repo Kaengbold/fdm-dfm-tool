@@ -4,8 +4,8 @@ An orientation is described by its build direction ``up``: the unit vector in
 part coordinates that will point to +Z on the printer. Nothing is rotated while
 scoring; heights are just projections onto ``up``.
 
-All support numbers are rough proxies: support volume assumes every overhang
-needs a column down to the bed, even when it would land on the part itself.
+The initial search uses rough support proxies. Finalists are ranked again with
+sliced support weight, bed contact, print time and the existing bed checks.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .mesh import Mesh
+from .profile import Profile
 
 # Per-face classes, shared with the web viewer colour map.
 OK, BORDERLINE, NEEDS_SUPPORT, BED = 0, 1, 2, 3
@@ -30,11 +31,11 @@ class OrientationSettings:
     coarse_faces: int = 20_000  # above this, pre-rank candidates on a sample
     fine_faces: int = 200_000  # finalists are re-scored on a sample this big (the sliced refinement checks them after)
     refine_candidates: int = 10
-    # Score weights (dimensionless terms, lower score is better).
+    # Search proxy weights (dimensionless terms, lower score is better).
     w_support_area: float = 1.0
     w_support_volume: float = 1.0
     w_height: float = 0.15
-    w_bed_contact: float = 0.5  # bonus for a big footprint: only warping materials need it (see api.orientation_settings)
+    w_bed_contact: float = 0.5  # search bonus; sliced finalists get at least 0.25 (see rank_finalists)
     # Hobbyist parts should sit on a real flat face: no/tiny bed contact means brims, rafts or
     # supports just to hold the part, poor first layers and a tilted part that's hard to slice.
     w_small_bed: float = 3.0
@@ -48,6 +49,7 @@ class OrientationSettings:
     # and for a first layer made only of thin strips.
     w_small_spots: float = 0.5
     w_thin_first_layer: float = 1.0
+    w_print_time: float = 0.25
 
 
 @dataclass
@@ -259,6 +261,78 @@ def stability_term(height, bed_area, s: OrientationSettings):
     width = 2.0 * np.sqrt(np.maximum(bed_area, 1e-6) / np.pi)
     aspect = np.asarray(height) / width
     return s.w_tipping * np.clip((aspect - s.tip_aspect) / s.tip_aspect, 0.0, 1.0)
+
+
+def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, settings: OrientationSettings,
+                   profile: Profile, support_fill: float,
+                   extra: tuple[OrientationResult, ...] = ()) -> list[OrientationResult]:
+    """Replace search proxies with the numbers shown to the user, only for finalists.
+
+    Lower is better. Support costs w_support_volume (1 balanced, 1.5 speed, 2.5
+    material) times displayed support grams / the grams of a support-filled
+    part-sized cube (L is the search's characteristic length; fill is 25%).
+    Do not also charge projected overhang area or scars: neither measures support
+    weight, and summing areas across sampled layers favoured tall edge poses.
+    Height retains w_height (0.15 balanced, 0.4 speed, 0.1 material) times height/L.
+    Contact costs w_small_bed=3 times max(1-fraction/0.15, 0), plus a bounded bonus of
+    max(w_bed_contact, 0.25)*fraction/(1+fraction), fraction=bed_area/L squared.
+    Even PLA benefits from contact; the smooth bonus still distinguishes large
+    footprints without letting them overwhelm support, strength or marked faces.
+
+    Time uses the app's existing _estimate, including walls, infill, cooling and
+    layer-change overhead, on the same up-to-160 sections as its bed checks.
+    It costs w_print_time=0.25 times minutes / the fastest finalist's minutes.
+    Thus a twice-as-long print costs 0.25 extra, not just a taller bounding box.
+    Existing penalties stay: stability up to 1, small spots 0.5 each (up to 3),
+    thin first-layer share times 1, plus strength and marked-face preferences.
+
+    Fit comes first, then no tipping_risk/small_bed_contact, then the Pareto front
+    of displayed support grams, contact and height, then score. Hard guards stop
+    a proxy or another preference recommending an avoidably unstable/dominated
+    pose. No candidate outside this short list is sliced or checked here.
+    """
+    from .checks import _bed_findings, _estimate, orient, slice_mesh
+    from .progress import report
+    from .profile import load_data
+
+    size = _size(mesh)
+    support_scale = size**3 * support_fill / 1000 * profile.material["density_g_cm3"]
+    thresholds = load_data("thresholds")
+    times, risky = {}, {}
+    for index, result in enumerate([*results, *extra]):
+        report(index / (len(results) + len(extra)), "Checking bed contact and print time")
+        layers = slice_mesh(orient(mesh, placed[id(result)][0]), profile.layer_height, 160)
+        findings = _bed_findings(layers, profile, thresholds)
+        risky[id(result)] = any(finding["rule"] in {"tipping_risk", "small_bed_contact"} for finding in findings)
+        times[id(result)] = _estimate(layers, profile)["print_time_min"]
+    fastest = min(times[id(result)] for result in results)
+    for result in [*results, *extra]:
+        fraction = result.bed_area / size**2
+        terms = {
+            "support": settings.w_support_volume * round(result.support_grams, 1) / support_scale,
+            "bed": settings.w_small_bed * float(np.clip(1 - fraction / settings.good_bed_fraction, 0, 1))
+            - max(settings.w_bed_contact, 0.25) * fraction / (1 + fraction),
+            "time": settings.w_print_time * times[id(result)] / fastest,
+        }
+        for name, value in terms.items():
+            result.penalize(name, value - result.terms.get(name, 0.0))
+
+    def eligibility(result):
+        return not placed[id(result)][1]["fits"], risky[id(result)]
+
+    def dominated(result):
+        values = (round(result.support_grams, 1), -result.bed_area, result.height)
+        for other in results:
+            if eligibility(other) != eligibility(result):
+                continue
+            alternative = (round(other.support_grams, 1), -other.bed_area, other.height)
+            if all(left <= right for left, right in zip(alternative, values)) and any(
+                left < right for left, right in zip(alternative, values)
+            ):
+                return True
+        return False
+
+    return sorted(results, key=lambda result: (*eligibility(result), dominated(result), result.score))
 
 
 def _bed_mask(nz, z, mesh, s):
