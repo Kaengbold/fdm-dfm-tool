@@ -340,8 +340,99 @@ def main():
             return f"{rows} nozzle rows; strength goal -> {walls} walls"
         run.step("nozzle comparison + goal", nozzles_and_goal)
 
-        def design():
+        def suggestion_selection():
             run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("() => fdm.steps.go('design')")
+            boxes = page.locator("#edits input[type=checkbox]")
+            count = boxes.count()
+            assert count > 0, "no suggestions to choose"
+            assert page.locator("#edits input:checked").count() == 0, "fresh suggestions ticked"
+            assert page.locator("#apply-edits").is_disabled(), "empty selection can be applied"
+            page.click("#edits-all")
+            assert page.locator("#edits input:checked").count() == count
+            page.click("#edits-none")
+            assert page.locator("#edits input:checked").count() == 0
+            boxes.first.check()
+            chosen = page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)")
+            run.act(lambda: page.dispatch_event("#param-teardrop_angle_deg", "change"))
+            assert page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)") == chosen, "re-suggest lost ticks"
+            return f"{count} unticked suggestions; all, none and re-suggest ticks kept"
+        run.step("suggestions start unticked and keep user choices", suggestion_selection)
+
+        def project_suggestion_ticks():
+            import base64
+            import json
+
+            # A 45-degree tilt gives several drooping faces: check both a tick and an untick.
+            fixture = OUT / "suggestion_ticks_start.json"
+            fixture.write_text(json.dumps({"format": "fdm-check-project", "version": 1, "mode": "both", "up": [0, 1, -1],
+                                           "part": {"name": "l_bracket.stl", "stl": base64.b64encode((ROOT / "web/samples/l_bracket.stl").read_bytes()).decode("ascii")}}), encoding="utf-8")
+            run.act(lambda: page.set_input_files("#file", str(fixture)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            page.evaluate("() => fdm.steps.go('fits')")
+            row = page.locator("#fits li", has_text="Ø6.0 mm hole")
+            row.locator(".fit:not(.fastener) input").fill("6")
+            run.act(lambda: row.get_by_role("button", name="Size it").click())
+            requested = page.locator("#edits label", has_text="sliding fit").locator("input")
+            assert requested.is_checked(), "direct request did not start ticked"
+            page.click("#edits-none")  # In particular, the explicit untick of a direct request must survive.
+            optional = page.evaluate("() => fdm.state.edits.findIndex(e => !e.id.startsWith('fit-'))")
+            assert optional >= 0, "no optional suggestion"
+            page.locator("#edits input").nth(optional).check()
+            edits = page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))")
+            assert True in edits.values() and False in edits.values(), edits
+            page.evaluate("""async () => {
+              const r = await fdm.call('regions'), s = fdm.state, cls = s.options[s.active].face_classes;
+              const ids = new Uint32Array(r.face_regions.slice().buffer), counts = new Map();
+              for (let f = 0; f < cls.length; f++) if (cls[f] === 2) counts.set(ids[f], (counts.get(ids[f]) ?? 0) + 1);
+              s.marks = r.regions.filter(r => r.area_mm2 >= 20 && counts.has(r.id)).map(r => ({ region: r.id, kind: 'clean' }));
+            }""")
+            page.evaluate("() => fdm.steps.go('extra')")
+            run.act(lambda: page.click("#vol-suggest"))
+            assert page.locator("#vol-suggest-list input").count() >= 2, "need two suggested boxes"
+            page.locator("#vol-suggest-list input").first.check()
+            box_choices = "() => Object.fromEntries(fdm.state.suggested.map(v => [JSON.stringify([v.kind, v.from.region ?? null, v.from.point ?? null, v.from.normal ?? null]), v.use]))"
+            boxes = page.evaluate(box_choices)
+            assert True in boxes.values() and False in boxes.values(), boxes
+            with page.expect_download() as dl:
+                page.evaluate("() => document.getElementById('dl-project').click()")
+            out = OUT / "suggestion_ticks.json"
+            dl.value.save_as(out)
+            saved = json.loads(out.read_text(encoding="utf-8"))
+            assert {k: saved["edit_selections"][k] for k in edits} == edits
+            assert {k: v["use"] for k, v in saved["suggested_boxes"].items()} == boxes
+            # Reorder saved boxes: their choices belong to their source, never to a list position.
+            saved["suggested_boxes"] = dict(reversed(list(saved["suggested_boxes"].items())))
+            out.write_text(json.dumps(saved), encoding="utf-8")
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            assert page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))") == edits
+            assert page.evaluate(box_choices) == boxes
+            assert page.locator("#edits input:checked").count() == sum(edits.values())
+            assert page.locator("#vol-suggest-list input:checked").count() == sum(boxes.values())
+            run.act(lambda: page.dispatch_event("#param-teardrop_angle_deg", "change"))
+            run.act(lambda: page.click("#vol-suggest"))
+            assert page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))") == edits
+            assert page.evaluate(box_choices) == boxes, "re-suggest lost box choices"
+            # A pre-ticks file keeps today's defaults, including a selected direct size request.
+            del saved["edit_selections"], saved["suggested_boxes"]
+            old = OUT / "suggestion_ticks_old.json"
+            old.write_text(json.dumps(saved), encoding="utf-8")
+            run.act(lambda: page.set_input_files("#file", str(old)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            defaults = page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)")
+            assert defaults and all(k.startswith("fit-") for k in defaults), defaults
+            assert page.locator("#vol-suggest-list input").count() == 0, "old file inherited pending boxes"
+            run.act(lambda: page.click("#vol-suggest"))
+            assert page.locator("#vol-suggest-list input:checked").count() == 0
+            return f"{len(edits)} design choices and {len(boxes)} box choices restored by key; old-file defaults kept"
+        run.step("project keeps suggestion ticks and unticks", project_suggestion_ticks)
+
+        def design():
+            if not page.locator("input[name=mode][value=both]").is_checked():
+                run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             run.act(lambda: page.click("[data-sample=l_bracket]"))
             options = page.evaluate("() => fdm.state.options")
             cards = page.locator("#options > li")
@@ -357,6 +448,7 @@ def main():
             assert any("Ø8.0" in e for e in edits), f"expected teardrop for the Ø8 hole, got {edits}"
             run.act(lambda: page.fill("#param-teardrop_angle_deg", "30") or page.dispatch_event("#param-teardrop_angle_deg", "change"))
             assert any("30° point" in e for e in page.locator("#edits label").all_inner_texts()), "teardrop angle input had no effect"
+            page.click("#edits-all")
             run.act(lambda: page.click("#apply-edits"))
             again = page.locator("#edits label").all_inner_texts()
             state = page.evaluate("() => ({active: fdm.state.active, up: fdm.state.options[fdm.state.active].up, name: fdm.state.name})")
@@ -386,6 +478,7 @@ def main():
             assert sum("Thicken" in e for e in edits) == 2, f"expected two thin walls to thicken, got {edits}"
             ops = page.evaluate("() => fdm.state.edits.map((e) => e.op)")
             page.evaluate("() => fdm.steps.go('design')")  # previews show while Design changes is in view
+            page.click("#edits-all")
             page.wait_for_timeout(800)
             assert "add" in ops and len(page.evaluate("() => fdm.viewer.ghosts.children.map((c) => c.material.color.getHexString())")) == len(ops)
             run.act(lambda: page.click("#apply-edits"))
@@ -399,6 +492,7 @@ def main():
             run.act(lambda: page.click("[data-sample=test_block]"))
             run.act(lambda: page.locator("#options > li").nth(1).click())
             up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
+            page.click("#edits-all")
             assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
             run.act(lambda: page.click("#apply-edits"))
             now = page.evaluate("() => ({ up: fdm.state.options[fdm.state.active].up, version: fdm.state.version })")
@@ -432,6 +526,7 @@ def main():
               marks: fdm.state.marks.map((m) => [m.kind, fdm.state.regionInfo[m.region].normal.map(Math.round)].join()) })""")  # noqa: E731
             before = where()
             page.evaluate("() => fdm.steps.go('design')")
+            page.click("#edits-all")
             assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
             run.act(lambda: page.click("#apply-edits"), 300_000)
             changed = where()
@@ -463,6 +558,7 @@ def main():
             note = page.locator("#fits li", has_text="Ø8.0 mm hole").locator(".fit:not(.fastener) p").inner_text()
             edits = page.locator("#edits label").all_inner_texts()
             assert any("sliding fit" in e for e in edits), edits
+            assert page.locator("#edits label", has_text="sliding fit").locator("input").is_checked(), "sized fit not ticked"
             # The sized hole is the selection: its row marked, a line saying so, its faces coloured.
             assert "picked" in (page.locator("#fits li", has_text="Ø8.0 mm hole").get_attribute("class") or ""), "sized hole not marked"
             selected = page.locator("#fit-selected").inner_text()
@@ -483,6 +579,7 @@ def main():
             edits = page.locator("#edits label").all_inner_texts()
             # Lying in this orientation: the M3 clearance hole (3.4 mm) plus the sideways allowance.
             assert any("Nut pocket for the M3 nut" in e for e in edits) and any("→ Ø3.50 mm hole" in e for e in edits), edits
+            assert page.locator("#edits label", has_text="Nut pocket for the M3 nut").locator("input").is_checked(), "requested nut pocket not ticked"
             assert not any("Teardrop for the horizontal Ø6.0" in e for e in edits), "teardrop at the old size kept"
             return note[:120]
 
@@ -527,6 +624,21 @@ def main():
             return f"{label}: {note[:90]}"
         run.step("slots and flat gaps", flat_gap)
 
+        why = lambda sel: page.evaluate(  # noqa: E731 - the visible reason line under a disabled button (T-402)
+            """(sel) => { const b = document.querySelector(sel); const n = (b.closest('.row, .actions') ?? b).nextElementSibling;
+              return { off: b.disabled, why: n && n.classList.contains('why-off') && !n.hidden ? n.textContent : '' }; }""", sel)
+
+        def disabled_say_why():
+            """T-402: every disabled button in the strength flow says why in text (phones show no tooltips)."""
+            page.evaluate("() => fdm.steps.go('strength')")
+            assert not page.evaluate("() => fdm.state.loads.length"), "test expects a part without loads here"
+            for sel, words in (("#as-fixed", "Tap a face"), ("[data-next=load]", "held"), ("#run-strength", "where it's held and where the load goes"),
+                               ("#run-dynamics", "Strength analysis"), ("#run-topology", "Strength analysis")):
+                got = why(sel)
+                assert got["off"] and words in got["why"], (sel, got)
+            return why("#run-strength")["why"]
+        run.step("disabled buttons say why", disabled_say_why)
+
         def pick_face():
             # Click the centre of the triangle nearest to the camera's view centre that is visible.
             x, y = page.evaluate(
@@ -537,7 +649,10 @@ def main():
             page.mouse.click(x, y)  # first pick may download scipy for face grouping
             page.wait_for_selector("#pick-panel:not([hidden])", timeout=180_000)
             info = page.locator("#pick-info").inner_text()
+            assert why("#as-fixed") == {"off": False, "why": ""}, why("#as-fixed")
             page.click("#as-fixed")
+            assert why("[data-next=load]") == {"off": False, "why": ""}, why("[data-next=load]")
+            assert "add a load" in why("#run-strength")["why"], why("#run-strength")
             return f"{info}; loads: {page.locator('#loads li').all_inner_texts()}"
         run.step("pick a face + mark fixed", pick_face)
 
@@ -731,6 +846,26 @@ def main():
             return text.splitlines()[1][:160] + note
         run.step("find the lightest settings that hold", optimise)
 
+        def visible_setting_reasons():
+            page.evaluate("() => fdm.steps.go('settings')")
+            reasons = page.locator("#settings .setting-reason")
+            assert reasons.count() > 0, "no setting reasons rendered"
+            assert reasons.first.is_visible(), "setting reason needs hovering"
+            assert all(text.strip() for text in reasons.all_inner_texts()), "empty reason line"
+            assert "Hover a row" not in page.locator("#settings-block").text_content()
+            assert page.locator("#settings tr[title]").count() == 0, "duplicate reason tooltip"
+            viewport = page.viewport_size
+            try:
+                page.set_viewport_size({"width": 375, "height": 812})
+                assert reasons.first.is_visible(), "setting reason hidden on phones"
+                assert page.locator("#settings").evaluate(
+                    "table => table.scrollWidth <= table.clientWidth && table.getBoundingClientRect().right <= innerWidth"
+                ), "settings overflow phone width"
+            finally:
+                page.set_viewport_size(viewport)
+            return f"{reasons.count()} visible reason lines; phone width fits"
+        run.step("slicer setting reasons are visible", visible_setting_reasons)
+
         def picked_zone():
             page.evaluate("() => fdm.steps.go('settings')")
             page.click("#zone-pick")
@@ -754,6 +889,10 @@ def main():
 
             conf = zipfile.ZipFile(dl.value.path()).read("Metadata/model_settings.config").decode()
             assert "modifier_part" in conf and 'value="80%"' in conf, "picked zone not in the 3MF"
+            # T-415: after a 3MF download the next steps show, and "Got it" closes them.
+            assert page.evaluate("() => !document.getElementById('after-dl').hidden"), "no next steps after the download"
+            page.evaluate("() => document.getElementById('after-dl-close').click()")
+            assert page.evaluate("() => document.getElementById('after-dl').hidden"), "next steps did not close"
             label = item.locator("strong").inner_text()
             page.click("#zone-card h3")  # Ctrl+Z isn't undo while typing in a field
             page.keyboard.press("Control+z")  # back to a box
@@ -943,16 +1082,34 @@ def main():
             page.click("input[name=goal][value=strength] >> xpath=..")  # slow: checks several orientations
             page.wait_for_selector("#progress:not([hidden])", timeout=30_000)
             page.wait_for_function("() => document.getElementById('progress-bar').value > 0", timeout=30_000)
-            run.act(lambda: page.click("#working-cancel"), 60_000)
+            # Record before clicking: the restarting message may be gone by the time act returns.
+            page.evaluate("""() => {
+                window.cancelStatuses = [];
+                const status = document.getElementById('status');
+                const observer = new MutationObserver(() => {
+                    cancelStatuses.push({ text: status.textContent,
+                        working: !document.getElementById('working').hidden,
+                        progress: !document.getElementById('progress').hidden,
+                        busy: Number(document.body.dataset.busy || 0) });
+                    if (status.textContent === 'Ready') observer.disconnect();
+                });
+                observer.observe(status, { childList: true });
+            }""")
+            run.act(lambda: page.click("#working-cancel"), 240_000)
+            statuses = page.evaluate("() => cancelStatuses")
+            assert [s["text"] for s in statuses] == ["Cancelled. Getting ready again…", "Ready"], statuses
+            assert statuses[0]["working"] and statuses[0]["progress"] and statuses[0]["busy"] > 0, statuses
+            assert not statuses[1]["working"] and not statuses[1]["progress"] and statuses[1]["busy"] == 0, statuses
+            assert page.locator("#working-cancel").is_enabled(), "Cancel stayed disabled after restart"
             status = page.locator("#status").inner_text()
-            assert status.startswith("Cancelled"), status
+            assert status == "Ready", status
             # The restarted engine must have the part again: re-orienting works.
             run.act(lambda: page.click("input[name=goal][value=balanced] >> xpath=.."))
             after = page.evaluate("() => fdm.state.options.length")
             assert after == before, f"{before} options before, {after} after restart"
             kept = page.evaluate("() => fdm.call('session_state')")
             assert kept["tags"] == told["tags"] and kept["fits"] == told["fits"], f"lost on cancel: {told} -> {kept}"
-            return f"{status} | kept {len(kept['tags'])} answer(s), {len(kept['fits'])} fit(s) | after restart: {after} options, {len(findings(page))} findings"
+            return f"{' -> '.join(s['text'] for s in statuses)} | kept {len(kept['tags'])} answer(s), {len(kept['fits'])} fit(s) | after restart: {after} options, {len(findings(page))} findings"
         run.step("progress + cancel", cancel)
 
         def lighter_shape():
@@ -1041,8 +1198,7 @@ def main():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             boxes = page.locator("#edits label")
             for i in range(boxes.count()):  # keep only the teardrop
-                if "Teardrop" not in boxes.nth(i).inner_text():
-                    boxes.nth(i).locator("input").uncheck()
+                boxes.nth(i).locator("input").set_checked("Teardrop" in boxes.nth(i).inner_text())
             run.act(lambda: page.click("#apply-edits"))
             assert page.locator("#dl-step").is_visible(), "no STEP download after editing a STEP part"
             with page.expect_download(timeout=300_000) as dl:
@@ -1516,6 +1672,92 @@ def main():
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
 
+        def strength_scale():
+            # T-401: a lightly loaded bracket must not look dangerous just because it has a peak.
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const held = r.regions.reduce((a, b) => a.normal[0] < b.normal[0] ? a : b);
+              const top = r.regions.filter((r) => r.normal[2] > 0.99).sort((a, b) => b.area_mm2 - a.area_mm2)[0];
+              fdm.state.loads = [{ region: held.id, kind: "fixed" }, { region: top.id, kind: "force", kg: 5, direction: [0, 0, -1] }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            page.locator(".fea-view select").first.select_option("fi")
+            stretch = page.get_by_label("Stretch the colours", exact=True)
+            assert not stretch.is_checked(), "strength scale should start fixed"
+            top_label = page.locator("#legend .band span").first
+            assert top_label.inner_text() == "100 %+", top_label.inner_text()
+            assert page.locator("#legend .band-0").inner_text() == "0 %"
+            need = page.evaluate("() => fdm.state.strength.required_safety")
+            assert f"×{need:g} safety" in page.locator("#legend small").inner_text()
+            assert page.evaluate("""async () => {
+              const { fieldColor } = await import('./viewer.js');
+              const colour = (v) => fieldColor(v, undefined, true);
+              return !colour(0.9999).equals(colour(1)) && colour(1).equals(colour(2));
+            }"""), "fixed colours must turn red at 100%, with higher values clamped"
+
+            def colour_counts(section=False):
+                return page.evaluate("""async section => {
+                  const { fieldColor } = await import('./viewer.js');
+                  const v = fdm.viewer, result = fdm.state.strength;
+                  const colours = section ? v.section.instanceColor : v.field.mesh.geometry.getAttribute('color');
+                  const floats = (b) => new Float32Array(b.slice().buffer);
+                  let values = floats(section ? result.elements.fi : result.vertex_fi);
+                  if (section) {
+                    const positions = v.field.mesh.geometry.getAttribute('position').array;
+                    let low = Infinity, high = -Infinity;
+                    for (let i = 2; i < positions.length; i += 3) {
+                      low = Math.min(low, positions[i]); high = Math.max(high, positions[i]);
+                    }
+                    const cut = Number([...document.querySelectorAll('.fea-view input[type=range]')].at(-1).value);
+                    const at = low + cut * (high - low), centers = floats(result.elements.centers);
+                    values = values.filter((_, i) => v.toShown([...centers.subarray(3 * i, 3 * i + 3)])[2] <= at);
+                  }
+                  let red = 0, blue = 0, mismatched = Number(values.length !== colours.count);
+                  for (let i = 0; i < colours.count; i++) {
+                    const r = colours.getX(i), g = colours.getY(i), b = colours.getZ(i);
+                    if (r > 0.9 && g < 0.2 && b < 0.2) red++;
+                    if (b > r) blue++;
+                    const expected = fieldColor(Math.fround(values[i] * result.required_safety) / 100, undefined, true);
+                    if (Math.max(Math.abs(r - expected.r), Math.abs(g - expected.g), Math.abs(b - expected.b)) > 1e-6) mismatched++;
+                  }
+                  return { red, blue, total: colours.count, mismatched };
+                }""", section)
+
+            strong = colour_counts()
+            assert strong["red"] == 0 and strong["blue"] > strong["total"] / 2 and strong["mismatched"] == 0, strong
+            key = page.evaluate("() => fdm.viewer.fieldKey")
+            surface = page.evaluate("() => fdm.viewer.field.mesh.uuid")
+            stretch.check()
+            stretched_label = top_label.inner_text()
+            peak = page.evaluate("() => Math.round(fdm.state.strength.fi_max_pct * fdm.state.strength.required_safety)")
+            assert stretched_label == f"{peak} %" and stretched_label != "100 %+", stretched_label
+            assert page.evaluate("() => fdm.viewer.fieldKey") != key, "stretch did not refresh the surface"
+            assert page.evaluate("() => fdm.viewer.field.mesh.uuid") != surface, "stretch did not rebuild the surface"
+            stretch.uncheck()
+            page.locator(".fea-view select").nth(1).select_option("z")
+            cut = colour_counts(section=True)
+            assert cut["total"] > 0 and cut["mismatched"] == 0, cut
+            page.locator(".fea-view select").nth(1).select_option("")
+            page.locator(".fea-view select").first.select_option("vm")
+            assert not stretch.is_visible(), "stretch switch should only show for strength used"
+            page.locator(".fea-view select").first.select_option("fi")
+            page.evaluate("() => { fdm.state.loads.find((l) => l.kind === 'force').kg = 500; }")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            assert top_label.inner_text() == "100 %+"
+            overloaded = colour_counts()
+            assert overloaded["red"] > 0 and overloaded["mismatched"] == 0, overloaded
+            page.locator(".fea-view select").nth(1).select_option("z")
+            overloaded_cut = colour_counts(section=True)
+            assert overloaded_cut["red"] > 0 and overloaded_cut["mismatched"] == 0, overloaded_cut
+            page.locator(".fea-view select").nth(1).select_option("")
+            return f"5 kg: {strong}; stretched top {stretched_label}; 500 kg: red weak spot"
+        run.step("strength colours: fixed allowed load and optional stretch", strength_scale)
+
         def load_at_an_angle():
             """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
             to the tapped face, with the arrow shown on the part while it's set."""
@@ -1704,6 +1946,13 @@ def main():
             run.act(lambda: page.click("#vol-suggest"))
             kinds = page.evaluate("() => fdm.state.suggested.map((v) => v.kind)")
             assert "blocker" in kinds, f"no no-support box suggested: {kinds} | {page.locator('#status').inner_text()}"
+            assert page.locator("#vol-suggest-list input:checked").count() == 0, "suggested boxes arrived ticked"
+            assert page.locator("#vol-use").is_disabled()
+            page.click("#vol-all")
+            assert page.locator("#vol-suggest-list input:checked").count() == len(kinds)
+            page.click("#vol-none")
+            assert page.locator("#vol-suggest-list input:checked").count() == 0
+            page.click("#vol-all")
             dashed = page.evaluate("() => fdm.viewer.zones.children.some((c) => c.isLineSegments && c.material.isLineDashedMaterial)")
             assert dashed, "suggestions not drawn dashed"
             page.click("#vol-use")
@@ -1738,23 +1987,84 @@ def main():
             return f"{folded} explanations behind an ⓘ; walk-through with {stops} stops here"
         run.step("less text: ⓘ explanations and the Explain walk-through", less_text)
 
-        def simple_compute():
-            """T-374: Simple shows what matters most (balanced / strong / fast / light) and a Compute button that
-            ticks off what the tool does."""
+        def simple_result():
+            """T-374 / T-397: one primary per step, with missing work started by Show my result."""
+            def primary_at_foot(button):
+                visible = page.locator(".panes button.primary:visible, .pane-foot button.primary:visible")
+                assert visible.count() == 1, visible.all_inner_texts()
+                assert visible.first.get_attribute("id") == button, visible.all_inner_texts()
+                assert page.locator(f".pane-foot #{button}").is_visible(), f"{button} is not at the foot"
+
             page.click("input[name=level][value=simple] >> xpath=..")
             page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
+            primary_at_foot("step-next")
             run.act(lambda: page.click("[data-sample=mushroom]"))
-            page.evaluate("() => fdm.steps.go('have')")
             assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
-            run.act(lambda: page.click("#compute"), 300_000)
+            assert page.locator("#compute").count() == 0, "redundant Compute button remains"
+            primary_at_foot("step-next")
+            page.evaluate("() => { window.simpleCompleted = { options: fdm.state.options, check: fdm.state.check }; }")
+            before = run.done()
+            page.click("#step-next")
+            assert page.evaluate("() => fdm.steps.current") == "strength"
+            primary_at_foot("step-next")
+            # T-414: with no load set, the step says it is optional and the foot button says it skips it.
+            assert page.locator("#step-next").inner_text() == "Skip: show my result"
+            assert "Optional" in page.locator("[data-pane=strength]").inner_text()
+            page.click("#step-next")
+            assert run.done() == before, "completed checks were run again with no load set"
             items = page.locator("#compute-steps li")
             states = items.evaluate_all("lis => lis.map((li) => li.className)")
-            assert len(states) == 4 and all(c in ("done", "skipped") for c in states), states
+            assert states == ["done", "done", "skipped", "done"], states
+            assert "no load set" in items.nth(2).inner_text()
             assert page.evaluate("() => fdm.steps.current") == "result"
-            page.click("input[name=level][value=expert] >> xpath=..")
-            assert page.locator("#compute").is_hidden(), "Compute is for Simple only"
+            primary_at_foot("dl-3mf")
+            with page.expect_download() as download:
+                run.act(lambda: page.click("#dl-3mf"))
+            assert download.value.suggested_filename.endswith(".3mf")
+
+            # Set loads without running Check strength. Show my result must supply that missing work.
+            page.evaluate("""async () => {
+              const r = await fdm.call('regions'), s = fdm.state;
+              s.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              s.regionInfo = r.regions;
+              const flat = r.regions.map((x, i) => ({ ...x, i })).filter((x) => x.kind === 'flat').sort((a, b) => b.area_mm2 - a.area_mm2);
+              const cap = flat[0];
+              const end = flat.find((x) => x.normal[0] * cap.normal[0] + x.normal[1] * cap.normal[1] + x.normal[2] * cap.normal[2] < -0.9 && x.area_mm2 < cap.area_mm2 / 2);
+              s.loads = [{ region: cap.i, kind: 'fixed' }, { region: end.i, kind: 'force', kg: 0.01, direction: 'pull', case: 1 }];
+            }""")
+            page.click("#step-back")
+
+            def show_missing_result():
+                assert page.locator("#step-next").inner_text() == "Show my result", "a load is set: not a skip"
+                page.click("#step-next")
+                assert page.evaluate("() => fdm.steps.current") == "result"
+                assert page.locator("#compute-steps li.working").is_visible(), "missing work has no progress list"
+                primary_at_foot("dl-3mf")
+
+            run.act(show_missing_result, 300_000)
+            assert page.evaluate("() => !!fdm.state.strength"), "missing strength check was skipped"
+            assert items.evaluate_all("lis => lis.every(li => li.className === 'done')")
+            assert page.evaluate("() => fdm.state.options === simpleCompleted.options && fdm.state.check === simpleCompleted.check"), "orientation or printability was needlessly repeated"
+            page.evaluate("() => { window.simpleStrength = fdm.state.strength; }")
+            before = run.done()
+            page.click("#step-back")
+            page.click("#step-next")
+            assert run.done() == before, "a current strength result was run again"
+            assert page.evaluate("() => fdm.state.strength === simpleStrength")
+            # An old strength result is no longer sufficient after the load changes.
+            page.click("#step-back")
+            page.evaluate("() => { fdm.state.loads[1].kg = 0.02; }")
+            run.act(show_missing_result, 300_000)
+            assert page.evaluate("() => fdm.state.strength !== simpleStrength"), "changed load reused stale strength"
+
+            for level in ("basic", "advanced", "expert"):
+                page.click(f"input[name=level][value={level}] >> xpath=..")
+                assert page.locator("#blk-download #dl-3mf.primary.big").count() == 1, f"download not restored in {level}"
+                assert page.locator("#run-strength.primary").count() == 1, f"strength action not restored in {level}"
+                assert page.locator(".sa-next.primary").count() == 2, f"strength stages not restored in {level}"
+            page.evaluate("() => { delete window.simpleCompleted; delete window.simpleStrength; }")
             return " | ".join(items.all_inner_texts())
-        run.step("simple: goal and Compute", simple_compute)
+        run.step("simple: one primary and missing work on Result", simple_result)
 
         def tick_and_recheck():
             """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
@@ -1774,12 +2084,15 @@ def main():
             run.act(lambda: page.get_by_role("button", name="How can I make it stronger?").click(), 300_000)
             recheck = page.get_by_role("button", name="Re-check with the ticked changes")
             assert recheck.is_disabled(), "re-check enabled with nothing ticked"
+            recheck_why = page.locator("#strength-options .why-off")
+            assert recheck_why.is_visible() and "Tick" in recheck_why.inner_text(), "no reason under the re-check button"
             page.locator("#strength-options summary", has_text="Slicer settings").evaluate("s => s.parentElement.open = true")
             ticks = page.locator("#strength-options li.slicer input[type=checkbox]")
             assert ticks.count() >= 2, f"{ticks.count()} slicer ideas"
             ticks.nth(0).check()
             ticks.nth(1).check()
             assert page.locator("#strength-options li.slicer input:checked").count() == 2 and recheck.is_enabled()
+            assert not recheck_why.is_visible(), "reason still shown with changes ticked"
             before = page.evaluate("() => ({ ...fdm.state.overrides })")
             run.act(lambda: recheck.click(), 300_000)
             after = page.evaluate("() => ({ ...fdm.state.overrides })")

@@ -446,7 +446,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: "Will it hold?" shows "Not finished yet: rough estimate, not yet checked against real test prints (T-032)."
   - Do: remove "(T-032)" from the text. The bigger change (a small "Estimate" badge instead of the dashed yellow frame) is T-444; this task is only the wording, so it can ship today.
   - Done when: no `T-` number is visible anywhere in the app (`grep -n "T-[0-9]" web/index.html` finds only comments).
-- [ ] **T-397 P1** [A] Simple, step "What you have": two main buttons ("Compute" and "Next: Will it hold?"), and Next reaches the result without Compute. · files: `web/index.html` (`#compute`), `web/app.js` (`compute`), `web/steps.js` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-397-one-primary`)
+- [x] **T-397 P1** [A] Simple, step "What you have": two main buttons ("Compute" and "Next: Will it hold?"), and Next reaches the result without Compute. · files: `web/index.html` (`#compute`), `web/app.js` (`compute`), `web/steps.js` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-397-one-primary`)
+  - Outcome: Simple has one primary at the panel foot; Result reuses completed checks and runs missing/stale strength work with progress. Browser smoke: 0 failures (local screenshot timeout 120 s; T-469); engine: 314 passed.
   - Seen: both are solid green. DESIGN.md says one primary per step. The checks already run when the part loads, so "Compute" only repeats them.
   - Do: remove the "Compute" button from the pane. Keep its good part, the list of what the tool is doing (`#compute-steps`): show it on the Result step while work is running (the last step's button "Show my result" starts it when something is still missing, e.g. strength with loads set).
   - Done when: every step in Simple has exactly one primary button, in the panel foot; the browser test for T-374 is updated.
@@ -455,7 +456,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: L-bracket, Basic, Option 1. The reason line comes from the quick face test in `explain`, the cost line from the sliced support weight (`support_g < 1` → "No support"). They disagree for small areas.
   - Do: one source. When `support_g` is known, drop the "Needs supports under …" reason and let the cost line speak; or write "A little support (under 1 g)" when the area is > 0 and the weight < 1 g.
   - Done when: no card shows both; unit test on `l_bracket`.
-- [ ] **T-399 P1** [A] Suggested design changes arrive ticked. · files: `web/app.js` (`suggestDesign`, where `selected` is set) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-399-suggestions-unticked`)
+- [x] **T-399 P1** [A] Suggested design changes arrive ticked. · files: `web/app.js` (`suggestDesign`, where `selected` is set) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-399-suggestions-unticked`) · outcome: Suggestions start unticked, direct requests and per-version choices stay selected across re-suggestions, and Tick all / None control each list; local browser smoke passed with 0 failures and pytest passed all 308 tests.
   - Seen: on the L-bracket all 8–9 suggestions were ticked on arrival; "Apply selected changes" then changes the part's shape in ways the user didn't ask for (see T-436).
   - Do: start every suggestion unticked. Keep ticked only what the user asked for directly (a fit they sized, a screw they set). Add "Tick all" / "None".
   - Done when: a fresh part shows 0 ticked; the browser tests that rely on pre-ticked boxes tick them first.
@@ -464,26 +465,34 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: Hook and L-bracket are plain grey, yet the key lists "Prints fine / May droop / Needs support / On the bed".
   - Do: show only the key entries whose colour is on the part now (count the face classes in `recolor`). No coloured face → no key.
   - Done when: Hook in Simple shows no key; `feature_test` shows only the colours it uses.
-- [ ] **T-401 P2** [A] Strength colours: red means "6 % of the strength used" on a part with ×17.7 safety. · files: `web/app.js` (`strengthView`, `renderLegend`), `web/viewer.js` (`FIELD_BANDS`, `fieldColor`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-401-strength-scale`)
+- [x] **T-401 P2** [A] Strength colours: red means "6 % of the strength used" on a part with ×17.7 safety. · files: `web/app.js` (`strengthView`, `renderLegend`), `web/viewer.js` (`FIELD_BANDS`, `fieldColor`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-401-strength-scale`)
+  - Outcome: "Strength used" colours run 0–100 % of the load the part should carry (with the ×2 / ×3 safety the check asks for), red only at or above it; the cut view and the report use the same scale; "Stretch the colours" (Advanced) shows the old stretched scale. Browser smoke 0 failures (80 steps), engine 314 passed.
   - Seen: L-bracket, 5 kg: the legend runs 0–6 % and the top band is red. The scale stretches to the highest value on the part.
   - Do: for "Strength used (%)" fix the scale to what matters: 0 → 100 % of the allowed load (the safety the check asks for: ×2, or ×3 with a constant load). Red only at or above 100 %. Offer "Stretch the colours" as a switch for people who want to see the pattern.
   - Done when: the same run shows the L-bracket mostly blue, no red; a part that fails shows red at the weak spot.
-- [ ] **T-402 P2** [A] Disabled buttons don't say why. · files: `web/app.js`, `web/index.html` · owner: —
+- [x] **T-402 P2** [A] Disabled buttons don't say why. · files: `web/app.js`, `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-402-disabled-reasons`)
+  - Outcome: `offWhy()` disables a button and shows its reason as a muted line under its row (pick buttons, stage Next buttons, Check strength / lightest settings, shaking and knocks, lighter shape, Re-check). Browser smoke: 81 steps, 0 failures (one earlier run hung in an unrelated long step; passed alone and on re-run).
   - Seen (re-checked 2026-11-15, after T-369): in the guided flow "Holds here" and "Load here" carry the tooltip "Tap a face first", which a phone doesn't show; "Next: where the load goes", "Check strength" and "Find the lightest settings that hold" are greyed out with no reason at all.
   - Do: every disabled action shows its reason as text next to it (not only a tooltip: phones have none), e.g. "Tap a face and mark where it is held and where the load goes". Same for `#run-dynamics`, `#run-topology`.
   - Done when: no disabled button without a visible reason in any step.
-- [ ] **T-403 P2** [A] After Cancel, say that the engine is restarting. · files: `web/app.js` (`cancelEngine`, `busy`), `tools/e2e_smoke.py` (progress + cancel) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-403-cancel-restarting`)
+- [x] **T-403 P2** [A] After Cancel, say that the engine is restarting. · files: `web/app.js` (`cancelEngine`, `busy`), `tools/e2e_smoke.py` (progress + cancel) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-403-cancel-restarting`)
+  - Outcome: After Cancel the status says "Cancelled. Getting ready again…" with the working bar until the part is back in the new engine, then "Ready"; Cancel is off during the restart. Browser smoke: 0 failures (engine code unchanged).
   - Seen: Cancel works, but the next action waited about 11 s (a new worker boots and gets the part again) with only "Cancelled — the last result stays shown."
   - Do: status "Cancelled. Getting ready again…" with the working bar until `restoring` is done, then "Ready".
   - Done when: the browser test's cancel step sees both messages.
-- [ ] **T-404 P2** [A] Slicer settings: the reason is only in a hover tooltip. · files: `web/app.js` (`renderSettings`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-404-setting-reasons`)
+- [x] **T-404 P2** [A] Slicer settings: the reason is only in a hover tooltip. · files: `web/app.js` (`renderSettings`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-404-setting-reasons`)
+  - Outcome: each slicer setting shows its reason as a muted line under its name (no hover needed, fits phone width); the "Hover a row for why" hint and duplicate tooltip are gone. Browser smoke 0 failures (80 steps), engine 314 passed.
   - Seen: "Hover a row for why" — not findable, and not there on a touch screen.
   - Do: show the reason as a muted second line under each setting's name. (T-427 later turns the table into a difference list; this is the small step.)
   - Done when: every row shows its reason without hovering.
+  - Progress: visible muted reasons and phone-width smoke assertion implemented; 314 pytest tests pass and the new smoke step passes (10 reason lines). Full smoke has two failures: blocked-storage startup timeout (180 s), and WebGL shader validation errors during settings optimisation. Await green validation before completion, push and PR.
+
+- [x] **T-468 P3** [A] Keep ticked design suggestions and suggested boxes in project files. · files: `core/fdmcore/project.py` (`FIELDS`), `web/app.js` (`dl-project`, `openProject`), tests on both sides · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-468-project-ticks`) · outcome: Projects save design-suggestion and suggested-box ticks and unticks by stable key (edit id; box kind + source) and restore them after the suggestions are rebuilt; old files keep today's defaults. Engine 318 passed, browser smoke 84 passed / 0 failed.
+  - Do: extend the shared Python/browser project format to save and restore ticks and unticks for design suggestions and suggested boxes. Cover both readers/writers and the browser project round trip.
 
 ### B. Advice that must be right
 
-- [ ] **T-405 P1** [B] The recommended orientation loses against the tool's own numbers. · files: `core/fdmcore/orientation.py` (`_score`, `OrientationSettings` weights, `stability_term`), `core/fdmcore/api.py` (`orientations`), `core/tests/test_orientation*.py` · owner: —
+- [ ] **T-405 P1** [B] The recommended orientation loses against the tool's own numbers. · files: `core/fdmcore/orientation.py` (`_score`, `OrientationSettings` weights, `stability_term`), `core/fdmcore/api.py` (`orientations`), `core/tests/test_orientation*.py` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-405-orientation-ranking`)
   - Seen (`web/samples/feature_test.stl`, PLA, P1S, Balanced): Option 1 "Recommended" stands the 100 × 60 × 40 mm plate on a 400 mm² edge, 60 mm tall, ≈ 3 g support. Option 2 lies flat on 5,973 mm² with ≈ 2 g support and is "Ranked lower: needs more support". The recommended pose then gets the finding "Tall part can tip over". Also `l_bracket`: recommended 475 mm² contact against 1,772 mm². And the 80,000-triangle blob is stood on a point and gets "Small contact with the bed".
   - Do: (1) Rank with the same numbers the cards show: sliced support weight (`support_g`), bed contact, height. (2) After the checks ran on the finalists, an option whose own check says `tipping_risk` or `small_bed_contact` may not be first while another finalist has neither. (3) Add the print time of each finalist to the score (taller = longer). (4) Write down the weights and why in the docstring.
   - Done when: `feature_test` and `tray`-like flat parts are recommended flat; no recommended option has more support *and* less contact *and* more height than another option; regression tests for `feature_test`, `l_bracket`, the corpus parts (expected picks in `core/tests/test_corpus.py` still hold).
@@ -491,10 +500,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: "Ranked lower: needs more support" on the option with *less* support weight (2 g against 3 g).
   - Do: build the sentence from the numbers shown on the two cards (support g, contact mm², height, time), not from the internal score part. If no shown number is worse, say what is (e.g. "a face you marked gets support marks").
   - Done when: a test goes over all sample parts and fails when a "needs more support" option has ≤ the support weight of the pick (same for "prints taller").
-- [ ] **T-407 P1** [B] Finding texts guess at the user's design. · files: `core/fdmcore/data/rules.yaml` · owner: —
+- [x] **T-407 P1** [B] Finding texts guess at the user's design. · files: `core/fdmcore/data/rules.yaml` · owner: Claude, built with Gemini Flash (`task/T-407-measured-why`)
   - Seen: any narrow gap says "The CAD model shows separate moving components in a print-in-place hinge or bearing"; any small hole says "The CAD model has an exact diameter hole for a bolt or pin"; the blob got "The CAD model shows crisp letters, logos, or shallow grooves". The `why` texts were drafted by an LLM as stories.
   - Do: rewrite every `why` to say only what the check measured and what happens when printing, in one or two short sentences, e.g. "Two faces are 0.15 mm apart. Gaps under 0.2 mm fuse into one piece." No "The CAD model shows …", no guessed purpose. The measured numbers already sit in each finding's `detail`.
   - Done when: `grep -c "The CAD model" core/fdmcore/data/rules.yaml` is 0; each `why` is ≤ 2 sentences (this also serves T-382).
+  - Outcome: all 51 `why` texts rewritten (drafted by Gemini Flash in three chunks, reviewed and three corrected by hand); no "The CAD model" left, each ≤ 2 sentences, nothing else in the file changed; rule tests pass.
 - [ ] **T-408 P1** [B] Know what kind of model it is: CAD part or organic shape (scan, sculpt, figure). · files: `core/fdmcore/api.py` (`load`), `core/fdmcore/regions.py`, `core/fdmcore/checks.py`, `core/fdmcore/features.py`, `web/app.js` · owner: —
   - Seen: the blob (no flat face, no hole) got "Raised or engraved detail too shallow", "Fine detail squashed on the bed", and many `rounded_edge` features.
   - Do: at load, measure the share of the surface that lies in flat or cylindrical regions (`find_regions`). Below a threshold (to find on the samples + the blob; put it in `thresholds.yaml`) the part is "organic". For organic parts: switch off the checks that need CAD features (`first_layer_detail`, engraved / raised detail, `small_hole_undersized`, feature detection), keep overhang / support / bed contact / tipping / cooling / warping. Return `kind: "cad" | "organic"` from `load`; the app shows "Looks like a sculpted model: checks for holes and fine CAD detail are off" with a switch to turn them on.
@@ -522,11 +532,13 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: Result shows the verdict, then "Copies on the plate", "Grip texture (fuzzy skin)", then the download. Print time and filament are missing (`#stats` sits in the Problems pane and isn't moved to Result). Big empty space below.
   - Do: order on Result: (1) verdict, (2) "About 34 min · 11 g of filament · about 0.25 for the filament" on one line, (3) the top three problems, each with a small picture of the place (T-423) and its one fix, "Show all" below, (4) the download button, (5) one line "What happens next" (T-415), (6) "More options" closed: copies, grip texture, report, share, slicer settings.
   - Done when: time and grams show in Simple's Result; copies and fuzzy skin are not above the download.
-- [ ] **T-414 P2** [C] "Strength analysis" in Simple: say it's optional. · files: `web/index.html` (pane `strength`), `web/app.js` · owner: —
+- [x] **T-414 P2** [C] "Strength analysis" in Simple: say it's optional. · files: `web/index.html` (pane `strength`), `web/app.js` · owner: Claude, built with Gemini Flash (`task/T-414-strength-optional`)
   - Seen (re-checked 2026-11-15): T-369 is done, the step now guides in three numbered stages with "Show me how". What is left: nothing says the step can be skipped (the foot button "Show my result" does skip it, but reads as the end of the step), and "Check strength" is greyed out without a reason (T-402).
   - Do: a line under the heading "Does something push or pull on it? Optional." and, while no load is set, the foot button reads "Skip: show my result"; once a load is set and checked it reads "Show my result".
   - Done when: a beginner can tell from the screen alone that the step can be skipped.
-- [ ] **T-415 P2** [C] Say what to do after the download. · files: `web/app.js` (after `dl-3mf`), `web/index.html` · owner: —
+  - Outcome: a line under the heading says the step is optional; the foot button reads "Skip: show my result" while no load is set, and "Show my result" once one is (that runs the missing check, T-397). New `skippable` hook in `web/steps.js`; browser test checks both labels.
+- [x] **T-415 P2** [C] Say what to do after the download. · files: `web/app.js` (after `dl-3mf`), `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-415-after-download`)
+  - Outcome: "Next, in your slicer" card with the three steps under the download button, shown on every 3MF download, closed with "Got it". "It printed badly?" waits for T-447 (the failed-print path is off). Browser smoke: 80 steps, 0 failures.
   - Seen: after "Download 3MF for your slicer" nothing more happens. A beginner doesn't know that the file opens in the slicer, or that their own printer and filament profile still has to be picked there.
   - Do: after the download show three short steps: "1 Open the file in OrcaSlicer, Bambu Studio or PrusaSlicer. 2 Pick your printer and filament there as usual. 3 Slice and print: the walls, infill, supports and brim are already set on the part." Add "It printed badly?" → the failed-print path (T-447).
   - Done when: the steps show once per download and can be closed.
@@ -582,7 +594,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 - [ ] **T-425 P1** [F] Layer height from the shape. · files: `core/fdmcore/recommend.py`, `core/fdmcore/checks.py` (`shallow_slope_stairs`, `fine_detail_rough`), `core/fdmcore/export3mf.py` (height ranges exist: `fineWanted` in `web/app.js`) · owner: —
   - Do: thinner layers (e.g. 0.12–0.16 on a 0.4 nozzle) when shallow slopes or fine detail cover a real share of the visible surface; thicker (0.24–0.28) for plain blocks with the goal Fast or Balanced and nothing that needs detail. Where only a height band needs it, keep the existing height ranges and say "thin layers only from 12 to 18 mm".
   - Done when: `detail_plate` and a sloped part get a different layer height than `tray`; time estimates follow.
-- [ ] **T-426 P1** [F] Reasons that name the part. · files: `core/fdmcore/recommend.py` (`put` reasons) · owner: —
+- [ ] **T-426 P1** [F] Reasons that name the part. · files: `core/fdmcore/recommend.py` (`put` reasons) · owner: Claude (`task/T-426-reasons-name-part`)
   - Seen: "Good balance of strength and speed", "Matches your goal", "Good default for a 0.4 mm nozzle": the same on every part.
   - Do: every reason states the fact of this part that led to the value: "3 walls: your thinnest wall is 1.4 mm, so it prints solid", "Brim ears: the base is 100 mm long and ABS lifts from about 45 mm on an open printer", "Supports on: 1,287 mm² hang in the air". Where the value is only the goal's default, say so: "From your goal Balanced; nothing on this part asks for more".
   - Done when: a test fails if two parts with different shape facts get an identical reason text for a part-driven setting.
@@ -660,7 +672,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 - [ ] **T-443 P1** [H] Prove the strength check with real prints (continues T-032). · files: `core/tests/`, `research/`, README "Accuracy" · owner: — · needs the user's printer
   - Do: five to ten small parts with a known load case (hook, bracket, beam, pin; flat and standing), each printed in PLA and PETG, loaded until it breaks (bucket and water, or a luggage scale). Record predicted against real break load in a table in `research/strength_validation.md`, tune the layer-strength factors, and link the table from the "Estimate" badge (T-444). The calibration bar exists (`calibration_part("layer_strength")`).
   - Done when: the table exists with at least five parts, and the typical error is written next to every strength result ("usually within ±x %").
-- [ ] **T-444 P2** [H] "Estimate" badge instead of the dashed "Not finished yet" boxes. · files: `web/style.css` (`.wip`), `web/index.html` (`data-wip`), DESIGN.md · owner: —
+- [ ] **T-444 P2** [H] "Estimate" badge instead of the dashed "Not finished yet" boxes. · files: `web/style.css` (`.wip`), `web/index.html` (`data-wip`), DESIGN.md · owner: Claude, built with Gemini Flash (`task/T-444-estimate-badge`)
   - Seen: "Will it hold?" and "Design changes" sit in a dashed yellow frame with a yellow bar. It reads as "broken".
   - Do: a small pill "Estimate" next to the heading; a click shows one sentence on what that means and, once T-443 is done, how far off it usually is. No frame. Document the badge in DESIGN.md (chips and badges).
   - Done when: no `.wip` frame is left; the badge follows DESIGN.md (no part colours, sentence case).
@@ -682,7 +694,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### J. Reach
 
-- [ ] **T-448 P1** [J] Say clearly where things run and what it costs. · files: README.md, `web/index.html` (a line near the drop zone or in the Guide) · owner: —
+- [x] **T-448 P1** [J] Say clearly where things run and what it costs. · files: README.md, `web/index.html` (a line near the drop zone or in the Guide) · owner: Claude, built with Gemini Flash (`task/T-448-where-it-runs`)
+  - Outcome: README section "Where it runs and what it costs" (browser only, no account / AI / key, free static hosting, Pyodide ~15 MB + scipy ~10 MB on first use, served by the site itself or jsDelivr locally, offline after), one line in the Guide and under the drop zone. Text only.
   - Do: README section "Where it runs": everything is calculated in your browser, on your computer; the site is static files, so hosting it is free and no part ever leaves your computer; the first visit downloads the Python runtime (~15 MB) and, for strength and design tools, scipy (~10 MB) from a public CDN; later visits work offline. Note for anyone hosting it: no server costs, only static bandwidth.
   - Done when: README and the Guide say it in plain words.
 - [ ] **T-449 P1** [J] Publish it (finishes T-071) and make it installable. · files: `.github/workflows/pages.yml`, `web/sw.js`, new `web/manifest.webmanifest`, `web/index.html` · owner: — · needs the user (enable Pages)
@@ -708,7 +721,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: user text is spread over HTML, JS string templates, YAML and Python f-strings. English only for now (PRODUCT.md).
   - Do: don't translate yet. Decide the shape (message keys with parameters; the engine returns key + numbers, the app formats) and move new text to it from now on; write the rule in AGENTS.md. Easiest after T-382 cut the text.
   - Done when: the approach is written down and one pane uses it as the example.
-- [ ] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: —
+- [ ] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: Claude, built with Gemini Flash (`task/T-455-use-cases`)
   - Add under Users: (1) beginner with a downloaded model: "will this print on my A1?" → verdict, time, grams, one file, no CAD words; (2) functional maker with own CAD: bracket, hook, enclosure that must hold → strength, fits, design advice back to CAD; (3) tinkerer with a tuned profile → a real difference to their profile, numbers, pick and choose; (4) small seller / print farm: the same part many times → failure risk, time and cost, saved projects; (5) teacher or club → a report to share and plain reasons; (6) agent user → easy local install.
   - Done when: PRODUCT.md lists them and each new feature task names which one it serves.
 
@@ -761,6 +774,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: the browser test takes about 15 minutes and only runs when a pull request is labelled, so most changes to `web/` go in without it.
   - Do: `python tools/e2e_smoke.py --quick` (about 2 minutes): boot, one sample through Simple to the 3MF download, one finding opened, one level switch, the phone viewport's start screen. Run it on every pull request that touches `web/`; the full run stays on the label.
   - Done when: `--quick` runs under 3 minutes locally and in CI.
+
+- [ ] **T-469 P3** [M] A screenshot timeout aborts the browser suite before it reports the remaining checks. · files: `tools/e2e_smoke.py` (`Run.step`) · owner: —
+  - Seen while testing T-397 on Windows: all assertions through the oversized-part split passed, then `Page.screenshot` exceeded 30 seconds and stopped the run outside the step's error handler. The host had about 400 MB of free RAM afterward.
+  - Do: handle screenshot failures as test failures and continue to the final summary; investigate an appropriate capture timeout on a busy host.
+  - Done when: a timed-out screenshot is reported with its step and the remaining checks still run.
 
 ## Done
 

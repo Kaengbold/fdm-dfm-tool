@@ -6,8 +6,8 @@
 rules:
   long_bridge:
     title: Long bridge with nothing underneath
-    why: The printer tries to stretch molten plastic across a large empty gap. Across long distances, the hot strands
-      droop under gravity and leave a rough, stringy bottom surface.
+    why: This is a long horizontal span with no support underneath. Molten plastic strands droop across the gap, leaving
+      a rough, stringy bottom surface.
     fixes:
     - domain: geometry
       text: Break up the span in CAD by adding an arch, 45-degree angled supports, or a center pillar.
@@ -33,8 +33,8 @@ rules:
     - Teaching Tech — 3D printer calibration: bridging — https://teachingtechyt.github.io/calibration.html#bridging
   too_thin_to_print:
     title: Too thin to print
-    why: This detail is narrower than your printer nozzle's extrusion width. The slicer completely ignores it during
-      slicing, so it will simply be missing from your finished print.
+    why: This feature is thinner than the printer nozzle's extrusion width. The slicer ignores it, so it will be missing
+      from the finished print.
     fixes:
     - domain: geometry
       text: Thicken the feature in your CAD model to at least 0.45 mm so a standard nozzle can trace it.
@@ -54,8 +54,8 @@ rules:
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   small_bed_contact:
     title: Small contact with the bed
-    why: The model has very little surface area touching the build plate compared to its overall volume. The weak
-      grip easily breaks loose mid-print, causing a failed print.
+    why: Very little surface area touches the build plate compared to the size of the part. The weak grip can easily
+      break loose mid-print and ruin the print.
     fixes:
     - domain: geometry
       text: Orient or redesign the model in CAD to create a broad, flat bottom surface for better adhesion.
@@ -77,8 +77,8 @@ rules:
     - OrcaSlicer Wiki — Brim — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_brim
   tipping_risk:
     title: Tall part can tip over
-    why: The part is tall and top-heavy relative to its narrow footprint on the print bed. As the bed shakes and
-      the nozzle pushes against upper layers, the model can snap off the plate and tip over.
+    why: The part is tall and top-heavy over a narrow base on the bed. Nozzle pressure and bed motion can knock it loose
+      and tip it over.
     fixes:
     - domain: geometry
       text: Rotate the part so it lies flat on its broadest side rather than standing upright.
@@ -101,8 +101,8 @@ rules:
     - Prusa Knowledge Base — Skirt and Brim (brim for tall objects with a small base) — https://help.prusa3d.com/article/skirt-and-brim_133969
   tall_thin_feature:
     title: Tall, thin part wobbles
-    why: A long, skinny pin or spire bends and wobbles back and forth as the nozzle pushes molten plastic onto it.
-      This vibration creates messy layer lines, blobbing, or total failure.
+    why: This tall, slender section bends and wobbles as the nozzle pushes against it. The movement causes messy layer
+      lines, blobs, or print failure.
     fixes:
     - domain: geometry
       text: Thicken the pin or add gussets and ribs around the base to stiffen it against bending forces.
@@ -125,8 +125,8 @@ rules:
     - Prusa Knowledge Base — Skirt and Brim (brim for tall objects with a small base) — https://help.prusa3d.com/article/skirt-and-brim_133969
   small_layers_cooling:
     title: Small layers don't cool in time
-    why: Tiny tips and spires take only a second to print per layer. The nozzle stays right over the hot spot, turning
-      the plastic into a melting, drooping blob before it can solidify.
+    why: These narrow layers take only a second to print. The nozzle stays over the hot plastic, turning it into a melting,
+      drooping blob before it can solidify.
     fixes:
     - domain: slicer
       text: "Let the printer slow tiny layers down further so they can cool. The slow-down stops at the filament's
@@ -151,8 +151,8 @@ rules:
     - OrcaSlicer Wiki — Material cooling — https://github.com/OrcaSlicer/OrcaSlicer/wiki/material_cooling
   enclosure_recommended:
     title: This material warps on an open printer
-    why: Temperature-sensitive filaments like ABS or ASA need hot ambient air around the print. Cold room drafts
-      make the upper layers contract rapidly, splitting layer seams and lifting the bottom.
+    why: Temperature-sensitive filaments like ABS or ASA need warm ambient air to print properly. Cold drafts cause
+      layers to shrink quickly, splitting layer seams and lifting the base.
     fixes:
     - domain: process
       text: Place the printer inside an enclosure tent or closed cabinet to trap heat and block room drafts.
@@ -176,8 +176,8 @@ rules:
     - Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide (enclosed chamber, hardened steel nozzle only) — https://wiki.bambulab.com/en/filament/asacf_pahtcf
   hardened_nozzle_required:
     title: Abrasive filament needs a hardened nozzle
-    why: Filaments infused with carbon fiber, glass, glow-in-the-dark powder, or metal are abrasive. Standard brass
-      nozzles wear out quickly, widening the hole and ruining print precision.
+    why: Filaments with carbon fiber, glass, or metal particles are abrasive. They quickly wear out standard brass nozzles,
+      widening the hole and ruining print precision.
     fixes:
     - domain: process
       text: Swap out your stock brass nozzle for a hardened steel or ruby nozzle before loading abrasive filaments.
@@ -192,8 +192,8 @@ rules:
     - Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide (enclosed chamber, hardened steel nozzle only) — https://wiki.bambulab.com/en/filament/asacf_pahtcf
   dry_filament:
     title: Filament needs drying first
-    why: Filaments like Nylon, PA-CF, TPU, and PETG absorb water directly out of humid air. The water boils inside
-      the hot nozzle, causing loud popping, severe stringing, and weak prints.
+    why: Filaments like Nylon, TPU, and PETG absorb moisture from humid air. Trapped water boils inside the hot nozzle,
+      causing popping, stringing, and weak prints.
     fixes:
     - domain: process
       text: Dry the filament spool in a dedicated filament dryer or food dehydrator before starting the print.
@@ -210,10 +210,8 @@ rules:
     - Bambu Lab Wiki — Filament Drying Recommendations — https://wiki.bambulab.com/en/filament-acc/filament/dry-filament
   stress_at_inside_corner:
     title: Sharp inside corner can crack
-    why: Where a stem, rib or wall meets the rest of the part at a sharp inside corner, the load has to turn the
-      corner in a tiny area. The stress there is several times higher than in the rest of the part, so cracks start
-      at the corner. A round (fillet) spreads the load over more material; a 45° chamfer helps too, a little less,
-      because it still has two smaller corners.
+    why: Two surfaces meet here at a sharp inside corner without a round or fillet. Stress concentrates in this tight
+      corner, making the part crack easily under load.
     fixes:
     - domain: geometry
       text: Round the inside corner with a 1–3 mm fillet (more for big parts) where it prints without support, on
@@ -236,9 +234,8 @@ rules:
     - Rahix — Design for 3D-Printing (fillets vs chamfers by print direction) — https://blog.rahix.de/design-for-3d-printing/
   too_hot_in_use:
     title: Gets too hot where it's used
-    why: Printed plastic loses stiffness and strength as it warms up and goes soft near its glass transition
-      (PLA around 60 °C, measured on printed PLA it keeps only about a quarter of its stiffness there). In a car
-      in the sun, near a heater or a motor, it bends, sags or slowly creeps out of shape, even under small loads.
+    why: Printed plastic softens and loses stiffness near its glass transition temperature, around 60 °C for PLA. Heat
+      makes the printed part bend, sag, or creep out of shape under load.
     fixes:
     - domain: process
       text: Print it in a material that takes more heat — PETG (~80 °C), ASA or ABS (~100 °C), PC (~145 °C).
@@ -256,9 +253,8 @@ rules:
       Rapid Prototyping Journal, https://doi.org/10.1108/RPJ-04-2017-0055
   side_detail_small:
     title: Text on an upright face is too small or too deep
-    why: On a face that stands upright when printed, the layers draw the detail one horizontal line at a time.
-      Letters shorter than about 3 mm don't get enough layers for their horizontal strokes, and engraving deeper
-      than about 0.8 mm leaves a small unsupported roof at the top of each letter that droops.
+    why: Letters on an upright face shorter than 3 mm lack enough layers for clear horizontal strokes. Engraving deeper
+      than 0.8 mm leaves an unsupported roof that droops.
     fixes:
     - domain: geometry
       text: Make upright text at least 3–3.5 mm tall in a bold sans-serif font; engrave or raise it 0.4–0.6 mm,
@@ -277,9 +273,8 @@ rules:
     - Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac
   shallow_relief:
     title: Raised or engraved detail too shallow
-    why: Text, logos or other details raised from or sunk into a face that points up are only a layer or two high.
-      The slicer cuts the part once per layer, so a step smaller than a layer may disappear or snap to the next
-      layer, and one of under about 0.4 mm (two layers) reads only faintly.
+    why: This raised or engraved detail on a top face is only a layer or two high. Steps smaller than a layer can vanish
+      during slicing, and details under 0.4 mm print very faintly.
     fixes:
     - domain: geometry
       text: Raise or sink the detail by 0.4–0.6 mm (2–3 layers at 0.2 mm). Use a bold sans-serif font with strokes
@@ -301,8 +296,8 @@ rules:
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   elephant_foot:
     title: First layers bulge out (elephant foot)
-    why: The weight of upper layers and heat from the build plate squish the initial bottom layers outward. This
-      creates a flared bottom rim that ruins precise dimensional fits.
+    why: Bed heat and the weight of upper layers squish the bottom layers outward. This creates a flared bottom rim
+      that ruins accurate dimensions at the base.
     fixes:
     - domain: slicer
       text: Enable elephant foot compensation in your slicer to pull the first-layer outline inward.
@@ -322,8 +317,8 @@ rules:
     - Prusa Knowledge Base — Elephant foot compensation — https://help.prusa3d.com/article/elephant-foot-compensation_114487
   exceeds_build_volume:
     title: Too big for your printer
-    why: The part doesn't fit on the bed or under the gantry in this orientation, so the slicer will refuse to print
-      it.
+    why: The part is larger than the printer's build volume in this orientation. The slicer cannot fit it on the bed
+      and will refuse to print.
     fixes:
     - domain: process
       text: Try another orientation from the list — lying flat or diagonal often fits where upright doesn't.
@@ -339,8 +334,8 @@ rules:
     - OrcaSlicer Wiki — Cutting tool — https://github.com/OrcaSlicer/OrcaSlicer/wiki/prepare_cutting_tool
   turned_to_fit:
     title: Turned on the bed to fit
-    why: The part only fits when it is rotated around the vertical axis, so the tool turned it. The 3MF export already
-      contains this rotation.
+    why: The part only fits on the bed when turned around the vertical axis, so the tool turned it. The 3MF file already
+      has this rotation.
     fixes:
     - domain: process
       text: Keep the rotation when you open the 3MF; don't use "auto arrange" if it turns the part back.
@@ -349,8 +344,8 @@ rules:
     - build volume
   support_marks:
     title: Rough surface where supports come off
-    why: The CAD model shows a clean, flat underside, but the printed surface resting on supports will be rough,
-      scarred, and droopy because single-material supports leave an air gap so they can break away.
+    why: This overhang rests directly on support material. The printed surface will be rough and droopy because breakaway
+      supports require an air gap.
     fixes:
     - domain: geometry
       text: Reorient the part to eliminate the overhang, or add 45-degree chamfers and gussets beneath the ledge
@@ -382,9 +377,8 @@ rules:
     - OrcaSlicer wiki — Overhangs (Make overhangs printable) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_overhangs
   trapped_support:
     title: Support trapped where you can't remove it
-    why: The CAD model shows a hollow internal pocket, a blind hole or a long narrow tunnel, but any support
-      generated inside is sealed in or out of reach, with no way to pull it out. It leaves loose rattling debris,
-      adds dead weight, blocks the hole or jams internal moving mechanisms.
+    why: An internal cavity or narrow tunnel has no opening to reach inside. Support printed inside cannot be removed
+      and stays trapped.
     fixes:
     - domain: geometry
       text: Redesign the cavity ceiling with self-supporting 45-degree chamfers, arched domes, or teardrop profiles
@@ -406,9 +400,8 @@ rules:
     - Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698
   bridge_sag:
     title: Top of a sideways hole sags
-    why: The CAD model shows a round hole or crisp rectangular slot, but gravity pulls down molten strands bridging
-      mid-air across a 4 to 8 mm span, causing the top ceiling to sag 0.2 to 1 mm into the opening and turning round
-      holes into undersized ovals.
+    why: A horizontal hole or slot has an unsupported ceiling spanning 4 to 8 mm. The top sags 0.2 to 1 mm into the
+      opening as it bridges in mid-air.
     fixes:
     - domain: geometry
       text: Redesign the top of horizontal holes with a 90-degree or 120-degree teardrop peak, or add a flat-top
@@ -432,9 +425,8 @@ rules:
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   hole_starts_midair:
     title: Hole starts in mid-air
-    why: Where a smaller hole starts above an open space (the screw hole above a counterbore printed head-down, or a
-      hole above a pocket), the first layer is a ring with a hole in it. The slicer has no edge to anchor the strands
-      around the hole, so that layer droops into the space below and the start of the hole comes out ragged.
+    why: A hole opens directly above a wider cavity with no support below it. The first layer droops into the open space
+      and prints ragged.
     fixes:
     - domain: geometry
       text: Add a sacrificial layer — one layer that closes the small hole where it starts. The layer below then bridges
@@ -456,9 +448,8 @@ rules:
     - Prusa Knowledge Base — Support material — https://help.prusa3d.com/article/support-material_1698
   sideways_hole_oval:
     title: Sideways hole prints oval
-    why: A round hole that lies on its side prints its lower half like a normal wall, but the top half is built in
-      mid-air over the hole. Those strands sag 0.2 to 0.4 mm (more above about 8 mm), so the hole comes out shorter
-      top to bottom than in CAD and a pin, bearing or bolt of the nominal size jams.
+    why: A round hole lies horizontally on its side. The top strands sag 0.2 to 0.4 mm into the opening, leaving the
+      hole oval and shorter from top to bottom.
     fixes:
     - domain: geometry
       text: Give the hole a teardrop top (a 45° point instead of the round ceiling), or make it 0.3–0.4 mm taller
@@ -481,9 +472,8 @@ rules:
     - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
   shrinkage_size_error:
     title: Long part comes out short
-    why: Plastic shrinks as it cools from printing temperature, so a long part ends up a little smaller than in
-      CAD — about 0.3% for PLA and up to 0.8% or more for ABS, ASA and PC. On a 200 mm part that's up to 1.6 mm,
-      enough that it no longer fits its mating part.
+    why: This part has a long continuous span across the bed. As the plastic cools it shrinks by 0.3% to over 0.8%,
+      which can make a 200 mm span up to 1.6 mm shorter.
     fixes:
     - domain: slicer
       text: Set the filament's shrinkage compensation in the slicer (OrcaSlicer, Filament settings, Shrinkage) to the
@@ -501,8 +491,8 @@ rules:
     - Polymaker PolyLite ABS / ASA technical data sheets (shrinkage values)
   grip_texture:
     title: Grip texture
-    why: A knob or handle that is held gets a better grip, and hides its layer lines, with a rough outer surface.
-      The slicer can make one without changing the model ("fuzzy skin"), only on the outer walls.
+    why: This outer wall is smooth. Applying fuzzy skin in the slicer adds a rough texture to outer surfaces to improve
+      grip and hide layer lines.
     fixes:
     - domain: slicer
       text: Turn on fuzzy skin for the outer walls (contour), about 0.3 mm thick, 0.8 mm point distance. In OrcaSlicer
@@ -519,8 +509,8 @@ rules:
     - Slant 3D — 10 Ways to Hide Layer Lines, Design 3D Printed Textures — https://www.youtube.com/watch?v=pUabxkiJAdE
   floor_shrink_line:
     title: Line round the outside where a floor ends
-    why: A big solid floor inside a hollow part (a deck, a shelf, the bottom of a box raised off the bed) shrinks as
-      it cools and pulls the thin outer wall in with it. The outside shows a ridge all round at the floor's height.
+    why: A solid internal floor meets a thinner outer wall. As the floor cools, it shrinks and pulls the outer wall
+      inward to form a visible ridge.
     fixes:
     - domain: geometry
       text: Cut a relief groove about 1 mm wide and 1-2 mm deep round the floor's edge where it meets the wall, or
@@ -539,8 +529,8 @@ rules:
     - Slant 3D — How to Eliminate Shrink Lines — https://www.youtube.com/watch?v=d61u_lKFa-U
   rib_sink_line:
     title: Rib pulls a line into the outer wall
-    why: Where a rib or partition joins the outer wall, the slicer piles extra plastic into the joint, and the rib
-      pulls the wall in as it cools. On the outside that shows as a vertical sink line along the rib.
+    why: An internal rib meets an outer wall. Extra plastic at the joint shrinks as it cools, pulling the wall inward
+      and leaving a vertical sink line on the outside.
     fixes:
     - domain: geometry
       text: Make the rib at most about 60 % as thick as the wall, or leave a 0.1-0.15 mm gap between the rib and the
@@ -557,9 +547,8 @@ rules:
     - Slant 3D — Ribs and Trusses are Made Wrong in 3D Printing — https://www.youtube.com/watch?v=OcxfQeeKn-s
   flat_gap_fuses:
     title: Flat gap in a moving joint fuses
-    why: In a print-in-place hinge or captive part, a flat gap stacked in height means the face above it is printed
-      in mid-air, only a few tenths of a millimetre over the plastic below. It sags onto it and welds the joint
-      solid, while leaving play where it doesn't.
+    why: Two surfaces are separated by a flat horizontal gap only a few tenths of a millimeter tall. The upper surface
+      sags as it prints in mid-air and fuses onto the plastic below.
     fixes:
     - domain: geometry
       text: Shape the pin and knuckle as opposing 45 degree cones with a 0.2-0.3 mm gap, so every face prints as a
@@ -573,9 +562,8 @@ rules:
     - Maker's Muse — How to design print-in-place hinges — https://www.youtube.com/watch?v=fbSQvJJjw2Q
   gap_fuses:
     title: Gap between moving parts fuses shut
-    why: The CAD model shows separate moving components in a print-in-place hinge or bearing, but clearances narrower
-      than 0.2 mm will weld together into a solid block because molten plastic bulges outward under extrusion pressure
-      and bridges the gap.
+    why: Two separate surfaces are closer than 0.2 mm apart. Molten plastic bulges outward under extrusion pressure
+      and bridges the gap, welding the surfaces together.
     fixes:
     - domain: geometry
       text: Increase the clearance gap in CAD to at least 0.3 to 0.4 mm between moving faces, and angle facing surfaces
@@ -600,9 +588,8 @@ rules:
     - Rahix / Slant 3D — Design for 3D-Printing — https://blog.rahix.de/design-for-3d-printing/
   hole_closes:
     title: Tiny hole closes up
-    why: The CAD model shows an open pinhole or wire passage, but vertical holes smaller than 1.5 mm diameter close
-      up or disappear because nozzle surface tension drags hot plastic inward around tight circles and overlapping
-      walls choke the opening.
+    why: This vertical hole is smaller than 1.5 mm in diameter. Surface tension drags hot plastic inward around tight
+      circles, choking the opening or closing it completely.
     fixes:
     - domain: geometry
       text: Enlarge small holes in CAD to at least 2.0 mm diameter, or model them as faceted polygons (polyholes)
@@ -628,9 +615,8 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
   small_hole_undersized:
     title: Small hole prints too small
-    why: The CAD model has an exact diameter hole for a bolt or pin, but vertical holes up to 6 mm print 0.15 to
-      0.3 mm too small because molten plastic is pulled inward around tight curves and STL polygon export cuts across
-      circle chords, preventing screws from fitting.
+    why: This vertical hole is 6 mm or smaller in diameter. Plastic is pulled inward around tight curves, making the
+      printed hole 0.15 to 0.3 mm too small.
     fixes:
     - domain: geometry
       text: Oversize vertical fastener holes in CAD by +0.2 to +0.3 mm (for example, design M3 clearance holes at
@@ -653,9 +639,8 @@ rules:
     - OrcaSlicer Wiki — Precise wall — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision
   nut_trap_tight:
     title: Nut pocket too tight for the nut
-    why: A hexagonal pocket modelled at the nut's exact size prints a little small, like every printed hole, so the
-      nut won't go in or cracks the walls when forced. Nut traps need about 0.2–0.3 mm more across the flats than the
-      nut (an M3 nut is 5.5 mm, so 5.7–5.8 mm).
+    why: This hexagonal pocket is the nut's exact size, and printed pockets come out a little small, so the nut won't
+      go in or cracks the walls. It needs about 0.2-0.3 mm more across the flats than the nut.
     fixes:
     - domain: geometry
       text: Make the hexagon 0.2–0.3 mm bigger across the flats than the nut (M3 5.7–5.8 mm, M4 7.2–7.3 mm), and the
@@ -675,8 +660,8 @@ rules:
     - fb-library — Bolt fittings — https://fb-library.readthedocs.io/en/latest/bolt_fittings/
   insert_wall_thin:
     title: Wall around a heat-set insert too thin
-    why: A heat-set insert is pressed in hot and pushes the melted plastic outwards. With less than about 1.6 mm of
-      plastic around the hole, the wall bulges, splits, or lets the insert pull out under load.
+    why: The wall around this hole is less than 1.6 mm thick. Pressing in a hot insert pushes plastic outward, causing
+      the wall to bulge or split.
     fixes:
     - domain: geometry
       text: Give the hole about 2 mm of wall all round (a boss around twice the insert's diameter), and make it about
@@ -698,9 +683,8 @@ rules:
     - Sovol — Design strong screw bosses for heat-set inserts — https://www.sovol3d.com/blogs/news/3d-printing-with-heat-set-inserts-design-strong-screw-bosses-that-last
   screw_wall_thin:
     title: Thin wall around a screw hole
-    why: A screw driven straight into printed plastic cuts its own thread and pushes the plastic outwards. With
-      less wall around the hole than the screw is thick, the wall splits along the layers or the thread strips
-      out.
+    why: The wall around this screw hole is thinner than the screw diameter. Driving the screw in pushes plastic outward,
+      splitting the wall along the layers or stripping the thread.
     fixes:
     - domain: geometry
       text: Give the hole a round boss with at least the screw's diameter of plastic all round (M3 needs about 3 mm),
@@ -720,8 +704,8 @@ rules:
       — https://www.hubs.com/knowledge-base/how-assemble-3d-printed-parts-threaded-fasteners/
   first_layer_detail:
     title: Fine detail squashed on the bed
-    why: The CAD model shows crisp letters, logos, or shallow grooves on the bottom face, but on the finished print
-      they get squashed shut or blurred into illegible mush by first-layer bed squish and elephant foot bulge.
+    why: Fine details or shallow grooves sit on the bottom face against the build plate. First-layer bed squish presses
+      the plastic outward, blurring the shapes and squashing narrow grooves shut.
     fixes:
     - domain: geometry
       text: Deboss text into the bottom face by at least 0.4 to 0.6 mm using wide, bold sans-serif fonts with stroke
@@ -745,9 +729,8 @@ rules:
     - Slant 3D — How to Design Parts for 3D Printing (Fillets & Chamfers) — https://www.youtube.com/watch?v=9JqN2aFBa2w
   fine_detail_rough:
     title: Raised detail too fine for the nozzle
-    why: The CAD model features delicate text strokes, thin ribs, or pointy pins, but positive details narrower
-      than 1.5 times nozzle width print rough, jagged, or missing entirely because a standard nozzle cannot trace
-      both walls of such a thin feature.
+    why: Raised features or ribs are narrower than 1.5 times the nozzle width. A standard nozzle cannot trace both walls
+      of features this thin, leaving them rough, jagged, or missing entirely.
     fixes:
     - domain: geometry
       text: Thicken positive features and text stroke widths in CAD to at least 0.6 to 0.8 mm, and choose bold sans-serif
@@ -772,8 +755,8 @@ rules:
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   warping:
     title: Corners of a long base lift off the bed
-    why: The CAD model has a flat, square base, but the printed part will lift and curl up at the corners like a
-      banana because cooling plastic contracts along the long base and pulls sharp corners clean off the build plate.
+    why: This part has a long flat base with sharp corners. As the plastic cools, it shrinks along the base and pulls
+      the corners off the build plate.
     fixes:
     - domain: geometry
       text: Round sharp exterior base corners with large fillets (3 mm radius or larger), or add circular mouse-ear
@@ -800,9 +783,8 @@ rules:
     - Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf
   weak_upright_pin:
     title: Upright pin snaps along its layers
-    why: The CAD model shows a solid pin, clip, or peg, but printed standing upright it will snap off under the
-      slightest sideways bump because horizontal layer lines run right across the narrow stem, putting weak layer
-      seams under pure bending load.
+    why: A narrow pin stands upright on the print bed. Horizontal layer lines run across the stem, so a sideways bump
+      easily snaps it off.
     fixes:
     - domain: geometry
       text: Reorient the part to print the pin lying flat on the build plate so continuous perimeter strands run
@@ -828,9 +810,8 @@ rules:
     - Slant 3D — Make a Pin that Doesn't Break. Use Ripples — https://www.youtube.com/shorts/njTfpxL71zk
   living_hinge:
     title: Thin hinge that bends
-    why: A thin strip joining two thicker parts works as a hinge that bends instead of a pin. Printed, it only
-      lasts if it lies flat on the bed so the lines run across the fold, and in a plastic that likes to bend.
-      PLA cracks after a couple of hundred folds; printed standing up it can break at the first one.
+    why: A thin hinge connects two thicker sections. Printed standing up, layer lines run along the fold and can break
+      on the very first bend.
     fixes:
     - domain: geometry
       text: Keep the hinge 0.4–0.6 mm thick (two or three layers) and a few millimetres long, with rounded edges where
@@ -853,9 +834,8 @@ rules:
       — https://facfox.com/docs/kb/how-to-design-living-hinges-for-3d-printed-parts
   snap_fit_upright:
     title: Snap-fit tab bends across its layers
-    why: A thin tab with a hook at the end clicks into a slot by bending. Standing upright it bends across the layer
-      lines, which hold about half as much stretch as the plastic along the lines, so it snaps off at a layer the
-      first time it is pushed in.
+    why: A thin snap-fit tab stands upright. Bending across horizontal layer lines is weak, so the tab can snap off
+      the first time it is pushed.
     fixes:
     - domain: geometry
       text: Make the tab longer or thinner, or the hook shallower, so it bends less; round the corner where the tab
@@ -877,9 +857,8 @@ rules:
       — https://hackaday.com/tag/snap-fit
   thick_solid_block:
     title: Thick solid block
-    why: The CAD model is solid, but the slicer prints a thick block as a few walls with infill inside, so it is
-      mostly air. Its strength comes from the walls, and raising the infill adds time and plastic but little
-      strength.
+    why: This section is a thick solid block. The slicer fills the inside with hollow infill, so adding more infill
+      wastes time and plastic with little extra strength.
     fixes:
     - domain: geometry
       text: If it has to be stiff, make it a shell with ribs (2–3 mm walls, a rib every 10–20 mm). That is stiffer
@@ -899,9 +878,8 @@ rules:
       — https://hackspace.raspberrypi.com/articles/experiments-with-strong-3d-prints
   thin_neck:
     title: Thin neck takes the whole load
-    why: The CAD model shows a narrow waist between two thicker sections, but under any real-world load the printed
-      part will snap right across the neck because all pulling and twisting stress concentrates into just a few
-      small layer bonds.
+    why: A narrow neck connects two thicker sections. Pulling or twisting forces concentrate there, making it snap easily
+      across the small layer bonds.
     fixes:
     - domain: geometry
       text: Thicken the narrow neck in CAD, add triangular gusset ribs, and use large transitional fillets (3 mm
@@ -928,9 +906,8 @@ rules:
     - CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion
   single_line_wall:
     title: Wall is only one line thick
-    why: The CAD model shows a solid wall, but because it is thinner than two nozzle extrusion passes (under 0.8
-      mm on a 0.4 mm nozzle), the slicer only lays down a single flimsy bead of plastic, leaving the wall brittle,
-      full of pinholes, and easily cracked along layer seams.
+    why: This wall is thinner than two nozzle passes, under 0.8 mm on a 0.4 mm nozzle. The slicer prints only a single
+      bead of plastic, leaving the wall weak, full of pinholes, and easy to crack.
     fixes:
     - domain: geometry
       text: Thicken the wall in CAD to at least 1.2 mm (or at least 0.85 mm for a 0.4 mm nozzle) so the slicer fits
@@ -955,8 +932,8 @@ rules:
     - CNC Kitchen — How designs the strongest hook? (more walls beat more infill) — https://cnckitchen.com/blog/how-designs-the-strongest-hook-polymaker-competition
   setup_layer_too_thick:
     title: Layers too thick for the nozzle
-    why: The nozzle presses each line onto the one below. With layers thicker than about three quarters of the
-      nozzle's width there is too little squeeze, the lines only touch, and the part splits between layers.
+    why: Layer height is set thicker than three quarters of the nozzle width. The lines do not get squeezed together
+      enough, so the part easily splits between layers.
     fixes:
     - domain: slicer
       text: Lower the layer height to at most 0.75 × the nozzle diameter (0.3 mm on a 0.4 mm nozzle), and keep
@@ -970,8 +947,8 @@ rules:
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   setup_support_gap_zero:
     title: Support touches the part
-    why: Without a gap between support and part, the support is printed onto the part like any other layer and
-      fuses with it when it is the same filament. It then breaks off with pieces of the surface.
+    why: Support is set to touch the part without any gap. The support fuses directly to the printed surface and tears
+      off pieces of the part when removed.
     fixes:
     - domain: slicer
       text: Set the support top Z distance to 0.15-0.2 mm (PETG 0.2-0.25 mm), or about one layer.
@@ -986,8 +963,8 @@ rules:
     - Prusa Knowledge Base — Support material (top contact Z distance) — https://help.prusa3d.com/article/support-material_1698
   setup_flow_too_high:
     title: Faster than the hotend can melt
-    why: The hotend can only melt so much plastic per second. Asked for more, the extruder skips, lines come out
-      thin and layers bond weakly. Slicers slow down to the filament's max volumetric speed - if that is set right.
+    why: The print speed requires more melted plastic per second than the hotend can supply. The extruder skips, causing
+      thin lines and weak layer bonds.
     fixes:
     - domain: slicer
       text: Set the filament's max volumetric speed to what your hotend really melts (standard hotends about
@@ -1001,8 +978,8 @@ rules:
     - Prusa Knowledge Base — Max volumetric speed — https://help.prusa3d.com/article/max-volumetric-speed_127176
   setup_plate_too_sticky:
     title: Filament sticks too hard to this plate
-    why: PETG, TPU and PC bond to smooth PEI and bare glass so strongly that the part can rip pieces out of the
-      plate's surface when you take it off.
+    why: PETG, TPU, or PC filament is printing on smooth PEI or bare glass. The plastic bonds so strongly that removing
+      the part can rip pieces out of the plate.
     fixes:
     - domain: process
       text: Put a thin layer of glue stick on the plate as a release layer, or print on a textured PEI plate
@@ -1016,9 +993,8 @@ rules:
     - Prusa Knowledge Base — PETG — https://help.prusa3d.com/article/petg_2059
   vase_mode_possible:
     title: Could print in vase mode
-    why: Spiral vase mode prints solid bottom layers, then the outer wall as one continuous spiral, rising all the
-      time. No seam, no infill, no top, and much faster - good for vases, cups, lampshades and open containers. The
-      wall is one line thick, so it is weaker and can leak under pressure.
+    why: 'This shape has an open top, so it can print in spiral vase mode: one continuous wall with no seam, much faster.
+      That wall is only one line thick, so it is weaker and can leak.'
     fixes:
     - domain: slicer
       text: Turn on "Spiral vase" (OrcaSlicer and Bambu Studio - Others, Special mode; PrusaSlicer - Print settings,
@@ -1032,10 +1008,8 @@ rules:
     - OrcaSlicer Wiki — Special mode, spiral vase — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_special_mode
   coarse_facets:
     title: Curves exported too coarse
-    why: An STL stores curves as flat facets. Exported with too few (a hole as a 12-sided polygon), the printer
-      prints exactly those flats - visible on round outsides, and a hole or peg comes out smaller or bigger
-      than designed, so fits and screws don't go in as planned. The check measures how far the flats sit
-      inside the true curve.
+    why: Curved surfaces are exported as coarse flat facets. The printer prints visible flat edges, making round features
+      come out the wrong size.
     fixes:
     - domain: process
       text: Export the STL again with a finer setting (smaller deviation / chord height, more facets, e.g. 0.01 mm
@@ -1050,9 +1024,8 @@ rules:
     - OrcaSlicer Wiki — Quality settings, precision (arc fitting, resolution, STEP import) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_precision
   shallow_slope_stairs:
     title: Shallow slope prints as steps
-    why: A top face that slopes only a little (5-20 degrees from flat) is built from many layer edges, each set
-      in a little from the one below. At normal layer heights those edges are wide, so the slope shows as rings
-      or stairs - about 1.1 mm wide at 10 degrees and 0.2 mm layers.
+    why: This surface has a shallow slope of 5 to 20 degrees from flat. The sliced layer edges are wide, leaving visible
+      stair-steps instead of a smooth slope.
     fixes:
     - domain: slicer
       text: Use thinner layers only over the slope's height (a height range modifier, or variable layer height
@@ -1071,9 +1044,8 @@ rules:
     - Prusa Knowledge Base — Layers and perimeters (ensure vertical shell thickness on shallow slopes) — https://help.prusa3d.com/article/layers-and-perimeters_1748
   pause_to_insert:
     title: Pocket for a part put in while printing
-    why: A closed pocket inside the part can hold a magnet, nut, bearing or weight that is dropped in part-way
-      through the print. The print has to pause after the last layer below the pocket's roof; the next layers then
-      close over it. Support printed inside the pocket would fill it up, and a long flat roof sags onto what is inside.
+    why: An internal pocket is closed inside the part. The print must pause before the roof closes, or support material
+      fills the pocket and a flat roof can sag.
     fixes:
     - domain: process
       text: Pause before the layer the check names (OrcaSlicer, PrusaSlicer, Bambu Studio - right-click that layer in
@@ -1099,9 +1071,8 @@ rules:
     - Prusa Knowledge Base — Insert pause or custom G-code at layer (magnets put in at a pause) — https://help.prusa3d.com/article/insert-pause-or-custom-g-code-at-layer_120490
   modelled_thread:
     title: Thread modelled into the part
-    why: A thread printed straight from the model is a 60° slope made of layers. Small threads, or too few layers per
-      turn, come out as a rough staircase that binds or strips; lying on its side, the top and bottom of the thread
-      are only layer steps. Printed threads also come out a little fat, so a printed bolt and nut need clearance.
+    why: A 60° thread is built from stacked layers. The layer steps make the surface rough and prone to binding or stripping
+      unless extra clearance is provided.
     fixes:
     - domain: slicer
       text: Print the threaded part with finer layers (at most a quarter of the pitch, e.g. 0.12 mm for M8), using
@@ -1122,10 +1093,8 @@ rules:
     - Prusa Knowledge Base — Modeling with 3D printing in mind (at least 0.3 mm for moving parts) — https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135
   fibre_filled:
     title: Carbon or glass fibre filament makes it stiffer, not stronger
-    why: The short fibres in PLA-CF, PETG-CF, PA-CF and similar filaments line up along each printed line. The part
-      bends less and warps less, but the fibres never cross from one layer to the next, so the layers hold together
-      worse and the part breaks more suddenly. Polymaker's PLA-CF is weaker than their plain PLA (31 vs 46 MPa
-      along the lines, 15 MPa between layers), and Bambu's ASA-CF takes about half the knock of plain ASA.
+    why: Short fibres in this filament align along the printed lines and never cross between layers. The part bends
+      and warps less, but the layer bonds are weaker and break more suddenly.
     fixes:
     - domain: process
       text: For a part that must not break, print the plain plastic (or a tougher one such as PETG, ASA or PC) and add

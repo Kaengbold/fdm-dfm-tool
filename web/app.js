@@ -94,19 +94,25 @@ function cancelEngine() {
   const src = state.source;
   const mine = loadMine();
   const expert = loadExpert();
-  if (src || Object.keys(mine.printers).length || Object.keys(mine.materials).length || Object.keys(expert).length) {
-    restoring = engineReady.then(async () => {
+  // A second Cancel during boot would kill the worker before it can become ready.
+  $("working-cancel").disabled = true;
+  restoring = busy("Cancelled. Getting ready again…", async () => {
+    await engineReady;
+    if (src || Object.keys(mine.printers).length || Object.keys(mine.materials).length || Object.keys(expert).length) {
       await post("custom_presets", mine);
       if (Object.keys(expert).length) await post("set_expert", { values: expert });
-      if (!src) return;
-      await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
-      if (src.body) await post("select_body", { index: src.body });
-      if (src.scale !== 1) await post("scale", { factor: src.scale });
-      if (state.gcode) await post("load_gcode", { up: state.gcode.up, profile: profile() }, state.gcode.bytes);
-      if (state.engineState) await post("restore_state", { state: state.engineState });
-      if (state.warp) clearWarp(); // too big to keep: run it again
-    }).catch((err) => setStatus(`Could not restart the engine: ${err.message}`, true));
-  }
+      if (src) {
+        await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
+        if (src.body) await post("select_body", { index: src.body });
+        if (src.scale !== 1) await post("scale", { factor: src.scale });
+        if (state.gcode) await post("load_gcode", { up: state.gcode.up, profile: profile() }, state.gcode.bytes);
+        if (state.engineState) await post("restore_state", { state: state.engineState });
+        if (state.warp) clearWarp(); // too big to keep: run it again
+      }
+    }
+  }).then(() => setStatus("Ready"))
+    .catch((err) => setStatus(`Could not restart the engine: ${err.message}`, true))
+    .finally(() => { $("working-cancel").disabled = false; });
 }
 
 // Cancelled work rejects up through every await; that's expected, not an error to log.
@@ -151,7 +157,11 @@ const state = {
 const steps = new Steps({
   ready: (step) => step === "part" ? true
     : !state.triangles ? "Load a part first"
+    : step === "result" && steps.current !== "result" && steps.busy.has("result") ? "Checking your part…"
     : step === "have" || state.check ? true : "Checking your part…",
+  // Strength is optional: with no load set, its foot button says it is skipped. With a load set,
+  // "Show my result" runs the missing check (T-397), so it isn't a skip.
+  skippable: (step) => step === "strength" && !state.loads.some((l) => l.kind === "force"),
   changed: () => {
     strengthShown();
     showViewChanges();
@@ -160,6 +170,7 @@ const steps = new Steps({
     if (shows("fits")) renderTolerance().catch(() => {}); // a new material or fit test changes it
     // A note about the last action ("Report copied …") belongs to the step it was made in.
     if (!busyCount && state.summary) setStatus(state.summary);
+    if (steps.level === "simple" && steps.current === "result") compute();
   },
 });
 
@@ -234,8 +245,7 @@ async function busy(text, fn, affects = []) {
   try {
     return await fn();
   } catch (err) {
-    if (err instanceof Cancelled) setStatus("Cancelled — the last result stays shown.");
-    else setStatus(err.message, true);
+    if (!(err instanceof Cancelled)) setStatus(err.message, true);
     throw err;
   } finally {
     steps.setBusy(affects, false);
@@ -332,6 +342,12 @@ async function openProject(bytes) {
   setZones(p.zones ?? []); // after selectOption: it clears zones and boxes of the old orientation
   setVolumes(p.volumes ?? []);
   if (p.holes && activeOption()) await restoreHoles(p.holes);
+  // Loading, orientation and sized holes rebuild the list: apply saved ids in the final suggestion result.
+  await state.designPending?.catch(() => {});
+  if (p.edit_selections && mode() !== "print") await suggestDesign(p.edit_selections);
+  else if (p.edit_selections) Object.assign(editSelections(), p.edit_selections);
+  // Keep pending boxes too: a weakest-spot box's strength result isn't part of a project.
+  setSuggested(Object.values(p.suggested_boxes ?? {}));
   recolor();
   await state.nozzleCompare?.catch(() => {}); // it would overwrite the message below when it ends
   setStatus(`${state.summary} — opened the project with what was set in it.`);
@@ -434,8 +450,7 @@ async function partLoaded(info) {
   renderOptions();
   $("view-empty").hidden = true;
   $("view-key").hidden = true;
-  $("compute").disabled = false;
-  $("compute-steps").hidden = true; // the list belongs to the last Compute
+  $("compute-steps").hidden = true; // a new part starts a new result
   if (steps.current === "part") steps.go("have");
   else steps.render();
   const up = state.keepUp;
@@ -807,8 +822,9 @@ function renderSettings() {
   $("settings-block").hidden = !settings.length;
   $("settings").replaceChildren(
     ...settings.map((s) =>
-      el("tr", { title: s.reason },
-        el("td", {}, s.label, s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : ""),
+      el("tr", {},
+        el("td", {}, s.label, s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : "",
+          s.reason ? el("small", { className: "setting-reason", textContent: s.reason }) : ""),
         el("td", { textContent: settingText(s.key, s.value) })),
     ),
   );
@@ -1193,8 +1209,7 @@ function previewPick() {
   const on = !$("pick-panel").hidden && state.selectedRegion >= 0;
   $("dir-angle").hidden = $("dir").value !== "angle";
   $("dir-angle-out").textContent = `${$("dir-lean").value}° lean, towards ${$("dir-toward").value}°`;
-  $("as-fixed").disabled = $("as-load").disabled = !on;
-  for (const b of [$("as-fixed"), $("as-load")]) b.title = on ? "" : "Tap a face first";
+  for (const b of [$("as-fixed"), $("as-load")]) offWhy(b, on ? "" : "Tap a face on the part first.");
   state.previewLoad = !on ? null
     : state.saStage === "held" ? { ...target(), kind: "fixed" }
     : state.saStage === "load" ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
@@ -1231,8 +1246,8 @@ function renderStages() {
     li.querySelector(".sa-sum").textContent = sums[li.dataset.stage];
     li.classList.toggle("done", Boolean(sums[li.dataset.stage]) && li.dataset.stage !== "extra");
   }
-  document.querySelector("[data-next=load]").disabled = !held.length;
-  document.querySelector("[data-next=extra]").disabled = !forces.length;
+  offWhy(document.querySelector("[data-next=load]"), held.length ? "" : "Mark at least one place where it's held first.");
+  offWhy(document.querySelector("[data-next=extra]"), forces.length ? "" : "Add at least one load first.");
 }
 for (const li of document.querySelectorAll(".sa-stage")) li.querySelector(".sa-head").onclick = () => setStage(li.dataset.stage);
 for (const b of document.querySelectorAll(".sa-next")) b.onclick = () => setStage(b.dataset.next);
@@ -1448,6 +1463,30 @@ addEventListener("pointerup", () => {
   renderLoads();
 });
 const multiCase = () => new Set(state.loads.filter((l) => l.kind === "force").map((l) => l.case)).size > 1;
+/** Disable a button and say why in a muted line under its row (phones show no tooltips); an empty reason enables it.
+ * Buttons sharing a row share one line, each reason said once. */
+function offWhy(button, reason) {
+  button.disabled = Boolean(reason);
+  const box = button.closest(".row, .actions") ?? button;
+  box.whyOff ??= new Map();
+  box.whyOff.set(button, reason);
+  if (!box.whyNote) {
+    box.whyNote = el("p", { className: "hint why-off" });
+    box.after(box.whyNote);
+  }
+  const why = [...new Set([...box.whyOff.values()].filter(Boolean))];
+  box.whyNote.textContent = why.join(" ");
+  box.whyNote.hidden = !why.length;
+}
+
+/** What the strength check still needs, in words ("" when it can run). */
+const strengthMissing = () => {
+  const held = state.loads.some((l) => l.kind === "fixed");
+  const load = state.loads.some((l) => l.kind === "force");
+  return held && load ? "" : !held && !load ? "First mark where it's held and where the load goes (steps 1 and 2 above)."
+    : !held ? "First mark where it's held (step 1 above)." : "First add a load (step 2 above).";
+};
+
 const readyForStrength = () => state.loads.some((l) => l.kind === "fixed") && state.loads.some((l) => l.kind === "force");
 
 function renderLoads() {
@@ -1476,12 +1515,12 @@ function renderLoads() {
       ),
     ),
   );
-  $("run-strength").disabled = !readyForStrength();
-  $("run-optimise").disabled = !readyForStrength();
-  $("run-topology").disabled = !readyForStrength();
-  $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
-  $("dynamics-need").hidden = readyForStrength();
+  offWhy($("run-strength"), strengthMissing());
+  offWhy($("run-optimise"), strengthMissing());
+  offWhy($("run-topology"), readyForStrength() ? "" : "Needs where it's held and a load: set them in Strength analysis first.");
+  dynamicsWhy();
   renderStages();
+  steps.render(); // the foot button says "Skip" only while no load is set
 }
 
 /** How the part will be printed (walls, solid top/bottom layers, infill 0–1), from the settings shown. */
@@ -1617,12 +1656,19 @@ function askLong(what, kind, choices = null) {
   });
 }
 
+/** Inputs that must still match before Simple can reuse a strength result. */
+function strengthInputs() {
+  return { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), detailed: useGcode(), zones: printZones() };
+}
+
 async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
   const what = useGcode() ? " with your sliced print (its walls, infill and line directions)" : "";
   const r = await busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
-    const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: printZones() }));
+    const args = strengthInputs();
+    const inputs = JSON.stringify(args); // snapshot before awaiting: loads can be edited while it runs
+    const r = await timed(fine ? "fine" : "strength", () => call("strength", { ...args, fine }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
       r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
@@ -1631,6 +1677,7 @@ async function runStrength(fine = false) {
           : "Changes a lot: the weak spot is small or sharp. Trust the finer result and keep a bigger safety margin.");
     }
     state.strength = r;
+    state.strengthInputs = inputs;
     state.showHeat = true;
     state.showWarp = false;
     state.showSwing = false;
@@ -1668,10 +1715,15 @@ async function offerTurn() {
 }
 
 // ---------- strength: shaking and knocks (optional, Advanced) ----------
+/** Why "Run these checks" can't run yet: the loads first, then at least one ticked check. */
+function dynamicsWhy() {
+  offWhy($("run-dynamics"), !readyForStrength() ? "Set where it is held and a load in Strength analysis first."
+    : !($("dyn-shake").checked || $("dyn-drop").checked) ? "Tick shaking or knocks above." : "");
+}
 for (const [box, row] of [["dyn-shake", "dyn-shake-row"], ["dyn-drop", "dyn-drop-row"]]) {
   $(box).onchange = () => {
     $(row).hidden = !$(box).checked;
-    $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
+    dynamicsWhy();
   };
 }
 $("run-dynamics").onclick = async () => {
@@ -1776,11 +1828,11 @@ const dispLength = (r) => {
   return out;
 };
 const FIELD = {
-  fi: { title: "Strength used (%)", note: "100 % = breaks", values: (r) => f32(r.vertex_fi), elements: "fi", max: (r) => r.fi_max_pct, fmt: (v) => `${Math.round(v)} %` },
+  fi: { title: "Strength used (%)", values: (r) => f32(r.vertex_fi), elements: "fi", max: (r) => r.fi_max_pct, fmt: (v) => `${Math.round(v)} %` },
   vm: { title: "Stress, von Mises (MPa)", note: "", values: (r) => f32(r.vertex_vm), elements: "vm", max: (r) => r.vm_max_mpa, fmt: (v) => v.toFixed(v < 10 ? 1 : 0) },
   disp: { title: "Moves by (mm)", note: "how far each spot bends away", values: dispLength, elements: null, max: (r) => r.max_displacement_mm, fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) },
 };
-const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
+const view = { field: "fi", stretch: false, bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
@@ -1794,27 +1846,33 @@ function strengthView() {
     $("legend").hidden = true;
     return false;
   }
-  const f = FIELD[view.field];
-  const max = Math.max(f.max(r), 1e-9);
-  const key = `${view.field}|${r.critical_point}|${activeOption().up}`;
-  if (viewer.fieldKey !== key || !viewer.field) {
-    viewer.showField({ triangles: f32(r.field_triangles), values: f.values(r), disp: f32(r.vertex_disp), max });
+  const strength = view.field === "fi";
+  const f = strength ? { ...FIELD.fi, note: `100 % = the most it should carry (×${r.required_safety} safety)` } : FIELD[view.field];
+  // Engine fields are shares of breaking strength; both the skin and the cut use allowed load.
+  const scale = strength ? r.required_safety : 1;
+  const fixed = strength && !view.stretch;
+  const max = fixed ? 100 : Math.max(f.max(r) * scale, 1e-9);
+  const key = `${view.field}|${fixed}|${scale}|${max}|${r.critical_point}|${activeOption().up}`;
+  if (viewer.fieldResult !== r || viewer.fieldKey !== key || !viewer.field) {
+    viewer.showField({ triangles: f32(r.field_triangles), values: f.values(r).map((v) => v * scale), disp: f32(r.vertex_disp), max, fixed });
     viewer.fieldKey = key;
+    viewer.fieldResult = r;
   }
   const radius = viewer.part.geometry.boundingSphere.radius;
   viewer.setDeformation(view.bend * (0.08 * radius) / Math.max(r.max_displacement_mm, 1e-9));
   const els = r.elements;
-  const cubes = f.elements ? f32(els[f.elements]) : null; // displacement: only known on the surface
-  viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: cubes, size_mm: els.size_mm }, max);
-  renderLegend(f, max);
+  const cubes = f.elements ? f32(els[f.elements]).map((v) => v * scale) : null; // displacement: only known on the surface
+  viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: cubes, size_mm: els.size_mm }, max, fixed);
+  renderLegend(f, max, fixed);
   return true;
 }
 
-function renderLegend(f, max) {
+function renderLegend(f, max, fixed = false) {
   const bands = [];
-  for (let i = FIELD_BANDS - 1; i >= 0; i--) {
-    bands.push(el("div", { className: "band", style: `background:${fieldColor((i + 0.5) / FIELD_BANDS).getStyle()}` },
-      el("span", { textContent: f.fmt((max * (i + 1)) / FIELD_BANDS) })));
+  for (let i = fixed ? FIELD_BANDS : FIELD_BANDS - 1; i >= 0; i--) {
+    const label = fixed && i === FIELD_BANDS ? `${f.fmt(max)}+` : f.fmt((max * (i + 1)) / FIELD_BANDS);
+    bands.push(el("div", { className: "band", style: `background:${fieldColor((i + 0.5) / FIELD_BANDS, undefined, fixed).getStyle()}` },
+      el("span", { textContent: label })));
   }
   $("legend").replaceChildren(el("strong", { textContent: f.title }), f.note ? el("small", { textContent: f.note }) : "", ...bands,
     el("div", { className: "band-0", textContent: f.fmt(0) }));
@@ -1936,10 +1994,13 @@ function strengthViewControls(r) {
     $("show-temp").checked = false;
     recolor();
   };
-  const field = el("select", {}, el("option", { value: "fi", textContent: "Strength used (% — where it breaks)" }),
+  const field = el("select", {}, el("option", { value: "fi", textContent: "Strength used (% of allowed load)" }),
     el("option", { value: "vm", textContent: "Stress (MPa, von Mises)" }), el("option", { value: "disp", textContent: "How far it moves (mm)" }));
   field.value = view.field;
-  field.onchange = () => ((view.field = field.value), show());
+  const stretch = el("input", { type: "checkbox", checked: view.stretch });
+  const stretchLabel = el("label", { className: "toggle", hidden: view.field !== "fi" }, stretch, "Stretch the colours");
+  stretch.onchange = () => ((view.stretch = stretch.checked), show());
+  field.onchange = () => ((view.field = field.value), (stretchLabel.hidden = view.field !== "fi"), show());
   const bend = el("input", { type: "range", min: 0, max: 1, step: 0.05, value: view.bend });
   bend.oninput = () => ((view.bend = Number(bend.value)), show());
   const axis = el("select", {}, ...[["", "No cut"], ["x", "Cut across X"], ["y", "Cut across Y"], ["z", "Cut at a height"]]
@@ -1952,6 +2013,7 @@ function strengthViewControls(r) {
   return el("div", { className: "fea-view" },
     el("label", { className: "toggle" }, heat, "Show results on the part (red arrow = weakest spot)"),
     from("advanced", el("label", {}, "Colour by ", field)),
+    from("advanced", stretchLabel),
     from("advanced", el("label", {}, "Show bending (exaggerated) ", bend)),
     from("advanced", el("div", { className: "row" }, axis, cut)),
     from("advanced", el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." })),
@@ -2142,8 +2204,12 @@ function optionGroups(opts, now) {
   if (!boxes.size) return groups;
   const recheck = el("button", { className: "primary recheck", textContent: "Re-check with the ticked changes", disabled: true,
     onclick: () => applyTicked(opts.filter((o) => boxes.get(o)?.checked)) });
-  for (const box of boxes.values()) box.addEventListener("change", () => (recheck.disabled = ![...boxes.values()].some((b) => b.checked)));
-  return [...groups, el("div", { className: "row recheck-row" }, recheck)];
+  const why = el("p", { className: "hint why-off", textContent: "Tick one or more changes above." });
+  for (const box of boxes.values()) box.addEventListener("change", () => {
+    recheck.disabled = ![...boxes.values()].some((b) => b.checked);
+    why.hidden = !recheck.disabled;
+  });
+  return [...groups, el("div", { className: "row recheck-row" }, recheck), why];
 }
 
 function optionCard(o, now, boxes, group) {
@@ -2605,6 +2671,7 @@ addEventListener("pointerup", async () => {
 const DROOP_SHARE = 0.5; // of a face's triangles "may droop" before it gets a support box
 const MIN_FACE_MM2 = 20; // smaller faces print fine either way
 const MAX_SUGGESTED = 6;
+const suggestedBoxKey = (v) => JSON.stringify([v.kind, v.from.region ?? null, v.from.point ?? null, v.from.normal ?? null]);
 
 /** What to place where, from what the app already knows: faces that may droop (support), faces marked
  * clean that would get supports (no support), and the weakest spot of the strength analysis (hidden gap). */
@@ -2646,6 +2713,7 @@ $("vol-suggest").onclick = async () => {
   if (!activeOption()) return;
   await ensureRegions();
   const ideas = boxIdeas();
+  const choices = new Map(state.suggested.map((v) => [suggestedBoxKey(v), v.use]));
   const placed = [];
   await busy("Placing suggested boxes…", async () => {
     for (const idea of ideas) {
@@ -2653,13 +2721,13 @@ $("vol-suggest").onclick = async () => {
         const v = await call("volume_at", { up: activeOption().up, kind: idea.kind, profile: profile(), ...idea.from });
         const info = idea.from.region != null ? state.regionInfo[idea.from.region] : null;
         const what = info ? (info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`) : "the weakest spot";
-        placed.push({ ...v, from: idea.from, what, why: idea.why, use: true });
+        placed.push({ ...v, from: idea.from, what, why: idea.why, use: choices.get(suggestedBoxKey(idea)) ?? false });
       } catch { /* a box that doesn't fit here is just not suggested */ }
     }
   });
   setSuggested(placed);
   const many = (n) => `${n} box${n > 1 ? "es" : ""}`;
-  setStatus(placed.length ? `${many(placed.length)} suggested (dashed): untick any you don't want, then "Use these".`
+  setStatus(placed.length ? `${many(placed.length)} suggested: tick the boxes you want, then "Use these".`
     : state.strength ? "Nothing to add: no face that may droop, no clean face with supports."
     : "Nothing to add yet. Run the strength analysis first for a hidden gap at the weakest spot.");
 };
@@ -2668,13 +2736,24 @@ function setSuggested(list) {
   state.suggested = list;
   $("vol-suggested").hidden = !list.length;
   $("vol-suggest-list").replaceChildren(...list.map((v) => {
-    const tick = el("input", { type: "checkbox", checked: v.use, onchange: () => { v.use = tick.checked; drawBoxes(); } });
+    const tick = el("input", { type: "checkbox", checked: v.use, onchange: () => {
+      v.use = tick.checked;
+      $("vol-use").disabled = !state.suggested.some((b) => b.use);
+      drawBoxes();
+    } });
     const li = el("li", {}, el("label", { className: "toggle" }, tick, el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` })),
       el("p", { className: "hint", textContent: v.why }));
     li.dataset.kind = v.kind;
     return li;
   }));
+  $("vol-use").disabled = !list.some((v) => v.use);
   drawBoxes();
+}
+for (const [id, use] of [["vol-all", true], ["vol-none", false]]) {
+  $(id).onclick = () => {
+    state.suggested.forEach((v) => (v.use = use));
+    setSuggested(state.suggested);
+  };
 }
 $("vol-use").onclick = () => {
   const use = state.suggested.filter((v) => v.use).map(({ use, why, ...v }) => v);
@@ -2759,14 +2838,29 @@ function clearEdits() {
   state.edits = [];
   state.designFor = null;
   $("edits").replaceChildren();
+  $("edit-selection").hidden = true;
   $("apply-edits").hidden = true;
   viewer.showGhosts([]);
 }
 
 function showSelectedGhosts(highlight = null) {
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : [], highlight);
-  $("apply-edits").hidden = !state.edits.some((e) => e.selected);
+  $("apply-edits").hidden = !state.edits.length;
+  $("apply-edits").disabled = !state.edits.some((e) => e.selected);
+  $("apply-edits").title = $("apply-edits").disabled ? "Tick a change to apply it." : "";
 }
+
+/** Choices belong to this model version; keep them even when a re-check rebuilds the list. */
+const editSelections = () => (state.versions[state.version].editSelections ??= {});
+const editsForProject = () => ({ ...editSelections(), ...Object.fromEntries(state.edits.map((e) => [e.id, e.selected])) });
+const suggestedForProject = () => Object.fromEntries(state.suggested.map((v) => [suggestedBoxKey(v), v]));
+function selectEdits(selected) {
+  for (const e of state.edits) editSelections()[e.id] = e.selected = selected;
+  document.querySelectorAll("#edits input[type=checkbox]").forEach((box) => (box.checked = selected));
+  showSelectedGhosts();
+}
+$("edits-all").onclick = () => selectEdits(true);
+$("edits-none").onclick = () => selectEdits(false);
 
 /** Design changes are suggested as soon as their step is shown (Expert: always on the page), once per orientation. */
 function suggestDesignIfShown() {
@@ -2776,22 +2870,29 @@ function suggestDesignIfShown() {
   if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
 }
 
-async function suggestDesign() {
+async function suggestDesign(savedChoices = null) {
   state.designFor = activeOption().up.join();
-  return busy("Looking for design improvements…", async () => {
+  return state.designPending = busy("Looking for design improvements…", async () => {
     const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
     const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
     $("edit-params").hidden = !r.edits.length;
     state.features = r.features;
     renderFeatures(r.features);
-    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer), selected: !e.clash }));
+    // Only the size the user requested (not optional fins or extra plastic) starts ticked.
+    const choices = editSelections();
+    for (const e of state.edits) choices[e.id] = e.selected;
+    if (savedChoices) Object.assign(choices, savedChoices);
+    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
+      selected: choices[e.id] ?? (!e.clash && /^(fit-|gap-|fastener-(?!boss-)|solid-)/.test(e.id)) }));
+    $("edit-selection").hidden = !state.edits.length;
     $("edits").replaceChildren(
       ...(state.edits.length
         ? state.edits.map((e) => {
             const box = el("input", { type: "checkbox", checked: e.selected });
             box.onchange = () => {
               e.selected = box.checked;
+              choices[e.id] = box.checked;
               showSelectedGhosts();
             };
             // Pointing at a change turns the part to it and lights it up.
@@ -3075,7 +3176,7 @@ async function tagFeature(region, tag) {
 /** Edit sizes from the inputs; empty until the first suggestion filled them in (engine defaults). */
 const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
-document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
+document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = () => suggestDesign()));
 
 /** The rounded corners (or the thicker weak spot) on a new version, checked again: the strength before and after side by side. */
 const EDIT_NAME = { "stress-chamfer": "the rounded corners", "thicken-weak": "the thicker weak spot" };
@@ -3096,6 +3197,7 @@ async function testDesignEdit(id) {
 
 /** Apply ``chosen`` (default: the ticked suggestions) as a new version of the model. */
 async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
+  if (!chosen.length) return setStatus("Tick a change to apply it.");
   return busy("Applying design changes…", async () => {
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
@@ -3653,12 +3755,16 @@ document.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () =>
   updateModeNote();
   if (state.triangles) runCheck();
 }));
-// ---------- Simple: "Compute", and what the tool is doing (T-374) ----------
+// ---------- Simple: finish missing work on Result, and show what the tool is doing ----------
 const COMPUTE_STEPS = [["orient", "Finding the best way to lay it on the bed"], ["problems", "Checking for problems"],
   ["strength", "Checking the strength"], ["settings", "Choosing the slicer settings"]];
 
-/** Run everything for Simple again, ticking off each step as it goes, then show the result. */
+let computingResult = false;
+
+/** Reuse completed checks; entering Result starts only the work still needed. */
 async function compute() {
+  if (computingResult) return;
+  computingResult = true;
   const items = Object.fromEntries(COMPUTE_STEPS.map(([k, t]) => [k, el("li", {}, el("span", { textContent: t }))]));
   $("compute-steps").replaceChildren(...Object.values(items));
   $("compute-steps").hidden = false;
@@ -3666,21 +3772,32 @@ async function compute() {
     items[k].className = how;
     if (note) items[k].firstChild.append(el("small", { textContent: ` — ${note}` }));
   };
-  if (steps.ready("result") === true) steps.go("result");
-  mark("orient", "working");
-  mark("problems", "working");
-  await findOrientations(readyForStrength());
-  mark("orient", "done");
-  mark("problems", "done", `${state.check?.findings.length ?? 0} found`);
-  if (readyForStrength()) {
-    mark("strength", "working");
-    const r = await runStrength();
-    mark("strength", "done", r ? `safety ×${r.safety_factor.toFixed(1)}` : "");
-  } else mark("strength", "skipped", "no load set (optional: Strength analysis)");
-  mark("settings", "done");
-  steps.go("result");
+  try {
+    if (!activeOption()) {
+      mark("orient", "working");
+      mark("problems", "working");
+      await findOrientations();
+    } else if (!state.check) {
+      mark("problems", "working");
+      await runCheck();
+    }
+    mark("orient", "done");
+    mark("problems", "done", `${state.check.findings.length} found`);
+    if (readyForStrength()) {
+      if (!state.strength || state.strengthInputs !== JSON.stringify(strengthInputs())) {
+        mark("strength", "working");
+        await runStrength();
+      }
+      mark("strength", "done", `safety ×${state.strength.safety_factor.toFixed(1)}`);
+    } else mark("strength", "skipped", "no load set (optional: Strength analysis)");
+    mark("settings", "done");
+  } catch {
+    // busy() already reports errors and Cancel. Don't leave an endless spinner in this list.
+    for (const [k, item] of Object.entries(items)) if (item.className !== "done") mark(k, "skipped", "not finished — try again");
+  } finally {
+    computingResult = false;
+  }
 }
-$("compute").onclick = compute;
 
 document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () => {
   updateGoalNote();
@@ -4018,6 +4135,7 @@ $("dl-3mf").onclick = async () => {
     const fine_layers = $("dl-fine").checked ? fineWanted() : [];
     const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked, copies: state.copies ?? 1 });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
+    $("after-dl").hidden = false; // what to do with the file, once per download
     const seam = faceMarks()?.clean?.length ? " The seam is kept off the faces you marked “keep clean”." : "";
     const grip = $("dl-grip").checked ? " Fuzzy skin is on for the outside walls." : "";
     const copies = (state.copies ?? 1) > 1 ? ` ${state.copies} copies on the plate.` : "";
@@ -4025,11 +4143,14 @@ $("dl-3mf").onclick = async () => {
   });
 };
 
+$("after-dl-close").onclick = () => ($("after-dl").hidden = true);
+
 /** The open part and what was set on it, as a project file (web/project.js). */
 const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
   up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
   holes: holesForProject(),
+  edit_selections: editsForProject(), suggested_boxes: suggestedForProject(),
 });
 
 $("dl-project").onclick = () => {
@@ -4085,7 +4206,10 @@ const makeReport = (project = false) =>
           lines: [s.explanation ?? MODE_TEXT[s.mode] ?? "", `${s.material}, ${s.walls} walls, ${Math.round(s.infill * 100)} % infill · bends about ${s.max_displacement_mm.toFixed(1)} mm`,
             ...state.loads.map(loadText)],
           picture: pictureWith("strength", () => viewer.snapshot()),
-          note: `Colours: blue = little stress, red = close to breaking (${FIELD[view.field].title}). Rough estimate: aim for ×2 or more.` };
+          note: (view.field === "fi" && !view.stretch
+            ? `Colours: blue = little load, red = more than it should carry with ×${s.required_safety} safety.`
+            : `Colours: blue = little, red = the most on this part (${FIELD[view.field].title}).`)
+            + ` Rough estimate: aim for ×${s.required_safety} or more.` };
       }
       const w = state.warp;
       if (w) {
@@ -4161,7 +4285,7 @@ async function autosave() {
   if (!state.triangles || !activeOption() || busyCount) return;
   // Cheap fingerprint first: writing out the whole part every minute would be wasted work.
   const sig = JSON.stringify([state.name, state.version, state.triangles.length, activeOption().up, state.loads, faceMarks(),
-    state.zones, state.volumes, state.overrides, profile(), mode()]);
+    state.zones, state.volumes, state.overrides, profile(), mode(), editsForProject(), suggestedForProject()]);
   if (sig === autosaved) return;
   autosaved = sig;
   await autosaveStore("readwrite", (s) => s.put({ text: projectText(), name: state.name, time: Date.now() }, AUTOSAVE_KEY));

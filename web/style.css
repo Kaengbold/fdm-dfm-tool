@@ -431,6 +431,7 @@ summary::marker { color: var(--accent); }
 #settings { width: 100%; border-collapse: collapse; font-size: 14px; }
 #settings td { border-bottom: 1px solid var(--line); padding: 7px 3px; }
 #settings td:last-child { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+#settings .setting-reason { display: block; margin-top: 3px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .more-downloads { display: flex; flex-direction: column; gap: 6px; }
 .more-downloads button { text-align: left; }
 .summary-box { display: flex; flex-direction: column; gap: 3px; padding: 13px 14px; border-radius: var(--r); background: var(--good-soft); }

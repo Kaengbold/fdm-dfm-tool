@@ -1573,6 +1573,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     worst = cases[[c.number for c in cases].index(r["case"])]
     ok = ~worst.ignore  # stresses right at the supports and loads are not meaningful (they grow as the grid gets finer)
     r["fi_max_pct"] = float(fi[ok].max(initial=0) * 100)
+    r["required_safety"] = float(required_safety(p))
     r["vm_max_mpa"] = float(vm[ok].max(initial=0))
     r["mesh"] = {"voxels": int(len(model.elems)), "voxel_mm": float(model.grid.h), "nodes": int(model.n_nodes),
                  "load_n": float(np.linalg.norm(worst.forces.sum(axis=0)))}
