@@ -617,6 +617,15 @@
             <label id="pause-sliced" class="file-button" hidden title="Bambu Studio ignores the pause in the 3MF. Slice there, export the plate's sliced file (or the G-code), choose it here and print the file you get back">Add the pause to a file sliced in Bambu Studio…<input id="pause-file" type="file" accept=".gcode,.gco,.g,.3mf" hidden /></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
             <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>
+            <div id="after-dl" class="sim-card after-dl" hidden>
+              <h3>Next, in your slicer</h3>
+              <ol>
+                <li>Open the file in OrcaSlicer, Bambu Studio or PrusaSlicer.</li>
+                <li>Pick your printer and filament there as usual.</li>
+                <li>Slice and print: the walls, infill, supports and brim are already set on the part.</li>
+              </ol>
+              <button type="button" id="after-dl-close" class="ghost small">Got it</button>
+            </div>
             <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, joined with pins or a dovetail; shown on the bed first">Too big: cut it into pieces that fit</button>
             <button id="dl-split-support" hidden title="Cut where the part is narrowest so each piece prints its own best way, with much less support">Less support: print it in two pieces</button>
             <div id="split-panel" class="split-panel" hidden>

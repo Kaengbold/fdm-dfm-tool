@@ -772,6 +772,10 @@ def main():
 
             conf = zipfile.ZipFile(dl.value.path()).read("Metadata/model_settings.config").decode()
             assert "modifier_part" in conf and 'value="80%"' in conf, "picked zone not in the 3MF"
+            # T-415: after a 3MF download the next steps show, and "Got it" closes them.
+            assert page.evaluate("() => !document.getElementById('after-dl').hidden"), "no next steps after the download"
+            page.evaluate("() => document.getElementById('after-dl-close').click()")
+            assert page.evaluate("() => document.getElementById('after-dl').hidden"), "next steps did not close"
             label = item.locator("strong").inner_text()
             page.click("#zone-card h3")  # Ctrl+Z isn't undo while typing in a field
             page.keyboard.press("Control+z")  # back to a box
