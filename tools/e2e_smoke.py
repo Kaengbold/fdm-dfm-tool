@@ -896,16 +896,34 @@ def main():
             page.click("input[name=goal][value=strength] >> xpath=..")  # slow: checks several orientations
             page.wait_for_selector("#progress:not([hidden])", timeout=30_000)
             page.wait_for_function("() => document.getElementById('progress-bar').value > 0", timeout=30_000)
-            run.act(lambda: page.click("#working-cancel"), 60_000)
+            # Record before clicking: the restarting message may be gone by the time act returns.
+            page.evaluate("""() => {
+                window.cancelStatuses = [];
+                const status = document.getElementById('status');
+                const observer = new MutationObserver(() => {
+                    cancelStatuses.push({ text: status.textContent,
+                        working: !document.getElementById('working').hidden,
+                        progress: !document.getElementById('progress').hidden,
+                        busy: Number(document.body.dataset.busy || 0) });
+                    if (status.textContent === 'Ready') observer.disconnect();
+                });
+                observer.observe(status, { childList: true });
+            }""")
+            run.act(lambda: page.click("#working-cancel"), 240_000)
+            statuses = page.evaluate("() => cancelStatuses")
+            assert [s["text"] for s in statuses] == ["Cancelled. Getting ready again…", "Ready"], statuses
+            assert statuses[0]["working"] and statuses[0]["progress"] and statuses[0]["busy"] > 0, statuses
+            assert not statuses[1]["working"] and not statuses[1]["progress"] and statuses[1]["busy"] == 0, statuses
+            assert page.locator("#working-cancel").is_enabled(), "Cancel stayed disabled after restart"
             status = page.locator("#status").inner_text()
-            assert status.startswith("Cancelled"), status
+            assert status == "Ready", status
             # The restarted engine must have the part again: re-orienting works.
             run.act(lambda: page.click("input[name=goal][value=balanced] >> xpath=.."))
             after = page.evaluate("() => fdm.state.options.length")
             assert after == before, f"{before} options before, {after} after restart"
             kept = page.evaluate("() => fdm.call('session_state')")
             assert kept["tags"] == told["tags"] and kept["fits"] == told["fits"], f"lost on cancel: {told} -> {kept}"
-            return f"{status} | kept {len(kept['tags'])} answer(s), {len(kept['fits'])} fit(s) | after restart: {after} options, {len(findings(page))} findings"
+            return f"{' -> '.join(s['text'] for s in statuses)} | kept {len(kept['tags'])} answer(s), {len(kept['fits'])} fit(s) | after restart: {after} options, {len(findings(page))} findings"
         run.step("progress + cancel", cancel)
 
         def lighter_shape():
