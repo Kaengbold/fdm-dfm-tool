@@ -578,7 +578,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: overhangs and supports are on the underside, the camera looks from above: the part stays grey while the list says "needs support under 1,287 mm²".
   - Do: after a check, if any face is coloured "needs support" or "may droop" and none is visible from the camera, turn the camera (smoothly, once) to where most coloured area faces it, and say "Turned to show the underside". Add a button "Look from below" and a see-through switch for the bed plate.
   - Done when: `feature_test` shows red / amber faces without the user turning it.
-- [ ] **T-422 P2** [E] Opening a finding flies the camera inside the part. · files: `web/viewer.js` (`showFindings`, the fly-to animation) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-422-fly-to-finding`)
+- [ ] **T-422 P2** [E] Opening a finding flies the camera inside the part. · files: `web/viewer.js` (`showFindings`, the fly-to animation) · owner: — · after T-421 (builds on its camera code)
   - Seen: "Gap between moving parts fuses shut" on `feature_test`: the view zooms so close that only a grey wall, a red wire box and a white disc are left; no sense of where on the part it is.
   - Do: frame the finding with context: the place takes about a third of the view, the camera stays outside the part's bounding box, and it looks along the place's outward direction. Offer "Back to the whole part".
   - Done when: for every finding of every sample, the screenshot after the click shows part outline around the marked place (add to the browser test as a pixel check: not > 80 % one colour).
