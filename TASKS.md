@@ -593,7 +593,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 - [ ] **T-425 P1** [F] Layer height from the shape. · files: `core/fdmcore/recommend.py`, `core/fdmcore/checks.py` (`shallow_slope_stairs`, `fine_detail_rough`), `core/fdmcore/export3mf.py` (height ranges exist: `fineWanted` in `web/app.js`) · owner: —
   - Do: thinner layers (e.g. 0.12–0.16 on a 0.4 nozzle) when shallow slopes or fine detail cover a real share of the visible surface; thicker (0.24–0.28) for plain blocks with the goal Fast or Balanced and nothing that needs detail. Where only a height band needs it, keep the existing height ranges and say "thin layers only from 12 to 18 mm".
   - Done when: `detail_plate` and a sloped part get a different layer height than `tray`; time estimates follow.
-- [ ] **T-426 P1** [F] Reasons that name the part. · files: `core/fdmcore/recommend.py` (`put` reasons) · owner: —
+- [ ] **T-426 P1** [F] Reasons that name the part. · files: `core/fdmcore/recommend.py` (`put` reasons) · owner: Claude (`task/T-426-reasons-name-part`)
   - Seen: "Good balance of strength and speed", "Matches your goal", "Good default for a 0.4 mm nozzle": the same on every part.
   - Do: every reason states the fact of this part that led to the value: "3 walls: your thinnest wall is 1.4 mm, so it prints solid", "Brim ears: the base is 100 mm long and ABS lifts from about 45 mm on an open printer", "Supports on: 1,287 mm² hang in the air". Where the value is only the goal's default, say so: "From your goal Balanced; nothing on this part asks for more".
   - Done when: a test fails if two parts with different shape facts get an identical reason text for a part-driven setting.
@@ -720,7 +720,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: user text is spread over HTML, JS string templates, YAML and Python f-strings. English only for now (PRODUCT.md).
   - Do: don't translate yet. Decide the shape (message keys with parameters; the engine returns key + numbers, the app formats) and move new text to it from now on; write the rule in AGENTS.md. Easiest after T-382 cut the text.
   - Done when: the approach is written down and one pane uses it as the example.
-- [ ] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: —
+- [ ] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: Claude, built with Gemini Flash (`task/T-455-use-cases`)
   - Add under Users: (1) beginner with a downloaded model: "will this print on my A1?" → verdict, time, grams, one file, no CAD words; (2) functional maker with own CAD: bracket, hook, enclosure that must hold → strength, fits, design advice back to CAD; (3) tinkerer with a tuned profile → a real difference to their profile, numbers, pick and choose; (4) small seller / print farm: the same part many times → failure risk, time and cost, saved projects; (5) teacher or club → a report to share and plain reasons; (6) agent user → easy local install.
   - Done when: PRODUCT.md lists them and each new feature task names which one it serves.
 
