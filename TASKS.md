@@ -506,7 +506,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: rewrite every `why` to say only what the check measured and what happens when printing, in one or two short sentences, e.g. "Two faces are 0.15 mm apart. Gaps under 0.2 mm fuse into one piece." No "The CAD model shows …", no guessed purpose. The measured numbers already sit in each finding's `detail`.
   - Done when: `grep -c "The CAD model" core/fdmcore/data/rules.yaml` is 0; each `why` is ≤ 2 sentences (this also serves T-382).
   - Outcome: all 51 `why` texts rewritten (drafted by Gemini Flash in three chunks, reviewed and three corrected by hand); no "The CAD model" left, each ≤ 2 sentences, nothing else in the file changed; rule tests pass.
-- [ ] **T-408 P1** [B] Know what kind of model it is: CAD part or organic shape (scan, sculpt, figure). · files: `core/fdmcore/api.py` (`load`), `core/fdmcore/regions.py`, `core/fdmcore/checks.py`, `core/fdmcore/features.py`, `web/app.js` · owner: —
+- [ ] **T-408 P1** [B] Know what kind of model it is: CAD part or organic shape (scan, sculpt, figure). · files: `core/fdmcore/api.py` (`load`), `core/fdmcore/regions.py`, `core/fdmcore/checks.py`, `core/fdmcore/features.py`, `web/app.js` · owner: Claude (`task/T-408-organic-models`); shares `checks.py` / `thresholds.yaml` with T-424 (separate blocks)
   - Seen: the blob (no flat face, no hole) got "Raised or engraved detail too shallow", "Fine detail squashed on the bed", and many `rounded_edge` features.
   - Do: at load, measure the share of the surface that lies in flat or cylindrical regions (`find_regions`). Below a threshold (to find on the samples + the blob; put it in `thresholds.yaml`) the part is "organic". For organic parts: switch off the checks that need CAD features (`first_layer_detail`, engraved / raised detail, `small_hole_undersized`, feature detection), keep overhang / support / bed contact / tipping / cooling / warping. Return `kind: "cad" | "organic"` from `load`; the app shows "Looks like a sculpted model: checks for holes and fine CAD detail are off" with a switch to turn them on.
   - Done when: the blob (`tools/` generator from T-462) gets no engraved-detail or first-layer-detail finding; all samples stay "cad" with the same findings.
@@ -521,7 +521,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### C. The first minute
 
-- [ ] **T-411 P1** [C] Start with the part, not with a choice of level. · files: `web/index.html` (`#guide`), `web/app.js` (`openGuide`, `GUIDE`) · owner: —
+- [ ] **T-411 P1** [C] Start with the part, not with a choice of level. · files: `web/index.html` (`#guide`), `web/app.js` (`openGuide`, `GUIDE`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-411-part-first`)
   - Seen: a first visit opens "What do you want to do?" with Simple / Basic / Advanced / Expert before the visitor knows what any of them means.
   - Do: no dialog on the first visit. Open on the drop zone in Simple. The "Guide" button stays for later. After the first result, one line offers more: "Want to check strength, fits or design changes? Show more tools" (switches level). If T-417 is accepted, this becomes its start screen.
   - Done when: a fresh visit (no `fdm-guided`) shows the drop zone at once; the browser test's guide step opens it with the button.
@@ -588,7 +588,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### F. Slicer settings: made for this part
 
-- [ ] **T-424 P1** [F] Walls, infill and top layers from the part's shape, not only from the goal. · files: `core/fdmcore/recommend.py` (`goal_plan`, `recommend_settings`), `core/fdmcore/checks.py` (wall thickness stats), `core/fdmcore/data/thresholds.yaml`, `core/tests/` · owner: —
+- [ ] **T-424 P1** [F] Walls, infill and top layers from the part's shape, not only from the goal. · files: `core/fdmcore/recommend.py` (`goal_plan`, `recommend_settings`), `core/fdmcore/checks.py` (wall thickness stats), `core/fdmcore/data/thresholds.yaml`, `core/tests/` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-424-shape-settings`); shares `checks.py` / `thresholds.yaml` with T-408 (separate blocks)
   - Seen: across 21 different parts (PLA, P1S, Balanced): layer height 0.2 on all 21, infill 15 % gyroid on all 21, top / bottom 4 / 3 on all 21, elephant foot 0.15 on all 21, walls 3 on 19 and 4 on 2. Only on/off extras (supports, brim, ironing, bridge speed, hole compensation) react to the part. The core values come from the table `GOAL_PLANS`.
   - Do: measure from the slices: the typical and thinnest wall thickness, the share of the volume that is thick (would be infill), the top area. Then: (1) a part whose walls are ≤ 2 × walls × line width is solid anyway: say so, set walls so they fill it exactly, and call infill "hardly used here". (2) A thick block: fewer walls don't help; infill carries: pick density from the goal and the block's size. (3) Low infill (≤ 10 %) → one more top layer so the top closes. (4) Thin walls that are not a whole number of lines → Arachne (already there) and the reason. Keep the goal as the starting point.
   - Done when: the 21 parts give at least 6 different (walls, infill, top) triples; each change carries a reason (T-426); tests pin three typical parts (thin shell, thick block, mixed).
