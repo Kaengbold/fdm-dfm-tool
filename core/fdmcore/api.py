@@ -394,7 +394,8 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
         with stage(0.0, 0.6):
             _refine(s.mesh, [*candidates, as_loaded], placed, settings, p)
         with stage(0.6, 1.0):
-            candidates = rank_finalists(s.mesh, candidates, placed, settings, p, SUPPORT_FILL, extra=(as_loaded,))
+            candidates = rank_finalists(s.mesh, candidates, placed, settings, p, SUPPORT_FILL, extra=(as_loaded,),
+                                       layer_budget=REFINE_BUDGET)
     candidates = candidates[:top]
     if kept is not None and all(r is not kept for r in candidates):
         candidates.append(kept)

@@ -265,7 +265,7 @@ def stability_term(height, bed_area, s: OrientationSettings):
 
 def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, settings: OrientationSettings,
                    profile: Profile, support_fill: float,
-                   extra: tuple[OrientationResult, ...] = ()) -> list[OrientationResult]:
+                   extra: tuple[OrientationResult, ...] = (), layer_budget: float = 3e7) -> list[OrientationResult]:
     """Replace search proxies with the numbers shown to the user, only for finalists.
 
     Lower is better. Support costs w_support_volume (1 balanced, 1.5 speed, 2.5
@@ -280,7 +280,10 @@ def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, s
     footprints without letting them overwhelm support, strength or marked faces.
 
     Time uses the app's existing _estimate, including walls, infill, cooling and
-    layer-change overhead, on the same up-to-160 sections as its bed checks.
+    layer-change overhead, on up to 160 sections like its bed checks; big meshes get fewer
+    (faces x sections within layer_budget for all finalists, at least 40) so the browser
+    doesn't spend more on ranking than on the search. The bed checks use only the first
+    layer, the top and the widest section, and time is only compared between finalists.
     It costs w_print_time=0.25 times minutes / the fastest finalist's minutes.
     Thus a twice-as-long print costs 0.25 extra, not just a taller bounding box.
     Existing penalties stay: stability up to 1, small spots 0.5 each (up to 3),
@@ -299,9 +302,10 @@ def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, s
     support_scale = size**3 * support_fill / 1000 * profile.material["density_g_cm3"]
     thresholds = load_data("thresholds")
     times, risky = {}, {}
+    sections = int(np.clip(layer_budget / (mesh.face_count * (len(results) + len(extra))), 40, 160))
     for index, result in enumerate([*results, *extra]):
         report(index / (len(results) + len(extra)), "Checking bed contact and print time")
-        layers = slice_mesh(orient(mesh, placed[id(result)][0]), profile.layer_height, 160)
+        layers = slice_mesh(orient(mesh, placed[id(result)][0]), profile.layer_height, sections)
         findings = _bed_findings(layers, profile, thresholds)
         risky[id(result)] = any(finding["rule"] in {"tipping_risk", "small_bed_contact"} for finding in findings)
         times[id(result)] = _estimate(layers, profile)["print_time_min"]
