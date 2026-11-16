@@ -23,7 +23,7 @@ from .checks import RULE_IMPACT, orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh, to_binary_stl
-from .orientation import OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
+from .orientation import OrientationResult, OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
 from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
@@ -402,8 +402,11 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
 
     def pack(r, label):
         out = _pack(s.mesh, r, label, settings, placed[id(r)][0], p, safety.get(id(r)))
+        if r.print_time_min is not None:
+            out["reasons"] = [*out["reasons"], f"About {r.print_time_min:.0f} min to print"]
         if candidates and r is not candidates[0]:
-            out["why_lower"] = why_lower(r.terms, candidates[0].terms)
+            best = candidates[0]
+            out["why_lower"] = why_lower(r, best, placed[id(r)][1]["fits"], placed[id(best)][1]["fits"])
         return out
 
     return {
@@ -413,26 +416,70 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     }
 
 
-# How each score part reads when an option is worse on it than the recommended one.
+# Non-numeric penalties only: numeric claims must come from the card values.
 WORSE = {
-    "support": "needs more support",
-    "height": "prints taller (takes longer)",
-    "bed": "has less contact with the bed",
-    "stability": "stands tall on a narrow base (can tip or wobble)",
-    "first_layer": "has a trickier first layer (small spots or thin strips on the bed)",
+    "stability": "may tip or wobble",
+    "first_layer": "has small spots or thin strips on the first layer",
     "weak": "has more weak spots along the layers",
     "strength": "is weaker under your load",
-    "faces": "doesn't keep to the faces you marked",
+}
+WORSE_FACE = {
+    "clean": "puts support marks on a face you want clean",
+    "bed": "leaves a face you marked off the bed",
+    "vertical": "tilts a face you want upright",
 }
 
 
-def why_lower(terms: dict[str, float], best: dict[str, float], min_gap: float = 0.05) -> str:
-    """Plain-language reason an option ranks below the recommended one, biggest difference first."""
-    gaps = sorted(((terms.get(k, 0.0) - best.get(k, 0.0), k) for k in WORSE), reverse=True)
-    worse = [WORSE[k] for gap, k in gaps if gap > min_gap][:2]
+def why_lower(option: OrientationResult, best: OrientationResult, fits: bool = True, best_fits: bool = True,
+              min_gap: float = 0.05) -> str:
+    """Compare the card values, never turn an internal score gap into a numeric claim.
+
+    Require both 10% and an absolute gap: 0.5 g support, 1 mm² contact,
+    0.5 mm height or 1 minute. Round as the cards do (whole grams/mm²/minutes,
+    0.1 mm height); support must also be worse in the API's 0.1 g value.
+    Under-1-g support shares one label, so cannot distinguish two such options.
+    These small floors keep rounding and slice noise out of the short sentence.
+    If no displayed number is meaningfully worse, explain a guard or preference
+    penalty instead. Small score differences alone are an honest near tie.
+    """
+    def grams(result: OrientationResult) -> float:
+        value = result.support_grams
+        return float(f"{value:.0f}") if value is not None and value >= 1 else 0.0
+
+    def shown(value: float | None, digits: int = 0) -> float | None:
+        return None if value is None else float(f"{value:.{digits}f}")
+
+    comparisons = [
+        (grams(option), grams(best), 0.5, "needs more support"),
+        (-shown(option.bed_area), -shown(best.bed_area), 1.0, "has less contact with the bed"),
+        (shown(option.height, 1), shown(best.height, 1), 0.5, "prints taller"),
+        (shown(option.print_time_min), shown(best.print_time_min), 1.0, "takes longer to print"),
+    ]
+    worse = []
+    for value, reference, floor, phrase in comparisons:
+        if value is None or reference is None:
+            continue
+        if phrase == "needs more support" and (
+            option.support_grams is None or best.support_grams is None
+            or round(option.support_grams, 1) - round(best.support_grams, 1)
+            <= max(0.5, 0.1 * round(best.support_grams, 1))
+        ):
+            continue
+        if value - reference > max(floor, 0.1 * abs(reference)):
+            worse.append(phrase)
     if not worse:
-        return "Almost as good as the recommended option"
-    return "Ranked lower: " + " and ".join(worse)
+        if not fits and best_fits:
+            worse.append("doesn't fit the printer")
+        bed_causes = {"tipping_risk": "may tip over", "small_bed_contact": "has too little contact to stay on the bed"}
+        worse += [phrase for rule, phrase in bed_causes.items() if rule in option.bed_rules and rule not in best.bed_rules]
+        gaps = [(option.terms.get(k, 0.0) - best.terms.get(k, 0.0), phrase) for k, phrase in WORSE.items()
+                if k != "stability" or "may tip over" not in worse]
+        gaps += [(option.face_penalties.get(k, 0.0) - best.face_penalties.get(k, 0.0), phrase)
+                 for k, phrase in WORSE_FACE.items()]
+        worse += [phrase for gap, phrase in sorted(gaps, reverse=True) if gap > min_gap]
+    if not worse:
+        return "About as good: pick whichever suits you"
+    return "Ranked lower: " + " and ".join(worse[:2])
 
 
 CLEAN_FACE_WEIGHT = 3.0  # full penalty when a "clean" face is all supported (a strong preference)
@@ -501,15 +548,19 @@ def _face_penalty(mesh: Mesh, r, marked: dict, settings: OrientationSettings) ->
     for m in marked["clean"]:
         frac = areas[m & (classes == NEEDS_SUPPORT)].sum() / areas[m].sum()
         penalty += CLEAN_FACE_WEIGHT * frac
+        r.face_penalties["clean"] = r.face_penalties.get("clean", 0.0) + CLEAN_FACE_WEIGHT * frac
         if frac > 0.05:
             notes.append(f"Supports would touch a face you want clean ({frac:.0%} of it)")
     for m in marked["bed"]:
         frac = areas[m & (classes == BED)].sum() / areas[m].sum()
         penalty += BED_FACE_WEIGHT * (1 - frac)
+        r.face_penalties["bed"] = r.face_penalties.get("bed", 0.0) + BED_FACE_WEIGHT * (1 - frac)
         notes.append("The face you picked sits on the bed" if frac > 0.9 else "The face you want on the bed is not on the bed")
     for m in marked["vertical"]:
         tilt = _tilt(mesh, m, r.up)
-        penalty += VERTICAL_FACE_WEIGHT * min(1.0, max(0.0, tilt - VERTICAL_TOL) / 0.2)
+        cost = VERTICAL_FACE_WEIGHT * min(1.0, max(0.0, tilt - VERTICAL_TOL) / 0.2)
+        penalty += cost
+        r.face_penalties["vertical"] = r.face_penalties.get("vertical", 0.0) + cost
         notes.append("The face you picked stands upright" if tilt <= VERTICAL_TOL else "The face you want upright is tilted or lying")
     r.penalize("faces", penalty)
     r.reasons += notes
@@ -543,12 +594,13 @@ def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettin
         }
         for k, v in new.items():
             r.penalize(k, v - r.terms.get(k, 0.0))
-        old_support_reason = explain(r, mesh)[1]
+        old_bed_reason, old_support_reason = explain(r, mesh)[:2]
         r.support_grams = st["support_volume"] * SUPPORT_FILL / 1000 * p.material["density_g_cm3"]
         r.support_needed = st["support_area"] > 0
-        new_support_reason = explain(r, mesh)[1]
-        r.reasons = [new_support_reason if reason == old_support_reason else reason for reason in r.reasons]
         r.bed_area, r.support_volume = st["bed_area"], st["support_volume"]
+        new_bed_reason, new_support_reason = explain(r, mesh)[:2]
+        replacements = {old_bed_reason: new_bed_reason, old_support_reason: new_support_reason}
+        r.reasons = [replacements.get(reason, reason) for reason in r.reasons]
         if st["small_spots"]:
             n = st["small_spots"]
             r.reasons.append(f"{n} small spot{'s' if n > 1 else ''} on the bed (a tip, post or corner): can come loose while printing")

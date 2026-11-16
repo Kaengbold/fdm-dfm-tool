@@ -176,7 +176,7 @@ def test_score_breakdown_explains_lower_options():
     for o in [first, *rest, r["as_loaded"]]:
         assert sum(o["score_terms"].values()) == pytest.approx(o["score"], abs=0.01)
     assert "why_lower" not in first
-    assert all(o["why_lower"].startswith(("Ranked lower", "Almost")) for o in rest)
+    assert all(o["why_lower"].startswith(("Ranked lower", "About as good")) for o in rest)
     assert "support" in rest[0]["why_lower"]
 
 
@@ -478,3 +478,104 @@ def test_bumpy_blob_pick_is_not_dominated():
     options = api.orientations()["orientations"]
     assert_not_pareto_dominated(options)
     assert all(np.isfinite(option["score"]) for option in options)
+
+
+def reason_option(**changes):
+    """Finalists with identical card values unless a test changes one."""
+    from fdmcore.orientation import OrientationResult
+
+    values = dict(up=np.array([0, 0, 1]), score=0.0, support_area=0.0, support_volume=0.0,
+                  bed_area=100.0, height=20.0, support_grams=3.0, print_time_min=30.0)
+    values.update(changes)
+    return OrientationResult(**values)
+
+
+@pytest.mark.parametrize("changes, phrase", [
+    ({"support_grams": 4.0}, "needs more support"),
+    ({"bed_area": 80.0}, "has less contact with the bed"),
+    ({"height": 23.0}, "prints taller"),
+    ({"print_time_min": 34.0}, "takes longer to print"),
+])
+def test_lower_reasons_use_card_values_even_without_score_gaps(changes, phrase):
+    assert api.why_lower(reason_option(**changes), reason_option()) == "Ranked lower: " + phrase
+
+
+@pytest.mark.parametrize("changes", [
+    {"support_grams": 2.0, "terms": {"support": 100.0}},  # the reported 2 g vs 3 g bug
+    {"support_grams": 3.49, "terms": {"support": 100.0}},  # both cards show 3 g
+    {"support_grams": 3.5},  # exactly the 0.5 g floor
+    {"bed_area": 90.0, "height": 22.0, "print_time_min": 33.0},  # exactly 10%: a near tie
+    {"bed_area": 99.6, "height": 20.04, "print_time_min": 30.4},  # round to the same card values
+    {"terms": {"support": 9.0, "height": 9.0, "bed": 9.0, "time": 9.0}},
+    {"terms": {"strength": 0.04}},
+])
+def test_lower_reason_near_tie_never_invents_a_numeric_cause(changes):
+    assert api.why_lower(reason_option(**changes), reason_option()) == "About as good: pick whichever suits you"
+
+
+@pytest.mark.parametrize("option_g, best_g", [(0.9, 0.0), (0.9, 0.1), (0.99, 1.01), (10.6, 10.0)])
+def test_lower_support_reason_respects_small_weight_labels_and_relative_floor(option_g, best_g):
+    assert api.why_lower(reason_option(support_grams=option_g), reason_option(support_grams=best_g)).startswith("About as good")
+
+
+@pytest.mark.parametrize("rule, phrase", [
+    ("tipping_risk", "may tip over"),
+    ("small_bed_contact", "has too little contact to stay on the bed"),
+])
+def test_lower_reason_uses_own_bed_finding_when_numbers_are_tied(rule, phrase):
+    option = reason_option(bed_rules=(rule,))
+    assert api.why_lower(option, reason_option()) == "Ranked lower: " + phrase
+    assert api.why_lower(option, reason_option(bed_rules=(rule,))).startswith("About as good")
+
+
+@pytest.mark.parametrize("term, phrase", [
+    ("stability", "may tip or wobble"),
+    ("first_layer", "has small spots or thin strips on the first layer"),
+    ("weak", "has more weak spots along the layers"),
+    ("strength", "is weaker under your load"),
+])
+def test_lower_reason_explains_non_numeric_penalties(term, phrase):
+    assert api.why_lower(reason_option(terms={term: 0.5}), reason_option()) == "Ranked lower: " + phrase
+
+
+@pytest.mark.parametrize("kind, phrase", [
+    ("clean", "puts support marks on a face you want clean"),
+    ("bed", "leaves a face you marked off the bed"),
+    ("vertical", "tilts a face you want upright"),
+])
+def test_lower_reason_explains_each_marked_face_preference(kind, phrase):
+    option = reason_option(terms={"faces": 1.0}, face_penalties={kind: 1.0})
+    assert api.why_lower(option, reason_option()) == "Ranked lower: " + phrase
+
+
+def test_lower_reason_explains_fit_guard_without_a_score_term():
+    assert api.why_lower(reason_option(), reason_option(), fits=False) == "Ranked lower: doesn't fit the printer"
+    assert api.why_lower(reason_option(), reason_option(), fits=False, best_fits=False).startswith("About as good")
+
+
+@pytest.mark.parametrize("path", sorted(SAMPLES.glob("*.stl")) + sorted((Path(__file__).parent / "corpus").glob("*.stl")),
+                         ids=lambda path: path.stem)
+def test_lower_sentences_agree_with_sample_and_corpus_cards(path):
+    api.load(path.read_bytes(), path.stem)
+    result = api.orientations({"printer": "bambu_p1s", "material": "pla"})
+    best = result["orientations"][0]
+
+    def shown_time(option):
+        return float(next(reason.split()[1] for reason in option["reasons"] if reason.endswith("min to print")))
+
+    for option in [*result["orientations"][1:], result["as_loaded"]]:
+        sentence = option["why_lower"]
+        context = (path.stem, sentence, option, best)
+        if "needs more support" in sentence:
+            assert option["support_g"] > best["support_g"], context
+            assert option["support_summary"] != best["support_summary"], context
+        if "taller" in sentence:
+            assert option["height_mm"] > best["height_mm"], context
+            assert float(f"{option['height_mm']:.1f}") > float(f"{best['height_mm']:.1f}"), context
+        if "has less contact" in sentence:
+            assert option["bed_area_mm2"] < best["bed_area_mm2"], context
+            assert round(option["bed_area_mm2"]) < round(best["bed_area_mm2"]), context
+        if "takes longer" in sentence:
+            assert shown_time(option) > shown_time(best), context
+    for option in [*result["orientations"], result["as_loaded"]]:
+        assert f"Flat contact with the bed: {option['bed_area_mm2']:.0f} mm²" in option["reasons"]
