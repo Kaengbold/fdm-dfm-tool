@@ -378,6 +378,23 @@ def main():
             assert page.is_visible("#view-key"), "feature test has warning colours but no key"
             entries = page.locator("#view-key > li:visible").evaluate_all("els => els.map(e => Number(e.dataset.faceClass)).sort()")
             assert entries == classes, f"key {entries} does not match face colours {classes}"
+            page.wait_for_timeout(450)
+            visible = "() => fdm.viewer.problemsVisible(fdm.viewer.problemSamples(fdm.state.options[fdm.state.active].face_classes))"
+            assert page.evaluate(visible), "feature_test: no red/amber face is visible after the check"
+            # Repainting the same check must respect the user's camera; explicit controls still work.
+            page.evaluate("() => fdm.viewer.resetCamera()")
+            before = page.evaluate("() => fdm.viewer.camera.position.toArray()")
+            page.evaluate("() => { fdm.steps.go('orient'); fdm.steps.go('problems'); }")
+            page.wait_for_timeout(450)
+            after = page.evaluate("() => fdm.viewer.camera.position.toArray()")
+            assert max(abs(a - b) for a, b in zip(before, after)) < 1e-6, "same check turned twice"
+            page.click("#look-below")
+            page.wait_for_timeout(450)
+            assert page.evaluate("() => fdm.viewer.camera.position.z < fdm.viewer.controls.target.z")
+            assert page.is_checked("#bed-see-through")
+            page.uncheck("#bed-see-through")
+            assert page.evaluate("() => fdm.viewer.bedGroup.children.every(o => o.material.opacity === 1 && o.material.depthWrite)")
+            page.check("#bed-see-through")
             # Hook's second pose has support but no yellow: absent entries must disappear too.
             page.evaluate("() => fdm.steps.go('part')")
             run.act(lambda: page.click("[data-sample=hook]"))

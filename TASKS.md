@@ -575,7 +575,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### E. The 3D view shows the problem
 
-- [ ] **T-421 P1** [E] Turn the view to the problem. · files: `web/viewer.js` (camera, `showFindings`), `web/app.js` (`recolor`, `renderCheck`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-421-view-to-problem`)
+- [x] **T-421 P1** [E] Turn the view to the problem. · files: `web/viewer.js` (camera, `showFindings`), `web/app.js` (`recolor`, `renderCheck`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-421-view-to-problem`) · outcome: One-time turn to visible problem faces, underside and see-through bed controls; 438 pytest and 92 browser steps passed. PR https://github.com/Kaengbold/fdm-dfm-tool/pull/144
   - Seen: overhangs and supports are on the underside, the camera looks from above: the part stays grey while the list says "needs support under 1,287 mm²".
   - Do: after a check, if any face is coloured "needs support" or "may droop" and none is visible from the camera, turn the camera (smoothly, once) to where most coloured area faces it, and say "Turned to show the underside". Add a button "Look from below" and a see-through switch for the bed plate.
   - Done when: `feature_test` shows red / amber faces without the user turning it.
