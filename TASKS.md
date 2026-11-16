@@ -447,7 +447,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: remove "(T-032)" from the text. The bigger change (a small "Estimate" badge instead of the dashed yellow frame) is T-444; this task is only the wording, so it can ship today.
   - Done when: no `T-` number is visible anywhere in the app (`grep -n "T-[0-9]" web/index.html` finds only comments).
 - [x] **T-397 P1** [A] Simple, step "What you have": two main buttons ("Compute" and "Next: Will it hold?"), and Next reaches the result without Compute. · files: `web/index.html` (`#compute`), `web/app.js` (`compute`), `web/steps.js` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-397-one-primary`)
-  - Outcome: Simple has one primary at the panel foot; Result reuses completed checks and runs missing/stale strength work with progress. Browser smoke: 0 failures (local screenshot timeout 120 s; T-468); engine: 314 passed.
+  - Outcome: Simple has one primary at the panel foot; Result reuses completed checks and runs missing/stale strength work with progress. Browser smoke: 0 failures (local screenshot timeout 120 s; T-469); engine: 314 passed.
   - Seen: both are solid green. DESIGN.md says one primary per step. The checks already run when the part loads, so "Compute" only repeats them.
   - Do: remove the "Compute" button from the pane. Keep its good part, the list of what the tool is doing (`#compute-steps`): show it on the Result step while work is running (the last step's button "Show my result" starts it when something is still missing, e.g. strength with loads set).
   - Done when: every step in Simple has exactly one primary button, in the panel foot; the browser test for T-374 is updated.
@@ -762,7 +762,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: `python tools/e2e_smoke.py --quick` (about 2 minutes): boot, one sample through Simple to the 3MF download, one finding opened, one level switch, the phone viewport's start screen. Run it on every pull request that touches `web/`; the full run stays on the label.
   - Done when: `--quick` runs under 3 minutes locally and in CI.
 
-- [ ] **T-468 P3** [M] A screenshot timeout aborts the browser suite before it reports the remaining checks. · files: `tools/e2e_smoke.py` (`Run.step`) · owner: —
+- [ ] **T-469 P3** [M] A screenshot timeout aborts the browser suite before it reports the remaining checks. · files: `tools/e2e_smoke.py` (`Run.step`) · owner: —
   - Seen while testing T-397 on Windows: all assertions through the oversized-part split passed, then `Page.screenshot` exceeded 30 seconds and stopped the run outside the step's error handler. The host had about 400 MB of free RAM afterward.
   - Do: handle screenshot failures as test failures and continue to the final summary; investigate an appropriate capture timeout on a busy host.
   - Done when: a timed-out screenshot is reported with its step and the remaining checks still run.
