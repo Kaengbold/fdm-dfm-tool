@@ -31,16 +31,6 @@ class QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def do_GET(self):
-        # Pictures can arrive on a separate branch. A blank response still exercises
-        # the image error fallback without logging expected 404s as app errors.
-        if self.path.startswith("/web/img/symptoms/") and not Path(self.translate_path(self.path)).is_file():
-            self.send_response(200)
-            self.send_header("Content-Type", "image/svg+xml")
-            self.end_headers()
-            return
-        super().do_GET()
-
 
 def serve() -> int:
     handler = functools.partial(QuietHandler, directory=str(ROOT))
@@ -1685,6 +1675,18 @@ def main():
             assert 'opt_key="layer_height">0.080' in ranges, ranges
             return text
         run.step("thinner layers on a shallow slope", fine_slopes)
+
+        def print_failed():
+            # "My print failed" on the sloped roof: rough top -> the shallow slope the check flagged comes first (T-344).
+            page.evaluate("() => document.getElementById('failed-start').click()")  # the start step may not be shown here
+            page.locator('[data-symptom="rough_overhang"]').click(timeout=60_000)
+            page.wait_for_function("() => document.querySelector('#failed-result .mine li')", timeout=60_000)
+            mine = page.locator("#failed-result .mine li").all_inner_texts()
+            assert any("Shallow slope" in m for m in mine), mine
+            assert page.locator('[data-symptom="rough_overhang"] img').evaluate("i => i.complete && i.naturalWidth > 0"), "no symptom picture"
+            page.click("#failed-close")
+            return mine[0][:100]
+        run.step("my print failed: the flagged slope comes first", print_failed)
 
         def mating_part():
             # Two parts of one assembly: a copy of the bracket 0.3 mm above it -> 0.30 mm per side, loose (T-348).
