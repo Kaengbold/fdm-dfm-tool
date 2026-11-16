@@ -521,7 +521,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### C. The first minute
 
-- [ ] **T-411 P1** [C] Start with the part, not with a choice of level. · files: `web/index.html` (`#guide`), `web/app.js` (`openGuide`, `GUIDE`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-411-part-first`)
+- [x] **T-411 P1** [C] Start with the part, not with a choice of level. · files: `web/index.html` (`#guide`), `web/app.js` (`openGuide`, `GUIDE`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-411-part-first`) · outcome: First visits open on Simple's drop zone with no dialog (Guide button stays); returning visits keep their level; after the first result Simple offers 'Show more tools' (switches to Advanced at Strength), hidden once used or dismissed. Browser smoke 91 passed / 0 failed.
   - Seen: a first visit opens "What do you want to do?" with Simple / Basic / Advanced / Expert before the visitor knows what any of them means.
   - Do: no dialog on the first visit. Open on the drop zone in Simple. The "Guide" button stays for later. After the first result, one line offers more: "Want to check strength, fits or design changes? Show more tools" (switches level). If T-417 is accepted, this becomes its start screen.
   - Done when: a fresh visit (no `fdm-guided`) shows the drop zone at once; the browser test's guide step opens it with the button.
