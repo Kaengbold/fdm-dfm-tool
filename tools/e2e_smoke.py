@@ -1723,6 +1723,10 @@ def main():
                 run.act(lambda: page.locator("#options > li").nth(i).click(), 300_000)
             assert page.evaluate("() => !document.getElementById('fine-for').hidden"), "no thinner-layers option for a 10° roof"
             text = page.locator("#fine-text").inner_text()
+            layer = page.evaluate("() => fdm.state.check.settings.find(s => s.key === 'layer_height')")
+            assert float(layer["value"]) == 0.2, layer
+            assert "thin layers only from 10 to 17.05 mm" in layer["reason"], layer
+            assert page.evaluate("() => fdm.state.check.stats.print_time_min > 0")
             page.evaluate("() => fdm.steps.go('download')")
             with page.expect_download(timeout=300_000) as dl:
                 page.evaluate("() => document.getElementById('dl-3mf').click()")

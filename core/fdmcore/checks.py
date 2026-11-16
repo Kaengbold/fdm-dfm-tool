@@ -168,8 +168,15 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     z = mesh.triangles[..., 2]
     top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
     stats["top_flat_mm2"] = float(areas[top].sum())
-    plan, _ = shape_plan(profile, stats, findings)
-    stats.update(_estimate(layers, profile, plan))
+    S = T["shape_layers"]
+    visible = normals[:, 2] >= -S["normal_tolerance"]
+    plain = (np.abs(normals[:, 2]) <= S["normal_tolerance"]) | (normals[:, 2] >= 1 - S["normal_tolerance"])
+    area = float(areas[visible].sum())
+    stats.update(visible_surface_mm2=area, plain_surface_share=float(areas[visible & plain].sum() / area) if area else 0.0,
+                 height_mm=float(z.max()),
+                 # Two long sides of a thin strip, estimated from its tracked volume / width.
+                 fine_detail_surface_mm2=float(sum(2 * r.volume / r.metrics["width"] for r in tracker.of("rough")
+                                                  if r.volume >= 1 and r.z1 - r.z0 >= 2 * profile.layer_height and r.metrics["width"] > 0)))
     heat = _layer_heat(layers, profile, sliced)
     findings += _cooling_findings(layers, heat, profile, T, sliced)
     findings += _profile_findings(layers, profile)
@@ -182,6 +189,8 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += shrink_line_findings(layers, profile, T)
     findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
+    plan, _ = shape_plan(profile, stats, findings)
+    stats.update(_estimate(layers, profile, plan))
 
     for f in findings:
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
@@ -1718,9 +1727,6 @@ def _estimate(layers: list[Layer], profile: Profile, plan: dict | None = None) -
     walls, infill = plan["walls"], plan["infill"] / 100
     sp = profile.speeds
     # At the melt-rate limit the head runs slower and steadier, so the efficiency doesn't apply on top.
-    flow_speed = profile.material["max_flow_mm3s"] / (lw * lh)  # mm/s at the volumetric limit
-    v_wall = min(sp["outer_wall"] * TIME_EFFICIENCY, flow_speed)
-    v_inf = min(sp["infill"] * TIME_EFFICIENCY, flow_speed)
     min_layer = profile.material["min_layer_time_s"]
     zs = np.array([layer.z for layer in layers])
     times, volume, total = [], 0.0, 0.0
@@ -1733,12 +1739,20 @@ def _estimate(layers: list[Layer], profile: Profile, plan: dict | None = None) -
         wall_area = min(g.area, g.length * walls * lw)
         core = max(g.area - wall_area, 0.0)
         solid = min(solid, core)
+        # Weight each sampled slice by the actual layer count, including partial band overlaps.
+        z0, z1 = layer.z - layer.dz / 2, layer.z + layer.dz / 2
+        cuts = sorted({z0, z1, *(max(z0, min(z1, r[k])) for r in plan.get("fine_layers", []) for k in ("z0", "z1"))})
+        real_layers = sum((b - a) / min([lh] + [r["layer_height"] for r in plan.get("fine_layers", [])
+                                                   if r["z0"] < b and r["z1"] > a]) for a, b in zip(cuts, cuts[1:]))
+        local_lh = layer.dz / real_layers
+        flow_speed = profile.material["max_flow_mm3s"] / (lw * local_lh)
+        v_wall = min(sp["outer_wall"] * TIME_EFFICIENCY, flow_speed)
+        v_inf = min(sp["infill"] * TIME_EFFICIENCY, flow_speed)
         # thin walls fit fewer loops than asked for: time follows the wall area that's really printed
         t = wall_area / lw / v_wall + (solid + (core - solid) * infill) / lw / v_inf + LAYER_OVERHEAD_S
         times.append(t)
-        real_layers = layer.dz / lh
         total += max(t, min_layer) * real_layers
-        volume += (wall_area + solid + (core - solid) * infill) * lh * real_layers
+        volume += (wall_area + solid + (core - solid) * infill) * layer.dz
     grams = volume / 1000 * profile.material["density_g_cm3"]
     return {"print_time_min": START_MIN + total / 60, "filament_g": grams, "layer_times": times}
 

@@ -329,3 +329,22 @@ shape_settings:
   density_offset: [0, 0, 0, 5, 10]
   min_infill_percent: 5
   max_infill_percent: 40
+
+shape_layers:
+  # Layer height trades vertical detail for speed; finer layers need more solid layers for the
+  # same skin thickness [Prusa KB https://help.prusa3d.com/article/layers-and-perimeters_1748;
+  # https://github.com/OrcaSlicer/OrcaSlicer/wiki/quality_settings_layer_height].
+  # 0.12/0.16 mm fine and 0.24/0.28 mm draft are standard 0.4 mm nozzle process heights
+  # [OrcaSlicer resources/profiles/BBL/process: 0.12mm Fine, 0.16mm Optimal,
+  # 0.24mm Draft, 0.28mm Extra Draft @BBL X1C]. Scale by nozzle; never exceed 70%.
+  # Shares below are conservative selection heuristics, not measured quality guarantees.
+  detail_nozzle_ratio: 0.4
+  slope_nozzle_ratio: 0.3
+  balanced_nozzle_ratio: 0.6
+  fast_nozzle_ratio: 0.7
+  detail_surface_share: 0.01
+  slope_surface_share: 0.08
+  whole_height_share: 0.65        # otherwise preserve the existing local height ranges
+  plain_surface_share: 0.999
+  normal_tolerance: 0.000001
+  min_wall_lines: 2
