@@ -59,6 +59,7 @@ export class Viewer {
     this.revealedChecks = new WeakSet();
     this.part = null;
     this.framed = false;
+    this.thumbnailCache = new Map();
 
     // The view's box changes with the window and with the level's layout (T-375: a card beside the settings).
     new ResizeObserver(() => this.resize()).observe(this.el);
@@ -77,6 +78,7 @@ export class Viewer {
   }
 
   setBed([w, d]) {
+    this.thumbnailCache.clear();
     this.bedSize = [w, d];
     empty(this.bedGroup);
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: "#dde3df" }));
@@ -100,6 +102,9 @@ export class Viewer {
   /** Show triangles (float32, part coords) rotated into print orientation. */
   showPart(triangles, rotation) {
     this.cancelCameraMove();
+
+    if (triangles !== this.thumbnailTriangles) this.setThumbnailPart(triangles, []);
+    if (JSON.stringify(rotation) !== JSON.stringify(this.placement?.rotation)) this.thumbnailCache.clear();
     this.hidePieces();
     const { out: positions, shift } = placeTriangles(triangles, rotation);
     this.placement = { rotation, shift };
@@ -636,8 +641,131 @@ export class Viewer {
     }
   }
 
-  /** A picture of the view as a JPEG data URL, ``width`` px wide: the whole part, or close to ``bbox``
-   * (print frame) seen from the current direction. The camera goes back to where the user had it. */
+  /** Register exact engine rotations/classes, including any turn made to fit the printer bed. */
+  setThumbnailPart(triangles, options) {
+    if (triangles === this.thumbnailTriangles && options === this.thumbnailOptions && options.length === this.thumbnailOptionCount) return;
+    dispose(this.thumbnailMesh);
+    this.thumbnailMesh = null;
+    this.thumbnailPose = null;
+    this.thumbnailCache.clear();
+    this.thumbnailTriangles = triangles;
+    this.thumbnailOptions = options;
+    this.thumbnailOptionCount = options.length;
+  }
+
+  /** Cached JPEG, independent of the live view. ``up`` is a part-coordinate build direction;
+   * ``focus`` is a finding (or its print-coordinate bbox); ``size`` is pixels, square or [width, height]. */
+  thumbnail({ up = this.placement?.rotation[2] ?? [0, 0, 1], focus = null, size = 160 } = {}) {
+    if (!this.thumbnailTriangles) return null;
+    const [width, height] = Array.isArray(size) ? size : [size, size];
+    const bbox = Array.isArray(focus) ? focus : focus?.bbox;
+    const key = JSON.stringify([up, bbox, focus?.severity, width, height]);
+    if (this.thumbnailCache.has(key)) return this.thumbnailCache.get(key);
+    const pose = JSON.stringify(up);
+    let mesh = this.thumbnailMesh;
+    if (!mesh || pose !== this.thumbnailPose) {
+      // Keep images for every pose, but only one GPU mesh: large uploads mustn't multiply GPU memory.
+      const material = mesh?.material ?? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });
+      mesh?.geometry.dispose();
+      mesh?.removeFromParent();
+      const option = this.thumbnailOptions.find((o) => o.up.every((v, i) => Math.abs(v - up[i]) < 1e-6));
+      const matrix = new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(...up).normalize(), new THREE.Vector3(0, 0, 1)));
+      const e = matrix.elements;
+      const rotation = option?.rotation ?? [[e[0], e[4], e[8]], [e[1], e[5], e[9]], [e[2], e[6], e[10]]];
+      const geometry = new THREE.BufferGeometry();
+      const { out } = placeTriangles(this.thumbnailTriangles, rotation);
+      geometry.setAttribute("position", new THREE.BufferAttribute(out, 3));
+      const colors = new Float32Array(out.length);
+      for (let f = 0; f < out.length / 9; f++) {
+        const c = CLASS_COLORS[option?.face_classes?.[f] ?? 0];
+        for (let v = 0; v < 3; v++) {
+          const at = f * 9 + v * 3;
+          colors[at] = c.r; colors[at + 1] = c.g; colors[at + 2] = c.b;
+        }
+      }
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      this.thumbnailMesh = mesh = new THREE.Mesh(geometry, material);
+      this.thumbnailPose = pose;
+    }
+    const scene = new THREE.Scene();
+    scene.background = this.scene.background;
+    for (const light of this.scene.children.filter((o) => o.isLight)) scene.add(light.clone());
+    scene.add(mesh);
+    const bed = bbox ? null : this.bedGroup.clone(true);
+    if (bed) {
+      bed.visible = true;
+      for (const object of bed.children) {
+        object.material = object.material.clone();
+        Object.assign(object.material, { transparent: false, opacity: 1, depthWrite: true });
+      }
+      scene.add(bed);
+    }
+    const sphere = mesh.geometry.boundingSphere;
+    let center = sphere.center.clone();
+    const direction = new THREE.Vector3(1.2, -1.6, 1.1).normalize();
+    let radius = sphere.radius;
+    let marker;
+    if (bbox) {
+      const box = new THREE.Box3(new THREE.Vector3(...bbox[0]), new THREE.Vector3(...bbox[1]));
+      center = box.getCenter(new THREE.Vector3());
+      direction.copy(center).sub(sphere.center);
+      if (direction.lengthSq() < 1e-6) direction.set(1.2, -1.6, 1.1);
+      direction.normalize();
+      // Keep some surrounding part and the eye outside the part, even for a tiny internal gap.
+      radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.9, sphere.radius * 0.6);
+      marker = new THREE.Box3Helper(box.expandByScalar(0.5), SEVERITY_COLORS[focus?.severity ?? "warn"]);
+      marker.material.depthTest = false;
+      scene.add(marker);
+    }
+    const camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 5000);
+    const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(20)) * Math.min(1, camera.aspect));
+    const distance = Math.max(radius / Math.sin(halfFov) * 1.1, sphere.radius + center.distanceTo(sphere.center) + 1);
+    camera.position.copy(center).addScaledVector(direction, distance);
+    camera.far = Math.max(5000, distance + sphere.radius * 4);
+    camera.updateProjectionMatrix();
+    camera.lookAt(center);
+    try {
+      const picture = this.renderPicture(scene, camera, width, height);
+      this.thumbnailCache.set(key, picture);
+      return picture;
+    } finally {
+      dispose(marker);
+      for (const object of bed?.children ?? []) object.material.dispose();
+      mesh.removeFromParent();
+    }
+  }
+
+  /** Render off-screen using the existing GPU context; never resize or repaint the visible canvas. */
+  renderPicture(scene, camera, width, height) {
+    const previous = this.renderer.getRenderTarget();
+    const target = new THREE.WebGLRenderTarget(width, height);
+    target.texture.colorSpace = this.renderer.outputColorSpace;
+    const pixels = new Uint8Array(width * height * 4);
+    try {
+      this.renderer.setRenderTarget(target);
+      this.renderer.render(scene, camera);
+      this.renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      const data = context.createImageData(width, height);
+      // WebGL's origin is bottom left; ImageData's is top left.
+      for (let row = 0; row < height; row++) {
+        data.data.set(pixels.subarray(row * width * 4, (row + 1) * width * 4), (height - row - 1) * width * 4);
+      }
+      context.putImageData(data, 0, 0);
+      return canvas.toDataURL("image/jpeg", 0.85);
+    } finally {
+      this.renderer.setRenderTarget(previous);
+      target.dispose();
+    }
+  }
+
+  /** Report picture of the live overlays, using a separate camera and the same off-screen renderer. */
   snapshot(bbox = null, width = 720) {
     const pos = this.camera.position.clone();
     const target = this.controls.target.clone();
@@ -655,19 +783,14 @@ export class Viewer {
       center = sphere.center.clone();
       dist = sphere.radius * 3.2;
     }
-    this.controls.target.copy(center);
-    this.camera.position.copy(center).addScaledVector(dir, dist);
-    this.camera.lookAt(center);
-    this.renderer.render(this.scene, this.camera);
     const src = this.renderer.domElement;
-    const out = document.createElement("canvas");
-    out.width = width;
-    out.height = Math.round((width * src.height) / src.width);
-    out.getContext("2d").drawImage(src, 0, 0, out.width, out.height);
-    this.camera.position.copy(pos);
-    this.controls.target.copy(target);
-    this.controls.update();
-    return out.toDataURL("image/jpeg", 0.85);
+    const height = Math.round(width * src.height / src.width);
+    const camera = this.camera.clone();
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    camera.position.copy(center).addScaledVector(dir, dist);
+    camera.lookAt(center);
+    return this.renderPicture(this.scene, camera, width, height);
   }
 
   /** Move the camera to ``f.bbox`` (print frame). ``from``: look from this direction (default:
