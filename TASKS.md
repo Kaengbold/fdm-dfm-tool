@@ -767,7 +767,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 - [ ] **T-463 P1** [M] Apply every suggested design change in the tests. · files: new `core/tests/test_design_edits.py`, `core/fdmcore/booleans.py` · owner: —
   - Do: for every sample and corpus part: get `design` edits for the best orientation, apply each alone and all together with `booleans.apply_edits` (needs `manifold3d`: skip when missing), and assert: closed, volume moved the right way, outer size unchanged unless the edit says so, piece count unchanged, the edit's finding gone after a re-check. (The audit's run found 112 edits, 0 failures to apply, 6 that grew the outer size.)
   - Done when: the test runs in CI with the engine tests and fails on a growing ledge fill until T-436 fixes it.
-- [ ] **T-464 P2** [M] Sanity tests for advice. · files: `core/tests/` · owner: —
+- [ ] **T-464 P2** [M] Sanity tests for advice. · files: `core/tests/` · owner: Claude, with Gemini Flash (`task/T-464-advice-sanity`)
   - Do: over all sample and corpus parts: (1) the recommended orientation is not worse on support weight, bed contact and height at once than another option (T-405); (2) no "ranked lower" reason contradicts the shown numbers (T-406); (3) the settings of clearly different parts are not all equal (T-424); (4) no user-visible text contains `T-` + digits or "The CAD model shows" (T-396, T-407); (5) the default profile has no use temperature (T-395, browser test).
   - Done when: each check exists and fails on today's `main` where the audit found the problem.
 
