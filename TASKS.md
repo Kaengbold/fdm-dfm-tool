@@ -514,7 +514,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: finding cards lead with the chip "Fix: change the design" even for someone who downloaded the model; the first fix shown is `fixes[0]`, whatever its kind.
   - Do: in mode `print`, order the fixes slicer → printer & material → design, and show the first slicer / process fix as the chip. Every rule already needs one (AGENTS.md). Organic parts (T-408) default to `print`.
   - Done when: in mode `print` no card's chip says "change the design".
-- [ ] **T-410 P2** [B] "Shaking and knocks": the drop result looks far too harsh. · files: `core/fdmcore/api.py` (`dynamics`), `core/fdmcore/fea.py`, `research/extra_simulations.md` · owner: —
+- [ ] **T-410 P2** [B] "Shaking and knocks": the drop result looks far too harsh. · files: `core/fdmcore/api.py` (`dynamics`), `core/fdmcore/fea.py`, `research/extra_simulations.md` · owner: Claude, research with Gemini Flash (`task/T-410-drop-range`)
   - Seen: L-bracket, 5 kg, drop 50 mm: "hits about 51× as hard … the part gives only 0.04 mm … safety drops from ×17.7 to ×0.3: it will likely break". The factor comes from the part's own tiny static bend alone, as if the falling thing, the mounting and the plastic gave nothing.
   - Do: check the formula against a source (impact factor `1 + sqrt(1 + 2h/δ)`), then add what really gives: the mount and the falling object (a default extra give, in `thresholds.yaml`, editable in All settings), and say in the text what is assumed. Show the result as a range ("between ×0.3 and ×2, depending on how hard the things are"). Source in the PR.
   - Done when: the text names its assumptions; a unit test pins the L-bracket case; the card carries the "Estimate" badge (T-444).
@@ -713,7 +713,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: 15 printers. Nothing says what to pick when yours is missing. Adding one means "Copy as YAML" into a pull request.
   - Do: (1) "My printer isn't listed" → pick the closest by three questions (enclosed? bed size? direct drive?) or (2) choose it from the shipped OrcaSlicer machine profiles (bed size, enclosure, nozzle read from there). Show which values are from the profile and which are assumed.
   - Done when: any printer in the shipped Orca profile set can be picked; the list says "+ about N more".
-- [ ] **T-452 P2** [J] Cura users. · files: `core/fdmcore/export3mf.py`, `web/app.js`, README · owner: —
+- [ ] **T-452 P2** [J] Cura users. · files: `core/fdmcore/export3mf.py`, `web/app.js`, README · owner: Claude, research with Gemini Flash (`task/T-452-cura`)
   - Seen: the 3MF carries settings for OrcaSlicer / Bambu Studio and PrusaSlicer. Cura reads the model but none of the settings; an informal poll (r/3Dprinting, Jan 2025, 123 votes) had Cura first.
   - Do: find out whether Cura takes per-model settings from a 3MF or needs a project file (`research/`). If not possible: for "Cura" in the slicer choice, show the settings as a short list to type in, with Cura's names, and export the turned STL.
   - Done when: a Cura user gets the orientation and a settings list with Cura's own names.
