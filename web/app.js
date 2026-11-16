@@ -1186,8 +1186,7 @@ function previewPick() {
   const on = !$("pick-panel").hidden && state.selectedRegion >= 0;
   $("dir-angle").hidden = $("dir").value !== "angle";
   $("dir-angle-out").textContent = `${$("dir-lean").value}° lean, towards ${$("dir-toward").value}°`;
-  $("as-fixed").disabled = $("as-load").disabled = !on;
-  for (const b of [$("as-fixed"), $("as-load")]) b.title = on ? "" : "Tap a face first";
+  for (const b of [$("as-fixed"), $("as-load")]) offWhy(b, on ? "" : "Tap a face on the part first.");
   state.previewLoad = !on ? null
     : state.saStage === "held" ? { ...target(), kind: "fixed" }
     : state.saStage === "load" ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
@@ -1224,8 +1223,8 @@ function renderStages() {
     li.querySelector(".sa-sum").textContent = sums[li.dataset.stage];
     li.classList.toggle("done", Boolean(sums[li.dataset.stage]) && li.dataset.stage !== "extra");
   }
-  document.querySelector("[data-next=load]").disabled = !held.length;
-  document.querySelector("[data-next=extra]").disabled = !forces.length;
+  offWhy(document.querySelector("[data-next=load]"), held.length ? "" : "Mark at least one place where it's held first.");
+  offWhy(document.querySelector("[data-next=extra]"), forces.length ? "" : "Add at least one load first.");
 }
 for (const li of document.querySelectorAll(".sa-stage")) li.querySelector(".sa-head").onclick = () => setStage(li.dataset.stage);
 for (const b of document.querySelectorAll(".sa-next")) b.onclick = () => setStage(b.dataset.next);
@@ -1441,6 +1440,30 @@ addEventListener("pointerup", () => {
   renderLoads();
 });
 const multiCase = () => new Set(state.loads.filter((l) => l.kind === "force").map((l) => l.case)).size > 1;
+/** Disable a button and say why in a muted line under its row (phones show no tooltips); an empty reason enables it.
+ * Buttons sharing a row share one line, each reason said once. */
+function offWhy(button, reason) {
+  button.disabled = Boolean(reason);
+  const box = button.closest(".row, .actions") ?? button;
+  box.whyOff ??= new Map();
+  box.whyOff.set(button, reason);
+  if (!box.whyNote) {
+    box.whyNote = el("p", { className: "hint why-off" });
+    box.after(box.whyNote);
+  }
+  const why = [...new Set([...box.whyOff.values()].filter(Boolean))];
+  box.whyNote.textContent = why.join(" ");
+  box.whyNote.hidden = !why.length;
+}
+
+/** What the strength check still needs, in words ("" when it can run). */
+const strengthMissing = () => {
+  const held = state.loads.some((l) => l.kind === "fixed");
+  const load = state.loads.some((l) => l.kind === "force");
+  return held && load ? "" : !held && !load ? "First mark where it's held and where the load goes (steps 1 and 2 above)."
+    : !held ? "First mark where it's held (step 1 above)." : "First add a load (step 2 above).";
+};
+
 const readyForStrength = () => state.loads.some((l) => l.kind === "fixed") && state.loads.some((l) => l.kind === "force");
 
 function renderLoads() {
@@ -1469,11 +1492,10 @@ function renderLoads() {
       ),
     ),
   );
-  $("run-strength").disabled = !readyForStrength();
-  $("run-optimise").disabled = !readyForStrength();
-  $("run-topology").disabled = !readyForStrength();
-  $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
-  $("dynamics-need").hidden = readyForStrength();
+  offWhy($("run-strength"), strengthMissing());
+  offWhy($("run-optimise"), strengthMissing());
+  offWhy($("run-topology"), readyForStrength() ? "" : "Needs where it's held and a load: set them in Strength analysis first.");
+  dynamicsWhy();
   renderStages();
 }
 
@@ -1669,10 +1691,15 @@ async function offerTurn() {
 }
 
 // ---------- strength: shaking and knocks (optional, Advanced) ----------
+/** Why "Run these checks" can't run yet: the loads first, then at least one ticked check. */
+function dynamicsWhy() {
+  offWhy($("run-dynamics"), !readyForStrength() ? "Set where it is held and a load in Strength analysis first."
+    : !($("dyn-shake").checked || $("dyn-drop").checked) ? "Tick shaking or knocks above." : "");
+}
 for (const [box, row] of [["dyn-shake", "dyn-shake-row"], ["dyn-drop", "dyn-drop-row"]]) {
   $(box).onchange = () => {
     $(row).hidden = !$(box).checked;
-    $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
+    dynamicsWhy();
   };
 }
 $("run-dynamics").onclick = async () => {
@@ -2153,8 +2180,12 @@ function optionGroups(opts, now) {
   if (!boxes.size) return groups;
   const recheck = el("button", { className: "primary recheck", textContent: "Re-check with the ticked changes", disabled: true,
     onclick: () => applyTicked(opts.filter((o) => boxes.get(o)?.checked)) });
-  for (const box of boxes.values()) box.addEventListener("change", () => (recheck.disabled = ![...boxes.values()].some((b) => b.checked)));
-  return [...groups, el("div", { className: "row recheck-row" }, recheck)];
+  const why = el("p", { className: "hint why-off", textContent: "Tick one or more changes above." });
+  for (const box of boxes.values()) box.addEventListener("change", () => {
+    recheck.disabled = ![...boxes.values()].some((b) => b.checked);
+    why.hidden = !recheck.disabled;
+  });
+  return [...groups, el("div", { className: "row recheck-row" }, recheck), why];
 }
 
 function optionCard(o, now, boxes, group) {
