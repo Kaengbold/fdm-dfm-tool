@@ -1365,7 +1365,12 @@ def main():
             # Or no pause at all: a side slot the magnet slides into after printing (T-336), a design change.
             run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             assert any("Side slot" in e for e in page.locator("#edits label").all_inner_texts()), "no side slot offered"
-            page.evaluate("() => { for (const e of fdm.state.edits) e.selected = e.id.startsWith('magnet-slot'); fdm.steps.go('design'); }")
+            # Tick only the side slot through its checkbox, as a user does (setting state alone leaves Apply off).
+            page.evaluate("() => fdm.steps.go('design')")
+            ids = page.evaluate("() => fdm.state.edits.map((e) => e.id)")
+            boxes = page.locator("#edits li input[type=checkbox]")
+            for i, edit_id in enumerate(ids):
+                boxes.nth(i).set_checked(edit_id.startswith("magnet-slot"))
             run.act(lambda: page.click("#apply-edits"), 300_000)
             assert page.evaluate("() => document.getElementById('pause-sliced').hidden"), "pause still offered after the side slot"
             run.act(lambda: page.click("input[name=mode][value=print] >> xpath=.."))
