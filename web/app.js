@@ -433,7 +433,7 @@ async function partLoaded(info) {
   closeSplit();
   renderOptions();
   $("view-empty").hidden = true;
-  $("view-key").hidden = false;
+  $("view-key").hidden = true;
   $("compute").disabled = false;
   $("compute-steps").hidden = true; // the list belongs to the last Compute
   if (steps.current === "part") steps.go("have");
@@ -496,8 +496,6 @@ async function selectOption(i) {
   state.active = i;
   [...$("options").children].forEach((li, k) => li.classList.toggle("active", k === i));
   state.placed = viewer.showPart(state.triangles, activeOption().rotation);
-  $("view-label").hidden = false;
-  $("view-label").textContent = i === 0 ? "Best orientation" : activeOption().label;
   viewer.clearMarkers(); // remove old orientation's warning boxes immediately
   state.strength = null;
   state.showHeat = false;
@@ -872,6 +870,12 @@ function showViewChanges() {
   $("view-changes").hidden = !text;
   if (text) $("view-changes").replaceChildren("This step changes: ", el("b", {}, text));
   $("view-compare").hidden = !(COMPARE.has(steps.current) && activeOption());
+  const option = activeOption();
+  // A ranking label helps only where poses are compared, and only with a different build direction.
+  const alternatives = option && state.options.some((o) => o.up.some((v, i) => Math.abs(v - option.up[i]) > 0.001));
+  $("view-label").hidden = !state.split && !(COMPARE.has(steps.current) && alternatives);
+  $("view-label").textContent = state.split ? `${state.split.soups.length} pieces, each on the bed the way it prints`
+    : option ? (state.active === 0 ? "Best orientation" : option.label) : "";
   setCompare(false);
 }
 
@@ -902,6 +906,8 @@ function shows(block) {
 /** Everything drawn on the part, for the step shown: loads and results in "Strength analysis", heat and
  * warping in "While printing", edit previews in "Design changes" — each step shows its own things only. */
 function recolor() {
+  const key = $("view-key");
+  key.hidden = true;
   const option = activeOption();
   if (!option) return;
   setCompare(false); // anything redrawn is the "after"
@@ -915,13 +921,21 @@ function recolor() {
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
   const spot = painting() && state.paint.length > 0;
   const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
+  const counts = [0, 0, 0, 0];
   viewer.colorByClass(option.face_classes, (f) => {
-    if (!state.faceRegions || !regions) return null;
-    const r = state.faceRegions[f];
-    if (shows("fits") && state.fitSel?.regions.includes(r)) return REGION_COLORS.fit;
-    if (r === state.selectedRegion && !spot) return REGION_COLORS.selected;
-    return roles.has(r) ? REGION_COLORS[roles.get(r)] : null;
+    let highlight = null;
+    if (state.faceRegions && regions) {
+      const r = state.faceRegions[f];
+      if (shows("fits") && state.fitSel?.regions.includes(r)) highlight = REGION_COLORS.fit;
+      else if (r === state.selectedRegion && !spot) highlight = REGION_COLORS.selected;
+      else if (roles.has(r)) highlight = REGION_COLORS[roles.get(r)];
+    }
+    if (!highlight) counts[option.face_classes[f]]++;
+    return highlight;
   });
+  for (const entry of key.children) entry.hidden = !counts[Number(entry.dataset.faceClass)];
+  // Grey and the underside on the bed need no explanation on an otherwise trouble-free part.
+  key.hidden = !(counts[1] || counts[2]);
   showPainted();
 }
 
@@ -3972,6 +3986,7 @@ async function showSplit(purpose = state.split?.purpose ?? "fit") {
   viewer.showPieces(soups.map((triangles, i) => ({ triangles, rotation: plan.pieces[i].rotation })));
   $("split-panel").hidden = false;
   $("split-text").textContent = plan.explanation;
+  $("view-label").hidden = false;
   $("view-label").textContent = `${soups.length} pieces, each on the bed the way it prints`;
   setStatus(plan.explanation);
 }
@@ -3993,7 +4008,7 @@ $("split-download").onclick = () => {
 };
 $("split-back").onclick = () => {
   closeSplit();
-  $("view-label").textContent = state.active === 0 ? "Best orientation" : activeOption().label;
+  showViewChanges();
 };
 
 $("dl-3mf").onclick = async () => {
