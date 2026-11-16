@@ -1469,6 +1469,92 @@ def main():
             return f"{shared.stat().st_size // 1024} kB, opened again: {got}"
         run.step("share: report with the part inside", share_file)
 
+        def strength_scale():
+            # T-401: a lightly loaded bracket must not look dangerous just because it has a peak.
+            run.act(lambda: page.click("[data-sample=l_bracket]"))
+            page.evaluate("""async () => {
+              const r = await fdm.call("regions");
+              fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
+              fdm.state.regionInfo = r.regions;
+              const held = r.regions.reduce((a, b) => a.normal[0] < b.normal[0] ? a : b);
+              const top = r.regions.filter((r) => r.normal[2] > 0.99).sort((a, b) => b.area_mm2 - a.area_mm2)[0];
+              fdm.state.loads = [{ region: held.id, kind: "fixed" }, { region: top.id, kind: "force", kg: 5, direction: [0, 0, -1] }];
+              document.getElementById("run-strength").disabled = false;
+            }""")
+            page.evaluate("() => fdm.steps.go('strength')")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            page.locator(".fea-view select").first.select_option("fi")
+            stretch = page.get_by_label("Stretch the colours", exact=True)
+            assert not stretch.is_checked(), "strength scale should start fixed"
+            top_label = page.locator("#legend .band span").first
+            assert top_label.inner_text() == "100 %+", top_label.inner_text()
+            assert page.locator("#legend .band-0").inner_text() == "0 %"
+            need = page.evaluate("() => fdm.state.strength.required_safety")
+            assert f"×{need:g} safety" in page.locator("#legend small").inner_text()
+            assert page.evaluate("""async () => {
+              const { fieldColor } = await import('./viewer.js');
+              const colour = (v) => fieldColor(v, undefined, true);
+              return !colour(0.9999).equals(colour(1)) && colour(1).equals(colour(2));
+            }"""), "fixed colours must turn red at 100%, with higher values clamped"
+
+            def colour_counts(section=False):
+                return page.evaluate("""async section => {
+                  const { fieldColor } = await import('./viewer.js');
+                  const v = fdm.viewer, result = fdm.state.strength;
+                  const colours = section ? v.section.instanceColor : v.field.mesh.geometry.getAttribute('color');
+                  const floats = (b) => new Float32Array(b.slice().buffer);
+                  let values = floats(section ? result.elements.fi : result.vertex_fi);
+                  if (section) {
+                    const positions = v.field.mesh.geometry.getAttribute('position').array;
+                    let low = Infinity, high = -Infinity;
+                    for (let i = 2; i < positions.length; i += 3) {
+                      low = Math.min(low, positions[i]); high = Math.max(high, positions[i]);
+                    }
+                    const cut = Number([...document.querySelectorAll('.fea-view input[type=range]')].at(-1).value);
+                    const at = low + cut * (high - low), centers = floats(result.elements.centers);
+                    values = values.filter((_, i) => v.toShown([...centers.subarray(3 * i, 3 * i + 3)])[2] <= at);
+                  }
+                  let red = 0, blue = 0, mismatched = Number(values.length !== colours.count);
+                  for (let i = 0; i < colours.count; i++) {
+                    const r = colours.getX(i), g = colours.getY(i), b = colours.getZ(i);
+                    if (r > 0.9 && g < 0.2 && b < 0.2) red++;
+                    if (b > r) blue++;
+                    const expected = fieldColor(Math.fround(values[i] * result.required_safety) / 100, undefined, true);
+                    if (Math.max(Math.abs(r - expected.r), Math.abs(g - expected.g), Math.abs(b - expected.b)) > 1e-6) mismatched++;
+                  }
+                  return { red, blue, total: colours.count, mismatched };
+                }""", section)
+
+            strong = colour_counts()
+            assert strong["red"] == 0 and strong["blue"] > strong["total"] / 2 and strong["mismatched"] == 0, strong
+            key = page.evaluate("() => fdm.viewer.fieldKey")
+            surface = page.evaluate("() => fdm.viewer.field.mesh.uuid")
+            stretch.check()
+            stretched_label = top_label.inner_text()
+            peak = page.evaluate("() => Math.round(fdm.state.strength.fi_max_pct * fdm.state.strength.required_safety)")
+            assert stretched_label == f"{peak} %" and stretched_label != "100 %+", stretched_label
+            assert page.evaluate("() => fdm.viewer.fieldKey") != key, "stretch did not refresh the surface"
+            assert page.evaluate("() => fdm.viewer.field.mesh.uuid") != surface, "stretch did not rebuild the surface"
+            stretch.uncheck()
+            page.locator(".fea-view select").nth(1).select_option("z")
+            cut = colour_counts(section=True)
+            assert cut["total"] > 0 and cut["mismatched"] == 0, cut
+            page.locator(".fea-view select").nth(1).select_option("")
+            page.locator(".fea-view select").first.select_option("vm")
+            assert not stretch.is_visible(), "stretch switch should only show for strength used"
+            page.locator(".fea-view select").first.select_option("fi")
+            page.evaluate("() => { fdm.state.loads.find((l) => l.kind === 'force').kg = 500; }")
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            assert top_label.inner_text() == "100 %+"
+            overloaded = colour_counts()
+            assert overloaded["red"] > 0 and overloaded["mismatched"] == 0, overloaded
+            page.locator(".fea-view select").nth(1).select_option("z")
+            overloaded_cut = colour_counts(section=True)
+            assert overloaded_cut["red"] > 0 and overloaded_cut["mismatched"] == 0, overloaded_cut
+            page.locator(".fea-view select").nth(1).select_option("")
+            return f"5 kg: {strong}; stretched top {stretched_label}; 500 kg: red weak spot"
+        run.step("strength colours: fixed allowed load and optional stretch", strength_scale)
+
         def load_at_an_angle():
             """T-372: no "hanging down (−Z as modelled)"; "at an angle" is chosen before placing the load, relative
             to the tapped face, with the arrow shown on the part while it's set."""

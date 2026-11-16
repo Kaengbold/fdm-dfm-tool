@@ -1762,11 +1762,11 @@ const dispLength = (r) => {
   return out;
 };
 const FIELD = {
-  fi: { title: "Strength used (%)", note: "100 % = breaks", values: (r) => f32(r.vertex_fi), elements: "fi", max: (r) => r.fi_max_pct, fmt: (v) => `${Math.round(v)} %` },
+  fi: { title: "Strength used (%)", values: (r) => f32(r.vertex_fi), elements: "fi", max: (r) => r.fi_max_pct, fmt: (v) => `${Math.round(v)} %` },
   vm: { title: "Stress, von Mises (MPa)", note: "", values: (r) => f32(r.vertex_vm), elements: "vm", max: (r) => r.vm_max_mpa, fmt: (v) => v.toFixed(v < 10 ? 1 : 0) },
   disp: { title: "Moves by (mm)", note: "how far each spot bends away", values: dispLength, elements: null, max: (r) => r.max_displacement_mm, fmt: (v) => v.toFixed(v < 0.1 ? 3 : 2) },
 };
-const view = { field: "fi", bend: 0, axis: "", cut: 0.5 };
+const view = { field: "fi", stretch: false, bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
@@ -1780,27 +1780,33 @@ function strengthView() {
     $("legend").hidden = true;
     return false;
   }
-  const f = FIELD[view.field];
-  const max = Math.max(f.max(r), 1e-9);
-  const key = `${view.field}|${r.critical_point}|${activeOption().up}`;
-  if (viewer.fieldKey !== key || !viewer.field) {
-    viewer.showField({ triangles: f32(r.field_triangles), values: f.values(r), disp: f32(r.vertex_disp), max });
+  const strength = view.field === "fi";
+  const f = strength ? { ...FIELD.fi, note: `100 % = the most it should carry (×${r.required_safety} safety)` } : FIELD[view.field];
+  // Engine fields are shares of breaking strength; both the skin and the cut use allowed load.
+  const scale = strength ? r.required_safety : 1;
+  const fixed = strength && !view.stretch;
+  const max = fixed ? 100 : Math.max(f.max(r) * scale, 1e-9);
+  const key = `${view.field}|${fixed}|${scale}|${max}|${r.critical_point}|${activeOption().up}`;
+  if (viewer.fieldResult !== r || viewer.fieldKey !== key || !viewer.field) {
+    viewer.showField({ triangles: f32(r.field_triangles), values: f.values(r).map((v) => v * scale), disp: f32(r.vertex_disp), max, fixed });
     viewer.fieldKey = key;
+    viewer.fieldResult = r;
   }
   const radius = viewer.part.geometry.boundingSphere.radius;
   viewer.setDeformation(view.bend * (0.08 * radius) / Math.max(r.max_displacement_mm, 1e-9));
   const els = r.elements;
-  const cubes = f.elements ? f32(els[f.elements]) : null; // displacement: only known on the surface
-  viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: cubes, size_mm: els.size_mm }, max);
-  renderLegend(f, max);
+  const cubes = f.elements ? f32(els[f.elements]).map((v) => v * scale) : null; // displacement: only known on the surface
+  viewer.setSection(view.axis || null, view.axis ? view.cut : null, { centers: f32(els.centers), values: cubes, size_mm: els.size_mm }, max, fixed);
+  renderLegend(f, max, fixed);
   return true;
 }
 
-function renderLegend(f, max) {
+function renderLegend(f, max, fixed = false) {
   const bands = [];
-  for (let i = FIELD_BANDS - 1; i >= 0; i--) {
-    bands.push(el("div", { className: "band", style: `background:${fieldColor((i + 0.5) / FIELD_BANDS).getStyle()}` },
-      el("span", { textContent: f.fmt((max * (i + 1)) / FIELD_BANDS) })));
+  for (let i = fixed ? FIELD_BANDS : FIELD_BANDS - 1; i >= 0; i--) {
+    const label = fixed && i === FIELD_BANDS ? `${f.fmt(max)}+` : f.fmt((max * (i + 1)) / FIELD_BANDS);
+    bands.push(el("div", { className: "band", style: `background:${fieldColor((i + 0.5) / FIELD_BANDS, undefined, fixed).getStyle()}` },
+      el("span", { textContent: label })));
   }
   $("legend").replaceChildren(el("strong", { textContent: f.title }), f.note ? el("small", { textContent: f.note }) : "", ...bands,
     el("div", { className: "band-0", textContent: f.fmt(0) }));
@@ -1922,10 +1928,13 @@ function strengthViewControls(r) {
     $("show-temp").checked = false;
     recolor();
   };
-  const field = el("select", {}, el("option", { value: "fi", textContent: "Strength used (% — where it breaks)" }),
+  const field = el("select", {}, el("option", { value: "fi", textContent: "Strength used (% of allowed load)" }),
     el("option", { value: "vm", textContent: "Stress (MPa, von Mises)" }), el("option", { value: "disp", textContent: "How far it moves (mm)" }));
   field.value = view.field;
-  field.onchange = () => ((view.field = field.value), show());
+  const stretch = el("input", { type: "checkbox", checked: view.stretch });
+  const stretchLabel = el("label", { className: "toggle", hidden: view.field !== "fi" }, stretch, "Stretch the colours");
+  stretch.onchange = () => ((view.stretch = stretch.checked), show());
+  field.onchange = () => ((view.field = field.value), (stretchLabel.hidden = view.field !== "fi"), show());
   const bend = el("input", { type: "range", min: 0, max: 1, step: 0.05, value: view.bend });
   bend.oninput = () => ((view.bend = Number(bend.value)), show());
   const axis = el("select", {}, ...[["", "No cut"], ["x", "Cut across X"], ["y", "Cut across Y"], ["z", "Cut at a height"]]
@@ -1938,6 +1947,7 @@ function strengthViewControls(r) {
   return el("div", { className: "fea-view" },
     el("label", { className: "toggle" }, heat, "Show results on the part (red arrow = weakest spot)"),
     from("advanced", el("label", {}, "Colour by ", field)),
+    from("advanced", stretchLabel),
     from("advanced", el("label", {}, "Show bending (exaggerated) ", bend)),
     from("advanced", el("div", { className: "row" }, axis, cut)),
     from("advanced", el("p", { className: "hint", textContent: "Cut through the part to see inside — the weakest spot is often under the surface." })),
@@ -4070,7 +4080,10 @@ const makeReport = (project = false) =>
           lines: [s.explanation ?? MODE_TEXT[s.mode] ?? "", `${s.material}, ${s.walls} walls, ${Math.round(s.infill * 100)} % infill · bends about ${s.max_displacement_mm.toFixed(1)} mm`,
             ...state.loads.map(loadText)],
           picture: pictureWith("strength", () => viewer.snapshot()),
-          note: `Colours: blue = little stress, red = close to breaking (${FIELD[view.field].title}). Rough estimate: aim for ×2 or more.` };
+          note: (view.field === "fi" && !view.stretch
+            ? `Colours: blue = little load, red = more than it should carry with ×${s.required_safety} safety.`
+            : `Colours: blue = little, red = the most on this part (${FIELD[view.field].title}).`)
+            + ` Rough estimate: aim for ×${s.required_safety} or more.` };
       }
       const w = state.warp;
       if (w) {

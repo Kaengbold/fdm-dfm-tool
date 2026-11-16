@@ -240,7 +240,7 @@ export class Viewer {
   /** FEA result view: the refined surface coloured by ``values`` (per corner) from 0 to ``max``,
    * in banded rainbow colours like FEA software. ``disp`` (3 per corner, mm, part coords) lets
    * ``setDeformation`` show the bent shape. Hides the normal part until ``hideField``. */
-  showField({ triangles, values, disp, max }) {
+  showField({ triangles, values, disp, max, fixed = false }) {
     this.hideField();
     const { out } = placeTriangles(triangles, this.placement.rotation, this.placement.shift);
     const geometry = new THREE.BufferGeometry();
@@ -248,7 +248,7 @@ export class Viewer {
     const colors = new Float32Array(out.length);
     const c = new THREE.Color();
     for (let i = 0; i < values.length; i++) {
-      fieldColor(values[i] / max, c);
+      fieldColor(values[i] / max, c, fixed);
       colors.set([c.r, c.g, c.b], i * 3);
     }
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -285,7 +285,7 @@ export class Viewer {
    * the analysis cubes themselves, solid and coloured, so the cut face reads as clean blocks (a
    * clipped surface shows its hollow inside instead). Without values (displacement: only known on
    * the surface) the surface is clipped. ``elements``: {centers (part coords), values|null, size_mm}. */
-  setSection(axis, t, elements, max) {
+  setSection(axis, t, elements, max, fixed = false) {
     dispose(this.section); // its own cubes and material, never the field's
     this.section = null;
     if (!this.field) return;
@@ -317,7 +317,7 @@ export class Viewer {
     const c = new THREE.Color();
     shown.forEach(([p, v], i) => {
       cubes.setMatrixAt(i, m.makeTranslation(p[0], p[1], p[2]));
-      cubes.setColorAt(i, fieldColor(v / max, c));
+      cubes.setColorAt(i, fieldColor(v / max, c, fixed));
     });
     this.section = cubes;
     this.scene.add(cubes);
@@ -799,10 +799,12 @@ export class Viewer {
 const VIEW_SAMPLES = 24; // points of an edit tested for a clear view
 export const FIELD_BANDS = 10;
 
-/** Classic FEA rainbow in bands: blue (0) → cyan → green → yellow → red (1 and above). */
-export function fieldColor(t, c = new THREE.Color()) {
-  const band = Math.min(FIELD_BANDS - 1, Math.max(0, Math.floor(t * FIELD_BANDS)));
-  return c.setHSL((0.66 * (FIELD_BANDS - 1 - band)) / (FIELD_BANDS - 1), 0.85, 0.5);
+/** Classic FEA rainbow. Fixed strength scales reserve an extra red band for 1 and above;
+ * stretched fields use the full rainbow over their ten bands. */
+export function fieldColor(t, c = new THREE.Color(), fixed = false) {
+  const top = fixed ? FIELD_BANDS : FIELD_BANDS - 1;
+  const band = Math.min(top, Math.max(0, Math.floor(t * FIELD_BANDS)));
+  return c.setHSL((0.66 * (top - band)) / top, 0.85, 0.5);
 }
 
 /** A thick arrow (shaft + head) from ``tail`` along unit ``dir``. */
