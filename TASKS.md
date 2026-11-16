@@ -471,7 +471,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen (re-checked 2026-11-15, after T-369): in the guided flow "Holds here" and "Load here" carry the tooltip "Tap a face first", which a phone doesn't show; "Next: where the load goes", "Check strength" and "Find the lightest settings that hold" are greyed out with no reason at all.
   - Do: every disabled action shows its reason as text next to it (not only a tooltip: phones have none), e.g. "Tap a face and mark where it is held and where the load goes". Same for `#run-dynamics`, `#run-topology`.
   - Done when: no disabled button without a visible reason in any step.
-- [ ] **T-403 P2** [A] After Cancel, say that the engine is restarting. · files: `web/app.js` (`cancelEngine`, `busy`) · owner: —
+- [ ] **T-403 P2** [A] After Cancel, say that the engine is restarting. · files: `web/app.js` (`cancelEngine`, `busy`), `tools/e2e_smoke.py` (progress + cancel) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-403-cancel-restarting`)
   - Seen: Cancel works, but the next action waited about 11 s (a new worker boots and gets the part again) with only "Cancelled — the last result stays shown."
   - Do: status "Cancelled. Getting ready again…" with the working bar until `restoring` is done, then "Ready".
   - Done when: the browser test's cancel step sees both messages.
