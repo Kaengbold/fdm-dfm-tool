@@ -38,7 +38,13 @@ CASES = {
 def test_corpus_part(name):
     good_ups, must, must_not = CASES[name]
     api.load((CORPUS / f"{name}.stl").read_bytes(), name)
-    top = api.orientations()["orientations"][0]
+    options = api.orientations()["orientations"]
+    top = options[0]
+    pick = (top["support_g"], -top["bed_area_mm2"], top["height_mm"])
+    for option in options[1:]:
+        alternative = (option["support_g"], -option["bed_area_mm2"], option["height_mm"])
+        assert not (all(left <= right for left, right in zip(alternative, pick))
+                    and any(left < right for left, right in zip(alternative, pick))), (name, top, option)
     if good_ups is not None:
         assert any(np.allclose(top["up"], u, atol=1e-6) for u in good_ups), f"{name}: top pick up={top['up']}"
     rules = {f["rule"] for f in api.check(top["up"])["findings"]}
