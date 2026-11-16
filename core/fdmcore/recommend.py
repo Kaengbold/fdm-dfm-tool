@@ -114,7 +114,7 @@ def _shape_layers(plan: dict, profile: Profile, stats: dict, findings: list[dict
                 and stats.get("wall_min_mm", 0) >= S["min_wall_lines"] * profile.line_width):
             ratio = S["fast_nozzle_ratio"] if profile.goal == "speed" else S["balanced_nozzle_ratio"]
             plan["layer_height"] = max(old, round(nozzle * ratio, 2))
-            reasons["layer_height"] = (f"This part has {area:,.0f} mm² of flat or upright surface; its thinner walls measure about {stats['wall_min_mm']:.2f} mm. "
+            reasons["layer_height"] = (f"This part has {area:,.0f} mm² of flat or upright surface; its thinnest walls measure about {stats['wall_min_mm']:.2f} mm; "
                                        f"no slopes or fine-detail warnings need thinner layers, so {GOAL_NAMES[profile.goal]} can print thicker layers")
     # Finer layers must not quietly make top/bottom skins thinner.
     if plan["layer_height"] < old:
