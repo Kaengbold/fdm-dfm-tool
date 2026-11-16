@@ -28,7 +28,7 @@ from .holes import horizontal_holes
 from .mesh import Mesh
 from .profile import Profile, load_data
 from .progress import report
-from .recommend import goal_plan
+from .recommend import goal_plan, shape_plan
 from .slicer import Layer, parts, slice_mesh
 
 QUAD = 2  # buffer resolution; coarse is fine and much faster
@@ -163,7 +163,13 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _bed_findings(layers, profile, T)
     findings += _weak_findings(layers, tracker, profile, T)
     findings += _flex_findings(layers, profile, T)
-    stats = _estimate(layers, profile)
+    stats = shape_settings_stats(layers, profile, T["shape_settings"])
+    normals, areas = mesh.normals_and_areas()
+    z = mesh.triangles[..., 2]
+    top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
+    stats["top_flat_mm2"] = float(areas[top].sum())
+    plan, _ = shape_plan(profile, stats, findings)
+    stats.update(_estimate(layers, profile, plan))
     heat = _layer_heat(layers, profile, sliced)
     findings += _cooling_findings(layers, heat, profile, T, sliced)
     findings += _profile_findings(layers, profile)
@@ -182,11 +188,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
     del stats["layer_times"]
     findings += vase_findings(layers, tracker, profile, T, stats)
-    normals, areas = mesh.normals_and_areas()
-    z = mesh.triangles[..., 2]
-    top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
     stats.update(
-        top_flat_mm2=float(areas[top].sum()),
         round_share=_round_share(layers, T["seam"]["round_min"]),
         layer_heat={"z": [l.z for l in layers], "temp_c": heat.round(1).tolist(), "softening_c": profile.material["softening_c"]},
         layers_analysed=len(layers),
@@ -195,6 +197,106 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
         needs_support=any(r.volume >= 2.0 for r in tracker.of("overhang")),
     )
     return {"findings": findings, "stats": stats, "z_strength_factor": profile.z_strength_factor, "material": profile.material["name"]}
+
+
+def _wall_width_samples(g, count: int) -> tuple[np.ndarray, float]:
+    """Cast inward normals from evenly spaced boundary points to the opposite wall.
+
+    Unlike 2A/P this measures a ring's actual wall, and keeps thin ribs in a mixed section.
+    Ray/segment maths needs no buffers or overlays (which can abort Pyodide's GEOS).
+    """
+    rings = [np.asarray(r.coords)[:, :2] for p in parts(g) for r in (p.exterior, *p.interiors)]
+    starts = np.concatenate([r[:-1] for r in rings])
+    edges = np.concatenate([np.diff(r, axis=0) for r in rings])
+    lengths = np.linalg.norm(edges, axis=1)
+    keep = lengths > 1e-8
+    starts, edges, lengths = starts[keep], edges[keep], lengths[keep]
+    perimeter = float(lengths.sum())
+    if not perimeter:
+        return np.array([]), 0.0
+    ends = np.cumsum(lengths)
+    along = (np.arange(count) + 0.5) * perimeter / count
+    index = np.searchsorted(ends, along)
+    points = starts[index] + edges[index] * ((along - (ends - lengths)[index]) / lengths[index])[:, None]
+    normals = edges[index][:, [1, 0]] * [-1, 1] / lengths[index, None]
+    probe = points + normals * 1e-5
+    normals[~shapely.contains_xy(g, probe[:, 0], probe[:, 1])] *= -1
+
+    def cross(a, b):
+        return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+    widths = []
+    for p, n in zip(np.array_split(points, 4), np.array_split(normals, 4)):
+        offset = starts[None, :, :] - p[:, None, :]
+        den = cross(n[:, None, :], edges)
+        parallel = np.abs(den) < 1e-10
+        den = np.where(parallel, 1, den)
+        t = cross(offset, edges) / den
+        u = cross(offset, n[:, None, :]) / den
+        hit = (~parallel) & (t > 1e-6) & (u >= -1e-9) & (u <= 1 + 1e-9)
+        widths.extend(np.min(np.where(hit, t, np.inf), axis=1))
+    widths = np.asarray(widths)
+    return widths[np.isfinite(widths)], perimeter / count
+
+
+def _infill_core_area(g, shell_mm: float, cells: int) -> float:
+    """Bounded grid estimate of the area left inside the goal's wall loops."""
+    x0, y0, x1, y1 = g.bounds
+    step = max(x1 - x0, y1 - y0) / cells
+    nx, ny = max(1, int(np.ceil((x1 - x0) / step))), max(1, int(np.ceil((y1 - y0) / step)))
+    hx, hy = (x1 - x0) / nx, (y1 - y0) / ny
+    x, y = np.meshgrid(x0 + (np.arange(nx) + 0.5) * hx, y0 + (np.arange(ny) + 0.5) * hy)
+    inside = shapely.contains_xy(g, x, y)
+    distances = shapely.distance(g.boundary, shapely.points(x[inside], y[inside]))
+    return min(float(np.count_nonzero(distances > shell_mm) * hx * hy), g.area)
+
+
+def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict) -> dict:
+    """Reuse the check's slices, with height/perimeter-weighted wall widths and volume-weighted core.
+
+    Width percentiles suppress tiny tips and intersections; they describe walls, not a certified
+    minimum feature size. The core excludes approximate top/bottom skins, so a flat plate does not
+    look like an infill-heavy block. Repeated prismatic sections share the expensive measurements.
+    """
+    plan = goal_plan(profile)
+    widths, weights = [], []
+    total = core = 0.0
+    cached = None
+    zs = np.array([l.z for l in layers])
+    for i, layer in enumerate(layers):
+        g = layer.geom
+        if g.is_empty or g.area <= 1e-9:
+            continue
+        key = shapely.normalize(g.simplify(0.001))
+        if cached is not None and key.equals_exact(cached[0], 1e-4):
+            w, weight, area = cached[1:]
+        else:
+            w, weight = _wall_width_samples(g, S["boundary_samples"])
+            area = _infill_core_area(g, plan["walls"] * profile.line_width, S["core_grid_cells"])
+            cached = (key, w, weight, area)
+        widths.extend(w)
+        weights.extend(np.full(len(w), weight * layer.dz))
+        skin = _skin_area(layers, zs, i, plan["top"] * plan["layer_height"], plan["bottom"] * plan["layer_height"])
+        core += max(0.0, area - skin) * layer.dz
+        total += g.area * layer.dz
+    if not widths or total <= 0:
+        return {}
+    w, weight = np.asarray(widths), np.asarray(weights)
+    order = np.argsort(w)
+    cumulative = np.cumsum(weight[order])
+    quantiles = [float(w[order[min(np.searchsorted(cumulative, q * cumulative[-1]), len(w) - 1)]])
+                 for q in S["wall_quantiles"]]
+    lines = w / profile.line_width
+    uneven = (w <= 2 * plan["walls"] * profile.line_width) & (np.abs(lines - np.round(lines)) > S["line_fraction_tolerance"])
+    uneven_indices = order[uneven[order]]
+    if len(uneven_indices):
+        uneven_weights = np.cumsum(weight[uneven_indices])
+        uneven_width = float(w[uneven_indices[np.searchsorted(uneven_weights, uneven_weights[-1] / 2)]])
+    else:
+        uneven_width = 0.0
+    return {"wall_min_mm": quantiles[0], "wall_typical_mm": quantiles[1], "wall_upper_mm": quantiles[2],
+            "infill_volume_share": float(core / total), "infill_volume_cm3": float(core / 1000),
+            "uneven_wall_share": float(weight[uneven].sum() / weight.sum()), "uneven_wall_mm": uneven_width}
 
 
 # ---------------------------------------------------------------- layer scan
@@ -1607,11 +1709,11 @@ def print_minutes(volume_mm3: float, profile: Profile) -> float:
     return float(volume_mm3) / (lw * lh * v) / 60
 
 
-def _estimate(layers: list[Layer], profile: Profile) -> dict:
-    """Rough print time and filament use, with the walls / infill / layer height of the user's goal.
+def _estimate(layers: list[Layer], profile: Profile, plan: dict | None = None) -> dict:
+    """Rough print time and filament use, with the shape-adjusted plan (or just the user's goal).
     Counts solid top/bottom skins and the slicer slowing down small layers to the material's
     minimum layer time. ``layer_times`` are the unslowed times (for the cooling check)."""
-    plan = goal_plan(profile)
+    plan = plan if plan is not None else goal_plan(profile)
     lw, lh = profile.line_width, plan["layer_height"]
     walls, infill = plan["walls"], plan["infill"] / 100
     sp = profile.speeds

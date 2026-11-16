@@ -284,3 +284,25 @@ flex:                             # parts that bend on purpose, and thick blocks
   thick_mm: 16.0                  # sections thicker than this all round are solid blocks
   thick_min_cm3: 15.0             # ... reported when this much of the part is that thick
   thick_min_share: 0.25           # ... and at least this share of it
+
+shape_settings:
+  # Shape-based adjustments to the goal plan. Engineering heuristics, not strength predictions.
+  # Infill supports top skins; low density needs another solid top layer [Prusa KB Infill,
+  # https://help.prusa3d.com/article/infill_42; OrcaSlicer wiki, strength_settings_top_bottom_shell].
+  # Arachne varies extrusion width for walls between whole line counts [Prusa KB Arachne wall generator,
+  # https://help.prusa3d.com/article/arachne-wall-generator_352769].
+  boundary_samples: 128          # normals per slice, shared by repeated cross-sections
+  core_grid_cells: 96            # longest grid side; point distances only, no shrinking buffers
+  wall_quantiles: [0.1, 0.5, 0.9] # thinnest sustained wall, typical wall, upper wall width
+  line_fraction_tolerance: 0.15  # within this fraction of a line counts as a whole line
+  uneven_wall_share: 0.15        # ignore a few corner/chamfer samples
+  solid_core_share: 0.05         # at most 5% of model volume left for infill: hardly used
+  mixed_core_share: 0.25         # mostly walls: one extra loop may finish filling the walls
+  low_infill_percent: 10
+  low_infill_extra_top: 1
+  # Density = goal + size offset (clamped below); cm3 of interior after walls/skins.
+  # Larger interiors need more backing for their skins. These deliberately broad bins are estimates.
+  core_size_cm3: [1, 8, 30, 100]
+  density_offset: [-10, -5, 0, 5, 10]
+  min_infill_percent: 5
+  max_infill_percent: 40

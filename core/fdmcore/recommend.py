@@ -6,6 +6,9 @@ Keys are OrcaSlicer / Bambu Studio setting names so they can go straight into a
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from math import ceil
+
 from .profile import Profile, load_data
 
 # What each goal changes in the slicer. Walls carry most of the strength (2–3× more than
@@ -63,12 +66,66 @@ def goal_plan(profile: Profile) -> dict:
     return plan
 
 
+def _sparse_top(plan: dict, stats: dict, S: dict, reasons: dict[str, str]) -> None:
+    """A sparse foundation needs one more closing layer, including on sloping tops."""
+    if plan["infill"] > S["low_infill_percent"]:
+        return
+    plan["top"] += S["low_infill_extra_top"]
+    area = stats.get("top_flat_mm2", 0)
+    fact = f"This part has a {area:,.0f} mm² flat top" if area > 0 else "This part's top surfaces need closing"
+    reasons["top"] = f"{fact} over {plan['infill']}% infill; one extra solid top layer helps close the gaps"
+
+
+def shape_plan(profile: Profile, stats: dict, findings: list[dict]) -> tuple[dict, dict[str, str]]:
+    """Start with the goal; change only what the measured walls/interior ask for.
+
+    Missing measurements keep the old plan, including its weak-spot safeguard. The size bins
+    are practical starting densities, not a prediction of how much load the part can carry.
+    """
+    plan = goal_plan(profile)
+    reasons = {}
+    S = load_data("thresholds")["shape_settings"]
+    weak = ("weak_upright_pin", "thin_neck", "single_line_wall")
+    if any(f["rule"] in weak for f in findings) and plan["walls"] < 4 and profile.goal not in ("speed", "material"):
+        plan["walls"] = 4
+        reasons["walls"] = f"Raised to 4 for a weak spot: {part_fact(findings, *weak)}"
+    if "wall_typical_mm" not in stats:
+        _sparse_top(plan, stats, S, reasons)
+        return plan, reasons
+
+    typical, thinnest, upper = (stats[k] for k in ("wall_typical_mm", "wall_min_mm", "wall_upper_mm"))
+    core_share, core_cm3 = stats["infill_volume_share"], stats["infill_volume_cm3"]
+    lw = profile.line_width
+    goal_walls = goal_plan(profile)["walls"]
+    fact = f"Your walls are typically {typical:.2f} mm (thinnest about {thinnest:.2f} mm)"
+    if core_share <= S["solid_core_share"]:
+        reasons["infill"] = f"Only {core_share:.0%} of this part is left for infill after walls and solid surfaces; infill is hardly used here"
+        if upper <= 2 * goal_walls * lw + 1e-6:
+            plan["walls"] = max(1, ceil(upper / (2 * lw) - 1e-6))
+            reasons["walls"] = (f"{fact}; {plan['walls']} wall loops from each side fill them solid "
+                                f"with {lw:.2f} mm lines (infill is hardly used here)")
+    else:
+        # Mostly walls with a small interior: finish filling the wall rather than leaving narrow gaps.
+        if core_share <= S["mixed_core_share"] and 2 * goal_walls * lw < typical <= 2 * (goal_walls + 1) * lw:
+            plan["walls"] = max(plan["walls"], ceil(typical / (2 * lw) - 1e-6))
+            reasons["walls"] = f"{fact}; {plan['walls']} loops from each side fill the typical wall instead of leaving a narrow gap"
+        size = bisect_right(S["core_size_cm3"], core_cm3)
+        plan["infill"] = max(S["min_infill_percent"], min(S["max_infill_percent"], plan["infill"] + S["density_offset"][size]))
+        reasons["infill"] = (f"About {core_cm3:.1f} cm³ ({core_share:.0%}) inside this part is left for infill; "
+                             f"{plan['infill']}% backs up that interior for your goal {GOAL_NAMES[profile.goal]}")
+        if "walls" not in reasons:
+            reasons["walls"] = (f"{fact}; keep {plan['walls']} loops from your goal {GOAL_NAMES[profile.goal]}. "
+                                f"The {core_cm3:.1f} cm³ interior needs infill too; fewer walls would not fill it")
+    _sparse_top(plan, stats, S, reasons)
+    return plan, reasons
+
+
 def recommend_settings(profile: Profile, findings: list[dict], stats: dict | None = None) -> list[dict]:
     rules = {f["rule"] for f in findings}
     stats = stats or {}
     mat = profile.material
     T = load_data("thresholds")
-    plan = goal_plan(profile)
+    plan, shape_reasons = shape_plan(profile, stats, findings)
     out: list[dict] = []
 
     def put(key, value, label, reason):
@@ -82,18 +139,11 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         else f"From your goal {GOAL_NAMES.get(goal, goal)} for a {profile.nozzle} mm nozzle; nothing on this part asks for finer layers")
 
     walls, infill = plan["walls"], plan["infill"]
-    weak = ("weak_upright_pin", "thin_neck", "single_line_wall")
-    if rules & set(weak) and walls < 4 and goal not in ("speed", "material"):
-        walls = 4
-    put("wall_loops", walls, "Walls", f"Raised to {walls} for a weak spot: {part_fact(findings, *weak)}" if walls > plan["walls"]
-        else {"strength": "Walls carry most of the strength", "speed": "Fewer walls print faster",
-              "material": "Fewer walls save plastic"}.get(goal, from_goal))
-    put("sparse_infill_density", f"{infill}%", "Infill", {"strength": "Denser infill backs up the walls",
-                                                          "speed": "Less infill prints faster",
-                                                          "material": "Very little infill saves plastic"}.get(goal, from_goal))
+    put("wall_loops", walls, "Walls", shape_reasons.get("walls", from_goal))
+    put("sparse_infill_density", f"{infill}%", "Infill", shape_reasons.get("infill", from_goal))
     put("sparse_infill_pattern", plan["pattern"], "Infill pattern", PATTERN_REASON[plan["pattern"]])
-    put("top_shell_layers", plan["top"], "Top layers", "More solid layers on top make it stiffer" if goal == "strength" else "Enough for a closed top surface")
-    put("bottom_shell_layers", plan["bottom"], "Bottom layers", "More solid layers at the bottom make it stiffer" if goal == "strength" else "Enough for a closed bottom")
+    put("top_shell_layers", plan["top"], "Top layers", shape_reasons.get("top", from_goal))
+    put("bottom_shell_layers", plan["bottom"], "Bottom layers", from_goal)
 
     overhang = stats.get("support_area_mm2", 0)
     if stats.get("needs_support") or "long_bridge" in rules:
@@ -123,7 +173,11 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
     else:
         put("brim_type", "no_brim", "Brim", "Enough bed contact without one")
 
-    if rules & {"too_thin_to_print", "fine_detail_rough", "single_line_wall"}:
+    if stats.get("uneven_wall_share", 0) >= T["shape_settings"]["uneven_wall_share"]:
+        put("wall_generator", "arachne", "Wall generator",
+            f"About {stats['uneven_wall_share']:.0%} of this part's wall samples, around {stats['uneven_wall_mm']:.2f} mm wide, "
+            f"fall between whole {profile.line_width:.2f} mm lines; Arachne varies line width to fill them")
+    elif rules & {"too_thin_to_print", "fine_detail_rough", "single_line_wall"}:
         put("wall_generator", "arachne", "Wall generator", "Arachne varies line width so thin details still print: "
             + part_fact(findings, "too_thin_to_print", "fine_detail_rough", "single_line_wall"))
     # Measured on the user's own prints (My materials): corrects every hole / outline, measured beats the default.
