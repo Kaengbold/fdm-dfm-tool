@@ -136,7 +136,9 @@ def check_thumbnails(page) -> str:
         for (const f of s.check.findings.filter(f => f.bbox).slice(0, 3)) {
           requests.push({up: s.options[s.active].up, focus: f, size: [120, 90]});
         }
-        for (const request of requests) {
+        // Symmetric samples can offer the same build direction more than once.
+        const unique = new Map(requests.map(r => [JSON.stringify([r.up, r.focus?.bbox, r.focus?.severity, r.size]), r]));
+        for (const request of unique.values()) {
           const start = performance.now();
           const picture = v.thumbnail(request);
           times.push(performance.now() - start);
@@ -156,7 +158,7 @@ def check_thumbnails(page) -> str:
           for (let i = 0; i < px.length; i += 4) colors.add(`${px[i] >> 4},${px[i+1] >> 4},${px[i+2] >> 4}`);
           variety.push(colors.size);
         }
-        return {times, cached, unchanged, renders, count: requests.length, variety};
+        return {times, cached, unchanged, renders, count: unique.size, variety};
       } finally { v.renderPicture = render; }
     }""")
     assert result["cached"], "thumbnail cache miss on an identical request"
