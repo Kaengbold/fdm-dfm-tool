@@ -4072,6 +4072,9 @@ async function showFailedSymptom(symptom) {
     : [el("p", { className: "hint", textContent: state.check ? "The check didn't flag this on your part: look at the usual causes." : "Load the part to see what the check found on it." })];
   $("failed-result").replaceChildren(...mine, el("h4", { textContent: "Usual causes" }), el("p", { textContent: r.why }),
     el("h4", { textContent: "What helps" }), el("ul", {}, ...r.fixes.map((f) => el("li", {}, el("span", { className: `chip ${f.domain}`, textContent: DOMAIN_LABEL[f.domain] }), " ", f.text))));
+  // Which one was picked, and its answer in view (it sits below the pictures, off screen on a phone).
+  for (const b of $("failed-symptoms").children) b.setAttribute("aria-pressed", String(b.dataset.symptom === symptom));
+  $("failed-result").scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 // Mistakes in the printer / material presets and the slicer values set here (api.setup_check), before the 3MF goes out.

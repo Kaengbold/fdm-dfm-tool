@@ -172,6 +172,7 @@ def main():
             page.get_by_text("Usual causes", exact=True).wait_for(timeout=60_000)
             assert "layers cool" in page.locator("#failed-result").inner_text()
             assert not page.locator("#failed-result .mine").count()
+            assert page.locator('[data-symptom="warped_corner"]').get_attribute("aria-pressed") == "true", "picked symptom not marked"
             page.click("#failed-close")
             return "warped corner: usual causes without a part"
         run.step("failed print without a part", failed_without_part)

@@ -300,6 +300,7 @@ summary::marker { color: var(--accent); }
 .failed-symptoms { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
 .failed-symptoms button { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
 .failed-symptoms img { width: 100%; height: 90px; object-fit: contain; }
+.failed-symptoms button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* ---------- problems ---------- */
 .impact-groups { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; }
