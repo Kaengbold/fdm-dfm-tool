@@ -2632,6 +2632,8 @@ $("vol-suggest").onclick = async () => {
   if (!activeOption()) return;
   await ensureRegions();
   const ideas = boxIdeas();
+  const key = (v) => JSON.stringify([v.kind, v.from]);
+  const choices = new Map(state.suggested.map((v) => [key(v), v.use]));
   const placed = [];
   await busy("Placing suggested boxes…", async () => {
     for (const idea of ideas) {
@@ -2639,13 +2641,13 @@ $("vol-suggest").onclick = async () => {
         const v = await call("volume_at", { up: activeOption().up, kind: idea.kind, profile: profile(), ...idea.from });
         const info = idea.from.region != null ? state.regionInfo[idea.from.region] : null;
         const what = info ? (info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`) : "the weakest spot";
-        placed.push({ ...v, from: idea.from, what, why: idea.why, use: true });
+        placed.push({ ...v, from: idea.from, what, why: idea.why, use: choices.get(key(idea)) ?? false });
       } catch { /* a box that doesn't fit here is just not suggested */ }
     }
   });
   setSuggested(placed);
   const many = (n) => `${n} box${n > 1 ? "es" : ""}`;
-  setStatus(placed.length ? `${many(placed.length)} suggested (dashed): untick any you don't want, then "Use these".`
+  setStatus(placed.length ? `${many(placed.length)} suggested: tick the boxes you want, then "Use these".`
     : state.strength ? "Nothing to add: no face that may droop, no clean face with supports."
     : "Nothing to add yet. Run the strength analysis first for a hidden gap at the weakest spot.");
 };
@@ -2654,13 +2656,24 @@ function setSuggested(list) {
   state.suggested = list;
   $("vol-suggested").hidden = !list.length;
   $("vol-suggest-list").replaceChildren(...list.map((v) => {
-    const tick = el("input", { type: "checkbox", checked: v.use, onchange: () => { v.use = tick.checked; drawBoxes(); } });
+    const tick = el("input", { type: "checkbox", checked: v.use, onchange: () => {
+      v.use = tick.checked;
+      $("vol-use").disabled = !state.suggested.some((b) => b.use);
+      drawBoxes();
+    } });
     const li = el("li", {}, el("label", { className: "toggle" }, tick, el("strong", { textContent: `${VOLUME_NAME[v.kind]}: ${v.what}` })),
       el("p", { className: "hint", textContent: v.why }));
     li.dataset.kind = v.kind;
     return li;
   }));
+  $("vol-use").disabled = !list.some((v) => v.use);
   drawBoxes();
+}
+for (const [id, use] of [["vol-all", true], ["vol-none", false]]) {
+  $(id).onclick = () => {
+    state.suggested.forEach((v) => (v.use = use));
+    setSuggested(state.suggested);
+  };
 }
 $("vol-use").onclick = () => {
   const use = state.suggested.filter((v) => v.use).map(({ use, why, ...v }) => v);
@@ -2745,14 +2758,27 @@ function clearEdits() {
   state.edits = [];
   state.designFor = null;
   $("edits").replaceChildren();
+  $("edit-selection").hidden = true;
   $("apply-edits").hidden = true;
   viewer.showGhosts([]);
 }
 
 function showSelectedGhosts(highlight = null) {
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : [], highlight);
-  $("apply-edits").hidden = !state.edits.some((e) => e.selected);
+  $("apply-edits").hidden = !state.edits.length;
+  $("apply-edits").disabled = !state.edits.some((e) => e.selected);
+  $("apply-edits").title = $("apply-edits").disabled ? "Tick a change to apply it." : "";
 }
+
+/** Choices belong to this model version; keep them even when a re-check rebuilds the list. */
+const editSelections = () => (state.versions[state.version].editSelections ??= {});
+function selectEdits(selected) {
+  for (const e of state.edits) editSelections()[e.id] = e.selected = selected;
+  document.querySelectorAll("#edits input[type=checkbox]").forEach((box) => (box.checked = selected));
+  showSelectedGhosts();
+}
+$("edits-all").onclick = () => selectEdits(true);
+$("edits-none").onclick = () => selectEdits(false);
 
 /** Design changes are suggested as soon as their step is shown (Expert: always on the page), once per orientation. */
 function suggestDesignIfShown() {
@@ -2771,13 +2797,19 @@ async function suggestDesign() {
     $("edit-params").hidden = !r.edits.length;
     state.features = r.features;
     renderFeatures(r.features);
-    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer), selected: !e.clash }));
+    // Only the size the user requested (not optional fins or extra plastic) starts ticked.
+    const choices = editSelections();
+    for (const e of state.edits) choices[e.id] = e.selected;
+    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
+      selected: choices[e.id] ?? (!e.clash && /^(fit-|gap-|fastener-(?!boss-)|solid-)/.test(e.id)) }));
+    $("edit-selection").hidden = !state.edits.length;
     $("edits").replaceChildren(
       ...(state.edits.length
         ? state.edits.map((e) => {
             const box = el("input", { type: "checkbox", checked: e.selected });
             box.onchange = () => {
               e.selected = box.checked;
+              choices[e.id] = box.checked;
               showSelectedGhosts();
             };
             // Pointing at a change turns the part to it and lights it up.
@@ -3082,6 +3114,7 @@ async function testDesignEdit(id) {
 
 /** Apply ``chosen`` (default: the ticked suggestions) as a new version of the model. */
 async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
+  if (!chosen.length) return setStatus("Tick a change to apply it.");
   return busy("Applying design changes…", async () => {
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
