@@ -151,6 +151,7 @@ const state = {
 const steps = new Steps({
   ready: (step) => step === "part" ? true
     : !state.triangles ? "Load a part first"
+    : step === "result" && steps.current !== "result" && steps.busy.has("result") ? "Checking your part…"
     : step === "have" || state.check ? true : "Checking your part…",
   changed: () => {
     strengthShown();
@@ -160,6 +161,7 @@ const steps = new Steps({
     if (shows("fits")) renderTolerance().catch(() => {}); // a new material or fit test changes it
     // A note about the last action ("Report copied …") belongs to the step it was made in.
     if (!busyCount && state.summary) setStatus(state.summary);
+    if (steps.level === "simple" && steps.current === "result") compute();
   },
 });
 
@@ -434,8 +436,7 @@ async function partLoaded(info) {
   renderOptions();
   $("view-empty").hidden = true;
   $("view-key").hidden = false;
-  $("compute").disabled = false;
-  $("compute-steps").hidden = true; // the list belongs to the last Compute
+  $("compute-steps").hidden = true; // a new part starts a new result
   if (steps.current === "part") steps.go("have");
   else steps.render();
   const up = state.keepUp;
@@ -1603,12 +1604,19 @@ function askLong(what, kind, choices = null) {
   });
 }
 
+/** Inputs that must still match before Simple can reuse a strength result. */
+function strengthInputs() {
+  return { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), detailed: useGcode(), zones: printZones() };
+}
+
 async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
   const what = useGcode() ? " with your sliced print (its walls, infill and line directions)" : "";
   const r = await busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
-    const r = await timed(fine ? "fine" : "strength", () => call("strength", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), fine, detailed: useGcode(), zones: printZones() }));
+    const args = strengthInputs();
+    const inputs = JSON.stringify(args); // snapshot before awaiting: loads can be edited while it runs
+    const r = await timed(fine ? "fine" : "strength", () => call("strength", { ...args, fine }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
       r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
@@ -1617,6 +1625,7 @@ async function runStrength(fine = false) {
           : "Changes a lot: the weak spot is small or sharp. Trust the finer result and keep a bigger safety margin.");
     }
     state.strength = r;
+    state.strengthInputs = inputs;
     state.showHeat = true;
     state.showWarp = false;
     state.showSwing = false;
@@ -3672,12 +3681,16 @@ document.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () =>
   updateModeNote();
   if (state.triangles) runCheck();
 }));
-// ---------- Simple: "Compute", and what the tool is doing (T-374) ----------
+// ---------- Simple: finish missing work on Result, and show what the tool is doing ----------
 const COMPUTE_STEPS = [["orient", "Finding the best way to lay it on the bed"], ["problems", "Checking for problems"],
   ["strength", "Checking the strength"], ["settings", "Choosing the slicer settings"]];
 
-/** Run everything for Simple again, ticking off each step as it goes, then show the result. */
+let computingResult = false;
+
+/** Reuse completed checks; entering Result starts only the work still needed. */
 async function compute() {
+  if (computingResult) return;
+  computingResult = true;
   const items = Object.fromEntries(COMPUTE_STEPS.map(([k, t]) => [k, el("li", {}, el("span", { textContent: t }))]));
   $("compute-steps").replaceChildren(...Object.values(items));
   $("compute-steps").hidden = false;
@@ -3685,21 +3698,32 @@ async function compute() {
     items[k].className = how;
     if (note) items[k].firstChild.append(el("small", { textContent: ` — ${note}` }));
   };
-  if (steps.ready("result") === true) steps.go("result");
-  mark("orient", "working");
-  mark("problems", "working");
-  await findOrientations(readyForStrength());
-  mark("orient", "done");
-  mark("problems", "done", `${state.check?.findings.length ?? 0} found`);
-  if (readyForStrength()) {
-    mark("strength", "working");
-    const r = await runStrength();
-    mark("strength", "done", r ? `safety ×${r.safety_factor.toFixed(1)}` : "");
-  } else mark("strength", "skipped", "no load set (optional: Strength analysis)");
-  mark("settings", "done");
-  steps.go("result");
+  try {
+    if (!activeOption()) {
+      mark("orient", "working");
+      mark("problems", "working");
+      await findOrientations();
+    } else if (!state.check) {
+      mark("problems", "working");
+      await runCheck();
+    }
+    mark("orient", "done");
+    mark("problems", "done", `${state.check.findings.length} found`);
+    if (readyForStrength()) {
+      if (!state.strength || state.strengthInputs !== JSON.stringify(strengthInputs())) {
+        mark("strength", "working");
+        await runStrength();
+      }
+      mark("strength", "done", `safety ×${state.strength.safety_factor.toFixed(1)}`);
+    } else mark("strength", "skipped", "no load set (optional: Strength analysis)");
+    mark("settings", "done");
+  } catch {
+    // busy() already reports errors and Cancel. Don't leave an endless spinner in this list.
+    for (const [k, item] of Object.entries(items)) if (item.className !== "done") mark(k, "skipped", "not finished — try again");
+  } finally {
+    computingResult = false;
+  }
 }
-$("compute").onclick = compute;
 
 document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () => {
   updateGoalNote();
