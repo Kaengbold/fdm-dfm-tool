@@ -460,7 +460,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: on the L-bracket all 8–9 suggestions were ticked on arrival; "Apply selected changes" then changes the part's shape in ways the user didn't ask for (see T-436).
   - Do: start every suggestion unticked. Keep ticked only what the user asked for directly (a fit they sized, a screw they set). Add "Tick all" / "None".
   - Done when: a fresh part shows 0 ticked; the browser tests that rely on pre-ticked boxes tick them first.
-- [ ] **T-400 P2** [A] Hide the colour key and the "Best orientation" label when they say nothing. · files: `web/app.js` (`recolor`, `showViewChanges`), `web/index.html` (`#view-key`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-400-quiet-key`)
+- [x] **T-400 P2** [A] Hide the colour key and the "Best orientation" label when they say nothing. · files: `web/app.js` (`recolor`, `showViewChanges`), `web/index.html` (`#view-key`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-400-quiet-key`)
+  - Outcome: the key lists only the colours on the part now (none on a trouble-free part); the "Best orientation" label only on steps that compare poses, and only when a different pose exists. Browser smoke 0 failures (81 steps), engine 314 passed.
   - Seen: Hook and L-bracket are plain grey, yet the key lists "Prints fine / May droop / Needs support / On the bed".
   - Do: show only the key entries whose colour is on the part now (count the face classes in `recolor`). No coloured face → no key.
   - Done when: Hook in Simple shows no key; `feature_test` shows only the colours it uses.

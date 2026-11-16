@@ -245,6 +245,53 @@ def main():
                 return f"{status} | top: {page.locator('#options > li').first.inner_text().splitlines()[1:3]} | findings: {findings(page)}"
             run.step(f"sample {name}", load)
 
+        def quiet_hook_key():
+            page.click("input[name=level][value=simple] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: page.click("[data-sample=hook]"))
+            assert page.is_hidden("#view-label"), "orientation ranking shown on the setup step"
+            page.evaluate("() => fdm.steps.go('result')")
+            assert page.is_hidden("#view-key"), "trouble-free Hook still shows a colour key"
+            assert page.is_visible("#view-label"), "different build directions have no ranking label"
+            # One option, or duplicate entries for the same pose, give no useful comparison.
+            page.evaluate("""() => {
+              window.savedOptions = fdm.state.options;
+              fdm.state.options = [fdm.state.options[0]];
+              fdm.steps.go('have'); fdm.steps.go('result');
+            }""")
+            try:
+                assert page.is_hidden("#view-label"), "single orientation still labelled best"
+                page.evaluate("""() => {
+                  fdm.state.options.push(fdm.state.options[0]);
+                  fdm.steps.go('have'); fdm.steps.go('result');
+                }""")
+                assert page.is_hidden("#view-label"), "duplicate pose still labelled best"
+            finally:
+                page.evaluate("() => { fdm.state.options = window.savedOptions; delete window.savedOptions; }")
+                page.click("input[name=level][value=expert] >> xpath=..")
+            return "Simple Hook: no key; ranking only with a different pose to compare"
+        run.step("quiet colour key and orientation label on Hook", quiet_hook_key)
+
+        def feature_colour_key():
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: page.click("[data-sample=feature_test]"))
+            page.evaluate("() => fdm.steps.go('problems')")
+            classes = page.evaluate("() => [...new Set(fdm.state.options[fdm.state.active].face_classes)].sort()")
+            assert 1 in classes or 2 in classes, f"feature test has no warning colours: {classes}"
+            assert page.is_visible("#view-key"), "feature test has warning colours but no key"
+            entries = page.locator("#view-key > li:visible").evaluate_all("els => els.map(e => Number(e.dataset.faceClass)).sort()")
+            assert entries == classes, f"key {entries} does not match face colours {classes}"
+            # Hook's second pose has support but no yellow: absent entries must disappear too.
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: page.click("[data-sample=hook]"))
+            run.act(lambda: page.locator("#options > li").nth(1).click())
+            page.evaluate("() => fdm.steps.go('problems')")
+            assert page.is_visible("#view-key") and page.is_hidden('#view-key > li[data-face-class="1"]')
+            run.act(lambda: page.locator("#options > li").first.click())
+            assert page.is_hidden("#view-key"), "key survived a switch back to the trouble-free pose"
+            return f"feature test key matches {classes}; unused yellow hidden; key clears on pose switch"
+        run.step("colour key contains only colours on the part", feature_colour_key)
+
         def modes():
             out = []
             for mode in ("design", "both", "print"):
