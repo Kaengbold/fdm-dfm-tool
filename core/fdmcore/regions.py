@@ -66,6 +66,32 @@ def find_regions(mesh: Mesh, planar_deg: float = 0.5, smooth_deg: float = 20.0, 
     return region
 
 
+def planar_share(mesh: Mesh, planar_deg: float = 0.05, max_faces: int = 150_000) -> float:
+    """Share of the surface on triangles that lie in one plane with an edge neighbour. CAD exports are ~1
+    (flat faces, cylinder strips of two triangles); scans and sculpts are ~0. The angle is far tighter than
+    ``find_regions``' 0.5°: on a finely meshed smooth shape neighbours are within 0.5° of each other, while
+    CAD neighbours in one plane differ only by float noise (~0.006° on a 0.1 mm strip). No scipy: it runs
+    when a part loads, before the browser fetches scipy. Big meshes are measured on whole grid cells
+    picked at random (fixed seed) up to ``max_faces``: neighbours stay together, and a share is a share."""
+    if mesh.face_count > max_faces:
+        c = mesh.triangles.mean(axis=1)
+        lo, size = c.min(axis=0), max(float(np.ptp(c, axis=0).max()), 1e-9)
+        cell = np.minimum((8 * (c - lo) / size).astype(np.int64), 7)
+        key = (cell[:, 0] * 8 + cell[:, 1]) * 8 + cell[:, 2]
+        counts = np.bincount(key, minlength=512)
+        order = np.random.default_rng(0).permutation(np.flatnonzero(counts))
+        upto = order[: int(np.searchsorted(np.cumsum(counts[order]), max_faces)) + 1]
+        mesh = Mesh(mesh.triangles[np.isin(key, upto)])
+    normals, areas = mesh.normals_and_areas()
+    adj = face_adjacency(weld(mesh))
+    cos = np.einsum("ij,ij->i", normals[adj[:, 0]], normals[adj[:, 1]])
+    pair = adj[cos > np.cos(np.radians(planar_deg))]  # sharing an edge, so the same direction is the same plane
+    shared = np.zeros(mesh.face_count, bool)
+    shared[pair.ravel()] = True
+    total = areas.sum()
+    return float(areas[shared].sum() / total) if total > 0 else 1.0
+
+
 def _patch_width(mesh: Mesh, patch: np.ndarray, areas: np.ndarray) -> np.ndarray:
     """Rough width of each planar patch: its area over its longest triangle edge (a strip of two
     triangles: area / diagonal, about its short side)."""

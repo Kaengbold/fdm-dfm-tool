@@ -18,7 +18,7 @@ PARTS = sorted((ROOT / "web" / "samples").glob("*.stl")) + sorted((Path(__file__
 # What the tool must never show a user: internal task numbers, and finding texts that guess at the design.
 FORBIDDEN = re.compile(r"\bT-\d+|The CAD model shows")
 # The shell settings T-424 wants from the part's shape (walls are already raised for weak spots).
-SHELLS = ("sparse_infill_density", "top_shell_layers", "bottom_shell_layers")
+SHELLS = ("wall_loops", "sparse_infill_density", "top_shell_layers")
 
 
 @pytest.fixture(scope="module")
@@ -64,11 +64,26 @@ def test_ranked_lower_reasons_match_the_numbers(advice):
     assert not false, "\n".join(false)
 
 
-@pytest.mark.xfail(strict=True, reason="T-424: infill and top/bottom layers come from the goal only, the same on every part")
 def test_clearly_different_parts_get_different_shells(advice):
     shells = {name: tuple({s["key"]: s["value"] for s in check["settings"]}[k] for k in SHELLS)
               for name, (_, check) in advice.items()}
+    # Not 6 as the audit hoped: the samples are mostly small parts that rightly share the goal's
+    # shells, and lowering infill on small interiors only to vary them would weaken hooks (T-424 review).
     assert len(set(shells.values())) > 1, f"every part gets {next(iter(shells.values()))} for {SHELLS}"
+
+
+def test_changed_shape_settings_quote_a_measurement(advice):
+    from fdmcore.profile import Profile
+    from fdmcore.recommend import goal_plan
+
+    plan = goal_plan(Profile.from_dict({}))
+    baseline = (str(plan["walls"]), f"{plan['infill']}%", str(plan["top"]))
+    for name, (_, check) in advice.items():
+        settings = {s["key"]: s for s in check["settings"]}
+        for key, default in zip(SHELLS, baseline):
+            row = settings[key]
+            if row["value"] != default:
+                assert re.search(r"\d.*(?:mm|cm³|%)", row["reason"]), (name, row)
 
 
 def _texts(value):

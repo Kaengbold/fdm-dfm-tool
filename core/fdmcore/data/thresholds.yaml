@@ -8,6 +8,20 @@ features:
   single_wall_below_nozzle: 2.0   # walls thinner than this get only one perimeter -> weak [min_wall_thickness_and_arachne]
   single_wall_min_height_mm: 5    # only report single-perimeter walls that stand at least this tall
 
+organic:
+  # CAD part or organic shape (scan, sculpt, figure), T-408. A CAD export is made of flat faces and
+  # cylinders cut into strips of two coplanar triangles, so nearly every triangle shares its plane with a
+  # neighbour; a scan or sculpt almost never does. Measured (regions.planar_share): every sample and
+  # corpus part 1.00, a smooth UV sphere 0.995, the bumpy 80k-triangle blob 0.006. A figure on a flat base
+  # stays well under the line; a CAD part with many doubly-curved blends may come close (the user can
+  # switch the CAD checks back on).
+  planar_share_below: 0.5
+  # Checks that assume what a designer meant (holes for screws, gaps between moving parts, pins, raised
+  # or engraved lettering, a first layer with fine detail): on a sculpted shape they only find noise.
+  # Overhangs, supports, walls too thin to print, bed contact, tipping, cooling and warping stay on.
+  cad_rules: [first_layer_detail, shallow_relief, side_detail_small, fine_detail_rough, small_hole_undersized,
+              gap_fuses, flat_gap_fuses, weak_upright_pin, insert_wall_thin, screw_wall_thin]
+
 use_heat:
   # Warned when the part is used this close to (or above) the material's heat limit (presets heat_limit_c).
   warn_within_c: 15
@@ -291,3 +305,27 @@ drop:
   # gives almost nothing and the factor runs away (a 0.04 mm bend and a 50 mm drop: x51).
   hard_n_per_mm: 1000             # hard end: a hard object on a part screwed into wood. Screw slip in wood about 1500 N/mm (EN 1995-1-1 K_ser = rho^1.5 d / 23, 4 mm screw) in series with hard-on-plastic contact about 2500 N/mm (Hertz)
   soft_n_per_mm: 25               # soft end: something rubber-footed or padded falling, or a plug in drywall (estimate: 2 mm under 5 kg, no measured source)
+
+shape_settings:
+  # Shape-based adjustments to the goal plan. Engineering heuristics, not strength predictions.
+  # Infill supports top skins; low density needs another solid top layer [Prusa KB Infill,
+  # https://help.prusa3d.com/article/infill_42; OrcaSlicer wiki, strength_settings_top_bottom_shell].
+  # Arachne varies extrusion width for walls between whole line counts [Prusa KB Arachne wall generator,
+  # https://help.prusa3d.com/article/arachne-wall-generator_352769].
+  boundary_samples: 128          # normals per slice, shared by repeated cross-sections
+  core_grid_cells: 96            # longest grid side; point distances only, no shrinking buffers
+  wall_quantiles: [0.1, 0.5, 0.9] # thinnest sustained wall, typical wall, upper wall width
+  line_fraction_tolerance: 0.15  # within this fraction of a line counts as a whole line
+  uneven_wall_share: 0.15        # ignore a few corner/chamfer samples
+  solid_core_share: 0.05         # at most 5% of model volume left for infill: hardly used
+  mixed_core_share: 0.25         # mostly walls: one extra loop may finish filling the walls
+  low_infill_percent: 10
+  low_infill_extra_top: 1
+  # Density = goal + size offset (clamped below); cm3 of interior after walls/skins.
+  # Larger interiors need more backing for their skins. These deliberately broad bins are estimates.
+  # Never below the goal: on a small interior less infill saves next to nothing and makes hooks and
+  # brackets weaker, and the sources above only back more density under wide skins.
+  core_size_cm3: [1, 8, 30, 100]
+  density_offset: [0, 0, 0, 5, 10]
+  min_infill_percent: 5
+  max_infill_percent: 40

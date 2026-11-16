@@ -437,6 +437,7 @@ async function partLoaded(info) {
   const body = info.bodies.length ? ` (${info.bodies[info.body].name})` : "";
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
   showUnitHint(info.unit_hint);
+  showKind(info);
   renderLoads();
   setStage("held");
   // Drop the previous part's options now, so a cancel mid-way can't leave them on the new part.
@@ -458,6 +459,20 @@ async function partLoaded(info) {
   if (!up) state.picked = null; // a new part: no orientation picked on it yet
   await findOrientations(false, up);
 }
+
+/** Sculpts, scans and figures (T-408): the engine turns off the checks that assume CAD intent; say so,
+ * with a switch for a CAD part that was taken for a sculpt. */
+function showKind(info) {
+  $("kind-hint").hidden = info.kind !== "organic";
+  $("cad-checks").checked = info.cad_checks;
+}
+$("cad-checks").onchange = async (e) => {
+  await call("set_cad_checks", { on: e.target.checked });
+  if (state.faceRegions) { // hole names on the faces come from the detected features
+    state.regionInfo = (await call("regions")).regions;
+  }
+  await runCheck();
+};
 
 /** Parts exported in inches, centimetres or metres arrive 25.4× / 10× / 1000× off; offer a one-click fix. */
 function showUnitHint(hint) {
@@ -3820,7 +3835,9 @@ function setLevel(level) {
   setTimeout(() => viewer.resize()); // the step list comes and goes (Expert), so the 3D view changes size
 }
 for (const r of document.querySelectorAll("input[name=level]")) r.onchange = () => setLevel(r.value);
-setLevel(new URLSearchParams(location.search).get("level") ?? store.get("fdm-level") ?? "simple");
+// Start with a part before asking newcomers how much of the workbench they want to see.
+setLevel(new URLSearchParams(location.search).get("level") ?? (store.get("fdm-guided") ? store.get("fdm-level") : "simple") ?? "simple");
+store.set("fdm-guided", "1");
 
 /** Set "What can you change?" like a click would (it re-checks the part). */
 function setMode(value) {
@@ -3857,7 +3874,20 @@ function openGuide() {
   $("guide").showModal();
 }
 $("show-guide").onclick = openGuide;
-if (!store.get("fdm-guided") && !new URLSearchParams(location.search).has("level")) openGuide();
+
+// This invitation lives in Simple's Result pane, so it waits until the visitor has an answer.
+$("more-tools").hidden = !!store.get("fdm-more-tools");
+function dismissMoreTools() {
+  $("more-tools").hidden = true; // keep it dismissed for this visit even when storage is blocked
+  store.set("fdm-more-tools", "1");
+}
+$("dismiss-more-tools").onclick = dismissMoreTools;
+$("show-more-tools").onclick = () => {
+  dismissMoreTools();
+  setLevel(GUIDE.steps.level); // Advanced is the first level with strength, fits AND design changes.
+  setMode(GUIDE.steps.mode);
+  steps.go("strength");
+};
 
 // ---------- less text (T-382): explanations behind an ⓘ, and "Explain" walks through what is shown ----------
 

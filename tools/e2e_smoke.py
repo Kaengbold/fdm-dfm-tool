@@ -155,8 +155,8 @@ def main():
         channel = None if args.browser == "chromium" else args.browser
         browser = p.chromium.launch(channel=channel, headless=not args.headed)
         page = browser.new_page(viewport={"width": 1500, "height": 950})
-        # Expert level and no start guide, so every step finds its controls (the guide has its own step).
-        page.add_init_script("localStorage.setItem('fdm-guided', '1'); localStorage.setItem('fdm-sa-demo', '1'); if (!localStorage.getItem('fdm-level')) localStorage.setItem('fdm-level', 'expert');")
+        # Start with a real fresh visit; the Guide step later opens Expert for the rest of the checks.
+        page.add_init_script("localStorage.setItem('fdm-sa-demo', '1');")
         # Long simulations ask first; the test says "Run it" unless a step wants to see the question.
         page.add_init_script("""addEventListener('DOMContentLoaded', () => new MutationObserver(() => {
             const d = document.getElementById('long-run');
@@ -165,6 +165,24 @@ def main():
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
+
+        def part_first():
+            assert page.evaluate("() => document.body.dataset.level") == "simple"
+            assert page.evaluate("() => fdm.steps.current") == "part"
+            assert page.locator("#drop").is_visible(), "fresh visit hides the drop zone"
+            assert not page.locator("#guide").evaluate("d => d.open"), "guide opened by itself"
+            assert page.locator("#more-tools").is_hidden(), "more tools offered before a result"
+            assert page.evaluate("() => localStorage.getItem('fdm-guided')") == "1"
+            page.click("input[name=level][value=advanced] >> xpath=..")
+            page.reload()
+            run.booted()
+            assert page.evaluate("() => document.body.dataset.level") == "advanced", "returning visit lost its level"
+            assert page.locator("#drop").is_visible()
+            assert not page.locator("#guide").evaluate("d => d.open"), "returning visit opened the guide"
+            page.click("input[name=level][value=simple] >> xpath=..")
+            return "fresh: Simple drop zone; returning: saved Advanced; no automatic dialog"
+
+        run.step("first and returning visits start with the part", part_first)
 
         def indoors_default():
             assert page.input_value("#use-temp") == ""
@@ -205,6 +223,13 @@ def main():
             other.add_init_script("Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });")
             other.goto(f"http://127.0.0.1:{port}/web/")
             other.wait_for_function("() => document.getElementById('status').textContent.startsWith('Ready')", timeout=180_000)
+            assert other.evaluate("() => document.body.dataset.level") == "simple"
+            assert other.locator("#drop").is_visible()
+            assert not other.locator("#guide").evaluate("d => d.open")
+            other.click("#show-guide")
+            assert other.locator("#guide").evaluate("d => d.open"), "Guide button needs storage"
+            other.click("[data-guide=settings]")
+            assert not other.locator("#guide").evaluate("d => d.open")
             other.close()
             assert not errors, errors
             return "starts with storage blocked"
@@ -212,7 +237,10 @@ def main():
         run.step("starts when browser storage is blocked", blocked_storage)
 
         def levels_and_guide():
+            assert not page.locator("#guide").evaluate("d => d.open")
             page.click("#show-guide")
+            assert page.locator("#guide").evaluate("d => d.open")
+            assert page.locator("[data-guide=settings]").get_attribute("class") == "current"
             page.click("[data-guide=settings]")
             simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
             assert simple == ["simple", False, False], simple
@@ -286,6 +314,61 @@ def main():
             return "Simple Hook: no key; ranking only with a different pose to compare"
         run.step("quiet colour key and orientation label on Hook", quiet_hook_key)
 
+        def more_tools():
+            assert page.locator("#more-tools").is_hidden(), "invitation visible outside Simple"
+            page.click("input[name=level][value=simple] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('result')")
+            invitation = page.locator("#more-tools")
+            assert invitation.is_visible(), "first Simple result has no invitation"
+            assert "Want to check strength, fits or design changes?" in invitation.inner_text()
+            assert "link" in page.locator("#show-more-tools").get_attribute("class").split()
+            page.set_viewport_size({"width": 375, "height": 812})
+            try:
+                assert invitation.evaluate("p => p.scrollWidth <= p.clientWidth"), "invitation overflows at phone width"
+                for selector in ("#show-more-tools", "#dismiss-more-tools"):
+                    assert page.locator(selector).evaluate("b => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }"), selector
+            finally:
+                page.set_viewport_size({"width": 1500, "height": 950})
+            run.act(lambda: page.click("#show-more-tools"))
+            assert page.evaluate("() => document.body.dataset.level") == "advanced"
+            assert page.evaluate("() => fdm.steps.current") == "strength"
+            assert page.evaluate("() => ['strength', 'fits', 'design'].every(s => fdm.steps.steps.includes(s))")
+            assert page.is_checked("input[name=mode][value=both]"), "design changes not enabled"
+            page.click("input[name=level][value=simple] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('result')")
+            assert invitation.is_hidden(), "used invitation came back"
+            page.reload()
+            run.booted()
+            assert page.locator("#more-tools").evaluate("p => p.hidden"), "used invitation forgot on return"
+            page.click("input[name=level][value=expert] >> xpath=..")
+            return "Simple result offers a wrapping secondary link; Advanced opens strength, fits and design; use remembered"
+
+        run.step("Simple result offers more tools", more_tools)
+
+        def dismiss_more_tools():
+            other = browser.new_page()
+            other_run = Run(other)
+            try:
+                other.goto(f"http://127.0.0.1:{port}/web/")
+                other_run.booted()
+                other_run.act(lambda: other.click("[data-sample=hook]"))
+                other.click("#step-next")
+                other.click("#step-next")
+                assert other.locator("#more-tools").is_visible()
+                other.click("#dismiss-more-tools")
+                assert other.locator("#more-tools").is_hidden()
+                assert other.evaluate("() => document.body.dataset.level") == "simple", "dismissal changed level"
+                other.reload()
+                other_run.booted()
+                assert other.locator("#more-tools").evaluate("p => p.hidden"), "dismissal forgot on return"
+                assert not other.locator("#guide").evaluate("d => d.open")
+                assert not other_run.console, other_run.console
+                return "Not now keeps Simple and stays dismissed after reload"
+            finally:
+                other.close()
+
+        run.step("more tools invitation can be dismissed", dismiss_more_tools)
+
         def feature_colour_key():
             page.evaluate("() => fdm.steps.go('part')")
             run.act(lambda: page.click("[data-sample=feature_test]"))
@@ -305,6 +388,33 @@ def main():
             assert page.is_hidden("#view-key"), "key survived a switch back to the trouble-free pose"
             return f"feature test key matches {classes}; unused yellow hidden; key clears on pose switch"
         run.step("colour key contains only colours on the part", feature_colour_key)
+
+        def organic_model():
+            import sys
+
+            sys.path.insert(0, str(ROOT / "core"))
+            sys.path.insert(0, str(ROOT / "core" / "tests"))
+            from fdmcore.mesh import to_binary_stl
+            from test_organic import blob
+
+            sculpt = OUT / "sculpt.stl"
+            sculpt.write_bytes(to_binary_stl(blob()))
+            cad_rules = "['first_layer_detail', 'shallow_relief', 'side_detail_small', 'fine_detail_rough', 'small_hole_undersized', 'gap_fuses', 'flat_gap_fuses', 'weak_upright_pin', 'insert_wall_thin', 'screw_wall_thin']"
+            count = f"() => fdm.state.check.findings.filter(f => {cad_rules}.includes(f.rule)).length"
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: page.set_input_files("#file", str(sculpt)), 300_000)
+            page.wait_for_function("() => fdm.state.check && fdm.state.name === 'sculpt.stl'", timeout=300_000)
+            assert page.is_visible("#kind-hint"), "no notice for a sculpted model"
+            assert not page.is_checked("#cad-checks")
+            assert page.evaluate(count) == 0, "CAD-only findings on a sculpted model"
+            run.act(lambda: page.check("#cad-checks"))
+            page.wait_for_function(f"() => ({count})() > 0", timeout=300_000)
+            back = page.evaluate(count)
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: page.click("[data-sample=hook]"))
+            assert page.is_hidden("#kind-hint"), "notice stays on a CAD part"
+            return f"sculpt: notice shown, 0 CAD-only findings; {back} with the switch on; hidden again on Hook"
+        run.step("sculpted model turns CAD checks off", organic_model)
 
         def modes():
             out = []

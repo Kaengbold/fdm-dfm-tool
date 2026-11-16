@@ -86,6 +86,10 @@
             </label>
             <label id="body-pick" class="field" hidden>This file has several bodies. Check <select id="body"></select></label>
             <div id="unit-hint" class="unit-hint" hidden><span id="unit-text"></span> <button id="unit-scale"></button> <button id="unit-scale-2" hidden></button></div>
+            <div id="kind-hint" class="kind-hint" hidden>
+              <span>Looks like a sculpted model (a figure, scan or sculpt): checks for holes and fine CAD detail are off.</span>
+              <label><input type="checkbox" id="cad-checks"> Check holes, gaps and fine detail anyway</label>
+            </div>
             <div class="samples">
               <span>No file at hand? Try a sample:</span>
               <button data-sample="l_bracket">L-bracket</button>
@@ -610,7 +614,7 @@
           <h2>Download</h2>
           <div id="blk-download" class="actions">
             <label id="zones-for" class="field" hidden>Your zones and boxes need a file for one slicer:
-              <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio</option><option value="prusa">PrusaSlicer</option></select></label>
+              <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio / Cura</option><option value="prusa">PrusaSlicer</option></select></label>
             <ul id="setup-warnings" class="setup-warnings" hidden></ul>
             <label id="fine-for" class="field" hidden><input type="checkbox" id="dl-fine" checked /> <span id="fine-text"></span></label>
             <label class="field" title="Several of this part on one plate, set out in rows; how many fit depends on the printer">Copies on the plate <input id="dl-copies" type="number" min="1" step="1" value="1" /></label>
@@ -620,11 +624,11 @@
             <label id="pause-for" class="field" hidden><input type="checkbox" id="dl-pause" checked /> <span id="pause-text"></span></label>
             <label id="pause-sliced" class="file-button" hidden title="Bambu Studio ignores the pause in the 3MF. Slice there, export the plate's sliced file (or the G-code), choose it here and print the file you get back">Add the pause to a file sliced in Bambu Studio…<input id="pause-file" type="file" accept=".gcode,.gco,.g,.3mf" hidden /></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
-            <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part.</p>
+            <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part. Cura takes most of them too; set layer height, tree supports and brim there yourself.</p>
             <div id="after-dl" class="sim-card after-dl" hidden>
               <h3>Next, in your slicer</h3>
               <ol>
-                <li>Open the file in OrcaSlicer, Bambu Studio or PrusaSlicer.</li>
+                <li>Open the file in OrcaSlicer, Bambu Studio, PrusaSlicer or Cura.</li>
                 <li>Pick your printer and filament there as usual.</li>
                 <li>Slice and print: the walls, infill, supports and brim are already set on the part.</li>
               </ol>
@@ -660,6 +664,9 @@
         <section class="pane" data-pane="result">
           <ol id="compute-steps" class="compute-steps" hidden></ol>
           <div id="verdict" class="summary"></div>
+          <p id="more-tools" class="hint only-simple">Want to check strength, fits or design changes?
+            <button type="button" id="show-more-tools" class="link">Show more tools</button>
+            · <button type="button" id="dismiss-more-tools" class="link">Not now</button></p>
         </section>
 
         <div id="parking" hidden></div>

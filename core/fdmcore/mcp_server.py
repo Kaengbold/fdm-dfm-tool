@@ -110,9 +110,18 @@ def list_presets() -> dict:
 def load_part(path: str) -> dict:
     """Load an STL or 3MF file (millimetres). Files with several bodies load the largest; the result lists
     them all (``bodies``) and ``unit_hint`` warns about parts exported in inches or metres.
-    Replaces any previously loaded part."""
+    ``kind``: "cad" or "organic" (a scan, sculpt or figure); organic parts start with the checks that
+    assume CAD intent off (``cad_checks``, see set_cad_checks). Replaces any previously loaded part."""
     p = _in(path, PARTS, "part file")
     return _clean(api.load(p.read_bytes(), p.name))
+
+
+@server.tool()
+def set_cad_checks(on: bool) -> dict:
+    """Turn the checks that assume CAD intent on or off: holes, gaps between moving parts, pins, raised or
+    engraved lettering, detail in the first layer and detected features. Off by itself for organic parts
+    (``kind`` from load_part); turn it on when a CAD part was taken for a sculpt."""
+    return _clean(api.set_cad_checks(on))
 
 
 @server.tool()
@@ -829,6 +838,7 @@ API_TOOLS = {
     "custom_presets": "set_custom_presets",
     "calibration_part": "calibration_part",
     "load": "load_part",
+    "set_cad_checks": "set_cad_checks",
     "load_gcode": "load_gcode",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
