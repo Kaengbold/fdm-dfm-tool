@@ -446,7 +446,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: "Will it hold?" shows "Not finished yet: rough estimate, not yet checked against real test prints (T-032)."
   - Do: remove "(T-032)" from the text. The bigger change (a small "Estimate" badge instead of the dashed yellow frame) is T-444; this task is only the wording, so it can ship today.
   - Done when: no `T-` number is visible anywhere in the app (`grep -n "T-[0-9]" web/index.html` finds only comments).
-- [ ] **T-397 P1** [A] Simple, step "What you have": two main buttons ("Compute" and "Next: Will it hold?"), and Next reaches the result without Compute. · files: `web/index.html` (`#compute`), `web/app.js` (`compute`), `web/steps.js` · owner: —
+- [ ] **T-397 P1** [A] Simple, step "What you have": two main buttons ("Compute" and "Next: Will it hold?"), and Next reaches the result without Compute. · files: `web/index.html` (`#compute`), `web/app.js` (`compute`), `web/steps.js` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-397-one-primary`)
   - Seen: both are solid green. DESIGN.md says one primary per step. The checks already run when the part loads, so "Compute" only repeats them.
   - Do: remove the "Compute" button from the pane. Keep its good part, the list of what the tool is doing (`#compute-steps`): show it on the Result step while work is running (the last step's button "Show my result" starts it when something is still missing, e.g. strength with loads set).
   - Done when: every step in Simple has exactly one primary button, in the panel foot; the browser test for T-374 is updated.
