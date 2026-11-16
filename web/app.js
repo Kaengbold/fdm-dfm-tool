@@ -94,19 +94,25 @@ function cancelEngine() {
   const src = state.source;
   const mine = loadMine();
   const expert = loadExpert();
-  if (src || Object.keys(mine.printers).length || Object.keys(mine.materials).length || Object.keys(expert).length) {
-    restoring = engineReady.then(async () => {
+  // A second Cancel during boot would kill the worker before it can become ready.
+  $("working-cancel").disabled = true;
+  restoring = busy("Cancelled. Getting ready again…", async () => {
+    await engineReady;
+    if (src || Object.keys(mine.printers).length || Object.keys(mine.materials).length || Object.keys(expert).length) {
       await post("custom_presets", mine);
       if (Object.keys(expert).length) await post("set_expert", { values: expert });
-      if (!src) return;
-      await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
-      if (src.body) await post("select_body", { index: src.body });
-      if (src.scale !== 1) await post("scale", { factor: src.scale });
-      if (state.gcode) await post("load_gcode", { up: state.gcode.up, profile: profile() }, state.gcode.bytes);
-      if (state.engineState) await post("restore_state", { state: state.engineState });
-      if (state.warp) clearWarp(); // too big to keep: run it again
-    }).catch((err) => setStatus(`Could not restart the engine: ${err.message}`, true));
-  }
+      if (src) {
+        await post("load", { name: src.name, face_ids: src.faceIds ? Array.from(src.faceIds) : undefined }, src.bytes);
+        if (src.body) await post("select_body", { index: src.body });
+        if (src.scale !== 1) await post("scale", { factor: src.scale });
+        if (state.gcode) await post("load_gcode", { up: state.gcode.up, profile: profile() }, state.gcode.bytes);
+        if (state.engineState) await post("restore_state", { state: state.engineState });
+        if (state.warp) clearWarp(); // too big to keep: run it again
+      }
+    }
+  }).then(() => setStatus("Ready"))
+    .catch((err) => setStatus(`Could not restart the engine: ${err.message}`, true))
+    .finally(() => { $("working-cancel").disabled = false; });
 }
 
 // Cancelled work rejects up through every await; that's expected, not an error to log.
@@ -236,8 +242,7 @@ async function busy(text, fn, affects = []) {
   try {
     return await fn();
   } catch (err) {
-    if (err instanceof Cancelled) setStatus("Cancelled — the last result stays shown.");
-    else setStatus(err.message, true);
+    if (!(err instanceof Cancelled)) setStatus(err.message, true);
     throw err;
   } finally {
     steps.setBusy(affects, false);
