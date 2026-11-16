@@ -486,7 +486,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Done when: every row shows its reason without hovering.
   - Progress: visible muted reasons and phone-width smoke assertion implemented; 314 pytest tests pass and the new smoke step passes (10 reason lines). Full smoke has two failures: blocked-storage startup timeout (180 s), and WebGL shader validation errors during settings optimisation. Await green validation before completion, push and PR.
 
-- [ ] **T-468 P3** [A] Keep ticked design suggestions and suggested boxes in project files. · files: `core/fdmcore/project.py` (`FIELDS`), `web/app.js` (`dl-project`, `openProject`), tests on both sides · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-468-project-ticks`)
+- [x] **T-468 P3** [A] Keep ticked design suggestions and suggested boxes in project files. · files: `core/fdmcore/project.py` (`FIELDS`), `web/app.js` (`dl-project`, `openProject`), tests on both sides · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-468-project-ticks`) · outcome: Projects save design-suggestion and suggested-box ticks and unticks by stable key (edit id; box kind + source) and restore them after the suggestions are rebuilt; old files keep today's defaults. Engine 318 passed, browser smoke 84 passed / 0 failed.
   - Do: extend the shared Python/browser project format to save and restore ticks and unticks for design suggestions and suggested boxes. Cover both readers/writers and the browser project round trip.
 
 ### B. Advice that must be right
