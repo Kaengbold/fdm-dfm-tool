@@ -533,7 +533,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen (re-checked 2026-11-15): T-369 is done, the step now guides in three numbered stages with "Show me how". What is left: nothing says the step can be skipped (the foot button "Show my result" does skip it, but reads as the end of the step), and "Check strength" is greyed out without a reason (T-402).
   - Do: a line under the heading "Does something push or pull on it? Optional." and, while no load is set, the foot button reads "Skip: show my result"; once a load is set and checked it reads "Show my result".
   - Done when: a beginner can tell from the screen alone that the step can be skipped.
-- [ ] **T-415 P2** [C] Say what to do after the download. · files: `web/app.js` (after `dl-3mf`), `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-415-after-download`)
+- [x] **T-415 P2** [C] Say what to do after the download. · files: `web/app.js` (after `dl-3mf`), `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-415-after-download`)
+  - Outcome: "Next, in your slicer" card with the three steps under the download button, shown on every 3MF download, closed with "Got it". "It printed badly?" waits for T-447 (the failed-print path is off). Browser smoke: 80 steps, 0 failures.
   - Seen: after "Download 3MF for your slicer" nothing more happens. A beginner doesn't know that the file opens in the slicer, or that their own printer and filament profile still has to be picked there.
   - Do: after the download show three short steps: "1 Open the file in OrcaSlicer, Bambu Studio or PrusaSlicer. 2 Pick your printer and filament there as usual. 3 Slice and print: the walls, infill, supports and brim are already set on the part." Add "It printed badly?" → the failed-print path (T-447).
   - Done when: the steps show once per download and can be closed.
