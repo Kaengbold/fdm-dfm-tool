@@ -459,11 +459,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: on the L-bracket all 8–9 suggestions were ticked on arrival; "Apply selected changes" then changes the part's shape in ways the user didn't ask for (see T-436).
   - Do: start every suggestion unticked. Keep ticked only what the user asked for directly (a fit they sized, a screw they set). Add "Tick all" / "None".
   - Done when: a fresh part shows 0 ticked; the browser tests that rely on pre-ticked boxes tick them first.
-- [ ] **T-400 P2** [A] Hide the colour key and the "Best orientation" label when they say nothing. · files: `web/app.js` (`recolor`, `showViewChanges`), `web/index.html` (`#view-key`) · owner: —
+- [ ] **T-400 P2** [A] Hide the colour key and the "Best orientation" label when they say nothing. · files: `web/app.js` (`recolor`, `showViewChanges`), `web/index.html` (`#view-key`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-400-quiet-key`)
   - Seen: Hook and L-bracket are plain grey, yet the key lists "Prints fine / May droop / Needs support / On the bed".
   - Do: show only the key entries whose colour is on the part now (count the face classes in `recolor`). No coloured face → no key.
   - Done when: Hook in Simple shows no key; `feature_test` shows only the colours it uses.
-- [ ] **T-401 P2** [A] Strength colours: red means "6 % of the strength used" on a part with ×17.7 safety. · files: `web/app.js` (`strengthView`, `renderLegend`), `web/viewer.js` (`FIELD_BANDS`, `fieldColor`) · owner: —
+- [ ] **T-401 P2** [A] Strength colours: red means "6 % of the strength used" on a part with ×17.7 safety. · files: `web/app.js` (`strengthView`, `renderLegend`), `web/viewer.js` (`FIELD_BANDS`, `fieldColor`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-401-strength-scale`)
   - Seen: L-bracket, 5 kg: the legend runs 0–6 % and the top band is red. The scale stretches to the highest value on the part.
   - Do: for "Strength used (%)" fix the scale to what matters: 0 → 100 % of the allowed load (the safety the check asks for: ×2, or ×3 with a constant load). Red only at or above 100 %. Offer "Stretch the colours" as a switch for people who want to see the pattern.
   - Done when: the same run shows the L-bracket mostly blue, no red; a part that fails shows red at the weak spot.
@@ -475,7 +475,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: Cancel works, but the next action waited about 11 s (a new worker boots and gets the part again) with only "Cancelled — the last result stays shown."
   - Do: status "Cancelled. Getting ready again…" with the working bar until `restoring` is done, then "Ready".
   - Done when: the browser test's cancel step sees both messages.
-- [ ] **T-404 P2** [A] Slicer settings: the reason is only in a hover tooltip. · files: `web/app.js` (`renderSettings`) · owner: —
+- [ ] **T-404 P2** [A] Slicer settings: the reason is only in a hover tooltip. · files: `web/app.js` (`renderSettings`) · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-404-setting-reasons`)
   - Seen: "Hover a row for why" — not findable, and not there on a touch screen.
   - Do: show the reason as a muted second line under each setting's name. (T-427 later turns the table into a difference list; this is the small step.)
   - Done when: every row shows its reason without hovering.
