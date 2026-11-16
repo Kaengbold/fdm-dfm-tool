@@ -313,6 +313,76 @@ def main():
             return f"{count} unticked suggestions; all, none and re-suggest ticks kept"
         run.step("suggestions start unticked and keep user choices", suggestion_selection)
 
+        def project_suggestion_ticks():
+            import base64
+            import json
+
+            # A 45-degree tilt gives several drooping faces: check both a tick and an untick.
+            fixture = OUT / "suggestion_ticks_start.json"
+            fixture.write_text(json.dumps({"format": "fdm-check-project", "version": 1, "mode": "both", "up": [0, 1, -1],
+                                           "part": {"name": "l_bracket.stl", "stl": base64.b64encode((ROOT / "web/samples/l_bracket.stl").read_bytes()).decode("ascii")}}), encoding="utf-8")
+            run.act(lambda: page.set_input_files("#file", str(fixture)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            page.evaluate("() => fdm.steps.go('fits')")
+            row = page.locator("#fits li", has_text="Ø6.0 mm hole")
+            row.locator(".fit:not(.fastener) input").fill("6")
+            run.act(lambda: row.get_by_role("button", name="Size it").click())
+            requested = page.locator("#edits label", has_text="sliding fit").locator("input")
+            assert requested.is_checked(), "direct request did not start ticked"
+            page.click("#edits-none")  # In particular, the explicit untick of a direct request must survive.
+            optional = page.evaluate("() => fdm.state.edits.findIndex(e => !e.id.startsWith('fit-'))")
+            assert optional >= 0, "no optional suggestion"
+            page.locator("#edits input").nth(optional).check()
+            edits = page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))")
+            assert True in edits.values() and False in edits.values(), edits
+            page.evaluate("""async () => {
+              const r = await fdm.call('regions'), s = fdm.state, cls = s.options[s.active].face_classes;
+              const ids = new Uint32Array(r.face_regions.slice().buffer), counts = new Map();
+              for (let f = 0; f < cls.length; f++) if (cls[f] === 2) counts.set(ids[f], (counts.get(ids[f]) ?? 0) + 1);
+              s.marks = r.regions.filter(r => r.area_mm2 >= 20 && counts.has(r.id)).map(r => ({ region: r.id, kind: 'clean' }));
+            }""")
+            page.evaluate("() => fdm.steps.go('extra')")
+            run.act(lambda: page.click("#vol-suggest"))
+            assert page.locator("#vol-suggest-list input").count() >= 2, "need two suggested boxes"
+            page.locator("#vol-suggest-list input").first.check()
+            box_choices = "() => Object.fromEntries(fdm.state.suggested.map(v => [JSON.stringify([v.kind, v.from.region ?? null, v.from.point ?? null, v.from.normal ?? null]), v.use]))"
+            boxes = page.evaluate(box_choices)
+            assert True in boxes.values() and False in boxes.values(), boxes
+            with page.expect_download() as dl:
+                page.evaluate("() => document.getElementById('dl-project').click()")
+            out = OUT / "suggestion_ticks.json"
+            dl.value.save_as(out)
+            saved = json.loads(out.read_text(encoding="utf-8"))
+            assert {k: saved["edit_selections"][k] for k in edits} == edits
+            assert {k: v["use"] for k, v in saved["suggested_boxes"].items()} == boxes
+            # Reorder saved boxes: their choices belong to their source, never to a list position.
+            saved["suggested_boxes"] = dict(reversed(list(saved["suggested_boxes"].items())))
+            out.write_text(json.dumps(saved), encoding="utf-8")
+            run.act(lambda: page.click("[data-sample=mushroom]"))
+            run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            assert page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))") == edits
+            assert page.evaluate(box_choices) == boxes
+            assert page.locator("#edits input:checked").count() == sum(edits.values())
+            assert page.locator("#vol-suggest-list input:checked").count() == sum(boxes.values())
+            run.act(lambda: page.dispatch_event("#param-teardrop_angle_deg", "change"))
+            run.act(lambda: page.click("#vol-suggest"))
+            assert page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))") == edits
+            assert page.evaluate(box_choices) == boxes, "re-suggest lost box choices"
+            # A pre-ticks file keeps today's defaults, including a selected direct size request.
+            del saved["edit_selections"], saved["suggested_boxes"]
+            old = OUT / "suggestion_ticks_old.json"
+            old.write_text(json.dumps(saved), encoding="utf-8")
+            run.act(lambda: page.set_input_files("#file", str(old)), 300_000)
+            page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+            defaults = page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)")
+            assert defaults and all(k.startswith("fit-") for k in defaults), defaults
+            assert page.locator("#vol-suggest-list input").count() == 0, "old file inherited pending boxes"
+            run.act(lambda: page.click("#vol-suggest"))
+            assert page.locator("#vol-suggest-list input:checked").count() == 0
+            return f"{len(edits)} design choices and {len(boxes)} box choices restored by key; old-file defaults kept"
+        run.step("project keeps suggestion ticks and unticks", project_suggestion_ticks)
+
         def design():
             if not page.locator("input[name=mode][value=both]").is_checked():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
