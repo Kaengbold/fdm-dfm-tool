@@ -469,7 +469,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: L-bracket, 5 kg: the legend runs 0–6 % and the top band is red. The scale stretches to the highest value on the part.
   - Do: for "Strength used (%)" fix the scale to what matters: 0 → 100 % of the allowed load (the safety the check asks for: ×2, or ×3 with a constant load). Red only at or above 100 %. Offer "Stretch the colours" as a switch for people who want to see the pattern.
   - Done when: the same run shows the L-bracket mostly blue, no red; a part that fails shows red at the weak spot.
-- [ ] **T-402 P2** [A] Disabled buttons don't say why. · files: `web/app.js`, `web/index.html` · owner: —
+- [ ] **T-402 P2** [A] Disabled buttons don't say why. · files: `web/app.js`, `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-402-disabled-reasons`)
   - Seen (re-checked 2026-11-15, after T-369): in the guided flow "Holds here" and "Load here" carry the tooltip "Tap a face first", which a phone doesn't show; "Next: where the load goes", "Check strength" and "Find the lightest settings that hold" are greyed out with no reason at all.
   - Do: every disabled action shows its reason as text next to it (not only a tooltip: phones have none), e.g. "Tap a face and mark where it is held and where the load goes". Same for `#run-dynamics`, `#run-topology`.
   - Done when: no disabled button without a visible reason in any step.
