@@ -9,6 +9,15 @@ web
 ## Users
 Hobbyists with a consumer FDM printer (Bambu, Prusa, Creality, Voron…) who slice in OrcaSlicer, Bambu Studio or PrusaSlicer. They have a part (their own CAD or a download) and want it to print well and hold, without learning engineering terms. Some can change the design, many can only change slicer settings.
 
+### Use cases to design for
+New features name which of these they serve.
+1. **Beginner with a downloaded model**: "will this print on my A1?" → a verdict, print time, grams, one file to open, no CAD words.
+2. **Functional maker with their own CAD**: a bracket, hook or enclosure that must hold → strength, fits, design advice to take back to CAD.
+3. **Tinkerer with a tuned profile** → a real difference to their own profile, with numbers, to pick and choose from.
+4. **Small seller or print farm**: the same part many times → failure risk, time and cost, saved projects.
+5. **Teacher or club** → a report to share, with plain reasons.
+6. **Agent user** (drives the tool from Claude Code, Codex or similar) → an easy local install.
+
 ## Product Purpose
 Drop in a part, get the best orientation, what will go wrong, slicer settings that fix it, a strength check, and (if the design can change) previewable geometry fixes. Success: the first print works and holds.
 
