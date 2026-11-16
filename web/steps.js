@@ -35,10 +35,12 @@ const CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3
 
 export class Steps {
   /** ``ready(step)``: true, or a short reason why the step can't be opened yet. ``changed(step)``:
-   * called when another step is shown, so the 3D view can show that step's things only. */
-  constructor({ ready, changed = () => {} }) {
+   * called when another step is shown, so the 3D view can show that step's things only.
+   * ``skippable(step)``: true while an optional step is left undone, so its foot button says "Skip". */
+  constructor({ ready, changed = () => {}, skippable = () => false }) {
     this.ready = ready;
     this.changed = changed;
+    this.skippable = skippable;
     this.level = "simple";
     this.current = "part";
     this.busy = new Map(); // step -> number of running jobs that will update it
@@ -186,7 +188,8 @@ export class Steps {
     if (following) {
       const ready = this.ready(following);
       next.disabled = ready !== true;
-      next.textContent = ready !== true ? ready : following === "result" ? "Show my result" : `Next: ${STEP_NAMES[following]}`;
+      const label = following === "result" ? "Show my result" : `Next: ${STEP_NAMES[following]}`;
+      next.textContent = ready !== true ? ready : this.skippable(this.current) ? `Skip: ${label[0].toLowerCase()}${label.slice(1)}` : label;
     }
   }
 

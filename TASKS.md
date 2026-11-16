@@ -469,7 +469,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: L-bracket, 5 kg: the legend runs 0–6 % and the top band is red. The scale stretches to the highest value on the part.
   - Do: for "Strength used (%)" fix the scale to what matters: 0 → 100 % of the allowed load (the safety the check asks for: ×2, or ×3 with a constant load). Red only at or above 100 %. Offer "Stretch the colours" as a switch for people who want to see the pattern.
   - Done when: the same run shows the L-bracket mostly blue, no red; a part that fails shows red at the weak spot.
-- [ ] **T-402 P2** [A] Disabled buttons don't say why. · files: `web/app.js`, `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-402-disabled-reasons`)
+- [x] **T-402 P2** [A] Disabled buttons don't say why. · files: `web/app.js`, `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-402-disabled-reasons`)
+  - Outcome: `offWhy()` disables a button and shows its reason as a muted line under its row (pick buttons, stage Next buttons, Check strength / lightest settings, shaking and knocks, lighter shape, Re-check). Browser smoke: 81 steps, 0 failures (one earlier run hung in an unrelated long step; passed alone and on re-run).
   - Seen (re-checked 2026-11-15, after T-369): in the guided flow "Holds here" and "Load here" carry the tooltip "Tap a face first", which a phone doesn't show; "Next: where the load goes", "Check strength" and "Find the lightest settings that hold" are greyed out with no reason at all.
   - Do: every disabled action shows its reason as text next to it (not only a tooltip: phones have none), e.g. "Tap a face and mark where it is held and where the load goes". Same for `#run-dynamics`, `#run-topology`.
   - Done when: no disabled button without a visible reason in any step.
@@ -485,7 +486,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Done when: every row shows its reason without hovering.
   - Progress: visible muted reasons and phone-width smoke assertion implemented; 314 pytest tests pass and the new smoke step passes (10 reason lines). Full smoke has two failures: blocked-storage startup timeout (180 s), and WebGL shader validation errors during settings optimisation. Await green validation before completion, push and PR.
 
-- [ ] **T-468 P3** [A] Keep ticked design suggestions and suggested boxes in project files. · files: `core/fdmcore/project.py` (`FIELDS`), `web/app.js` (`dl-project`, `openProject`), tests on both sides · owner: —
+- [x] **T-468 P3** [A] Keep ticked design suggestions and suggested boxes in project files. · files: `core/fdmcore/project.py` (`FIELDS`), `web/app.js` (`dl-project`, `openProject`), tests on both sides · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-468-project-ticks`) · outcome: Projects save design-suggestion and suggested-box ticks and unticks by stable key (edit id; box kind + source) and restore them after the suggestions are rebuilt; old files keep today's defaults. Engine 318 passed, browser smoke 84 passed / 0 failed.
   - Do: extend the shared Python/browser project format to save and restore ticks and unticks for design suggestions and suggested boxes. Cover both readers/writers and the browser project round trip.
 
 ### B. Advice that must be right
@@ -498,10 +499,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: "Ranked lower: needs more support" on the option with *less* support weight (2 g against 3 g).
   - Do: build the sentence from the numbers shown on the two cards (support g, contact mm², height, time), not from the internal score part. If no shown number is worse, say what is (e.g. "a face you marked gets support marks").
   - Done when: a test goes over all sample parts and fails when a "needs more support" option has ≤ the support weight of the pick (same for "prints taller").
-- [ ] **T-407 P1** [B] Finding texts guess at the user's design. · files: `core/fdmcore/data/rules.yaml` · owner: Claude, built with Gemini Flash (`task/T-407-measured-why`)
+- [x] **T-407 P1** [B] Finding texts guess at the user's design. · files: `core/fdmcore/data/rules.yaml` · owner: Claude, built with Gemini Flash (`task/T-407-measured-why`)
   - Seen: any narrow gap says "The CAD model shows separate moving components in a print-in-place hinge or bearing"; any small hole says "The CAD model has an exact diameter hole for a bolt or pin"; the blob got "The CAD model shows crisp letters, logos, or shallow grooves". The `why` texts were drafted by an LLM as stories.
   - Do: rewrite every `why` to say only what the check measured and what happens when printing, in one or two short sentences, e.g. "Two faces are 0.15 mm apart. Gaps under 0.2 mm fuse into one piece." No "The CAD model shows …", no guessed purpose. The measured numbers already sit in each finding's `detail`.
   - Done when: `grep -c "The CAD model" core/fdmcore/data/rules.yaml` is 0; each `why` is ≤ 2 sentences (this also serves T-382).
+  - Outcome: all 51 `why` texts rewritten (drafted by Gemini Flash in three chunks, reviewed and three corrected by hand); no "The CAD model" left, each ≤ 2 sentences, nothing else in the file changed; rule tests pass.
 - [ ] **T-408 P1** [B] Know what kind of model it is: CAD part or organic shape (scan, sculpt, figure). · files: `core/fdmcore/api.py` (`load`), `core/fdmcore/regions.py`, `core/fdmcore/checks.py`, `core/fdmcore/features.py`, `web/app.js` · owner: —
   - Seen: the blob (no flat face, no hole) got "Raised or engraved detail too shallow", "Fine detail squashed on the bed", and many `rounded_edge` features.
   - Do: at load, measure the share of the surface that lies in flat or cylindrical regions (`find_regions`). Below a threshold (to find on the samples + the blob; put it in `thresholds.yaml`) the part is "organic". For organic parts: switch off the checks that need CAD features (`first_layer_detail`, engraved / raised detail, `small_hole_undersized`, feature detection), keep overhang / support / bed contact / tipping / cooling / warping. Return `kind: "cad" | "organic"` from `load`; the app shows "Looks like a sculpted model: checks for holes and fine CAD detail are off" with a switch to turn them on.
@@ -529,11 +531,13 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: Result shows the verdict, then "Copies on the plate", "Grip texture (fuzzy skin)", then the download. Print time and filament are missing (`#stats` sits in the Problems pane and isn't moved to Result). Big empty space below.
   - Do: order on Result: (1) verdict, (2) "About 34 min · 11 g of filament · about 0.25 for the filament" on one line, (3) the top three problems, each with a small picture of the place (T-423) and its one fix, "Show all" below, (4) the download button, (5) one line "What happens next" (T-415), (6) "More options" closed: copies, grip texture, report, share, slicer settings.
   - Done when: time and grams show in Simple's Result; copies and fuzzy skin are not above the download.
-- [ ] **T-414 P2** [C] "Strength analysis" in Simple: say it's optional. · files: `web/index.html` (pane `strength`), `web/app.js` · owner: Claude, built with Gemini Flash (`task/T-414-strength-optional`)
+- [x] **T-414 P2** [C] "Strength analysis" in Simple: say it's optional. · files: `web/index.html` (pane `strength`), `web/app.js` · owner: Claude, built with Gemini Flash (`task/T-414-strength-optional`)
   - Seen (re-checked 2026-11-15): T-369 is done, the step now guides in three numbered stages with "Show me how". What is left: nothing says the step can be skipped (the foot button "Show my result" does skip it, but reads as the end of the step), and "Check strength" is greyed out without a reason (T-402).
   - Do: a line under the heading "Does something push or pull on it? Optional." and, while no load is set, the foot button reads "Skip: show my result"; once a load is set and checked it reads "Show my result".
   - Done when: a beginner can tell from the screen alone that the step can be skipped.
-- [ ] **T-415 P2** [C] Say what to do after the download. · files: `web/app.js` (after `dl-3mf`), `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-415-after-download`)
+  - Outcome: a line under the heading says the step is optional; the foot button reads "Skip: show my result" while no load is set, and "Show my result" once one is (that runs the missing check, T-397). New `skippable` hook in `web/steps.js`; browser test checks both labels.
+- [x] **T-415 P2** [C] Say what to do after the download. · files: `web/app.js` (after `dl-3mf`), `web/index.html` · owner: Claude, built with Gemini Flash (`task/T-415-after-download`)
+  - Outcome: "Next, in your slicer" card with the three steps under the download button, shown on every 3MF download, closed with "Got it". "It printed badly?" waits for T-447 (the failed-print path is off). Browser smoke: 80 steps, 0 failures.
   - Seen: after "Download 3MF for your slicer" nothing more happens. A beginner doesn't know that the file opens in the slicer, or that their own printer and filament profile still has to be picked there.
   - Do: after the download show three short steps: "1 Open the file in OrcaSlicer, Bambu Studio or PrusaSlicer. 2 Pick your printer and filament there as usual. 3 Slice and print: the walls, infill, supports and brim are already set on the part." Add "It printed badly?" → the failed-print path (T-447).
   - Done when: the steps show once per download and can be closed.
@@ -690,7 +694,8 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### J. Reach
 
-- [ ] **T-448 P1** [J] Say clearly where things run and what it costs. · files: README.md, `web/index.html` (a line near the drop zone or in the Guide) · owner: Claude, built with Gemini Flash (`task/T-448-where-it-runs`)
+- [x] **T-448 P1** [J] Say clearly where things run and what it costs. · files: README.md, `web/index.html` (a line near the drop zone or in the Guide) · owner: Claude, built with Gemini Flash (`task/T-448-where-it-runs`)
+  - Outcome: README section "Where it runs and what it costs" (browser only, no account / AI / key, free static hosting, Pyodide ~15 MB + scipy ~10 MB on first use, served by the site itself or jsDelivr locally, offline after), one line in the Guide and under the drop zone. Text only.
   - Do: README section "Where it runs": everything is calculated in your browser, on your computer; the site is static files, so hosting it is free and no part ever leaves your computer; the first visit downloads the Python runtime (~15 MB) and, for strength and design tools, scipy (~10 MB) from a public CDN; later visits work offline. Note for anyone hosting it: no server costs, only static bandwidth.
   - Done when: README and the Guide say it in plain words.
 - [ ] **T-449 P1** [J] Publish it (finishes T-071) and make it installable. · files: `.github/workflows/pages.yml`, `web/sw.js`, new `web/manifest.webmanifest`, `web/index.html` · owner: — · needs the user (enable Pages)

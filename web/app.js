@@ -159,6 +159,9 @@ const steps = new Steps({
     : !state.triangles ? "Load a part first"
     : step === "result" && steps.current !== "result" && steps.busy.has("result") ? "Checking your part…"
     : step === "have" || state.check ? true : "Checking your part…",
+  // Strength is optional: with no load set, its foot button says it is skipped. With a load set,
+  // "Show my result" runs the missing check (T-397), so it isn't a skip.
+  skippable: (step) => step === "strength" && !state.loads.some((l) => l.kind === "force"),
   changed: () => {
     strengthShown();
     showViewChanges();
@@ -339,6 +342,12 @@ async function openProject(bytes) {
   setZones(p.zones ?? []); // after selectOption: it clears zones and boxes of the old orientation
   setVolumes(p.volumes ?? []);
   if (p.holes && activeOption()) await restoreHoles(p.holes);
+  // Loading, orientation and sized holes rebuild the list: apply saved ids in the final suggestion result.
+  await state.designPending?.catch(() => {});
+  if (p.edit_selections && mode() !== "print") await suggestDesign(p.edit_selections);
+  else if (p.edit_selections) Object.assign(editSelections(), p.edit_selections);
+  // Keep pending boxes too: a weakest-spot box's strength result isn't part of a project.
+  setSuggested(Object.values(p.suggested_boxes ?? {}));
   recolor();
   await state.nozzleCompare?.catch(() => {}); // it would overwrite the message below when it ends
   setStatus(`${state.summary} — opened the project with what was set in it.`);
@@ -1186,8 +1195,7 @@ function previewPick() {
   const on = !$("pick-panel").hidden && state.selectedRegion >= 0;
   $("dir-angle").hidden = $("dir").value !== "angle";
   $("dir-angle-out").textContent = `${$("dir-lean").value}° lean, towards ${$("dir-toward").value}°`;
-  $("as-fixed").disabled = $("as-load").disabled = !on;
-  for (const b of [$("as-fixed"), $("as-load")]) b.title = on ? "" : "Tap a face first";
+  for (const b of [$("as-fixed"), $("as-load")]) offWhy(b, on ? "" : "Tap a face on the part first.");
   state.previewLoad = !on ? null
     : state.saStage === "held" ? { ...target(), kind: "fixed" }
     : state.saStage === "load" ? { ...target(), kind: "force", kg: Number($("kg").value), direction: pickedDirection() } : null;
@@ -1224,8 +1232,8 @@ function renderStages() {
     li.querySelector(".sa-sum").textContent = sums[li.dataset.stage];
     li.classList.toggle("done", Boolean(sums[li.dataset.stage]) && li.dataset.stage !== "extra");
   }
-  document.querySelector("[data-next=load]").disabled = !held.length;
-  document.querySelector("[data-next=extra]").disabled = !forces.length;
+  offWhy(document.querySelector("[data-next=load]"), held.length ? "" : "Mark at least one place where it's held first.");
+  offWhy(document.querySelector("[data-next=extra]"), forces.length ? "" : "Add at least one load first.");
 }
 for (const li of document.querySelectorAll(".sa-stage")) li.querySelector(".sa-head").onclick = () => setStage(li.dataset.stage);
 for (const b of document.querySelectorAll(".sa-next")) b.onclick = () => setStage(b.dataset.next);
@@ -1441,6 +1449,30 @@ addEventListener("pointerup", () => {
   renderLoads();
 });
 const multiCase = () => new Set(state.loads.filter((l) => l.kind === "force").map((l) => l.case)).size > 1;
+/** Disable a button and say why in a muted line under its row (phones show no tooltips); an empty reason enables it.
+ * Buttons sharing a row share one line, each reason said once. */
+function offWhy(button, reason) {
+  button.disabled = Boolean(reason);
+  const box = button.closest(".row, .actions") ?? button;
+  box.whyOff ??= new Map();
+  box.whyOff.set(button, reason);
+  if (!box.whyNote) {
+    box.whyNote = el("p", { className: "hint why-off" });
+    box.after(box.whyNote);
+  }
+  const why = [...new Set([...box.whyOff.values()].filter(Boolean))];
+  box.whyNote.textContent = why.join(" ");
+  box.whyNote.hidden = !why.length;
+}
+
+/** What the strength check still needs, in words ("" when it can run). */
+const strengthMissing = () => {
+  const held = state.loads.some((l) => l.kind === "fixed");
+  const load = state.loads.some((l) => l.kind === "force");
+  return held && load ? "" : !held && !load ? "First mark where it's held and where the load goes (steps 1 and 2 above)."
+    : !held ? "First mark where it's held (step 1 above)." : "First add a load (step 2 above).";
+};
+
 const readyForStrength = () => state.loads.some((l) => l.kind === "fixed") && state.loads.some((l) => l.kind === "force");
 
 function renderLoads() {
@@ -1469,12 +1501,12 @@ function renderLoads() {
       ),
     ),
   );
-  $("run-strength").disabled = !readyForStrength();
-  $("run-optimise").disabled = !readyForStrength();
-  $("run-topology").disabled = !readyForStrength();
-  $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
-  $("dynamics-need").hidden = readyForStrength();
+  offWhy($("run-strength"), strengthMissing());
+  offWhy($("run-optimise"), strengthMissing());
+  offWhy($("run-topology"), readyForStrength() ? "" : "Needs where it's held and a load: set them in Strength analysis first.");
+  dynamicsWhy();
   renderStages();
+  steps.render(); // the foot button says "Skip" only while no load is set
 }
 
 /** How the part will be printed (walls, solid top/bottom layers, infill 0–1), from the settings shown. */
@@ -1669,10 +1701,15 @@ async function offerTurn() {
 }
 
 // ---------- strength: shaking and knocks (optional, Advanced) ----------
+/** Why "Run these checks" can't run yet: the loads first, then at least one ticked check. */
+function dynamicsWhy() {
+  offWhy($("run-dynamics"), !readyForStrength() ? "Set where it is held and a load in Strength analysis first."
+    : !($("dyn-shake").checked || $("dyn-drop").checked) ? "Tick shaking or knocks above." : "");
+}
 for (const [box, row] of [["dyn-shake", "dyn-shake-row"], ["dyn-drop", "dyn-drop-row"]]) {
   $(box).onchange = () => {
     $(row).hidden = !$(box).checked;
-    $("run-dynamics").disabled = !readyForStrength() || !($("dyn-shake").checked || $("dyn-drop").checked);
+    dynamicsWhy();
   };
 }
 $("run-dynamics").onclick = async () => {
@@ -2153,8 +2190,12 @@ function optionGroups(opts, now) {
   if (!boxes.size) return groups;
   const recheck = el("button", { className: "primary recheck", textContent: "Re-check with the ticked changes", disabled: true,
     onclick: () => applyTicked(opts.filter((o) => boxes.get(o)?.checked)) });
-  for (const box of boxes.values()) box.addEventListener("change", () => (recheck.disabled = ![...boxes.values()].some((b) => b.checked)));
-  return [...groups, el("div", { className: "row recheck-row" }, recheck)];
+  const why = el("p", { className: "hint why-off", textContent: "Tick one or more changes above." });
+  for (const box of boxes.values()) box.addEventListener("change", () => {
+    recheck.disabled = ![...boxes.values()].some((b) => b.checked);
+    why.hidden = !recheck.disabled;
+  });
+  return [...groups, el("div", { className: "row recheck-row" }, recheck), why];
 }
 
 function optionCard(o, now, boxes, group) {
@@ -2616,6 +2657,7 @@ addEventListener("pointerup", async () => {
 const DROOP_SHARE = 0.5; // of a face's triangles "may droop" before it gets a support box
 const MIN_FACE_MM2 = 20; // smaller faces print fine either way
 const MAX_SUGGESTED = 6;
+const suggestedBoxKey = (v) => JSON.stringify([v.kind, v.from.region ?? null, v.from.point ?? null, v.from.normal ?? null]);
 
 /** What to place where, from what the app already knows: faces that may droop (support), faces marked
  * clean that would get supports (no support), and the weakest spot of the strength analysis (hidden gap). */
@@ -2657,8 +2699,7 @@ $("vol-suggest").onclick = async () => {
   if (!activeOption()) return;
   await ensureRegions();
   const ideas = boxIdeas();
-  const key = (v) => JSON.stringify([v.kind, v.from]);
-  const choices = new Map(state.suggested.map((v) => [key(v), v.use]));
+  const choices = new Map(state.suggested.map((v) => [suggestedBoxKey(v), v.use]));
   const placed = [];
   await busy("Placing suggested boxes…", async () => {
     for (const idea of ideas) {
@@ -2666,7 +2707,7 @@ $("vol-suggest").onclick = async () => {
         const v = await call("volume_at", { up: activeOption().up, kind: idea.kind, profile: profile(), ...idea.from });
         const info = idea.from.region != null ? state.regionInfo[idea.from.region] : null;
         const what = info ? (info.hole_diameter ? `Ø${info.hole_diameter.toFixed(1)} mm hole` : `${info.kind} face`) : "the weakest spot";
-        placed.push({ ...v, from: idea.from, what, why: idea.why, use: choices.get(key(idea)) ?? false });
+        placed.push({ ...v, from: idea.from, what, why: idea.why, use: choices.get(suggestedBoxKey(idea)) ?? false });
       } catch { /* a box that doesn't fit here is just not suggested */ }
     }
   });
@@ -2797,6 +2838,8 @@ function showSelectedGhosts(highlight = null) {
 
 /** Choices belong to this model version; keep them even when a re-check rebuilds the list. */
 const editSelections = () => (state.versions[state.version].editSelections ??= {});
+const editsForProject = () => ({ ...editSelections(), ...Object.fromEntries(state.edits.map((e) => [e.id, e.selected])) });
+const suggestedForProject = () => Object.fromEntries(state.suggested.map((v) => [suggestedBoxKey(v), v]));
 function selectEdits(selected) {
   for (const e of state.edits) editSelections()[e.id] = e.selected = selected;
   document.querySelectorAll("#edits input[type=checkbox]").forEach((box) => (box.checked = selected));
@@ -2813,9 +2856,9 @@ function suggestDesignIfShown() {
   if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
 }
 
-async function suggestDesign() {
+async function suggestDesign(savedChoices = null) {
   state.designFor = activeOption().up.join();
-  return busy("Looking for design improvements…", async () => {
+  return state.designPending = busy("Looking for design improvements…", async () => {
     const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
     const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
@@ -2825,6 +2868,7 @@ async function suggestDesign() {
     // Only the size the user requested (not optional fins or extra plastic) starts ticked.
     const choices = editSelections();
     for (const e of state.edits) choices[e.id] = e.selected;
+    if (savedChoices) Object.assign(choices, savedChoices);
     state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
       selected: choices[e.id] ?? (!e.clash && /^(fit-|gap-|fastener-(?!boss-)|solid-)/.test(e.id)) }));
     $("edit-selection").hidden = !state.edits.length;
@@ -3118,7 +3162,7 @@ async function tagFeature(region, tag) {
 /** Edit sizes from the inputs; empty until the first suggestion filled them in (engine defaults). */
 const designParams = () =>
   Object.fromEntries([...document.querySelectorAll("#edit-params input")].filter((i) => i.value !== "").map((i) => [i.dataset.param, Number(i.value)]));
-document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = suggestDesign));
+document.querySelectorAll("#edit-params input").forEach((i) => (i.onchange = () => suggestDesign()));
 
 /** The rounded corners (or the thicker weak spot) on a new version, checked again: the strength before and after side by side. */
 const EDIT_NAME = { "stress-chamfer": "the rounded corners", "thicken-weak": "the thicker weak spot" };
@@ -4076,12 +4120,15 @@ $("dl-3mf").onclick = async () => {
     const fine_layers = $("dl-fine").checked ? fineWanted() : [];
     const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked, copies: state.copies ?? 1 });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
+    $("after-dl").hidden = false; // what to do with the file, once per download
     const seam = faceMarks()?.clean?.length ? " The seam is kept off the faces you marked “keep clean”." : "";
     const grip = $("dl-grip").checked ? " Fuzzy skin is on for the outside walls." : "";
     const copies = (state.copies ?? 1) > 1 ? ` ${state.copies} copies on the plate.` : "";
     setStatus(`${state.summary} — 3MF downloaded with per-object slicer settings.${seam}${grip}${copies}`);
   });
 };
+
+$("after-dl-close").onclick = () => ($("after-dl").hidden = true);
 
 // "Estimate" pills: a click shows or hides the one sentence on what that means.
 for (const pill of document.querySelectorAll(".estimate")) {
@@ -4097,6 +4144,7 @@ const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
   up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
   holes: holesForProject(),
+  edit_selections: editsForProject(), suggested_boxes: suggestedForProject(),
 });
 
 $("dl-project").onclick = () => {
@@ -4231,7 +4279,7 @@ async function autosave() {
   if (!state.triangles || !activeOption() || busyCount) return;
   // Cheap fingerprint first: writing out the whole part every minute would be wasted work.
   const sig = JSON.stringify([state.name, state.version, state.triangles.length, activeOption().up, state.loads, faceMarks(),
-    state.zones, state.volumes, state.overrides, profile(), mode()]);
+    state.zones, state.volumes, state.overrides, profile(), mode(), editsForProject(), suggestedForProject()]);
   if (sig === autosaved) return;
   autosaved = sig;
   await autosaveStore("readwrite", (s) => s.put({ text: projectText(), name: state.name, time: Date.now() }, AUTOSAVE_KEY));
