@@ -170,6 +170,67 @@ def check_thumbnails(page) -> str:
     return f"{result['count']} images, slowest {max(result['times']):.1f} ms; cached, nonblank, live view unchanged"
 
 
+def check_finding_views(page) -> str:
+    """Click every place, checking the actual live pixels and the camera throughout each flight."""
+    entries = page.evaluate("() => fdm.state.check.findings")
+    page.evaluate("() => document.querySelectorAll('#findings .impact > details').forEach(d => d.open = true)")
+    focused, worst = 0, 0
+    place_indices = {}
+    for finding in entries:
+        title = re.compile(r"^" + re.escape(finding["title"]) + r"(?: ×\d+)?$")
+        card = page.locator("#findings .findings > li").filter(has=page.locator(".f-head b", has_text=title)).first
+        if not card.locator(":scope > details").evaluate("d => d.open"):
+            card.locator(":scope > details > summary").click()
+        page.evaluate("""() => {
+          const v = fdm.viewer;
+          v.part.geometry.computeBoundingBox();
+          window.findingFlight = {record: true, inside: 0};
+          const sample = () => {
+            if (!window.findingFlight.record) return;
+            if (v.part.geometry.boundingBox.containsPoint(v.camera.position)) window.findingFlight.inside++;
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        }""")
+        places = card.locator(".places .place")
+        if places.count():
+            index = place_indices.get(finding["rule"], 0)
+            places.nth(index).click()
+            place_indices[finding["rule"]] = index + 1
+        else:
+            card.locator(".detail.clickable").click()
+        page.wait_for_function("() => fdm.viewer.cameraMove === null")
+        pixels = page.evaluate("""bbox => {
+          const v = fdm.viewer;
+          window.findingFlight.record = false;
+          v.renderer.render(v.scene, v.camera);
+          const canvas = document.createElement('canvas'); canvas.width = 240; canvas.height = 180;
+          const ctx = canvas.getContext('2d'); ctx.drawImage(v.renderer.domElement, 0, 0, 240, 180);
+          const data = ctx.getImageData(0, 0, 240, 180).data, colors = new Map();
+          for (let i = 0; i < data.length; i += 4) {
+            const key = (data[i] << 16) | (data[i+1] << 8) | data[i+2];
+            colors.set(key, (colors.get(key) ?? 0) + 1);
+          }
+          const point = bbox && v.camera.position.clone().fromArray(bbox[0]).add(
+            v.camera.position.clone().fromArray(bbox[1])).multiplyScalar(0.5).project(v.camera);
+          return {dominant: Math.max(...colors.values()) / (240 * 180),
+            inside: window.findingFlight.inside || Number(v.part.geometry.boundingBox.containsPoint(v.camera.position)),
+            marked: !point || (Math.abs(point.x) < 1 && Math.abs(point.y) < 1 && Math.abs(point.z) < 1)};
+        }""", finding.get("bbox"))
+        assert pixels["dominant"] <= 0.8, f"{finding['rule']}: over 80% one colour: {pixels}"
+        assert not pixels["inside"], f"{finding['rule']}: camera entered the part's bounds: {pixels}"
+        assert pixels["marked"], f"{finding['rule']}: marked place is outside the view"
+        worst = max(worst, pixels["dominant"])
+        if finding.get("bbox"):
+            focused += 1
+            assert page.is_visible("#whole-part"), "no way back from a finding"
+    if focused:
+        page.click("#whole-part")
+        assert page.is_hidden("#whole-part")
+        assert page.evaluate("() => fdm.viewer.controls.target.distanceTo(fdm.viewer.part.geometry.boundingSphere.center) < 1e-6")
+    return f"{len(entries)} findings clicked, {focused} places framed; most common colour {worst:.1%}; flights outside, whole-part return works"
+
+
 REVIEW_PROMPT = (
     "Do not run commands or edit files. This is a screenshot of a browser app that analyses 3D-print parts "
     "(sidebar with settings/findings, 3D view of the part on a print bed). List concrete visual problems only: "
@@ -2599,6 +2660,16 @@ def main():
                 return check_thumbnails(page)
 
             run.step(f"thumbnails {sample.stem}", extra_thumbnails)
+        # Every shipped part, including fixtures outside the sample buttons, must keep visual context.
+        page.click("input[name=level][value=expert] >> xpath=..")
+        for sample in sorted((ROOT / "web" / "samples").glob("*.stl")):
+            def finding_views(sample=sample):
+                page.evaluate("() => fdm.steps.go('part')")
+                run.act(lambda: page.set_input_files("#file", str(sample)), 300_000)
+                page.evaluate("() => fdm.steps.go('problems')")
+                return check_finding_views(page)
+
+            run.step(f"finding views {sample.stem}", finding_views)
 
         for part in args.parts:
             def load_part(part=part):
