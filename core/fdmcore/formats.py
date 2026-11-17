@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from .mesh import Mesh, load_stl
+from .mesh import Mesh, load_stl, vertex_ids
 
 # 3MF ``unit`` attribute -> millimetres.
 UNITS_MM = {"micron": 0.001, "millimeter": 1.0, "centimeter": 10.0, "inch": 25.4, "foot": 304.8, "meter": 1000.0}
@@ -232,7 +232,7 @@ def split_bodies(mesh: Mesh, min_fraction: float = 0.002) -> list[Mesh]:
 
 def _components(tri: np.ndarray) -> np.ndarray:
     """Component label per triangle; triangles sharing a corner (exact float32 match) connect."""
-    vid = _vertex_ids(tri)
+    vid = vertex_ids(tri)
     parent = np.arange(vid.max() + 1)
     a = np.concatenate([vid[:, 0], vid[:, 0]])
     b = np.concatenate([vid[:, 1], vid[:, 2]])
@@ -250,22 +250,6 @@ def _components(tri: np.ndarray) -> np.ndarray:
             parent = jumped
     _, labels = np.unique(parent[vid[:, 0]], return_inverse=True)
     return labels.ravel()
-
-
-def _vertex_ids(tri: np.ndarray) -> np.ndarray:
-    """Same id for bit-identical float32 corners, (M, 3). Sorting one int64 hash per point is
-    several times faster than np.unique on 12-byte records; a hash collision can only join two
-    bodies that should be separate (harmless: the user just sees one body)."""
-    bits = np.ascontiguousarray(tri.reshape(-1, 3).astype(np.float32)).view(np.uint32).astype(np.uint64)
-    key = (bits[:, 0] * np.uint64(0x9E3779B97F4A7C15)) ^ (bits[:, 1] * np.uint64(0xC2B2AE3D27D4EB4F)) ^ (bits[:, 2] << np.uint64(21))
-    order = np.argsort(key)
-    sorted_key = key[order]
-    new = np.empty(len(key), bool)
-    new[0] = True
-    new[1:] = sorted_key[1:] != sorted_key[:-1]
-    ids = np.empty(len(key), np.int64)
-    ids[order] = np.cumsum(new) - 1
-    return ids.reshape(-1, 3)
 
 
 # ---------- units ----------

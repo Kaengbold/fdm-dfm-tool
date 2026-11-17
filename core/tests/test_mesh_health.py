@@ -16,7 +16,7 @@ def cube():
 
 def test_cube_and_hole():
     h = mesh_health(Mesh(cube()))
-    assert (h["holes"], h["flipped_faces"], h["shells"]) == (0, 0, 1)
+    assert (h["holes"], h["flipped_faces"], h["non_manifold_edges"]) == (0, 0, 0)
     h = mesh_health(Mesh(cube()[2:]))
     assert (h["holes"], h["boundary_edges"]) == (1, 4)
     assert len(h["points"]["holes"]) == 1
@@ -31,13 +31,23 @@ def test_flipped_and_zero_area():
     assert mesh_health(Mesh(t))["zero_area_faces"] == 1
 
 
-def test_non_manifold_and_separate_shells():
+def test_non_manifold():
     t = cube()
     extra = np.array([t[0, 0], t[0, 1], [0.5, 0.5, -1]])
     h = mesh_health(Mesh(np.concatenate((t, extra[None]))))
     assert h["non_manifold_edges"] == 1
     assert len(h["points"]["non_manifold_edges"]) == 1
-    assert mesh_health(Mesh(np.concatenate((t, t + 3))))["shells"] == 2
+    assert mesh_health(Mesh(np.concatenate((t, t + 3))))["holes"] == 0  # two bodies are fine
+
+
+def test_flat_sliver_still_closes_the_surface():
+    """A zero-area triangle with three distinct corners (T-junction fill) is no hole."""
+    t = cube()
+    v4, v5, v6 = t[2]
+    mid = (v4 + v6) / 2
+    split = np.array([[v4, v5, mid], [mid, v5, v6], [v4, mid, v6]])
+    h = mesh_health(Mesh(np.concatenate((t[:2], split, t[3:]))))
+    assert (h["zero_area_faces"], h["holes"], h["non_manifold_edges"], h["flipped_faces"]) == (1, 0, 0, 0)
 
 
 def test_samples():

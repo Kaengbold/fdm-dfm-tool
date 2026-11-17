@@ -91,6 +91,22 @@ def to_binary_stl(mesh: Mesh) -> bytes:
     return b"\0" * 80 + struct.pack("<I", mesh.face_count) + arr.tobytes()
 
 
+def vertex_ids(tri: np.ndarray) -> np.ndarray:
+    """Same id for bit-identical float32 corners, (M, 3). Sorting one int64 hash per point is
+    several times faster than np.unique on 12-byte records; a hash collision can only join two
+    bodies that should be separate (harmless: the user just sees one body)."""
+    bits = np.ascontiguousarray(tri.reshape(-1, 3).astype(np.float32)).view(np.uint32).astype(np.uint64)
+    key = (bits[:, 0] * np.uint64(0x9E3779B97F4A7C15)) ^ (bits[:, 1] * np.uint64(0xC2B2AE3D27D4EB4F)) ^ (bits[:, 2] << np.uint64(21))
+    order = np.argsort(key)
+    sorted_key = key[order]
+    new = np.empty(len(key), bool)
+    new[0] = True
+    new[1:] = sorted_key[1:] != sorted_key[:-1]
+    ids = np.empty(len(key), np.int64)
+    ids[order] = np.cumsum(new) - 1
+    return ids.reshape(-1, 3)
+
+
 def _connected(n: int, edges: np.ndarray) -> np.ndarray:
     """Connected vertex labels, using vectorised hooking and path compression."""
     parent = np.arange(n)
@@ -109,28 +125,35 @@ def _connected(n: int, edges: np.ndarray) -> np.ndarray:
 
 
 def mesh_health(mesh: Mesh) -> dict:
-    """Inspect topology without changing the triangles. Points are in the loaded frame."""
+    """Surface defects a slicer's repair would fix, counted without changing the triangles.
+    Points (a few per problem, loaded frame) are for marking. Separate shells aren't counted:
+    multi-body files are normal and handled by the body pick."""
     t = mesh.triangles
     _, areas = mesh.normals_and_areas()
     zero = areas == 0
-    good = t[~zero]
-    result = {"holes": 0, "boundary_edges": 0, "non_manifold_edges": 0,
-              "flipped_faces": 0, "shells": 0, "zero_area_faces": int(zero.sum()),
+    ids = vertex_ids(t)
+    # A face with a repeated corner has no edges of its own; a flat sliver with three distinct
+    # corners still closes the surface (T-junction fill), so it stays in the edge count.
+    real = (ids[:, 0] != ids[:, 1]) & (ids[:, 1] != ids[:, 2]) & (ids[:, 0] != ids[:, 2])
+    good, ids = t[real], ids[real]
+    result = {"holes": 0, "boundary_edges": 0, "non_manifold_edges": 0, "flipped_faces": 0,
+              "zero_area_faces": int(zero.sum()),
               "points": {"holes": [], "non_manifold_edges": [], "flipped_faces": [],
                          "zero_area_faces": t[zero][:5].mean(axis=1).tolist()}}
     if not len(good):
         return result
-    # Exact coordinate equality avoids silently welding gaps in the file.
-    vertices, inverse = np.unique(good.reshape(-1, 3), axis=0, return_inverse=True)
-    ids = inverse.reshape(-1, 3)
+    corners = good.reshape(-1, 3)
+    vertices = np.zeros((int(ids.max()) + 1, 3))
+    vertices[ids.ravel()] = corners
     directed = ids[:, [[0, 1], [1, 2], [2, 0]]].reshape(-1, 2)
     edges = np.sort(directed, axis=1)
-    unique, inv, counts = np.unique(edges, axis=0, return_inverse=True, return_counts=True)
+    n = np.int64(len(vertices))
+    keys, inv, counts = np.unique(edges[:, 0] * n + edges[:, 1], return_inverse=True, return_counts=True)
+    unique = np.stack([keys // n, keys % n], axis=1)
     boundary = unique[counts == 1]
     result["boundary_edges"] = int(len(boundary))
     result["non_manifold_edges"] = int((counts > 2).sum())
     result["points"]["non_manifold_edges"] = vertices[unique[counts > 2][:5]].mean(axis=1).tolist()
-    result["shells"] = int(len(np.unique(_connected(len(vertices), unique))))
     if len(boundary):
         labels = _connected(len(vertices), boundary)[boundary[:, 0]]
         roots, inv_hole = np.unique(labels, return_inverse=True)
