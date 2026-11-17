@@ -628,11 +628,15 @@ async function runCheck() {
 
 // ---------- rendering ----------
 function renderOptions() {
+  viewer.setThumbnailPart(state.triangles, state.options);
   $("options").replaceChildren(
     ...state.options.map((o, i) =>
       el(
         "li",
-        { onclick: () => pickOption(i), className: i === state.active ? "active" : "" },
+        { onclick: () => pickOption(i), className: i === state.active ? "active" : "", style: "display:flow-root" },
+        el("img", { className: "orientation-picture", src: viewer.thumbnail({ up: o.up, size: [112, 84] }),
+          alt: `${o.label}: how the part lies on the bed`, width: 112, height: 84, decoding: "async",
+          style: "float:right;margin:0 0 4px 10px;border-radius:var(--r)" }),
         el("strong", { textContent: o.label }, i === 0 ? el("span", { className: "tag", textContent: "Recommended" }) : ""),
         el("ul", {}, ...o.reasons.map((r) => el("li", { textContent: r }))),
         optionCost(o) ? el("p", { className: "option-cost", textContent: optionCost(o) }) : "",
@@ -691,6 +695,14 @@ function renderImpactGroups(findings) {
   return groups;
 }
 
+/** Shared by finding cards on Problems/Result; report pictures use the same cached viewer API. */
+function findingPicture(f) {
+  if (!f.bbox) return "";
+  return el("img", { className: "place-picture", src: viewer.thumbnail({ up: activeOption().up, focus: f, size: [112, 84] }),
+    alt: `Place on the part: ${f.title}`, width: 112, height: 84, decoding: "async",
+    style: "align-self:flex-start;border-radius:var(--r)" });
+}
+
 function findingCard(findings, items) {
   const first = items[0].f;
   const worst = items.reduce((a, b) => (SEVERITY_RANK[b.f.severity] < SEVERITY_RANK[a.f.severity] ? b : a)).f.severity;
@@ -745,6 +757,7 @@ function findingCard(findings, items) {
         el("span", { className: "f-head" },
           el("b", { textContent: first.title + (items.length > 1 ? ` ×${items.length}` : "") }),
           el("span", { className: "sev", textContent: SEVERITY_LABEL[worst] })),
+        findingPicture(first),
         // Readable without opening: what happens, and what kind of fix there is.
         el("span", { className: "gist", textContent: first.why.split(/(?<=\.)\s/)[0] }),
         el("span", { className: "paths" },
@@ -4321,13 +4334,13 @@ const makeReport = (project = false) =>
     };
     try {
       Object.assign(state, { showWarp: false, showSwing: false });
-      report.overview = pictureWith("problems", () => viewer.snapshot());
+      report.overview = viewer.thumbnail({ up: o.up, size: [720, 450] });
       // One card per kind of problem, with a picture of the first place it happens.
       const byRule = new Map();
       findings.forEach((f, i) => byRule.set(f.rule, [...(byRule.get(f.rule) ?? []), i]));
       report.problems = [...byRule.values()].map((idx) => {
         const f = findings[idx[0]];
-        const picture = f.bbox ? pictureWith("problems", () => (viewer.showFindings(findings, idx[0], false), viewer.snapshot(f.bbox))) : null;
+        const picture = f.bbox ? viewer.thumbnail({ up: o.up, focus: f, size: [720, 450] }) : null;
         return { title: f.title, severity: SEVERITY_LABEL[f.severity], picture, details: idx.map((i) => findings[i].detail), why: f.why,
           fixes: f.fixes.map((fx) => ({ kind: DOMAIN_LABEL[fx.domain], text: fx.text })) };
       });

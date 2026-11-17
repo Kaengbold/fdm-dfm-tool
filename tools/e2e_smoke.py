@@ -119,6 +119,56 @@ def click_sample(page, name):
         fold.locator("summary").click()
     button.click()
 
+def check_thumbnails(page) -> str:
+    """T-423: real uncached images, cache hits, and no changes to the live view."""
+    result = page.evaluate("""async () => {
+      const v = fdm.viewer, s = fdm.state;
+      const before = () => JSON.stringify([v.camera.position.toArray(), v.camera.quaternion.toArray(),
+        v.controls.target.toArray(), v.renderer.domElement.width, v.renderer.domElement.height]);
+      const saved = before(), target = v.renderer.getRenderTarget();
+      const render = v.renderPicture;
+      let renders = 0;
+      v.renderPicture = function(...args) { renders++; return render.apply(this, args); };
+      const times = [], pictures = [];
+      let cached = true;
+      try {
+        const requests = s.options.map(o => ({up: o.up, size: [120, 90]}));
+        for (const f of s.check.findings.filter(f => f.bbox).slice(0, 3)) {
+          requests.push({up: s.options[s.active].up, focus: f, size: [120, 90]});
+        }
+        // Symmetric samples can offer the same build direction more than once.
+        const unique = new Map(requests.map(r => [JSON.stringify([r.up, r.focus?.bbox, r.focus?.severity, r.size]), r]));
+        for (const request of unique.values()) {
+          const start = performance.now();
+          const picture = v.thumbnail(request);
+          times.push(performance.now() - start);
+          pictures.push(picture);
+          const count = renders;
+          cached &&= v.thumbnail(request) === picture && renders === count;
+        }
+        // Reports use the same off-screen renderer for live heat/warp overlays.
+        const snapshot = v.snapshot(null, 120);
+        const unchanged = before() === saved && v.renderer.getRenderTarget() === target;
+        const variety = [];
+        for (const picture of [...pictures, snapshot]) {
+          const img = new Image(); img.src = picture; await img.decode();
+          const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height;
+          const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
+          const px = ctx.getImageData(0, 0, img.width, img.height).data, colors = new Set();
+          for (let i = 0; i < px.length; i += 4) colors.add(`${px[i] >> 4},${px[i+1] >> 4},${px[i+2] >> 4}`);
+          variety.push(colors.size);
+        }
+        return {times, cached, unchanged, renders, count: unique.size, variety};
+      } finally { v.renderPicture = render; }
+    }""")
+    assert result["cached"], "thumbnail cache miss on an identical request"
+    assert result["unchanged"], "taking pictures changed the camera, controls, canvas size or render target"
+    assert result["renders"] == result["count"] + 1, result
+    assert min(result["variety"]) > 8, f"blank or near-blank image: {result}"
+    assert max(result["times"]) < 100, f"thumbnail took 100 ms or more: {result}"
+    assert page.locator("#options .orientation-picture").count() == page.locator("#options > li").count()
+    return f"{result['count']} images, slowest {max(result['times']):.1f} ms; cached, nonblank, live view unchanged"
+
 
 REVIEW_PROMPT = (
     "Do not run commands or edit files. This is a screenshot of a browser app that analyses 3D-print parts "
@@ -335,6 +385,7 @@ def main():
                 assert page.locator("#options > li").count() >= 2, "no orientation options"
                 return f"{status} | top: {page.locator('#options > li').first.inner_text().splitlines()[1:3]} | findings: {findings(page)}"
             run.step(f"sample {name}", load)
+            run.step(f"thumbnails {name}", lambda: check_thumbnails(page))
 
         def answer_first_result():
             page.click("input[name=level][value=simple] >> xpath=..")
@@ -507,6 +558,9 @@ def main():
             page.uncheck("#bed-see-through")
             assert page.evaluate("() => fdm.viewer.bedGroup.children.every(o => o.material.opacity === 1 && o.material.depthWrite)")
             page.check("#bed-see-through")
+
+            check_thumbnails(page)
+            assert page.locator("#findings .place-picture").count() > 0, "finding cards have no place pictures"
             # Hook's second pose has support but no yellow: absent entries must disappear too.
             page.evaluate("() => fdm.steps.go('part')")
             run.act(lambda: click_sample(page, "hook"))
@@ -568,7 +622,10 @@ def main():
         run.step("mode toggle", modes)
 
         def other_orientation():
+            page.evaluate("() => fdm.viewer.thumbnailCache.clear()")
+            check_thumbnails(page)
             run.act(lambda: page.locator("#options > li").nth(1).click())
+            check_thumbnails(page)  # changing the print orientation invalidates the old images
             return f"{len(findings(page))} findings"
         run.step("select option 2", other_orientation)
 
@@ -2429,6 +2486,18 @@ def main():
             assert page.evaluate("() => fdm.state.versions.length") == versions, "a tested change was applied"
             return f"{len(tested)} tested: " + " | ".join(t.splitlines()[0] for t in tested)
         run.step("make it stronger: design ideas tested straight away", design_ideas_tested)
+
+        # T-423's timing limit applies to every shipped sample, including those outside the main tour.
+        for sample in sorted((ROOT / "web" / "samples").glob("*.stl")):
+            if sample.stem in [*SAMPLES, "feature_test"]:
+                continue
+
+            def extra_thumbnails(sample=sample):
+                page.evaluate("() => fdm.steps.go('part')")
+                run.act(lambda: page.set_input_files("#file", str(sample)), 300_000)
+                return check_thumbnails(page)
+
+            run.step(f"thumbnails {sample.stem}", extra_thumbnails)
 
         for part in args.parts:
             def load_part(part=part):
