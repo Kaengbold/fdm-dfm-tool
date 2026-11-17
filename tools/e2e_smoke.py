@@ -336,6 +336,69 @@ def main():
                 return f"{status} | top: {page.locator('#options > li').first.inner_text().splitlines()[1:3]} | findings: {findings(page)}"
             run.step(f"sample {name}", load)
 
+        def answer_first_result():
+            page.click("input[name=level][value=simple] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('part')")
+            sample = page.locator("[data-sample=feature_test]")
+            fold = sample.locator("xpath=ancestor::details[1]")
+            if fold.count() and not fold.evaluate("d => d.open"):
+                fold.locator("summary").click()
+            run.act(sample.click)
+            page.evaluate("() => fdm.steps.go('result')")
+            stats = page.locator("#stats")
+            assert stats.is_visible(), "Simple Result hides time and filament"
+            text = stats.inner_text()
+            assert text.startswith("About ") and " g of filament" in text and " · " in text, text
+            cost = page.evaluate("() => fdm.state.check.stats.cost")
+            if cost is not None:
+                assert f"about {cost:.2f} for the filament" in text, text
+            assert page.evaluate("""() => {
+              const before = (a, b) => !!(document.getElementById(a).compareDocumentPosition(document.getElementById(b)) & Node.DOCUMENT_POSITION_FOLLOWING);
+              return before('verdict', 'stats') && before('stats', 'result-problems') && before('result-problems', 'result-all')
+                && before('dl-3mf', 'result-next') && before('result-next', 'result-options');
+            }"""), "answer, estimate and problems are out of order"
+            cards = page.locator("#result-problems > li")
+            assert cards.count() == 3, f"expected three problem kinds, got {cards.count()}"
+            rules = cards.evaluate_all("lis => lis.map(li => li.dataset.rule)")
+            assert len(set(rules)) == 3, rules
+            assert page.locator("#result-problems .result-fix").count() == 3, "not one fix per problem"
+            page.wait_for_function("() => [...document.querySelectorAll('#result-problems img')].every(img => img.complete && img.naturalWidth > 0)")
+            assert page.locator("#result-problems img").count() == 3, "missing place pictures"
+            for selector in ("#dl-copies", "#dl-grip", "#dl-report", "#dl-share", "#settings"):
+                assert page.locator(selector).is_hidden(), f"optional control visible before download: {selector}"
+            assert not page.locator("#result-options").evaluate("d => d.open")
+            assert not page.locator("#result-all").evaluate("d => d.open")
+            assert page.locator(".pane-foot #dl-3mf.primary").is_visible(), "primary download no longer at the foot"
+            assert page.locator("#more-tools").is_visible(), "more tools invitation lost"
+            page.locator("#result-problems .result-place").first.click()
+            assert page.evaluate("() => fdm.viewer.markers.children.length > 0"), "problem click has no marker"
+            page.click("#result-all > summary")
+            assert page.locator("#findings").is_visible(), "Show all does not open the full findings"
+            page.click("#result-all > summary")
+            page.click("#result-options > summary")
+            for selector in ("#dl-copies", "#dl-grip", "#dl-report", "#dl-share", "#settings-fold > summary"):
+                assert page.locator(selector).is_visible(), f"More options lost {selector}"
+            page.click("#result-options > summary")
+            page.set_viewport_size({"width": 390, "height": 844})
+            assert page.locator("[data-pane=result]").evaluate("p => p.scrollWidth <= p.clientWidth"), "phone Result overflows"
+            assert stats.is_visible()
+            assert page.locator(".pane-foot #dl-3mf.primary").is_visible()
+            page.click("#result-options > summary")
+            assert page.locator("#result-options").evaluate("p => p.scrollWidth <= p.clientWidth"), "phone options overflow"
+            assert page.locator("#dl-copies").is_visible()
+            page.click("#result-options > summary")
+            page.set_viewport_size({"width": 1500, "height": 950})
+            page.click("input[name=level][value=basic] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('problems')")
+            assert stats.is_visible() and stats.evaluate("p => p.closest('[data-pane]').dataset.pane") == "problems"
+            assert page.evaluate("() => !!(document.getElementById('stats').compareDocumentPosition(document.getElementById('blk-problems')) & Node.DOCUMENT_POSITION_FOLLOWING)"), "stats returned below the findings"
+            assert page.locator("#blk-download #dl-copies").count() == 1
+            page.click("input[name=level][value=expert] >> xpath=..")
+            page.evaluate("() => fdm.steps.go('part')")
+            return f"{text} | three pictured problem kinds with one fix each; optional controls folded; phone fits; stats restore in Basic"
+
+        run.step("Simple Result puts the answer first", answer_first_result)
+
         def quiet_hook_key():
             page.click("input[name=level][value=simple] >> xpath=..")
             page.evaluate("() => fdm.steps.go('part')")
@@ -2239,12 +2302,15 @@ def main():
             items = page.locator("#compute-steps li")
             states = items.evaluate_all("lis => lis.map((li) => li.className)")
             assert states == ["done", "done", "skipped", "done"], states
-            assert "no load set" in items.nth(2).inner_text()
+            assert not page.locator("#result-progress").evaluate("d => d.open"), "finished progress should be folded"
+            assert "no load set" in items.nth(2).text_content(), "missing optional-strength explanation"
             assert page.evaluate("() => fdm.steps.current") == "result"
             primary_at_foot("dl-3mf")
             with page.expect_download() as download:
                 run.act(lambda: page.click("#dl-3mf"))
             assert download.value.suggested_filename.endswith(".3mf")
+            assert page.locator("#after-dl").is_visible(), "next steps hidden inside More options"
+            page.click("#after-dl-close")
 
             # Set loads without running Check strength. Show my result must supply that missing work.
             page.evaluate("""async () => {

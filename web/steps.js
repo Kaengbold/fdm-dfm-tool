@@ -20,7 +20,8 @@ export const LEVEL_STEPS = {
 // Blocks that live somewhere else than the pane they are written in, per level. Simple has no
 // problems/settings/download steps: those blocks make up its Result.
 const MOVED = {
-  simple: [["blk-download", "result"], ["blk-problems", "result"], ["blk-settings", "result"]],
+  simple: [["blk-stats", "result-stats"], ["blk-problems", "result-all"],
+    ["blk-download", "result-options"], ["blk-settings", "result-options"], ["after-dl", "result"]],
 };
 
 // What a change in a step re-computes: shown under the step, so cause and effect are visible.
@@ -45,7 +46,12 @@ export class Steps {
     this.current = "part";
     this.busy = new Map(); // step -> number of running jobs that will update it
     this.panes = Object.fromEntries([...document.querySelectorAll(".pane")].map((p) => [p.dataset.pane, p]));
-    this.home = Object.fromEntries([...document.querySelectorAll("[id^=blk-]")].map((b) => [b.id, b.parentElement]));
+    // Keep exact positions: stats must return above Problems when the visitor changes level.
+    this.home = Object.fromEntries([...document.querySelectorAll("[id^=blk-], #after-dl")].map((b) => {
+      const place = document.createComment(`${b.id}'s original place`);
+      b.before(place);
+      return [b.id, place];
+    }));
     this.downloadHome = document.createComment("Download button's place outside Simple Result");
     document.getElementById("dl-3mf").before(this.downloadHome);
     for (const [step, list] of Object.entries(AFFECTS)) {
@@ -97,7 +103,7 @@ export class Steps {
     const moved = MOVED[level] ?? [];
     for (const [id, home] of Object.entries(this.home)) {
       const block = document.getElementById(id);
-      if (block.parentElement !== home) home.append(block);
+      if (block.previousSibling !== home) home.after(block);
     }
     for (const [id, to] of moved) (this.panes[to] ?? document.getElementById(to)).append(document.getElementById(id));
     // The optional load fold only has something in it where the strength block moves in (Simple);
@@ -198,12 +204,14 @@ export class Steps {
     const simple = this.level === "simple";
     const download = document.getElementById("dl-3mf");
     const atResult = simple && this.current === "result";
+    document.getElementById("result-next").hidden = !atResult;
+    document.getElementById("result-options").hidden = !atResult;
     const home = atResult ? document.querySelector(".foot-buttons") : this.downloadHome.parentElement;
     if (download.parentElement !== home) {
       if (atResult) home.append(download);
       else this.downloadHome.after(download);
     }
-    for (const button of document.querySelectorAll(".pane button.primary, .pane button.pane-primary")) {
+    for (const button of document.querySelectorAll(".pane button.primary, .pane button.pane-primary, #result-options button.primary, #result-options button.pane-primary")) {
       button.classList.add("pane-primary"); // remember its style when switching back to another level
       button.classList.toggle("primary", !simple);
     }

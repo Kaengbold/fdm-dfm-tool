@@ -258,7 +258,7 @@
 
         <section class="pane" data-pane="problems">
           <h2>Problems</h2>
-          <p id="stats" class="note"></p>
+          <div id="blk-stats"><p id="stats" class="note"></p></div>
           <div id="blk-problems">
             <p class="lead">Tap one to see where it is on the part.</p>
             <ol id="findings" class="impact-groups"></ol>
@@ -662,8 +662,13 @@
         </section>
 
         <section class="pane" data-pane="result">
-          <ol id="compute-steps" class="compute-steps" hidden></ol>
           <div id="verdict" class="summary"></div>
+          <div id="result-stats"></div>
+          <ol id="result-problems" class="result-problems"></ol>
+          <details id="result-all" class="more-block"><summary>Show all problems and tips</summary></details>
+          <details id="result-progress" class="more-block"><summary>How this was checked</summary>
+            <ol id="compute-steps" class="compute-steps" hidden></ol>
+          </details>
           <p id="more-tools" class="hint only-simple">Want to check strength, fits or design changes?
             <button type="button" id="show-more-tools" class="link">Show more tools</button>
             · <button type="button" id="dismiss-more-tools" class="link">Not now</button></p>
@@ -679,6 +684,8 @@
           <button type="button" id="step-back" class="ghost">Back</button>
           <button type="button" id="step-next" class="primary">Next</button>
         </div>
+        <p id="result-next" class="hint" hidden>What happens next: open the 3MF in your slicer, choose your printer and filament, then slice and print.</p>
+        <details id="result-options" class="more-block" hidden><summary>More options</summary></details>
       </footer>
     </section>
 

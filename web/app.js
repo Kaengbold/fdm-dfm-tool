@@ -764,14 +764,14 @@ function findingCard(findings, items) {
   return card;
 }
 
-/** "About 2 h to print and 48 g of filament (+ 6 g support), about 1.30" and the spool warning. */
+/** One estimate line for Result and reports, with support and spool warnings when needed. */
 function statsText(stats) {
   const support = stats.support_g >= 1 ? ` (+ ${Math.round(stats.support_g)} g support)` : "";
-  const cost = stats.cost != null ? `, about ${stats.cost.toFixed(2)} for the filament` : "";
+  const cost = stats.cost != null ? ` · about ${stats.cost.toFixed(2)} for the filament` : "";
   const spool = stats.spool_short
     ? ` Your spool has ${Math.round(stats.spool_left_g)} g left: not enough for this print (with a margin), so load a fuller one.`
     : "";
-  return `About ${fmtTime(stats.print_time_min)} to print and ${Math.round(stats.filament_g)} g of filament${support}${cost}.${spool}`;
+  return `About ${fmtTime(stats.print_time_min)} · ${Math.round(stats.filament_g)} g of filament${support}${cost}.${spool}`;
 }
 
 function renderCheck() {
@@ -788,10 +788,45 @@ function renderCheck() {
   recolor();
 }
 
-/** One line on top of Simple's result: can it fail, and what the settings already handle. */
+const resultPictures = new WeakMap(); // a new check replaces the part/orientation-specific pictures
+
+/** The answer, followed by at most three different problems and one practical fix for each. */
 function renderVerdict() {
   const v = verdict();
   $("verdict").replaceChildren(el("div", { className: `summary-box ${v.kind}` }, el("strong", { textContent: v.head }), el("span", { textContent: v.text })));
+  const findings = state.check.findings;
+  const byRule = new Map();
+  const ranked = findings.map((f, i) => ({ f, i })).filter(({ f }) => f.impact !== "info")
+    .sort((a, b) => SEVERITY_RANK[a.f.severity] - SEVERITY_RANK[b.f.severity]
+      || IMPACTS.findIndex(([impact]) => impact === a.f.impact) - IMPACTS.findIndex(([impact]) => impact === b.f.impact));
+  for (const item of ranked) if (!byRule.has(item.f.rule)) byRule.set(item.f.rule, item);
+  let pictures = resultPictures.get(state.check);
+  if (!pictures) resultPictures.set(state.check, pictures = new Map());
+  let restoreView = false;
+  try {
+    $("result-problems").replaceChildren(...[...byRule.values()].slice(0, 3).map(({ f, i }) => {
+      const fix = f.fixes.find((fx) => fx.domain === "slicer") ?? f.fixes[0];
+      if (!pictures.has(i)) {
+        // Reuse the report's place pictures and restore the main view afterwards.
+        restoreView = true;
+        pictures.set(i, pictureWith("problems", () => {
+          viewer.showFindings(findings, i, false);
+          return viewer.snapshot(f.bbox ?? null, 160);
+        }));
+      }
+      const card = el("li", { className: "result-problem" },
+        el("button", { type: "button", className: "link result-place", onclick: () => viewer.showFindings(findings, i),
+          title: "Show this place on the part" },
+          el("img", { src: pictures.get(i), alt: "", width: 88, height: 66 }),
+          el("strong", { textContent: f.title })),
+        fix ? el("p", { className: "hint result-fix", textContent: `Fix: ${fix.text}` }) : "");
+      card.dataset.rule = f.rule;
+      return card;
+    }));
+  } finally {
+    if (restoreView) recolor();
+  }
+  $("result-all").hidden = !findings.length;
 }
 
 function verdict() {
@@ -3807,6 +3842,7 @@ async function compute() {
   const items = Object.fromEntries(COMPUTE_STEPS.map(([k, t]) => [k, el("li", {}, el("span", { textContent: t }))]));
   $("compute-steps").replaceChildren(...Object.values(items));
   $("compute-steps").hidden = false;
+  $("result-progress").open = true;
   const mark = (k, how, note) => {
     items[k].className = how;
     if (note) items[k].firstChild.append(el("small", { textContent: ` — ${note}` }));
@@ -3835,6 +3871,7 @@ async function compute() {
     for (const [k, item] of Object.entries(items)) if (item.className !== "done") mark(k, "skipped", "not finished — try again");
   } finally {
     computingResult = false;
+    $("result-progress").open = false;
   }
 }
 
