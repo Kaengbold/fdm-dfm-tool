@@ -879,6 +879,8 @@ def main():
             run.act(lambda: page.click("#run-strength"), 300_000)
             text = page.locator("#strength-result").inner_text()
             assert "Weakest is case 2" in text, text
+            headline = page.locator("#strength-result .verdict strong").first.inner_text()
+            assert headline in ("Plenty of reserve", "Enough", "Marginal", "Likely to break"), headline
             return f"loads: {page.locator('#loads li').all_inner_texts()} | {text.splitlines()[0]}"
         run.step("strength with two load cases", load_cases)
 
@@ -915,7 +917,8 @@ def main():
             assert page.evaluate("() => fdm.state.loads.at(-1).points.length") == painted
             run.act(lambda: page.click("#run-strength"), 300_000)
             text = page.locator("#strength-result").inner_text()
-            assert "safety" in text.lower(), text
+            headline = page.locator("#strength-result .verdict strong").first.inner_text()
+            assert headline in ("Plenty of reserve", "Enough", "Marginal", "Likely to break"), text
             return f"loads: {loads} | {text.splitlines()[0]}"
         run.step("strength with a load on a painted area", spot_load)
 
@@ -1018,7 +1021,9 @@ def main():
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('as sliced in')", timeout=300_000)
             text = page.locator("#strength-result").inner_text()
             # The result also shows in the G-code's own card, where the user loaded it.
-            assert "With your sliced print: safety" in page.locator("#gcode-result").inner_text(), page.locator("#gcode-result").inner_text()
+            headline = page.locator("#gcode-result strong").first.inner_text()
+            assert headline in tuple(f"With your sliced print: {band}" for band in
+                                     ("Plenty of reserve", "Enough", "Marginal", "Likely to break")), headline
             page.uncheck("#use-gcode")
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('walls')", timeout=300_000)
             return f"{page.locator('#gcode-summary').inner_text()} | {text.splitlines()[0]}"
@@ -1165,7 +1170,7 @@ def main():
         def rank_with_strength():
             run.act(lambda: page.get_by_role("button", name="Find the best orientation including strength").click(), 600_000)
             text = page.locator("#strength-result").inner_text()
-            assert "safety" in text.lower(), "no strength result for the new best orientation"
+            assert any(band in text for band in ("Plenty of reserve", "Enough", "Marginal", "Likely to break")), "no strength result for the new best orientation"
             return page.locator("#status").inner_text()
         run.step("best orientation with strength shows its result", rank_with_strength)
 

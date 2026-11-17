@@ -76,5 +76,5 @@ def test_drop_counts_the_give_of_mount_and_falling_thing():
     assert 7 < r["impact_factor_soft"] < 10 < 30 < r["impact_factor"] < impact_factor(50, r["sag_mm"]) - 10  # well under the rigid x51
     assert r["impact_safety"] < 1 < 2 < r["impact_safety_soft"]
     text = r["explanation"]
-    assert "screwed into wood" in text and "rubber-footed" in text and "between ×" in text  # names what it assumes
+    assert "screwed into wood" in text and "rubber-footed" in text and "between about ×" in text  # names what it assumes
     assert "a hard one may break it" in text
