@@ -41,3 +41,8 @@ def test_drop_safety_uses_estimate_precision():
     assert "about ×18" in story
     assert "about ×9.5" in story
     assert "about ×10" in story
+
+
+def test_strong_part_is_not_told_to_change():
+    result = {"safety_factor": 12, "critical_point_print": [0, 0, 3], "verdict": "fine", "mode": "material"}
+    assert _strength_story_parts(result)["helps"] == "Nothing needs to change for this load."

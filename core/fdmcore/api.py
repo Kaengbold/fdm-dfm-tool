@@ -771,7 +771,9 @@ def _strength_story_parts(r: dict) -> dict:
         "lines": ("There the printed lines lying side by side get pulled apart, like a screw tearing out through the walls."
                   " More walls around that spot, more material there, or turning the part so the lines run along the pull help most."),
     }[r["mode"]]
-    return {"weakest": f"The weakest spot is about {max(z, 0):.0f} mm above the bed.", "helps": why}
+    # Strong enough: don't nudge people to change a part that already holds (the why stays in the full story).
+    helps = "Nothing needs to change for this load." if r.get("verdict") == "fine" else why
+    return {"weakest": f"The weakest spot is about {max(z, 0):.0f} mm above the bed.", "helps": helps, "why": why}
 
 
 def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
@@ -784,7 +786,7 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
         "borderline": "It might break under the load you set; real prints vary.",
         "likely to break": f"It will most likely break: it holds only about {sf:.0%} of the load you set.",
     }[r["verdict"]]
-    why = _strength_story_parts(r)["helps"]
+    why = _strength_story_parts(r)["why"]
     near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
             " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
     return f"{_strength_band(sf, required_safety(p))}. {head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red arrow). {why}{near}{_use_story(p)}"
