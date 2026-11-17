@@ -669,10 +669,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### H. Strength results: honest and proven
 
-- [ ] **T-442 P1** [H] Bands instead of "×17.7". · files: `web/app.js` (`renderStrength`, `compute`, `renderVersions`), `core/fdmcore/api.py` (`strength` verdict text) · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-442-strength-bands`)
+- [x] **T-442 P1** [H] Bands instead of "×17.7". · files: `web/app.js` (`renderStrength`, `compute`, `renderVersions`), `core/fdmcore/api.py` (`strength` verdict text) · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-442-strength-bands`)
   - Why: the check uses about 14,000 cubes of 1 mm and material values not yet checked against prints. One decimal promises a precision it doesn't have.
   - Do: lead with a band in words: "Plenty of reserve" (≥ ×5), "Enough" (≥ the needed ×2 or ×3), "Marginal" (×1 to needed), "Likely to break" (< ×1), with a bar that shows where in the band. The number stays behind "Details" as "about ×18" (no decimal above ×10, one decimal below). Same in the versions table and the report.
   - Done when: no headline shows a decimal safety factor above ×10.
+  - Outcome: strength results, versions and reports lead with bands and rounded details; 472 engine tests and all 94 browser smoke steps passed.
 - [ ] **T-443 P1** [H] Prove the strength check with real prints (continues T-032). · files: `core/tests/`, `research/`, README "Accuracy" · owner: — · needs the user's printer
   - Do: five to ten small parts with a known load case (hook, bracket, beam, pin; flat and standing), each printed in PLA and PETG, loaded until it breaks (bucket and water, or a luggage scale). Record predicted against real break load in a table in `research/strength_validation.md`, tune the layer-strength factors, and link the table from the "Estimate" badge (T-444). The calibration bar exists (`calibration_part("layer_strength")`).
   - Done when: the table exists with at least five parts, and the typical error is written next to every strength result ("usually within ±x %").

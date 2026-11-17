@@ -738,8 +738,23 @@ STRENGTH_RATIO_WEIGHT = {"strength": 1.5, "balanced": 1.0, "speed": 0.4, "materi
 MAX_SCORE_GAP = 3.0  # options scoring this much worse than the best are not shown
 
 
+def _format_safety(value: float) -> str:
+    """Avoid implying more precision than the strength estimate supports."""
+    return f"about ×{value:.0f}" if value >= 10 or round(value, 1) >= 10 else f"about ×{value:.1f}"
+
+
+def _strength_band(value: float, need: float) -> str:
+    if value >= 5:
+        return "Plenty of reserve"
+    if value >= need:
+        return "Enough"
+    if value >= 1:
+        return "Marginal"
+    return "Likely to break"
+
+
 def _strength_reason(sf: float, verdict: str, strongest: float | None = None) -> str:
-    out = f"Strong enough for your load (safety ×{sf:.1f})" if verdict == "fine" else f"{verdict.capitalize()} under your load (safety ×{sf:.1f})"
+    out = f"Strong enough for your load (safety {_format_safety(sf)})" if verdict == "fine" else f"{verdict.capitalize()} under your load (safety {_format_safety(sf)})"
     if strongest and strongest / max(sf, 1e-9) >= 1.2:
         out += f" — the strongest direction holds {strongest / sf:.1f}× more"
     elif strongest:
@@ -751,10 +766,10 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     """The result in plain words: will it hold, where it gives way, and why there."""
     sf, z = r["safety_factor"], r["critical_point_print"][2]
     if not np.isfinite(sf):
-        return "The load hardly stresses the part. It will hold."
+        return "Plenty of reserve. The load hardly stresses the part. It will hold."
     head = {
-        "fine": f"It should hold: it takes about {sf:.1f}× the load you set before it breaks.",
-        "borderline": f"It might break: it takes only {sf:.1f}× the load you set, and real prints vary by about that much.",
+        "fine": "It should hold the load you set.",
+        "borderline": "It might break under the load you set; real prints vary.",
         "likely to break": f"It will most likely break: it holds only about {sf:.0%} of the load you set.",
     }[r["verdict"]]
     why = {
@@ -765,7 +780,7 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     }[r["mode"]]
     near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
             " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
-    return f"{head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red arrow). {why}{near}{_use_story(p)}"
+    return f"{_strength_band(sf, required_safety(p))}. {head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red arrow). {why}{near}{_use_story(p)}"
 
 
 def _use_story(p: Profile) -> str:
@@ -1210,12 +1225,12 @@ def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     head = (f"Stronger only where it's needed: {len(zoned['zones'])} zone{'s' if len(zoned['zones']) > 1 else ''} with "
             f"{z['infill']:.0%} infill and {z['walls']} walls, the rest {zoned['walls']} walls and {zoned['infill']:.0%} infill")
     if not zoned["met"]:
-        return f"{head} only reach ×{zoned['safety_factor']:.1f} (you need ×{target:.0f})."
+        return f"{head} only reach {_format_safety(zoned['safety_factor'])} (you need ×{target:.0f})."
     if zoned["saves_grams"] > 0.5:
         time = f" and about {zoned['saves_min']:.0f} min" if zoned.get("saves_min", 0) >= 1 else ""
-        return (f"{head}: ×{zoned['safety_factor']:.1f} with {zoned['grams']:.0f} g — {zoned['saves_grams']:.0f} g{time} less than the same settings"
+        return (f"{head}: {_format_safety(zoned['safety_factor'])} with {zoned['grams']:.0f} g — {zoned['saves_grams']:.0f} g{time} less than the same settings"
                 " everywhere (checked again with the zones).")
-    return f"{head}: ×{zoned['safety_factor']:.1f}, but it saves almost nothing here — the load spreads through most of the part."
+    return f"{head}: {_format_safety(zoned['safety_factor'])}, but it saves almost nothing here — the load spreads through most of the part."
 
 
 def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None = None) -> dict:
@@ -1284,12 +1299,12 @@ def _optimise_story(best: dict, target: float, compared: bool) -> str:
     where = " Printed in the strongest orientation." if best["orientation"] == "strongest" else ""
     setting = f"{best['walls']} walls, {best['top']} top / {best['bottom']} bottom layers and {best['infill']:.0%} infill"
     if best["met"]:
-        out = f"{setting} reach ×{best['safety_factor']:.1f} (you need ×{target:.0f}) with about {best['grams']:.0f} g of plastic.{where}"
+        out = f"{setting} reach {_format_safety(best['safety_factor'])} (you need ×{target:.0f}) with about {best['grams']:.0f} g of plastic.{where}"
         alt = best["alternatives"]
         if compared and alt and alt[0]["met"]:
             out += f" The other orientation needs {alt[0]['grams']:.0f} g for the same."
         return out
-    return (f"Even {setting} only reach ×{best['safety_factor']:.1f} (you need ×{target:.0f}).{where} "
+    return (f"Even {setting} only reach {_format_safety(best['safety_factor'])} (you need ×{target:.0f}).{where} "
             "Settings alone can't make it strong enough: make the weak spot thicker, round its corners, use a stronger material, or let it carry less.")
 
 
@@ -1468,7 +1483,7 @@ def topology(up, loads: list[dict], profile: dict | None = None, keep: float = 0
     part_g, shape_g = abs(s.mesh.volume()) * grams, abs(Mesh(tris).volume()) * grams
     need = required_safety(p)
     text = (f"A lighter shape that keeps the plastic where the load runs: about {shape_g:.0f} g instead of {part_g:.0f} g "
-            f"({100 * shape_g / part_g:.0f} %). Printed solid it holds about ×{after:.1f} the load (the whole part solid: ×{before:.1f}). ")
+            f"({100 * shape_g / part_g:.0f} %). Printed solid it holds {_format_safety(after)} the load (the whole part solid: {_format_safety(before)}). ")
     text += ("That's still enough. " if after >= need else
              f"That's below ×{need:g}: keep more plastic, or thicken the thinnest struts when you redesign it. ")
     if r["keep_used"] > float(keep) + 0.01:
@@ -1812,7 +1827,7 @@ def _dynamics_story(r: dict) -> str:
         out += (f"{' ' if out else ''}If the load drops {r['drop_mm']:.0f} mm onto it, it hits about {r['impact_factor_soft']:.0f}–{r['impact_factor']:.0f}×"
                 f" as hard as when held still, depending on how hard the falling thing and the mount are (assumed: from something"
                 f" soft or rubber-footed to a hard object on a part screwed into wood; the part itself gives {r['sag_mm']:.2f} mm)."
-                f" The safety drops from ×{r['static_safety']:.1f} to between ×{hard:.1f} and ×{soft:.1f}" + verdict)
+                f" The safety drops from {_format_safety(r['static_safety'])} to between {_format_safety(hard)} and {_format_safety(soft)}" + verdict)
     return out
 
 
@@ -2044,7 +2059,7 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
         if base is not None:
             sf = float(_scaled_safety(base, p, other))
             v = verdict(sf, need)
-            (good if v == "fine" else care if v == "borderline" else bad).append(f"holds your load ×{sf:.1f}")
+            (good if v == "fine" else care if v == "borderline" else bad).append(f"holds your load {_format_safety(sf)}")
         rating = "not suitable" if bad else "with care" if care else "good"
         fuss = {"low": 0, "medium": 1, "high": 2}[m["warp_risk"]] + (m["hygroscopic"] == "high") + bool(m["abrasive"])
         out.append({"material": mid, "name": m["name"], "rating": rating, "safety_factor": sf,

@@ -3,6 +3,14 @@
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
+export const formatSafety = (value) => Number.isFinite(value) ? `about ×${value.toFixed(value >= 10 || Number(value.toFixed(1)) >= 10 ? 0 : 1)}` : "very high";
+export function strengthBand(value, need = 2) {
+  if (value >= 5) return { label: "Plenty of reserve", position: Number.isFinite(value) ? 1 - 5 / value : 1 };
+  if (value >= need) return { label: "Enough", position: (value - need) / (5 - need) };
+  if (value >= 1) return { label: "Marginal", position: (value - 1) / (need - 1) };
+  return { label: "Likely to break", position: Math.max(0, value) };
+}
+
 const STYLE = `
 body { font: 16px/1.5 "Segoe UI", system-ui, sans-serif; color: #1f2328; max-width: 860px; margin: 32px auto; padding: 0 20px; }
 h1 { font-size: 28px; margin: 0 0 4px; } h2 { font-size: 21px; margin: 36px 0 10px; padding-top: 18px; border-top: 1px solid #d5ddd7; }
@@ -10,6 +18,8 @@ h3 { font-size: 17px; margin: 0 0 6px; } p { margin: 6px 0; } .muted { color: #5
 img { width: 100%; border-radius: 8px; border: 1px solid #d5ddd7; display: block; margin: 8px 0; }
 .box { border: 1px solid #d5ddd7; border-radius: 8px; padding: 14px 16px; margin: 12px 0; break-inside: avoid; }
 .verdict { font-size: 19px; font-weight: 700; } .ok { background: #e7f3ec; } .warn { background: #fbf0d9; } .bad { background: #fbe4e1; }
+.band-bar { width: 160px; height: 6px; background: #c3cdc6; border-radius: 6px; position: relative; margin: 10px 0; }
+.band-bar span { position: absolute; top: -3px; width: 12px; height: 12px; border-radius: 50%; background: #1f5c47; transform: translateX(-50%); }
 .sev { float: right; font-size: 13px; font-weight: 700; color: #5b6560; }
 ul { margin: 6px 0; padding-left: 20px; } table { border-collapse: collapse; width: 100%; font-size: 15px; }
 td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e9e4; vertical-align: top; } td.why { color: #5b6560; font-size: 13px; }
@@ -31,7 +41,7 @@ export function reportHtml(r) {
         ${p.fixes.length ? `<ul>${p.fixes.map((f) => `<li><b>${esc(f.kind)}:</b> ${esc(f.text)}</li>`).join("")}</ul>` : ""}</div>`).join("")
     : `<p>No problems found in this orientation.</p>`;
   const result = (x, title) => x && section(title,
-    `<div class="box ${x.kind}"><p class="verdict">${esc(x.head)}</p>${x.lines.map((l) => `<p>${esc(l)}</p>`).join("")}</div>`,
+    `<div class="box ${x.kind}"><p class="verdict">${esc(x.head)}</p>${x.safety != null ? `<div class="band-bar" aria-label="Position within the band"><span style="left:${Math.max(4, Math.min(96, strengthBand(x.safety, x.need).position * 100))}%"></span></div><details><summary>Details</summary><p>Safety ${esc(formatSafety(x.safety))}</p></details>` : ""}${x.lines.map((l) => `<p>${esc(l)}</p>`).join("")}</div>`,
     picture(x.picture, title), x.note ? `<p class="muted">${esc(x.note)}</p>` : "");
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(r.title)}</title><style>${STYLE}</style></head><body>

@@ -4,7 +4,7 @@ import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
 import { Steps, STEP_NAMES } from "./steps.js";
-import { projectInReport, reportHtml } from "./report.js";
+import { projectInReport, reportHtml, formatSafety, strengthBand } from "./report.js";
 import { readProject, writeProject } from "./project.js";
 
 const $ = (id) => document.getElementById(id);
@@ -1638,7 +1638,7 @@ function renderGcodeResult() {
   }
   if (!r?.detailed) return box.replaceChildren();
   box.replaceChildren(el("div", { className: `verdict ${r.verdict.replaceAll(" ", "-")}` },
-    el("strong", { textContent: `With your sliced print: safety ×${r.safety_factor.toFixed(1)}` }),
+    el("strong", { textContent: `With your sliced print: ${strengthBand(r.safety_factor, r.required_safety).label}` }),
     el("p", { textContent: `Uses the walls, infill and line directions from the G-code (${r.detailed.fill_pct} % of the part is plastic). Loads, colours and what to change are in "${STEP_NAMES.strength}".` }),
     go));
 }
@@ -1710,7 +1710,7 @@ async function runStrength(fine = false) {
     const r = await timed(fine ? "fine" : "strength", () => call("strength", { ...args, fine }));
     if (fine && before) {
       const change = r.safety_factor / before.safety_factor - 1;
-      r.accuracy = `Finer grid: ×${r.safety_factor.toFixed(2)} instead of ×${before.safety_factor.toFixed(2)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
+      r.accuracy = `Finer grid: ${formatSafety(r.safety_factor)} instead of ${formatSafety(before.safety_factor)} (${change >= 0 ? "+" : ""}${Math.round(change * 100)} %). ` +
         (Math.abs(change) <= 0.1 ? "Barely changes: the result is stable." : Math.abs(change) <= 0.25
           ? "A normal difference for a rough estimate; the finer one is closer to the truth."
           : "Changes a lot: the weak spot is small or sharp. Trust the finer result and keep a bigger safety margin.");
@@ -1745,7 +1745,7 @@ async function offerTurn() {
     call("stronger_orientation", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() }), ["strength"]);
   if (!o?.up) return;
   const box = el("div", { className: "verdict borderline turn-offer" },
-    el("strong", { textContent: `Turned another way it holds ×${o.safety_factor.toFixed(1)} instead of ×${o.current.toFixed(1)}` }),
+    el("strong", { textContent: `Turned another way it holds ${formatSafety(o.safety_factor)} instead of ${formatSafety(o.current)}` }),
     el("p", { textContent: "The load would run along the layers instead of pulling them apart. Use that orientation?" }),
     el("div", { className: "row" },
       el("button", { className: "primary", textContent: "Turn it", onclick: () => applyOption({ up: o.up }) }),
@@ -2063,22 +2063,30 @@ function strengthViewControls(r) {
       "Check accuracy with a finer grid ", etaTag("fine"))));
 }
 
+function strengthBar(band) {
+  return el("div", { className: "strength-band-bar", role: "img", ariaLabel: "Position within the band" },
+    el("span", { style: `left: ${Math.max(4, Math.min(96, band.position * 100))}%` }));
+}
+
 function renderStrength() {
   const r = state.strength;
-  noteVersion({ safety: r.safety_factor });
+  noteVersion({ safety: r.safety_factor, safetyNeed: r.required_safety });
   const sf = r.safety_factor;
+  const band = strengthBand(sf, r.required_safety);
   $("strength-result").replaceChildren(
     el(
       "div",
       { className: `verdict ${r.verdict.replaceAll(" ", "-")}` },
-      el("strong", { textContent: `${r.verdict[0].toUpperCase() + r.verdict.slice(1)} — safety ×${sf.toFixed(1)}` }),
+      el("strong", { textContent: band.label }),
+      strengthBar(band),
+      el("details", {}, el("summary", { textContent: "Details" }), el("p", { textContent: `Safety ${formatSafety(sf)}` })),
       el("p", { textContent: r.explanation ?? MODE_TEXT[r.mode] }),
       el("p", { className: "hint", textContent: (r.detailed
         ? `${r.material}, as sliced in ${state.gcode.name} (${r.detailed.missed_pct}% of the plastic falls outside the analysis cubes)`
         : `${r.material}, ${r.walls} walls, ${r.top} top / ${r.bottom} bottom layers, ${Math.round(r.infill * 100)}% infill`) + ` · bends about ${r.max_displacement_mm.toFixed(1)} mm` }),
     ),
     r.cases.length > 1
-      ? el("p", { className: "hint", textContent: `Weakest is case ${r.case} (shown). ` + r.cases.map((c) => `Case ${c.case}: ×${c.safety_factor.toFixed(1)}`).join(" · ") })
+      ? el("p", { className: "hint", textContent: `Weakest is case ${r.case} (shown). ` + r.cases.map((c) => `Case ${c.case}: ${formatSafety(c.safety_factor)}`).join(" · ") })
       : "",
     strengthViewControls(r),
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
@@ -2175,14 +2183,14 @@ function renderTrials(results, before) {
   const enough = results.filter((t) => t.verdict === "fine").sort((a, b) => a.added_g - b.added_g)[0];
   box.replaceChildren(
     el("h3", { textContent: "Tested design changes" }),
-    el("p", { className: "hint", textContent: `Each one was built on a copy of your part and checked with your loads (now ×${before.toFixed(1)}). Pick one to make it a new version.` }),
+    el("p", { className: "hint", textContent: `Each one was built on a copy of your part and checked with your loads (now ${formatSafety(before)}). Pick one to make it a new version.` }),
     el("ul", { className: "options strength-options" }, ...results.map((t) => {
       const gain = Math.round((t.safety_factor / before - 1) * 100);
       const tag = t === results[0] ? "strongest" : t === enough ? "enough, least plastic" : "";
       return el("li", { className: "option design" },
         el("div", { className: "option-head" },
           el("strong", { textContent: t.title }, tag ? el("span", { className: "tag", textContent: tag }) : ""),
-          el("span", { className: "gain", textContent: `×${t.safety_factor.toFixed(1)} (${gain >= 0 ? "+" : ""}${gain} %)` })),
+          el("span", { className: "gain", textContent: `${formatSafety(t.safety_factor)} (${gain >= 0 ? "+" : ""}${gain} %)` })),
         el("p", { className: "hint", textContent: `+${t.added_g.toFixed(1)} g of plastic` }),
         el("div", { className: "row" }, el("button", { textContent: "Use this", onclick: () => useTrial(t) })));
     })),
@@ -2192,7 +2200,7 @@ function renderTrials(results, before) {
 async function useTrial(t) {
   await applyEdits(t.edits);
   if (readyForStrength()) await runStrength();
-  setStatus(`${t.title}: safety ×${state.strength.safety_factor.toFixed(1)}, as a new version (Undo or the Model list goes back).`);
+  setStatus(`${t.title}: safety ${formatSafety(state.strength.safety_factor)}, as a new version (Undo or the Model list goes back).`);
 }
 
 /** Re-rank with the loads, then show the strength of the new best orientation (not the old result). */
@@ -2201,7 +2209,7 @@ async function rankWithStrength() {
   state.picked = null; // asked for a new ranking
   await findOrientations(true);
   await runStrength();
-  setStatus(`${activeOption().label === before ? "Still the best" : "New best orientation"} with your load: safety ×${state.strength.safety_factor.toFixed(1)}.`);
+  setStatus(`${activeOption().label === before ? "Still the best" : "New best orientation"} with your load: safety ${formatSafety(state.strength.safety_factor)}.`);
 }
 
 async function showStrengthOptions() {
@@ -2237,7 +2245,7 @@ function optionGroups(opts, now) {
     const mine = opts.filter((o) => o.kind === kind);
     const top = mine.find((o) => o.safety_factor != null)?.safety_factor;
     return el("details", { className: "more-block option-group", open: i === 0 },
-      el("summary", {}, OPTION_GROUP[kind], el("small", { textContent: top != null ? `up to ×${top.toFixed(1)}` : `${mine.length} idea${mine.length > 1 ? "s" : ""}` })),
+      el("summary", {}, OPTION_GROUP[kind], el("small", { textContent: top != null ? `up to ${formatSafety(top)}` : `${mine.length} idea${mine.length > 1 ? "s" : ""}` })),
       el("ul", { className: "options strength-options" }, ...mine.map((o) => optionCard(o, now, boxes, mine))));
   });
   if (!boxes.size) return groups;
@@ -2264,7 +2272,7 @@ function optionCard(o, now, boxes, group) {
     el("label", { className: "option-head" }, tick,
       el("strong", { textContent: o.change }),
       el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
-        : `×${o.safety_factor.toFixed(1)}${now && o.kind !== "load" ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
+        : `${formatSafety(o.safety_factor)}${now && o.kind !== "load" ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
     el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
     o.kind === "design" ? el("div", { className: "row" },
       el("button", { textContent: "Show me", onclick: () => applyOption(o) }),
@@ -3231,7 +3239,7 @@ async function testDesignEdit(id) {
   if (!readyForStrength()) return setStatus(`${name[0].toUpperCase()}${name.slice(1)} is on a new version, but the loads didn't carry over: set them again to compare.`);
   await runStrength();
   const after = state.strength.safety_factor;
-  setStatus(`With ${name}: safety ×${after.toFixed(1)}${before ? ` (was ×${before.toFixed(1)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
+  setStatus(`With ${name}: safety ${formatSafety(after)}${before ? ` (was ${formatSafety(before)})` : ""}. Keep it, or go back with the Model list or Ctrl+Z.`);
 }
 
 /** Apply ``chosen`` (default: the ticked suggestions) as a new version of the model. */
@@ -3355,11 +3363,15 @@ function renderVersions() {
   $("version-pick").hidden = list.length < 2;
   $("version").replaceChildren(...list.map((v, i) => el("option", { value: i, textContent: versionName(v, i) + (v.dropped ? " (results only)" : ""), selected: i === state.version })));
   const fmt = (r) => [r?.time != null ? fmtTime(r.time) : "–", r?.grams != null ? `${Math.round(r.grams)} g` : "–",
-    r?.problems != null ? String(r.problems) : "–", r?.safety != null ? `×${r.safety.toFixed(1)}` : "–"];
+    r?.problems != null ? String(r.problems) : "–"];
   $("versions").replaceChildren(
     el("tr", {}, ...["Version", "Time", "Plastic", "Problems", "Strength", ""].map((t) => el("th", { textContent: t }))),
     ...list.map((v, i) => el("tr", { className: i === state.version ? "current" : "" },
       el("td", { className: "name", textContent: versionName(v, i), title: versionName(v, i) }), ...fmt(v.results).map((t) => el("td", { textContent: t })),
+      // A narrow fixed column: the band word only, the rough number on hover.
+      v.results?.safety != null
+        ? el("td", { className: "safety-band", textContent: strengthBand(v.results.safety, v.results.safetyNeed).label, title: `Safety ${formatSafety(v.results.safety)}` })
+        : el("td", { textContent: "–" }),
       el("td", {}, i === state.version ? "shown" : el("button", { className: "small", textContent: "Show", onclick: () => showVersion(i) })))),
   );
 }
@@ -3827,7 +3839,7 @@ async function compute() {
         mark("strength", "working");
         await runStrength();
       }
-      mark("strength", "done", `safety ×${state.strength.safety_factor.toFixed(1)}`);
+      mark("strength", "done", strengthBand(state.strength.safety_factor, state.strength.required_safety).label);
     } else mark("strength", "skipped", "no load set (optional: Strength analysis)");
     mark("settings", "done");
   } catch {
@@ -4286,7 +4298,7 @@ const makeReport = (project = false) =>
       if (s) {
         state.showHeat = true;
         report.strength = { kind: s.verdict === "fine" ? "ok" : s.verdict === "borderline" ? "warn" : "bad",
-          head: `${s.verdict[0].toUpperCase() + s.verdict.slice(1)}: safety ×${s.safety_factor.toFixed(1)}`,
+          head: strengthBand(s.safety_factor, s.required_safety).label, safety: s.safety_factor, need: s.required_safety,
           lines: [s.explanation ?? MODE_TEXT[s.mode] ?? "", `${s.material}, ${s.walls} walls, ${Math.round(s.infill * 100)} % infill · bends about ${s.max_displacement_mm.toFixed(1)} mm`,
             ...state.loads.map(loadText)],
           picture: pictureWith("strength", () => viewer.snapshot()),

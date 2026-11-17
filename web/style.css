@@ -133,7 +133,10 @@ main#viewer canvas { display: block; }
 #versions th:first-child { width: 34%; }
 #versions th:last-child { width: 3.6em; }
 #versions td.name { overflow: hidden; text-overflow: ellipsis; }
+#versions td.safety-band { white-space: normal; }
 #versions tr.current { background: var(--accent-soft); }
+.strength-band-bar { width: 160px; height: 6px; margin: 10px 0; border-radius: 6px; background: var(--line-strong); position: relative; }
+.strength-band-bar span { position: absolute; top: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); transform: translateX(-50%); }
 .file-button { cursor: pointer; color: var(--accent); font-weight: 700; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
 .view-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 5px 10px; font-size: 14px; font-weight: 700; background: #fdfdfce6; border-radius: var(--r); }
 .view-key {
