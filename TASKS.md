@@ -584,7 +584,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: "Gap between moving parts fuses shut" on `feature_test`: the view zooms so close that only a grey wall, a red wire box and a white disc are left; no sense of where on the part it is.
   - Do: frame the finding with context: the place takes about a third of the view, the camera stays outside the part's bounding box, and it looks along the place's outward direction. Offer "Back to the whole part".
   - Done when: for every finding of every sample, the screenshot after the click shows part outline around the marked place (add to the browser test as a pixel check: not > 80 % one colour).
-- [ ] **T-423 P2** [E] Small pictures of a place, for cards and the result. · files: `web/viewer.js` (off-screen render), `web/app.js`, `web/report.js` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-423-place-pictures`)
+- [x] **T-423 P2** [E] Small pictures of a place, for cards and the result. · files: `web/viewer.js` (off-screen render), `web/app.js`, `web/report.js` · owner: Codex GPT-6.1 Sol, reviewed by Claude (`task/T-423-place-pictures`) · outcome: Cached off-screen pictures on orientation/finding cards and reports; all 11 sample STLs below 100 ms, live view unchanged. Engine 459 passed + 70 affected checks after rebase; browser 105 passed / 0 failed.
   - Do: one function `viewer.thumbnail({ up, focus, size })` that renders to a small image without disturbing the main view. Used by the orientation cards (T-416), the top-three problems on Result (T-413) and the report (it already makes pictures: `pictureWith`; share the code).
   - Done when: thumbnails render in under 100 ms each on the samples and are cached until the part or orientation changes.
 
