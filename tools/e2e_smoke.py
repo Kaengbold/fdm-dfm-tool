@@ -387,6 +387,20 @@ def main():
             run.step(f"sample {name}", load)
             run.step(f"thumbnails {name}", lambda: check_thumbnails(page))
 
+        def broken_mesh_notice():
+            import struct
+            raw = _box_stl([((0, 0, 0), 20)])
+            holed = OUT / "holed_cube.stl"
+            holed.write_bytes(raw[:80] + struct.pack("<I", 10) + raw[84 + 2 * 50:])
+            run.act(lambda: page.set_input_files("#file", str(holed)), 300_000)
+            notice = page.locator("#mesh-health")
+            assert notice.is_visible() and "1 hole" in notice.inner_text(), notice.inner_text()
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: click_sample(page, "l_bracket"), 300_000)
+            assert notice.is_hidden(), "clean sample has a broken-file notice"
+            return "holed cube warned; clean sample has no notice"
+        run.step("broken mesh notice", broken_mesh_notice)
+
         def answer_first_result():
             page.click("input[name=level][value=simple] >> xpath=..")
             page.evaluate("() => fdm.steps.go('part')")
