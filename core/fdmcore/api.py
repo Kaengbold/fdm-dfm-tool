@@ -2891,12 +2891,13 @@ def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
 
 def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca",
            pauses: list[float] | None = None, fine_layers: list[dict] | None = None, faces: dict | None = None,
-           grip: bool = False, copies: int = 1) -> bytes:
+           grip: bool = False, copies: int = 1, excluded_settings: list[str] | None = None) -> bytes:
     """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio / PrusaSlicer.
     ``fine_layers``: {"z0", "z1", "layer_height"} each (the metrics of shallow_slope_stairs findings):
     thinner layers over just that height. ``faces`` as in ``orientations``: no seam on the faces marked
     "clean" (the ones people see; painted as seam blockers). ``grip``: fuzzy skin on the outer walls
     (recommend.grip_settings; the slicer settings given win). ``copies``: that many on the plate (see ``plate``).
+    ``excluded_settings``: per-object keys left to the slicer's profile, even when grip or support boxes add them.
     ``pauses``: pocket tops (mm, ``top_z`` of a pause_to_insert finding): the print pauses before the first
     layer above each, to put something into the pocket (OrcaSlicer and PrusaSlicer; Bambu Studio ignores it).
     ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes, and
@@ -2920,6 +2921,8 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     if any(m[2] == "support" for m in modifiers) and str(settings.get("enable_support", "0")) == "0":
         # Supports only where the user put them: the slicer's own placement stays off.
         settings = {**settings, "enable_support": "1", "support_type": "tree(manual)"}
+    excluded = set(excluded_settings or ())
+    settings = {k: v for k, v in settings.items() if k not in excluded}
     return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer,
                       pauses=[{"top": float(z), "layer_height": float(settings.get("layer_height") or p.layer_height),
                                "note": "Put the part into the pocket"} for z in pauses or []],

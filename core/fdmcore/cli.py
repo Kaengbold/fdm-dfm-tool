@@ -68,6 +68,7 @@ def _setup(a) -> tuple[dict, list[float]]:
     else:
         api.load(path.read_bytes(), path.name)
     a.saved_settings = saved.get("settings", {})
+    a.saved_excluded_settings = saved.get("excluded_settings", [])
     if getattr(a, "mode", "") is None:  # not given: the project's, else both
         a.mode = saved.get("mode") or "both"
     if a.scale != 1:
@@ -136,9 +137,12 @@ def cmd_chart(a, profile, up):
 
 def cmd_export(a, profile, up):
     settings = {r["key"]: r["value"] for r in api.check(up, profile)["settings"]}
-    settings.update({**a.saved_settings, **(_json_arg(a.settings) or {})})
+    given = _json_arg(a.settings) or {}
+    settings.update({**a.saved_settings, **given})
+    excluded = set(a.saved_excluded_settings) - set(given)  # explicit command-line values win
+    settings = {k: v for k, v in settings.items() if k not in excluded}
     out = Path(a.output).expanduser()
-    out.write_bytes(api.export(up, profile, settings, _json_arg(a.zones), a.slicer))
+    out.write_bytes(api.export(up, profile, settings, _json_arg(a.zones), a.slicer, excluded_settings=list(excluded)))
     return {"up": up, "saved": str(out), "settings": settings}
 
 

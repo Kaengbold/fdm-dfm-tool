@@ -2,6 +2,7 @@
 // it is now plus the settings, loads, marks, zones, boxes and sized holes, so either side can pick up the work.
 // edit_selections: edit id -> boolean; suggested_boxes: box key -> pending box (including use).
 // Box keys are JSON of [kind, source region, point, normal], with null for missing source fields.
+// excluded_settings: per-object setting keys left to the user's slicer profile.
 
 export const FORMAT = "fdm-check-project";
 export const VERSION = 1;

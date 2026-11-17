@@ -5,6 +5,7 @@ holes, screws and slots (``holes``: api.holes_state, sized again with api.restor
 ``edit_selections`` maps stable design edit ids to booleans; ``suggested_boxes`` maps box keys
 (JSON of kind, source region, point and normal) to pending boxes including their ``use`` boolean.
 Pending boxes keep their geometry because a strength result that placed one isn't saved.
+``excluded_settings`` lists per-object setting keys left to the user's slicer profile.
 
 JSON with the part as base64 binary STL, so it opens anywhere and diffs as text. Face ids in loads and
 marks refer to the part's face regions, which come out the same when the same triangles load again
@@ -19,7 +20,7 @@ import json
 FORMAT = "fdm-check-project"
 VERSION = 1
 FIELDS = ("profile", "mode", "up", "loads", "faces", "zones", "volumes", "settings", "holes",
-          "edit_selections", "suggested_boxes")
+          "edit_selections", "suggested_boxes", "excluded_settings")
 
 
 def dump(name: str, stl: bytes, face_ids: list[int] | None = None, **fields) -> str:

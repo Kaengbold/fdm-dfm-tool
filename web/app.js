@@ -148,6 +148,7 @@ const state = {
   strength: null,
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
+  excludedSettings: [], // per-part settings left to the user's slicer
   zones: [], // strengthening zones from the optimiser: {lo, hi, walls, infill, corners_print}
   volumes: [], // advanced design boxes: {kind, lo, hi, corners_print, notes, from, margin, what, offset (moved, part mm)}
   moving: -1, // the box whose move arrows show
@@ -339,6 +340,7 @@ async function openProject(bytes) {
   state.marks = marks;
   renderMarks();
   state.overrides = p.settings ?? {};
+  state.excludedSettings = p.excluded_settings ?? [];
   renderSettings();
   if (p.up) {
     const option = await call("orientation", { up: p.up, profile: profile(), label: "From the project" });
@@ -440,7 +442,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, excludedSettings: [], fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -881,30 +883,57 @@ $("show-temp").onchange = () => {
 const OWN_LABEL = { xy_hole_compensation: "Hole compensation", hole_to_polyhole: "Polyholes" };
 
 /** Recommended settings with the user's applied strength suggestions on top. */
-function effectiveSettings() {
+function effectiveSettings(includeUnchecked = false) {
   if (!state.check) return [];
   const list = state.check.settings.map((s) => (s.key in state.overrides ? { ...s, value: state.overrides[s.key], changed: true } : s));
   for (const [key, value] of Object.entries(state.overrides)) {
     if (!list.some((s) => s.key === key)) list.push({ key, value, label: OWN_LABEL[key] ?? key, reason: OWN_LABEL[key] ? "Set by you" : "From strength check", changed: true });
   }
-  return list;
+  return includeUnchecked ? list : list.filter((s) => !state.excludedSettings.includes(s.key));
 }
 
 function renderSettings() {
   if (state.check) renderSetup(); // values set by hand may be a mistake (layer too thick, support gap 0)
-  const settings = effectiveSettings();
+  const settings = effectiveSettings(true);
+  const omitted = new Set(state.excludedSettings);
+  $("settings-estimate-note").hidden = !omitted.size;
   const value = (key) => settings.find((s) => s.key === key)?.value;
   $("hole-comp").value = Number(value("xy_hole_compensation") ?? 0);
   $("polyholes").checked = ["1", "true"].includes(String(value("hole_to_polyhole")));
   $("settings-block").hidden = !settings.length;
+  const expanded = $("settings").querySelector("[data-unchanged]")?.hidden === false;
+  const unchanged = (s) => s.usual != null && (String(s.value) === String(s.usual)
+    || (Number.isFinite(Number(s.value)) && Number(s.value) === Number(s.usual)));
+  const row = (s) => {
+    const tick = el("input", { type: "checkbox", checked: !omitted.has(s.key), onchange: (event) => {
+        remember("which slicer settings to include");
+        if (event.target.checked) omitted.delete(s.key); else omitted.add(s.key);
+        state.excludedSettings = [...omitted];
+        renderSettings();
+        renderVerdict();
+      } });
+    tick.setAttribute("aria-label", `Include ${s.label} in 3MF`);
+    const tr = el("tr", {}, el("td", {}, el("label", {}, tick, el("span", {}, s.label,
+      s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : ""))),
+      el("td", { textContent: s.usual == null ? "Not set by goal" : settingText(s.key, s.usual) }),
+      el("td", {}, settingText(s.key, s.value), s.reason ? el("small", { className: "setting-reason", textContent: s.reason }) : ""));
+    tr.dataset.setting = s.key;
+    return tr;
+  };
+  const same = settings.filter(unchanged);
+  const folded = el("tbody", { id: "settings-unchanged", hidden: !expanded }, ...same.map(row));
+  folded.dataset.unchanged = "";
+  const toggle = el("button", { type: "button", className: "link", textContent: `Unchanged (${same.length})`,
+    onclick: () => {
+      folded.hidden = !folded.hidden;
+      toggle.setAttribute("aria-expanded", String(!folded.hidden));
+    } });
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", folded.id);
   $("settings").replaceChildren(
-    ...settings.map((s) =>
-      el("tr", {},
-        el("td", {}, s.label, s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : "",
-          s.reason ? el("small", { className: "setting-reason", textContent: s.reason }) : ""),
-        el("td", { textContent: settingText(s.key, s.value) })),
-    ),
-  );
+    el("thead", {}, el("tr", {}, ...["Setting", "Usual (goal)", "For this part"].map((textContent) => el("th", { scope: "col", textContent })))),
+    el("tbody", {}, ...settings.filter((s) => !unchanged(s)).map(row)),
+    ...(same.length ? [el("tbody", {}, el("tr", {}, el("td", { colSpan: 3 }, toggle))), folded] : []));
   renderShells();
 }
 
@@ -1612,7 +1641,8 @@ function renderLoads() {
 
 /** How the part will be printed (walls, solid top/bottom layers, infill 0–1), from the settings shown. */
 function currentShells() {
-  const s = Object.fromEntries(effectiveSettings().map((x) => [x.key, x.value]));
+  // An unticked row leaves an unknown slicer value; keep estimates on the shown assumptions.
+  const s = Object.fromEntries(effectiveSettings(true).map((x) => [x.key, x.value]));
   const num = (v, d) => (v == null || v === "" || Number.isNaN(parseFloat(v)) ? d : parseFloat(v));
   return { walls: num(s.wall_loops, 2), top: num(s.top_shell_layers, 4), bottom: num(s.bottom_shell_layers, 3), infill: num(s.sparse_infill_density, 15) / 100 };
 }
@@ -3314,7 +3344,7 @@ const redoStack = []; // what Undo took back, for Redo (emptied by any new chang
 
 /** The loads, marks, settings, boxes and model version now, labelled with the change about to happen. */
 const snapshot = (label) => ({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks),
-  overrides: { ...state.overrides }, zones: structuredClone(state.zones), volumes: structuredClone(state.volumes) });
+  overrides: { ...state.overrides }, excludedSettings: [...state.excludedSettings], zones: structuredClone(state.zones), volumes: structuredClone(state.volumes) });
 
 /** Call before a change: Undo (and Ctrl+Z) puts the loads, marks, settings and model version back. */
 function remember(label) {
@@ -3337,7 +3367,7 @@ function renderUndo() {
 async function restoreSnapshot(u) {
   const marksChanged = JSON.stringify(u.marks) !== JSON.stringify(state.marks);
   if (u.version !== state.version) await showVersion(u.version, false);
-  Object.assign(state, { loads: u.loads, marks: u.marks, overrides: u.overrides });
+  Object.assign(state, { loads: u.loads, marks: u.marks, overrides: u.overrides, excludedSettings: u.excludedSettings ?? [] });
   if (state.loads.length) await ensureRegions();
   renderLoads();
   renderMarks();
@@ -3444,6 +3474,7 @@ function carryLoads() {
     loads: state.loads.map((l) => ({ item: l, at: at(l) })),
     marks: state.marks.map((m) => ({ item: m, at: at(m) })),
     overrides: { ...state.overrides },
+    excludedSettings: [...state.excludedSettings],
   };
 }
 
@@ -3473,6 +3504,7 @@ async function restoreLoads(carry) {
   state.loads = loads;
   state.marks = marks;
   state.overrides = carry.overrides;
+  state.excludedSettings = carry.excludedSettings ?? [];
   renderLoads();
   renderMarks();
   renderSettings();
@@ -4270,7 +4302,7 @@ $("dl-3mf").onclick = async () => {
     const settings = Object.fromEntries(effectiveSettings().map((s) => [s.key, s.value]));
     const pauses = $("dl-pause").checked ? pausesWanted() : [];
     const fine_layers = $("dl-fine").checked ? fineWanted() : [];
-    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked, copies: state.copies ?? 1 });
+    const bytes = await call("export", { up: activeOption().up, profile: profile(), settings, excluded_settings: state.excludedSettings, zones: printZones(), slicer: $("dl-slicer").value, pauses, fine_layers, faces: faceMarks(), grip: $("dl-grip").checked, copies: state.copies ?? 1 });
     download(bytes, `${baseName()}.3mf`, "model/3mf");
     $("after-dl").hidden = false; // what to do with the file, once per download
     const seam = faceMarks()?.clean?.length ? " The seam is kept off the faces you marked “keep clean”." : "";
@@ -4295,6 +4327,7 @@ for (const pill of document.querySelectorAll(".estimate")) {
 const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
   up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
+  excluded_settings: state.excludedSettings,
   holes: holesForProject(),
   edit_selections: editsForProject(), suggested_boxes: suggestedForProject(),
 });
@@ -4431,7 +4464,7 @@ async function autosave() {
   if (!state.triangles || !activeOption() || busyCount) return;
   // Cheap fingerprint first: writing out the whole part every minute would be wasted work.
   const sig = JSON.stringify([state.name, state.version, state.triangles.length, activeOption().up, state.loads, faceMarks(),
-    state.zones, state.volumes, state.overrides, profile(), mode(), editsForProject(), suggestedForProject()]);
+    state.zones, state.volumes, state.overrides, state.excludedSettings, profile(), mode(), editsForProject(), suggestedForProject()]);
   if (sig === autosaved) return;
   autosaved = sig;
   await autosaveStore("readwrite", (s) => s.put({ text: projectText(), name: state.name, time: Date.now() }, AUTOSAVE_KEY));
