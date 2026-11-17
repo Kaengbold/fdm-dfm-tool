@@ -811,8 +811,6 @@ function renderCheck() {
   recolor();
 }
 
-const resultPictures = new WeakMap(); // a new check replaces the part/orientation-specific pictures
-
 /** The answer, followed by at most three different problems and one practical fix for each. */
 function renderVerdict() {
   const v = verdict();
@@ -823,32 +821,20 @@ function renderVerdict() {
     .sort((a, b) => SEVERITY_RANK[a.f.severity] - SEVERITY_RANK[b.f.severity]
       || IMPACTS.findIndex(([impact]) => impact === a.f.impact) - IMPACTS.findIndex(([impact]) => impact === b.f.impact));
   for (const item of ranked) if (!byRule.has(item.f.rule)) byRule.set(item.f.rule, item);
-  let pictures = resultPictures.get(state.check);
-  if (!pictures) resultPictures.set(state.check, pictures = new Map());
-  let restoreView = false;
-  try {
-    $("result-problems").replaceChildren(...[...byRule.values()].slice(0, 3).map(({ f, i }) => {
-      const fix = f.fixes.find((fx) => fx.domain === "slicer") ?? f.fixes[0];
-      if (!pictures.has(i)) {
-        // Reuse the report's place pictures and restore the main view afterwards.
-        restoreView = true;
-        pictures.set(i, pictureWith("problems", () => {
-          viewer.showFindings(findings, i, false);
-          return viewer.snapshot(f.bbox ?? null, 160);
-        }));
-      }
-      const card = el("li", { className: "result-problem" },
-        el("button", { type: "button", className: "link result-place", onclick: () => viewer.showFindings(findings, i),
-          title: "Show this place on the part" },
-          el("img", { src: pictures.get(i), alt: "", width: 88, height: 66 }),
-          el("strong", { textContent: f.title })),
-        fix ? el("p", { className: "hint result-fix", textContent: `Fix: ${fix.text}` }) : "");
-      card.dataset.rule = f.rule;
-      return card;
-    }));
-  } finally {
-    if (restoreView) recolor();
-  }
+  const up = activeOption().up;
+  $("result-problems").replaceChildren(...[...byRule.values()].slice(0, 3).map(({ f, i }) => {
+    const fix = f.fixes.find((fx) => fx.domain === "slicer") ?? f.fixes[0];
+    // Off-screen and cached by the viewer (T-423): the main view stays where the user left it.
+    const picture = viewer.thumbnail(f.bbox ? { up, focus: f, size: [88, 66] } : { up, size: [88, 66] });
+    const card = el("li", { className: "result-problem" },
+      el("button", { type: "button", className: "link result-place", onclick: () => viewer.showFindings(findings, i),
+        title: "Show this place on the part" },
+        el("img", { src: picture, alt: "", width: 88, height: 66, decoding: "async" }),
+        el("strong", { textContent: f.title })),
+      fix ? el("p", { className: "hint result-fix", textContent: `Fix: ${fix.text}` }) : "");
+    card.dataset.rule = f.rule;
+    return card;
+  }));
   $("result-all").hidden = !findings.length;
 }
 
