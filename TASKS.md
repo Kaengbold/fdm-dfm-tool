@@ -510,7 +510,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: the blob (no flat face, no hole) got "Raised or engraved detail too shallow", "Fine detail squashed on the bed", and many `rounded_edge` features.
   - Do: at load, measure the share of the surface that lies in flat or cylindrical regions (`find_regions`). Below a threshold (to find on the samples + the blob; put it in `thresholds.yaml`) the part is "organic". For organic parts: switch off the checks that need CAD features (`first_layer_detail`, engraved / raised detail, `small_hole_undersized`, feature detection), keep overhang / support / bed contact / tipping / cooling / warping. Return `kind: "cad" | "organic"` from `load`; the app shows "Looks like a sculpted model: checks for holes and fine CAD detail are off" with a switch to turn them on.
   - Done when: the blob (`tools/` generator from T-462) gets no engraved-detail or first-layer-detail finding; all samples stay "cad" with the same findings.
-- [ ] **T-409 P2** [B] "Just print it" must not show CAD words or design fixes first. · files: `web/app.js` (`findingCard`, `FIX_PATH`), `core/fdmcore/api.py` (`check`, mode filter) · owner: —
+- [ ] **T-409 P2** [B] "Just print it" must not show CAD words or design fixes first. · files: `web/app.js` (`findingCard`, `FIX_PATH`), `core/fdmcore/api.py` (`check`, mode filter) · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-409-print-mode-fixes`)
   - Seen: finding cards lead with the chip "Fix: change the design" even for someone who downloaded the model; the first fix shown is `fixes[0]`, whatever its kind.
   - Do: in mode `print`, order the fixes slicer → printer & material → design, and show the first slicer / process fix as the chip. Every rule already needs one (AGENTS.md). Organic parts (T-408) default to `print`.
   - Done when: in mode `print` no card's chip says "change the design".
@@ -668,7 +668,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### H. Strength results: honest and proven
 
-- [ ] **T-442 P1** [H] Bands instead of "×17.7". · files: `web/app.js` (`renderStrength`, `compute`, `renderVersions`), `core/fdmcore/api.py` (`strength` verdict text) · owner: —
+- [ ] **T-442 P1** [H] Bands instead of "×17.7". · files: `web/app.js` (`renderStrength`, `compute`, `renderVersions`), `core/fdmcore/api.py` (`strength` verdict text) · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-442-strength-bands`)
   - Why: the check uses about 14,000 cubes of 1 mm and material values not yet checked against prints. One decimal promises a precision it doesn't have.
   - Do: lead with a band in words: "Plenty of reserve" (≥ ×5), "Enough" (≥ the needed ×2 or ×3), "Marginal" (×1 to needed), "Likely to break" (< ×1), with a bar that shows where in the band. The number stays behind "Details" as "about ×18" (no decimal above ×10, one decimal below). Same in the versions table and the report.
   - Done when: no headline shows a decimal safety factor above ×10.
