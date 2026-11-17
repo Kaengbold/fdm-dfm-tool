@@ -385,6 +385,15 @@ summary::marker { color: var(--accent); }
 .angle-editor .angles { display: flex; flex-direction: column; gap: 3px; }
 .shells .row label { display: inline-flex; gap: 5px; align-items: center; }
 .actions { display: flex; flex-direction: column; gap: 8px; }
+.result-problems { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.result-problem { border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; min-width: 0; }
+.result-place { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0; text-align: left; }
+.result-place img { flex: none; object-fit: contain; background: var(--bg); border-radius: var(--r); }
+.result-fix { margin: 6px 0 0; }
+#result-stats .note { margin: 0; }
+#result-options[open] { max-height: 35vh; overflow-y: auto; }
+#result-options > div, #result-all > div { margin-top: 10px; }
+#result-all > #blk-problems { display: flex; flex-direction: column; gap: 10px; }
 .verdict { border-radius: var(--r); padding: 11px 13px; font-size: 14px; background: var(--soft); }
 .verdict strong { display: block; font-size: 17px; }
 .verdict.fine { background: var(--good-soft); } .verdict.fine strong { color: var(--good); }
