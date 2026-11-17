@@ -3368,8 +3368,10 @@ function renderVersions() {
     el("tr", {}, ...["Version", "Time", "Plastic", "Problems", "Strength", ""].map((t) => el("th", { textContent: t }))),
     ...list.map((v, i) => el("tr", { className: i === state.version ? "current" : "" },
       el("td", { className: "name", textContent: versionName(v, i), title: versionName(v, i) }), ...fmt(v.results).map((t) => el("td", { textContent: t })),
-      el("td", {}, v.results?.safety != null ? el("div", {}, strengthBand(v.results.safety, v.results.safetyNeed).label, strengthBar(strengthBand(v.results.safety, v.results.safetyNeed)),
-        el("details", {}, el("summary", { textContent: "Details" }), formatSafety(v.results.safety))) : "–"),
+      // A narrow fixed column: the band word only, the rough number on hover.
+      v.results?.safety != null
+        ? el("td", { className: "safety-band", textContent: strengthBand(v.results.safety, v.results.safetyNeed).label, title: `Safety ${formatSafety(v.results.safety)}` })
+        : el("td", { textContent: "–" }),
       el("td", {}, i === state.version ? "shown" : el("button", { className: "small", textContent: "Show", onclick: () => showVersion(i) })))),
   );
 }
