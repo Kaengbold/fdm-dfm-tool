@@ -2416,6 +2416,18 @@ def main():
             return f"{len(tested)} tested: " + " | ".join(t.splitlines()[0] for t in tested)
         run.step("make it stronger: design ideas tested straight away", design_ideas_tested)
 
+        # T-423's timing limit applies to every shipped sample, including those outside the main tour.
+        for sample in sorted((ROOT / "web" / "samples").glob("*.stl")):
+            if sample.stem in [*SAMPLES, "feature_test"]:
+                continue
+
+            def extra_thumbnails(sample=sample):
+                page.evaluate("() => fdm.steps.go('part')")
+                run.act(lambda: page.set_input_files("#file", str(sample)), 300_000)
+                return check_thumbnails(page)
+
+            run.step(f"thumbnails {sample.stem}", extra_thumbnails)
+
         for part in args.parts:
             def load_part(part=part):
                 status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)
