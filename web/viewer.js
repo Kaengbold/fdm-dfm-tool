@@ -60,6 +60,11 @@ export class Viewer {
     this.part = null;
     this.framed = false;
     this.thumbnailCache = new Map();
+    this.wholePartButton = document.createElement("button");
+    Object.assign(this.wholePartButton, { id: "whole-part", type: "button", className: "small", hidden: true,
+      textContent: "Back to the whole part" });
+    this.wholePartButton.addEventListener("click", () => this.resetCamera());
+    el.querySelector(".view-info .view-tools")?.append(this.wholePartButton);
 
     // The view's box changes with the window and with the level's layout (T-375: a card beside the settings).
     new ResizeObserver(() => this.resize()).observe(this.el);
@@ -91,6 +96,8 @@ export class Viewer {
 
   setBedSeeThrough(seeThrough) {
     this.bedSeeThrough = seeThrough;
+    const control = this.el.querySelector("#bed-see-through");
+    if (control) control.checked = seeThrough;
     for (const object of this.bedGroup.children) {
       object.material.transparent = seeThrough;
       object.material.opacity = seeThrough ? 0.12 : 1;
@@ -105,6 +112,7 @@ export class Viewer {
 
     if (triangles !== this.thumbnailTriangles) this.setThumbnailPart(triangles, []);
     if (JSON.stringify(rotation) !== JSON.stringify(this.placement?.rotation)) this.thumbnailCache.clear();
+    this.wholePartButton.hidden = true;
     this.hidePieces();
     const { out: positions, shift } = placeTriangles(triangles, rotation);
     this.placement = { rotation, shift };
@@ -629,7 +637,8 @@ export class Viewer {
 
         // Prominent marker pin at the center
         const pin = new THREE.Mesh(
-          new THREE.SphereGeometry(Math.max(1.8, Math.min(dx, dy, dz) * 0.25)),
+          new THREE.SphereGeometry(Math.min(this.part.geometry.boundingSphere.radius * 0.035,
+            Math.max(0.3, Math.min(dx, dy, dz) * 0.15))),
           new THREE.MeshBasicMaterial({ color: "#ffffff", depthTest: false })
         );
         pin.position.set((x0 + x1) / 2, (y0 + y1) / 2, z1 + 1.2);
@@ -793,20 +802,34 @@ export class Viewer {
     return this.renderPicture(this.scene, camera, width, height);
   }
 
-  /** Move the camera to ``f.bbox`` (print frame). ``from``: look from this direction (default:
-   * keep the current one). */
+  /** Frame a place with surrounding part. ``from`` can supply a known clear outward direction. */
   focusFinding(f, from = null) {
-    if (!f?.bbox) return;
-    const [[x0, y0, z0], [x1, y1, z1]] = f.bbox;
-    const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
-    const span = Math.max(Math.hypot(x1 - x0, y1 - y0, z1 - z0), 20);
-
-    const dir = from ? from.clone().normalize() : this.camera.position.clone().sub(this.controls.target).normalize();
-    if (dir.lengthSq() < 0.01) dir.set(1.2, -1.6, 1.1).normalize();
-    const endTarget = center;
-    const endPos = center.clone().add(dir.multiplyScalar(Math.max(span * 2.4, 45)));
-
-    this.moveCamera(endPos, endTarget);
+    if (!f?.bbox || !this.part) return;
+    const box = new THREE.Box3(new THREE.Vector3(...f.bbox[0]), new THREE.Vector3(...f.bbox[1]));
+    const center = box.getCenter(new THREE.Vector3());
+    const part = this.part.geometry.boundingSphere;
+    const dir = from ? from.clone() : center.clone().sub(part.center);
+    if (dir.lengthSq() < 1e-6) dir.set(1.2, -1.6, 1.1);
+    dir.normalize();
+    if (!from) {
+      // An oblique outward view shows context even at the end of a long, narrow part.
+      const tangent = new THREE.Vector3(1.2, -1.6, 1.1);
+      tangent.addScaledVector(dir, -tangent.dot(dir));
+      if (tangent.lengthSq() > 1e-6) dir.addScaledVector(tangent.normalize(), 0.5).normalize();
+      // A near-horizontal view hides the outline of flat parts behind their edge.
+      const vertical = Math.sign(dir.z) || 1;
+      dir.z = vertical * Math.max(Math.abs(dir.z), Math.hypot(dir.x, dir.y) * 0.7);
+      dir.normalize();
+    }
+    const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * Math.min(1, this.camera.aspect));
+    // Aim for a third of the view; tiny places need context, whole-part findings need a fitted view.
+    const radius = Math.min(Math.max(box.getSize(new THREE.Vector3()).length() * 1.5, part.radius * 0.65), part.radius);
+    const distance = Math.max(radius / Math.sin(halfFov) * 1.1,
+      part.radius + center.distanceTo(part.center) + part.radius * 0.1);
+    const endPos = center.clone().addScaledVector(dir, distance);
+    if (dir.z < 0) this.setBedSeeThrough(true);
+    this.wholePartButton.hidden = false;
+    this.moveCamera(endPos, center, part);
   }
 
   cancelCameraMove() {
@@ -815,11 +838,20 @@ export class Viewer {
   }
 
   /** One cancellable eased move, shared by finding focus and whole-part turns. */
-  moveCamera(endPos, endTarget) {
+  moveCamera(endPos, endTarget, outside = null) {
     this.cancelCameraMove();
     const startTarget = this.controls.target.clone();
     const startPos = this.camera.position.clone();
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Going round the enclosing sphere avoids a straight flight through the part on opposite-side clicks.
+    const startOffset = outside && startPos.clone().sub(outside.center);
+    const endOffset = outside && endPos.clone().sub(outside.center);
+    const startRadius = startOffset?.length();
+    const endRadius = endOffset?.length();
+    if (outside && startRadius < 1e-6) startOffset.copy(endOffset);
+    const turn = outside && new THREE.Quaternion().setFromUnitVectors(startOffset.normalize(), endOffset.normalize());
+    const rotation = new THREE.Quaternion();
+    const offset = new THREE.Vector3();
 
     const t0 = performance.now();
     const dur = 350;
@@ -827,7 +859,14 @@ export class Viewer {
       const p = reduced ? 1 : Math.min((now - t0) / dur, 1);
       const ease = p * (2 - p);
       this.controls.target.lerpVectors(startTarget, endTarget, ease);
-      this.camera.position.lerpVectors(startPos, endPos, ease);
+      if (outside) {
+        rotation.identity().slerp(turn, ease);
+        offset.copy(startOffset).applyQuaternion(rotation);
+        const radius = Math.max(THREE.MathUtils.lerp(startRadius, endRadius, ease), outside.radius * 1.1);
+        this.camera.position.copy(outside.center).addScaledVector(offset, radius);
+      } else {
+        this.camera.position.lerpVectors(startPos, endPos, ease);
+      }
       this.controls.update();
       this.cameraMove = p < 1 ? requestAnimationFrame(anim) : null;
     };
@@ -934,11 +973,15 @@ export class Viewer {
   resetCamera() {
     if (this.part?.geometry?.boundingSphere) {
       this.frame(this.part.geometry.boundingSphere);
+      this.camera.position.copy(this.eyeForDirection(new THREE.Vector3(1.2, -1.6, 1.1).normalize()));
+      this.controls.update();
+      this.wholePartButton.hidden = true;
     }
   }
 
   clearMarkers() {
     empty(this.markers);
+    this.wholePartButton.hidden = true;
   }
 
   /** Translucent preview of design edits (part coordinates): red what is cut away, green what is added.
