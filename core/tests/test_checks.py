@@ -81,6 +81,18 @@ def test_modes_filter_fixes():
     assert api.check([0, 0, 1], {}, "design")["settings"] == []
 
 
+def test_print_fixes_prioritize_slicer_without_changing_other_modes():
+    rules = api.load_data("rules")["rules"]
+    for rule, data in rules.items():
+        original = data.get("fixes", [])
+        printed = api.explain_finding({"rule": rule}, "print")["fixes"]
+        assert printed, rule
+        assert [f["domain"] for f in printed] == sorted(
+            (f["domain"] for f in printed), key={"slicer": 0, "process": 1}.get
+        )
+        assert api.explain_finding({"rule": rule}, "both")["fixes"] == original
+
+
 def test_settings_follow_findings():
     api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
     upright = {s["key"]: s["value"] for s in api.check([0, 0, 1])["settings"]}
