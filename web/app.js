@@ -330,7 +330,7 @@ async function openProject(bytes) {
   radio("goal", pr.goal);
   radio("mode", p.mode);
   $("constant-load").checked = Boolean(pr.constant_load);
-  await loadFile(p.name, p.stl, p.faceIds);
+  await loadFile(p.name, p.stl, p.faceIds, null, "new", { body: 0, scale: 1, preserveMode: true });
   const wantedTemp = pr.use_temp_c ?? ROOM_C;
   if (wantedTemp !== (useTemp() ?? ROOM_C)) await setUseTemp(wantedTemp);
   // Marks and settings first: the check for the project's orientation should already use them.
@@ -405,6 +405,10 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
     // A version shown again keeps the body picked and the unit rescale (inches, metres) it had.
     if (keep.body) info = await call("select_body", { index: keep.body });
     if (keep.scale !== 1) info = await call("scale", { factor: keep.scale });
+    if (as === "new" && !keep.preserveMode && info.kind === "organic") {
+      document.querySelector('input[name=mode][value=print]').checked = true;
+      updateModeNote();
+    }
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel

@@ -467,9 +467,12 @@ def main():
             sculpt.write_bytes(to_binary_stl(blob()))
             cad_rules = "['first_layer_detail', 'shallow_relief', 'side_detail_small', 'fine_detail_rough', 'small_hole_undersized', 'gap_fuses', 'flat_gap_fuses', 'weak_upright_pin', 'insert_wall_thin', 'screw_wall_thin']"
             count = f"() => fdm.state.check.findings.filter(f => {cad_rules}.includes(f.rule)).length"
+            if not page.is_checked("input[name=mode][value=both]"):
+                run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             page.evaluate("() => fdm.steps.go('part')")
             run.act(lambda: page.set_input_files("#file", str(sculpt)), 300_000)
             page.wait_for_function("() => fdm.state.check && fdm.state.name === 'sculpt.stl'", timeout=300_000)
+            assert page.is_checked("input[name=mode][value=print]"), "sculpt did not default to print mode"
             assert page.is_visible("#kind-hint"), "no notice for a sculpted model"
             assert not page.is_checked("#cad-checks")
             assert page.evaluate(count) == 0, "CAD-only findings on a sculpted model"
@@ -481,6 +484,17 @@ def main():
             assert page.is_hidden("#kind-hint"), "notice stays on a CAD part"
             return f"sculpt: notice shown, 0 CAD-only findings; {back} with the switch on; hidden again on Hook"
         run.step("sculpted model turns CAD checks off", organic_model)
+
+        def print_fix_chips():
+            if not page.is_checked("input[name=mode][value=print]"):
+                run.act(lambda: page.click("input[name=mode][value=print] >> xpath=.."))
+            page.evaluate("() => fdm.steps.go('part')")
+            run.act(lambda: click_sample(page, "test_block"))
+            chips = page.locator("#findings .findings > li > details > summary .paths .chip").all_inner_texts()
+            assert chips, "sample has no fix chips"
+            assert all("change the design" not in chip.lower() for chip in chips), chips
+            return f"{len(chips)} chips have no design fix"
+        run.step("print mode fix chips", print_fix_chips)
 
         def modes():
             out = []

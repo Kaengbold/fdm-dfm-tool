@@ -2831,11 +2831,14 @@ def explain_finding(finding: dict, mode: str = "both") -> dict:
     rule = load_data("rules")["rules"].get(finding["rule"], {})
     domains = MODES[mode]
     all_fixes = rule.get("fixes", [])
+    fixes = [f for f in all_fixes if f["domain"] in domains]
+    if mode == "print":
+        fixes.sort(key=lambda f: {"slicer": 0, "process": 1}[f["domain"]])
     return {
         **finding,
         "title": rule.get("title", finding["rule"]),
         "why": rule.get("why", ""),
-        "fixes": [f for f in all_fixes if f["domain"] in domains],
+        "fixes": fixes,
         # Fix kinds left out by the mode, so the UI can say "more fixes if you can change the model".
         "hidden_fixes": sorted({f["domain"] for f in all_fixes if f["domain"] not in domains}),
     }
