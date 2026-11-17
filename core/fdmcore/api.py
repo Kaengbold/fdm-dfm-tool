@@ -22,7 +22,7 @@ import numpy as np
 from .checks import RULE_IMPACT, orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
-from .mesh import Mesh, to_binary_stl
+from .mesh import Mesh, mesh_health, to_binary_stl
 from .orientation import OrientationResult, OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
 from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
@@ -299,6 +299,7 @@ def _info() -> dict:
     return {
         "name": s.name,
         "faces": s.mesh.face_count,
+        "mesh_health": mesh_health(s.mesh),
         "volume_mm3": abs(s.mesh.volume()),
         "size_mm": size.tolist(),
         "triangles": s.mesh.triangles.astype("<f4").tobytes(),

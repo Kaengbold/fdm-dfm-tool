@@ -452,6 +452,14 @@ async function partLoaded(info) {
   const [x, y, z] = info.size_mm.map((v) => v.toFixed(1));
   const body = info.bodies.length ? ` (${info.bodies[info.body].name})` : "";
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
+  const health = info.mesh_health;
+  const issues = [];
+  if (health.holes) issues.push(`${health.holes} hole${health.holes === 1 ? "" : "s"} in its surface`);
+  if (health.non_manifold_edges) issues.push(`${health.non_manifold_edges} edge${health.non_manifold_edges === 1 ? "" : "s"} shared by more than two faces`);
+  if (health.flipped_faces) issues.push(`${health.flipped_faces} face${health.flipped_faces === 1 ? "" : "s"} facing the wrong way`);
+  if (health.zero_area_faces) issues.push(`${health.zero_area_faces} flat triangle${health.zero_area_faces === 1 ? "" : "s"} with no area`);
+  $("mesh-health").hidden = !issues.length;
+  $("mesh-health").textContent = issues.length ? `This file has ${issues.join(", ")}. Results may be off. Try repairing the model in your slicer before checking it again.` : "";
   showUnitHint(info.unit_hint);
   showKind(info);
   renderLoads();

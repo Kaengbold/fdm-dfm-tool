@@ -752,10 +752,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen (browser, one core): the blob with 80,000 triangles: load + orient + check 53 s; 320,000: 46 s; 980,000: 77 s. The flat-sided samples take 2–3 s. So it is the curved surface (many candidate directions, many-cornered outlines), not the triangle count.
   - Do: profile the 80,000 blob in Pyodide (`node tools/pyodide_check.mjs part.stl`). Likely: cap and cluster candidate directions for organic parts (T-408 gives the kind), simplify layer outlines before the checks, check fewer finalists in full. Show progress with what is being done.
   - Done when: the 80,000 blob is under 15 s in Pyodide with the same pick; numbers in this line.
-- [ ] **T-459 P2** [L] Tell the user when a file is broken. · files: `core/fdmcore/formats.py`, `core/fdmcore/mesh.py`, `core/fdmcore/api.py` (`load`), `web/app.js` · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-459-broken-files`)
+- [x] **T-459 P2** [L] Tell the user when a file is broken. · files: `core/fdmcore/formats.py`, `core/fdmcore/mesh.py`, `core/fdmcore/api.py` (`load`), `web/app.js` · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-459-broken-files`)
   - Seen: PLAN lists "mesh repair check" as not built; holes and bad meshes are worked around silently.
   - Do: at load, count open edges, flipped faces, separate shells and zero-area triangles (numpy only). Report in plain words ("This file has 3 holes in its surface: results may be off; your slicer's repair can fix it") with the places marked. No auto-repair in the browser (GEOS / robustness risk); say how to repair in the slicer.
   - Done when: a cube with one face removed gives the message; clean samples give none.
+  - Outcome: Load reports mesh health and the app warns about damaged surfaces; cube, samples, Pyodide and browser smoke checks pass.
 - [ ] **T-460 P2** [L] Memory with big parts. · files: `web/app.js` (`state.versions`, `state.source`, `autosave`, `projectText`) · owner: —
   - Seen in code: every version keeps its own copy of the part's bytes, `state.source` another, and autosave writes the whole part as text into IndexedDB every minute when something changed. Measured page memory: 242 MB at 980,000 triangles with one version.
   - Do: versions share unchanged bytes (keep edits as a list on top of the original where possible); autosave stores the part once as binary (a Blob) and the settings as text; cap versions by total size, not only count.
