@@ -25,13 +25,20 @@ def test_round_trip_keeps_face_ids(tmp_path):
 
 
 def test_cli_reads_a_project(tmp_path, capsys):
+    import zipfile
+
     api.load(PART.read_bytes(), PART.name)
     stl = Path(PART).read_bytes()
     path = tmp_path / "p.json"
-    path.write_text(project.dump("bracket.stl", stl, profile={"material": "abs"}, up=[0, 1, 0], settings={"wall_loops": "5"}))
+    path.write_text(project.dump("bracket.stl", stl, profile={"material": "abs"}, up=[0, 1, 0],
+                                 settings={"wall_loops": "5"}, excluded_settings=["top_shell_layers"]))
     assert cli.main(["export", str(path), "-o", str(tmp_path / "p.3mf")]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["up"] == [0, 1, 0] and out["settings"]["wall_loops"] == "5"
+    assert "top_shell_layers" not in out["settings"]
+    with zipfile.ZipFile(tmp_path / "p.3mf") as archive:
+        assert 'key="top_shell_layers"' not in archive.read("Metadata/model_settings.config").decode()
+        assert 'key="top_solid_layers"' not in archive.read("Metadata/Slic3r_PE_model.config").decode()
     assert cli.main(["check", str(path), "--up", "0,0,1", "--material", "pla"]) == 0  # flags win over the project
     assert json.loads(capsys.readouterr().out)["up"] == pytest.approx([0, 0, 1])
 
@@ -63,7 +70,8 @@ def test_old_project_has_no_suggestion_overrides():
     assert opened["holes"]["fits"]["4"]["partner_mm"] == 8
 
 
-@pytest.mark.parametrize("choices", [{}, {"edit_selections": {"fit-4": False, "teardrop-8": True},
+@pytest.mark.parametrize("choices", [{}, {"excluded_settings": ["wall_loops", "layer_height"]},
+                                       {"edit_selections": {"fit-4": False, "teardrop-8": True},
                                         "suggested_boxes": {'["support",4,null,null]': {
                                             "kind": "support", "from": {"region": 4}, "use": False}}}])
 def test_browser_and_python_project_round_trip(choices):

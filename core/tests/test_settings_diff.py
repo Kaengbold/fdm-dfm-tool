@@ -65,3 +65,27 @@ def test_export_with_every_row_unticked_does_not_fall_back_to_recommendations():
     for name in ("Metadata/model_settings.config", "Metadata/Slic3r_PE_model.config"):
         keys = {m.attrib["key"] for m in ET.fromstring(archive.read(name)).iter("metadata")}
         assert not keys & (set(SETTINGS) | set(PRUSA.values()))
+
+
+def test_export_omissions_win_over_grip_settings():
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 20, 20), 0, 10))), "knob.stl")
+    archive = zipfile.ZipFile(io.BytesIO(api.export(
+        [0, 0, 1], settings=SETTINGS, grip=True,
+        excluded_settings=["wall_loops", "wall_generator", "fuzzy_skin"])))
+    for name, excluded in [("Metadata/model_settings.config", {"wall_loops", "wall_generator", "fuzzy_skin"}),
+                           ("Metadata/Slic3r_PE_model.config", {"perimeters", "perimeter_generator", "fuzzy_skin"})]:
+        keys = {m.attrib["key"] for m in ET.fromstring(archive.read(name)).iter("metadata")}
+        assert not keys & excluded
+        assert "layer_height" in keys
+
+
+@pytest.mark.parametrize("slicer", ["orca", "prusa"])
+def test_unticked_support_rows_are_not_added_back_for_support_boxes(slicer):
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 20, 20), 0, 10))), "block.stl")
+    archive = zipfile.ZipFile(io.BytesIO(api.export(
+        [0, 0, 1], settings={}, zones=[{"kind": "support", "lo": [-2, -2, 0], "hi": [2, 2, 5]}],
+        slicer=slicer, excluded_settings=["enable_support", "support_type"])))
+    name, excluded = ("model_settings.config", {"enable_support", "support_type"}) if slicer == "orca" else (
+        "Slic3r_PE_model.config", {"support_material", "support_material_style", "support_material_auto"})
+    keys = {m.attrib["key"] for m in ET.fromstring(archive.read("Metadata/" + name)).iter("metadata")}
+    assert not keys & excluded

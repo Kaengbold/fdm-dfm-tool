@@ -1197,17 +1197,29 @@ def main():
 
         def settings_difference_export():
             import io
+            import json
             import zipfile
             from xml.etree import ElementTree as ET
 
+            had_strength = page.evaluate("() => !!fdm.state.strength")
             page.evaluate("() => fdm.steps.go('settings')")
             assert page.locator("#settings th").all_inner_texts() == ["Setting", "Usual (goal)", "For this part"]
             assert page.locator("#settings-unchanged").is_hidden(), "unchanged rows start open"
             page.get_by_role("button", name=re.compile(r"^Unchanged \(")).click()
             walls = page.locator('#settings tr[data-setting="wall_loops"] input')
             assert walls.is_checked(), "new part starts with a setting excluded"
+            shell_walls = page.locator("#sh-walls").input_value()
             walls.uncheck()
             assert not walls.is_checked(), "render lost the unchecked choice"
+            page.click("#undo")
+            assert walls.is_checked(), "Undo did not restore the tick"
+            page.click("#redo")
+            assert not walls.is_checked(), "Redo did not restore the untick"
+            assert page.locator("#sh-walls").input_value() == shell_walls, "unticking changed the estimate's wall assumption"
+            assert page.locator("#settings-estimate-note").is_visible(), "unknown slicer settings need an estimate note"
+            page.set_viewport_size({"width": 375, "height": 812})
+            assert page.locator("#settings").evaluate("t => t.scrollWidth <= t.clientWidth"), "difference table overflows phone width"
+            page.set_viewport_size({"width": 1500, "height": 950})
             page.evaluate("() => fdm.steps.go('download')")
             with page.expect_download(timeout=300_000) as dl:
                 page.evaluate("() => document.getElementById('dl-3mf').click()")
@@ -1219,8 +1231,25 @@ def main():
                 assert "layer_height" in keys, "checked setting was dropped too"
             page.evaluate("() => fdm.steps.go('settings')")
             assert not walls.is_checked(), "changing steps lost the unchecked choice"
+            page.evaluate("() => fdm.steps.go('download')")
+            with page.expect_download() as saved:
+                page.click("#dl-project")
+            project_path = OUT / "settings_choices.json"
+            saved.value.save_as(str(project_path))
+            assert "wall_loops" in json.loads(project_path.read_text())["excluded_settings"]
+            run.act(lambda: page.set_input_files("#file", str(project_path)), 300_000)
+            page.evaluate("() => fdm.steps.go('settings')")
+            if page.locator("#settings-unchanged").is_hidden():
+                page.get_by_role("button", name=re.compile(r"^Unchanged \(")).click()
+            assert not walls.is_checked(), "opening a project lost the unchecked choice"
             walls.check()
-            return "goal defaults shown; unchanged rows folded; unticked walls absent from both 3MF configs"
+            assert page.locator("#settings-estimate-note").is_hidden()
+            # Reopening a project drops cached analyses; leave the strength fixture ready for the next step.
+            if had_strength:
+                page.evaluate("() => fdm.steps.go('strength')")
+                run.act(lambda: page.click("#run-strength"), 300_000)
+                page.evaluate("() => fdm.steps.go('settings')")
+            return "goal defaults shown; unchanged rows folded; unticked walls absent from both 3MF configs and kept in projects; phone fits"
         run.step("settings differences and per-row export choice", settings_difference_export)
 
         def picked_zone():
