@@ -2157,17 +2157,29 @@ function renderStrength() {
       { className: `verdict ${r.verdict.replaceAll(" ", "-")}` },
       el("strong", { textContent: band.label }),
       strengthBar(band),
-      el("details", {}, el("summary", { textContent: "Details" }), el("p", { textContent: `Safety ${formatSafety(sf)}` })),
+      el("p", { className: "strength-weakest" }, r.story_parts.weakest, " ", el("button", { textContent: "Show it", onclick: () => {
+        state.showHeat = true;
+        $("strength-result").querySelector(".fea-view input[type=checkbox]").checked = true;
+        $("show-temp").checked = false;
+        recolor();
+        const point = r.weak_marker?.point ?? r.critical_point_print;
+        const from = r.weak_marker ? viewer.camera.position.clone().set(...r.weak_marker.normal) : null;
+        viewer.focusFinding({ bbox: [point, point] }, from);
+      } })),
+      el("p", { className: "strength-helps", textContent: r.story_parts.helps }),
+    ),
+    el("details", { className: "strength-more" }, el("summary", { textContent: "More" }),
+      el("p", { textContent: `Safety ${formatSafety(sf)}` }),
       el("p", { textContent: r.explanation ?? MODE_TEXT[r.mode] }),
       el("p", { className: "hint", textContent: (r.detailed
         ? `${r.material}, as sliced in ${state.gcode.name} (${r.detailed.missed_pct}% of the plastic falls outside the analysis cubes)`
         : `${r.material}, ${r.walls} walls, ${r.top} top / ${r.bottom} bottom layers, ${Math.round(r.infill * 100)}% infill`) + ` · bends about ${r.max_displacement_mm.toFixed(1)} mm` }),
-    ),
     r.cases.length > 1
       ? el("p", { className: "hint", textContent: `Weakest is case ${r.case} (shown). ` + r.cases.map((c) => `Case ${c.case}: ${formatSafety(c.safety_factor)}`).join(" · ") })
       : "",
     strengthViewControls(r),
     el("p", { className: "hint", textContent: "Rough estimate. Aim for ×2 or more for anything that matters." }),
+    ),
     el("button", { className: "primary", textContent: "How can I make it stronger?", onclick: showStrengthOptions,
       title: "Shows every option: slicer settings, orientation, design changes and materials, each with what it costs" }),
     el("button", { id: "try-designs", textContent: "Test design changes for me ", onclick: tryDesigns, hidden: mode() === "print",
@@ -2293,6 +2305,7 @@ async function rankWithStrength() {
 async function showStrengthOptions() {
   return busy("Trying alternatives (a few seconds)…", async () => {
     const opts = await call("strength_options", { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells() });
+    if (opts?.length) $("strength-result").querySelector(".strength-helps").textContent = `Try ${opts[0].change.toLowerCase()}.`;
     const noMaterial = opts.some((o) => o.kind === "material") ? ""
       : el("p", { className: "hint", textContent: `No other material is much stronger than ${state.strength?.material ?? "this one"}; others help with heat or impact instead.` });
     // Compare with the engine's own baseline: with "Use the G-code" the shown safety comes from another model.
