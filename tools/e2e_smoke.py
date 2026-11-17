@@ -997,6 +997,7 @@ def main():
                 page.select_option("#load-case", case)
                 page.click("#as-load")
             run.act(lambda: page.click("#run-strength"), 300_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             text = page.locator("#strength-result").inner_text()
             assert "Weakest is case 2" in text, text
             headline = page.locator("#strength-result .verdict strong").first.inner_text()
@@ -1042,6 +1043,25 @@ def main():
             return f"loads: {loads} | {text.splitlines()[0]}"
         run.step("strength with a load on a painted area", spot_load)
 
+        def compact_strength():
+            page.set_viewport_size({"width": 1440, "height": 900})
+            result = page.locator("#strength-result .verdict").last
+            page.locator("#strength-result").scroll_into_view_if_needed()
+            page.locator("#panel .panes").evaluate("e => e.scrollTop += 2")  # leave room for fractional pixel rounding
+            for selector in ("strong", ".strength-band-bar", ".strength-weakest", ".strength-helps"):
+                assert result.locator(selector).is_visible(), selector
+            assert page.locator("#strength-result .strength-more > summary").is_visible()
+            result.get_by_role("button", name="Show it").click()
+            page.wait_for_function("() => !fdm.viewer.cameraMove", timeout=5000)
+            assert page.evaluate("() => fdm.viewer.controls.target.distanceTo(fdm.viewer.camera.position.clone().set(...(fdm.state.strength.weak_marker?.point ?? fdm.state.strength.critical_point_print))) < 0.01"), "camera did not point at the weak spot"
+            box = result.bounding_box()
+            panel = page.locator("#panel .panes").bounding_box()
+            assert box["height"] <= panel["height"] and box["y"] >= panel["y"] and box["y"] + box["height"] <= panel["y"] + panel["height"], (box, panel)
+            page.screenshot(path=OUT / "strength-compact.png")
+            page.set_viewport_size({"width": 1500, "height": 950})
+            return f"result {box['height']:.0f}px, panel {panel['height']:.0f}px"
+        run.step("strength result fits at 1440 x 900", compact_strength)
+
         def shaking():
             page.check("#dyn-shake")
             run.act(lambda: page.click("#run-dynamics"), 300_000)
@@ -1055,6 +1075,7 @@ def main():
 
         def fea_view():
             page.evaluate("() => fdm.steps.go('strength')")  # the stress colours show in Will it hold?
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             assert page.locator("#legend").is_visible(), "no legend"
             colours = page.evaluate("() => fdm.viewer.field.mesh.geometry.getAttribute('color').count")
             page.locator(".fea-view select").first.select_option("vm")
@@ -1066,6 +1087,7 @@ def main():
             page.screenshot(path=OUT / "section-cut.png")
             page.locator(".fea-view select").nth(1).select_option("")
             run.act(lambda: page.get_by_text("Check accuracy with a finer grid").click(), 600_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             note = page.locator(".fea-view").inner_text()
             assert "Finer grid" in note, note
             return f"{colours} coloured corners; {title}; section {cubes} cubes; {note.splitlines()[-1][:90]}"
@@ -1076,6 +1098,7 @@ def main():
             page.locator(".shells:not(#detailed) summary").click()
             page.fill("#sh-walls", "6")
             run.act(lambda: page.dispatch_event("#sh-walls", "change"), 300_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('6 walls')", timeout=300_000)
             text = page.locator("#strength-result").inner_text()
             settings = page.locator("#settings").inner_text()
@@ -1085,6 +1108,7 @@ def main():
 
         def hot_car():
             run.act(lambda: page.select_option("#use-temp", "70"), 300_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('°C')", timeout=300_000)
             text = page.locator("#strength-result").inner_text()
             found = findings(page)
@@ -1100,6 +1124,7 @@ def main():
             assert "at 23 °C" in chart.text_content(), chart.text_content()
             page.fill("#sim-temp", "50")
             run.act(lambda: page.click("#sim-temp-use"), 300_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             assert page.input_value("#use-temp") == "custom" and page.input_value("#use-temp-c") == "50"
             page.wait_for_function("() => document.querySelector('#temp-chart svg')?.textContent.includes('at 50 °C')")
             text = page.locator("#strength-result").inner_text()
@@ -1137,6 +1162,7 @@ def main():
             gcode.write_text(sliced["orcaslicer"]["gcode"])
             page.locator("#detailed summary").click()
             run.act(lambda: page.set_input_files("#gcode-file", str(gcode)), 600_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             assert page.is_checked("#use-gcode"), page.locator("#status").inner_text()
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('as sliced in')", timeout=300_000)
             text = page.locator("#strength-result").inner_text()
@@ -1145,6 +1171,8 @@ def main():
             assert headline in tuple(f"With your sliced print: {band}" for band in
                                      ("Plenty of reserve", "Enough", "Marginal", "Likely to break")), headline
             page.uncheck("#use-gcode")
+            page.wait_for_function("() => !document.querySelector('#strength-result .strength-more')?.open", timeout=300_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             page.wait_for_function("() => document.querySelector('#strength-result')?.innerText.includes('walls')", timeout=300_000)
             return f"{page.locator('#gcode-summary').inner_text()} | {text.splitlines()[0]}"
         run.step("detailed check from a sliced G-code", detailed)
@@ -2092,6 +2120,7 @@ def main():
             }""")
             page.evaluate("() => fdm.steps.go('strength')")
             run.act(lambda: page.click("#run-strength"), 300_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             page.locator(".fea-view select").first.select_option("fi")
             stretch = page.get_by_label("Stretch the colours", exact=True)
             assert not stretch.is_checked(), "strength scale should start fixed"
@@ -2154,6 +2183,7 @@ def main():
             page.locator(".fea-view select").first.select_option("fi")
             page.evaluate("() => { fdm.state.loads.find((l) => l.kind === 'force').kg = 500; }")
             run.act(lambda: page.click("#run-strength"), 300_000)
+            page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             assert top_label.inner_text() == "100 %+"
             overloaded = colour_counts()
             assert overloaded["red"] > 0 and overloaded["mismatched"] == 0, overloaded

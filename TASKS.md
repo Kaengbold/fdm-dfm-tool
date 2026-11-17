@@ -682,10 +682,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: a small pill "Estimate" next to the heading; a click shows one sentence on what that means and, once T-443 is done, how far off it usually is. No frame. Document the badge in DESIGN.md (chips and badges).
   - Done when: no `.wip` frame is left; the badge follows DESIGN.md (no part colours, sentence case).
   - Outcome: "Estimate" pill by the Strength analysis and Design changes headings, a click shows one sentence; `.wip` frames removed; DESIGN.md Chips and badges updated. Click-to-explain only for now: how far off it usually is waits for T-443. The pause test now ticks through the checkbox (it passed by a hover accident before).
-- [ ] **T-445 P2** [H] The strength result text is too long. · files: `web/app.js` (`renderStrength`, `strengthViewControls`), part of T-382 · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-445-short-strength`)
+- [x] **T-445 P2** [H] The strength result text is too long. · files: `web/app.js` (`renderStrength`, `strengthViewControls`), part of T-382 · owner: Codex GPT-6.1 Terra, reviewed by Claude (`task/T-445-short-strength`)
   - Seen (before T-382 was merged; T-382 folded the hint paragraphs behind an ⓘ, the result text itself comes from the engine and `renderStrength`): the result is a paragraph of six sentences, then nine view controls. Run a strength check first and see what is left to do.
   - Do: three lines: the band (T-442), where it's weakest (with "Show it"), the one thing that helps most. Everything else ("It's right next to where the part is held …", grid size, total load, the colour and cut controls, "Check accuracy with a finer grid") behind "More".
   - Done when: the result fits the panel without scrolling at 1440 × 900.
+  - Outcome: Compact result shows the weak spot and best advice, with camera focus and details under More; 476 engine tests and 107 browser steps passed.
 
 ### I. From the printed part back into the tool
 

@@ -762,6 +762,20 @@ def _strength_reason(sf: float, verdict: str, strongest: float | None = None) ->
     return out
 
 
+def _strength_story_parts(r: dict) -> dict:
+    """Short, independently usable parts of the strength explanation."""
+    z = r["critical_point_print"][2]
+    why = {
+        "layers": "There the layers get pulled or slid apart. The bond between layers is the weakest part of any print, so turning the part helps most.",
+        "material": "There the plastic itself is overloaded, not the bond between layers. More walls, more infill or a thicker design help most.",
+        "lines": ("There the printed lines lying side by side get pulled apart, like a screw tearing out through the walls."
+                  " More walls around that spot, more material there, or turning the part so the lines run along the pull help most."),
+    }[r["mode"]]
+    # Strong enough: don't nudge people to change a part that already holds (the why stays in the full story).
+    helps = "Nothing needs to change for this load." if r.get("verdict") == "fine" else why
+    return {"weakest": f"The weakest spot is about {max(z, 0):.0f} mm above the bed.", "helps": helps, "why": why}
+
+
 def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     """The result in plain words: will it hold, where it gives way, and why there."""
     sf, z = r["safety_factor"], r["critical_point_print"][2]
@@ -772,12 +786,7 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
         "borderline": "It might break under the load you set; real prints vary.",
         "likely to break": f"It will most likely break: it holds only about {sf:.0%} of the load you set.",
     }[r["verdict"]]
-    why = {
-        "layers": "There the layers get pulled or slid apart. The bond between layers is the weakest part of any print, so turning the part helps most.",
-        "material": "There the plastic itself is overloaded, not the bond between layers. More walls, more infill or a thicker design help most.",
-        "lines": ("There the printed lines lying side by side get pulled apart, like a screw tearing out through the walls."
-                  " More walls around that spot, more material there, or turning the part so the lines run along the pull help most."),
-    }[r["mode"]]
+    why = _strength_story_parts(r)["why"]
     near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
             " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
     return f"{_strength_band(sf, required_safety(p))}. {head} The weakest spot is about {max(z, 0):.0f} mm above the bed (red arrow). {why}{near}{_use_story(p)}"
@@ -1697,6 +1706,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     r["stress_zones"] = _stress_zones(model, fi, worst.ignore, up, sh, s.mesh, p)
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
+    r["story_parts"] = _strength_story_parts(r)
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
 
