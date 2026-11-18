@@ -291,7 +291,6 @@ summary::marker { color: var(--accent); }
 #options > li.active { border: 2px solid var(--accent); padding: 9px 11px; background: var(--accent-soft); }
 #options > li strong { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 #options > li ul { margin: 0; padding-left: 18px; color: var(--muted); }
-#options > li:not(.active) ul li:nth-child(n + 2) { display: none; }
 .tag { font-size: 12px; font-weight: 700; color: var(--good); background: var(--good-soft); padding: 1px 8px; border-radius: 999px; align-self: flex-start; white-space: nowrap; }
 .why-lower { margin-top: 4px; font-size: 13px; color: var(--muted); }
 .option-cost { margin: 4px 0 0; font-size: 13px; color: var(--muted); }

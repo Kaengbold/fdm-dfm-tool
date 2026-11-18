@@ -121,6 +121,8 @@ def click_sample(page, name):
 
 def check_thumbnails(page) -> str:
     """T-423: real uncached images, cache hits, and no changes to the live view."""
+    # Let the lazy card renders finish before counting renders in this test.
+    page.wait_for_function("() => [...document.querySelectorAll('#options > li img')].every(i => i.complete && i.naturalWidth > 0)")
     result = page.evaluate("""async () => {
       const v = fdm.viewer, s = fdm.state;
       const before = () => JSON.stringify([v.camera.position.toArray(), v.camera.quaternion.toArray(),
@@ -710,6 +712,17 @@ def main():
             assert len(costs) == n and all("support" in c for c in costs), f"cards without support grams: {costs}"
             active = page.evaluate("() => [...document.querySelectorAll('#options > li')].findIndex(li => li.classList.contains('active'))")
             assert active == 1, f"option 2 no longer marked after the check redrew the cards ({active})"
+            cards = page.locator("#options > li")
+            page.wait_for_function("() => [...document.querySelectorAll('#options > li img')].every(i => i.complete && i.naturalWidth > 0)")
+            for card in cards.all():
+                title = card.locator("strong").first.inner_text()
+                assert not re.match(r"^Option \d", title), title
+                assert card.locator("img, canvas").count() > 0
+                assert "mm²" not in card.inner_text(), card.inner_text()
+                card.locator("summary").click()
+                assert "mm²" in card.inner_text(), card.inner_text()
+                card.locator("summary").click()
+            page.screenshot(path=OUT / "orientation-cards.png")
             return " | ".join(costs)
         run.step("support grams on each orientation card", option_costs)
 

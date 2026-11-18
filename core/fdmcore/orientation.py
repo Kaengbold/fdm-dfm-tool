@@ -183,6 +183,38 @@ def explain(r: OrientationResult, mesh: Mesh) -> list[str]:
     return reasons
 
 
+def pose_names(mesh: Mesh, results: list[OrientationResult]) -> list[str]:
+    """Name poses from their contact and proportions, keeping the offered names distinct."""
+    normals, areas = mesh.normals_and_areas()
+    keys = np.round(normals * 100).astype(int)
+    _, inverse = np.unique(keys, axis=0, return_inverse=True)
+    largest = np.bincount(inverse, weights=areas).max()
+    names = []
+    for r in results:
+        if np.dot(r.up, [0, 0, 1]) > 0.999999:
+            name = "As in your file"
+        elif np.dot(r.up, [0, 0, -1]) > 0.999999:
+            name = "Upside down"
+        else:
+            points = mesh.triangles.reshape(-1, 3) @ rotation_to_z(r.up).T
+            sizes = np.ptp(points, axis=0)
+            if r.bed_area >= 0.8 * largest and r.bed_area > 0:
+                name = "On its big flat side"
+            elif sizes[2] > max(sizes[:2]) * 1.1:
+                name = "Standing on the short edge"
+            else:
+                name = "On its side"
+        base = name
+        if name in names:
+            name = f"{base} turned over"
+        suffix = 2
+        while name in names:
+            name = f"{base} turned over {suffix}"
+            suffix += 1
+        names.append(name)
+    return names
+
+
 def support_summary(grams: float, needed: bool) -> str:
     """Use sliced support presence even when its weight rounds down to zero."""
     if not needed:

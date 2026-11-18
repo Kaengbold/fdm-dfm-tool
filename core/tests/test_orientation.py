@@ -5,7 +5,7 @@ import pytest
 
 from fdmcore import api
 from fdmcore.mesh import Mesh, load_stl, to_binary_stl
-from fdmcore.orientation import BED, NEEDS_SUPPORT, OK, classify_faces, find_orientations, rotation_to_z
+from fdmcore.orientation import BED, NEEDS_SUPPORT, OK, classify_faces, evaluate, find_orientations, pose_names, rotation_to_z
 
 SAMPLES = Path(__file__).resolve().parents[2] / "web" / "samples"
 
@@ -20,6 +20,24 @@ def cube(size=10.0) -> Mesh:
 
 def sample(name) -> bytes:
     return (SAMPLES / f"{name}.stl").read_bytes()
+
+
+def test_pose_names_for_plate_and_tall_part():
+    plate = Mesh(cube().triangles * [3, 2, 0.2])
+    poses = [evaluate(plate, up) for up in ([0, 0, 1], [1, 0, 0], [0, 0, -1], [-1, 0, 0])]
+    names = pose_names(plate, poses)
+    assert names == ["As in your file", "Standing on the short edge", "Upside down",
+                     "Standing on the short edge turned over"]
+    tall = Mesh(cube().triangles * [1, 1, 4])
+    assert pose_names(tall, [evaluate(tall, [1, 0, 0])]) == ["On its big flat side"]
+
+
+def test_pose_names_for_l_bracket():
+    mesh = load_stl(sample("l_bracket"))
+    results = [evaluate(mesh, up) for up in ([0, 0, 1], [1, 0, 0], [-1, 0, 0])]
+    names = pose_names(mesh, results)
+    assert names[0] == "As in your file"
+    assert len(set(names)) == len(names)
 
 
 def test_cube_geometry():
