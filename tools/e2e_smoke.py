@@ -1355,6 +1355,34 @@ def main():
             return "goal defaults shown; unchanged rows folded; unticked walls absent from both 3MF configs and kept in projects; phone fits"
         run.step("settings differences and per-row export choice", settings_difference_export)
 
+        def import_print_settings():
+            import gzip
+            import json
+            profiles = json.loads(gzip.decompress((ROOT / "core/fdmcore/data/orca_profiles.json.gz").read_bytes()))["profiles"]
+            parent = next(name for name, p in profiles.items() if p["kind"] == "process" and "layer_height" in p["data"])
+            orca = OUT / "print-profile.json"
+            orca.write_text(json.dumps({"name": "My process", "inherits": parent, "wall_loops": "4"}))
+            prusa = OUT / "print-profile.ini"
+            prusa.write_text("perimeters = 4\nfill_density = 15%\nfill_pattern = gyroid\nlayer_height = 0.2\n")
+            page.evaluate("() => fdm.steps.go('settings')")
+            for path in (orca, prusa):
+                page.set_input_files("#import-print-profile", str(path))
+                page.wait_for_function("name => document.querySelector('#print-profile-status').textContent.includes(name)", arg="My process" if path == orca else "Your print settings")
+                folded = page.locator("#settings-unchanged")
+                if folded.is_hidden():
+                    page.get_by_role("button", name=re.compile(r"^Unchanged \(")).click()
+                walls = page.locator('#settings tr[data-setting="wall_loops"]')
+                assert "yours: 4" in walls.inner_text(), walls.inner_text()
+                goal = page.locator('#settings tr[data-setting="sparse_infill_pattern"]')
+                assert goal.locator("input").is_disabled(), goal.inner_text()
+                assert goal.locator("xpath=..").get_attribute("id") == "settings-unchanged"
+                if path == orca:
+                    assert "Can't find its parent" not in page.locator("#print-profile-status").inner_text()
+            page.locator("#settings").screenshot(path=str(OUT / "imported-print-settings.png"))
+            page.click("#remove-print-profile")
+            return "Orca inherited profile and Prusa INI show yours: 4; goal-only pattern unchanged"
+        run.step("import print settings", import_print_settings)
+
         def picked_zone():
             page.evaluate("() => fdm.steps.go('settings')")
             page.click("#zone-pick")

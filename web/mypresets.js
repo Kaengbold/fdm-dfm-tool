@@ -2,6 +2,56 @@
 // sent to the engine (api.custom_presets), shareable as a YAML snippet for presets.yaml.
 // Each one starts from a built-in preset (based_on) and overrides a few values.
 const STORAGE = "fdm.myPresets";
+const PRINT_STORAGE = "fdm.printProfile";
+
+export function loadPrintProfile() {
+  try { return JSON.parse(localStorage.getItem(PRINT_STORAGE)) || null; } catch { return null; }
+}
+export function savePrintProfile(profile) {
+  try { if (profile) localStorage.setItem(PRINT_STORAGE, JSON.stringify(profile)); else localStorage.removeItem(PRINT_STORAGE); } catch { /* Works for this visit. */ }
+}
+
+const PRINT_KEYS = {
+  wall_loops: "perimeters", sparse_infill_density: "fill_density", sparse_infill_pattern: "fill_pattern",
+  layer_height: "layer_height", top_shell_layers: "top_solid_layers", bottom_shell_layers: "bottom_solid_layers",
+  enable_support: "support_material", support_type: "support_material_style", support_threshold_angle: "support_material_threshold",
+  brim_type: "brim_type", brim_width: "brim_width", bridge_speed: "bridge_speed",
+  outer_wall_speed: "external_perimeter_speed", inner_wall_speed: "perimeter_speed",
+  sparse_infill_speed: "infill_speed", internal_solid_infill_speed: "solid_infill_speed", top_surface_speed: "top_solid_infill_speed",
+};
+const PRINT_NAMES = { wall_loops: "walls", sparse_infill_density: "infill", sparse_infill_pattern: "infill pattern", layer_height: "layer height",
+  top_shell_layers: "top layers", bottom_shell_layers: "bottom layers", enable_support: "supports", support_type: "support type",
+  support_threshold_angle: "support angle", brim_type: "brim type", brim_width: "brim width", bridge_speed: "bridge speed",
+  outer_wall_speed: "outer wall speed", inner_wall_speed: "inner wall speed", sparse_infill_speed: "infill speed",
+  internal_solid_infill_speed: "solid infill speed", top_surface_speed: "top surface speed" };
+
+/** Read process settings; bundled parents are already flattened by tools/orca_profiles.py. */
+export function fromPrintProfile(text, isIni, profiles = {}) {
+  let own;
+  if (isIni) {
+    own = {};
+    for (const line of text.split(/\r?\n/)) {
+      const match = line.match(/^\s*([\w]+)\s*=\s*(.*?)\s*$/);
+      if (match) own[match[1]] = match[2];
+    }
+  } else own = JSON.parse(text);
+  if (!own || Array.isArray(own) || typeof own !== "object") throw new Error("This file is not a print profile.");
+  const parent = own.inherits && profiles[own.inherits]?.kind === "process" ? profiles[own.inherits].data : null;
+  const data = { ...(parent || {}), ...own }, values = {};
+  for (const [key, prusa] of Object.entries(PRINT_KEYS)) {
+    let v = data[isIni ? prusa : key];
+    if (Array.isArray(v)) v = v[0];
+    if (v == null || v === "") continue;
+    v = String(v).trim();
+    if (key === "sparse_infill_density") { const n = parseFloat(v); if (!Number.isFinite(n)) continue; v = `${n}%`; }
+    if (key === "enable_support") v = /^(1|true|yes)$/i.test(v) ? "1" : "0";
+    if (isIni && key === "support_type") v = /organic|tree/i.test(v) ? "tree(auto)" : "normal(auto)";
+    values[key] = v;
+  }
+  if (isIni && !values.brim_type && values.brim_width != null) values.brim_type = Number(values.brim_width) > 0 ? "outer_only" : "no_brim";
+  return { name: own.name || "Your print settings", values, missingParent: own.inherits && !parent ? own.inherits : null,
+    missing: Object.keys(PRINT_KEYS).filter((key) => values[key] == null).map((key) => PRINT_NAMES[key]) };
+}
 
 export const MATERIAL_FIELDS = [
   ["name", "Name", "text"],
