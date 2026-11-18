@@ -27,7 +27,7 @@ def test_pose_names_for_plate_and_tall_part():
     poses = [evaluate(plate, up) for up in ([0, 0, 1], [1, 0, 0], [0, 0, -1], [-1, 0, 0])]
     names = pose_names(plate, poses)
     assert names == ["As in your file", "Standing on the short edge", "Upside down",
-                     "Standing on the short edge turned over"]
+                     "Standing on the short edge, turned over"]
     tall = Mesh(cube().triangles * [1, 1, 4])
     assert pose_names(tall, [evaluate(tall, [1, 0, 0])]) == ["On its big flat side"]
 
