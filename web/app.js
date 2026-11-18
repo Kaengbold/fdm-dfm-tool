@@ -528,7 +528,10 @@ async function findOrientations(withLoads = false, keep = null) {
   const loads = (withLoads || profile().goal === "strength") && readyForStrength() ? state.loads : undefined;
   await busy(loads ? "Finding the best orientation for printing and strength…" : "Finding the best orientation…", async () => {
     const r = await call("orientations", { profile: profile(), loads, faces: faceMarks(), keep: keep ?? undefined });
-    state.options = [...r.orientations, r.as_loaded];
+    state.options = [...r.orientations];
+    if (!state.options.some((o) => o.up.every((v, i) => Math.abs(v - r.as_loaded.up[i]) < 1e-6))) {
+      state.options.push(r.as_loaded);
+    }
     if (picked && r.kept != null) { // keep the name it had ("Strongest", "Your own"), not a ranking label
       const o = state.options[r.kept];
       o.label = picked.label;
@@ -644,26 +647,43 @@ function renderOptions() {
       el(
         "li",
         { onclick: () => pickOption(i), className: i === state.active ? "active" : "", style: "display:flow-root" },
-        el("img", { className: "orientation-picture", src: viewer.thumbnail({ up: o.up, size: [112, 84] }),
+        el("img", { className: "orientation-picture",
           alt: `${o.label}: how the part lies on the bed`, width: 112, height: 84, decoding: "async",
           style: "float:right;margin:0 0 4px 10px;border-radius:var(--r)" }),
         el("strong", { textContent: o.label }, i === 0 ? el("span", { className: "tag", textContent: "Recommended" }) : ""),
-        el("ul", {}, ...o.reasons.map((r) => el("li", { textContent: r }))),
         optionCost(o) ? el("p", { className: "option-cost", textContent: optionCost(o) }) : "",
         o.why_lower ? el("p", { className: "why-lower", textContent: o.why_lower }) : "",
+        el("details", { onclick: (event) => event.stopPropagation() },
+          el("summary", { textContent: "Details" }),
+          el("ul", {}, ...o.reasons.map((r) => el("li", { textContent: r })))),
       ),
     ),
   );
+  const cards = [...$("options").children];
+  const options = state.options;
+  function picture(i) {
+    if (i >= options.length || state.options !== options || !cards[i]?.isConnected) return;
+    const src = viewer.thumbnail({ up: options[i].up, size: [112, 84] });
+    if (src) cards[i].querySelector("img").src = src;
+    requestAnimationFrame(() => picture(i + 1));
+  }
+  requestAnimationFrame(() => requestAnimationFrame(() => picture(0)));
 }
 
-/** Support and filament cost of one orientation card. The part's own grams come from the last check (they
- * hardly change with the direction; the support does), the price from that check's cost (My materials). */
+/** The part's grams come from the last check; support and time are estimated per pose. */
 function optionCost(o) {
   if (o.support_g == null) return "";
   const st = state.check?.stats;
   const support = o.support_summary;
-  if (st?.cost == null || !st.total_g) return support;
-  return `${support} · about ${((st.cost / st.total_g) * (st.filament_g + o.support_g)).toFixed(2)} for the filament`;
+  const parts = [support];
+  if (o.print_time_min != null) {
+    // The per-pose time comes from a rough slice: scale it so the checked pose shows the check's own time.
+    const checked = state.check && state.options.find((c) => c.up.every((v, k) => Math.abs(v - state.check.up[k]) < 1e-6));
+    const scale = checked?.print_time_min && st?.print_time_min ? st.print_time_min / checked.print_time_min : 1;
+    parts.push(`about ${fmtTime(o.print_time_min * scale)}`);
+  }
+  if (st?.filament_g != null) parts.push(`about ${Math.round(st.filament_g + o.support_g)} g of plastic`);
+  return parts.join(" · ");
 }
 
 const SEVERITY_LABEL = { problem: "Problem", warn: "Warning", info: "Tip" };

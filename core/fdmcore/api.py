@@ -444,9 +444,12 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
             out["why_lower"] = why_lower(r, best, placed[id(r)][1]["fits"], placed[id(best)][1]["fits"])
         return out
 
+    from .orientation import pose_names
+
+    names = pose_names(s.mesh, candidates)
     return {
-        "as_loaded": pack(as_loaded, "As loaded"),
-        "orientations": [pack(r, f"Option {i + 1}") for i, r in enumerate(candidates)],
+        "as_loaded": pack(as_loaded, "As in your file"),
+        "orientations": [pack(r, name) for r, name in zip(candidates, names)],
         "kept": next((i for i, r in enumerate(candidates) if r is kept), None),
     }
 
@@ -725,6 +728,7 @@ def _pack(mesh: Mesh, r, label: str, settings: OrientationSettings, rotation: np
         "safety_factor": safety,
         "support_g": round(r.support_grams, 1) if r.support_grams is not None else None,
         "support_needed": r.support_needed,
+        "print_time_min": r.print_time_min,
         "support_summary": support_summary(r.support_grams, bool(r.support_needed)) if r.support_grams is not None else None,
         "reasons": r.reasons,
         "score_terms": {k: round(v, 3) for k, v in r.terms.items()},

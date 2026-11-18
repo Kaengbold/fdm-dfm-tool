@@ -183,6 +183,37 @@ def explain(r: OrientationResult, mesh: Mesh) -> list[str]:
     return reasons
 
 
+def pose_names(mesh: Mesh, results: list[OrientationResult]) -> list[str]:
+    """Name poses from their contact and proportions, keeping the offered names distinct."""
+    normals, areas = mesh.normals_and_areas()
+    keys = np.round(normals * 100).astype(int)
+    _, inverse = np.unique(keys, axis=0, return_inverse=True)
+    largest = np.bincount(inverse, weights=areas).max()
+    names, heights = [], []
+    for r in results:
+        sizes = np.ptp(mesh.triangles.reshape(-1, 3) @ rotation_to_z(r.up).T, axis=0)
+        if np.dot(r.up, [0, 0, 1]) > 0.999999:
+            name = "As in your file"
+        elif np.dot(r.up, [0, 0, -1]) > 0.999999:
+            name = "Upside down"
+        elif r.bed_area >= 0.8 * largest and r.bed_area > 0:
+            name = "On its big flat side"
+        elif sizes[2] > max(sizes[:2]) * 1.1:
+            name = "Standing on the short edge"
+        else:
+            name = "On its side"
+        if name in names:  # a different height tells two such poses apart; the same height is the mirror pose
+            other = heights[names.index(name)]
+            name = f"{name}, {sizes[2]:.0f} mm tall" if abs(other - sizes[2]) >= 1 else f"{name}, turned over"
+        heights.append(sizes[2])
+        base, n = name, 1
+        while name in names:
+            n += 1
+            name = f"{base} ({n})"
+        names.append(name)
+    return names
+
+
 def support_summary(grams: float, needed: bool) -> str:
     """Use sliced support presence even when its weight rounds down to zero."""
     if not needed:
