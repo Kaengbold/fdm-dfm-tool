@@ -790,10 +790,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: `python tools/e2e_smoke.py --quick` (about 2 minutes): boot, one sample through Simple to the 3MF download, one finding opened, one level switch, the phone viewport's start screen. Run it on every pull request that touches `web/`; the full run stays on the label.
   - Done when: `--quick` runs under 3 minutes locally and in CI.
 
-- [ ] **T-469 P3** [M] A screenshot timeout aborts the browser suite before it reports the remaining checks. · files: `tools/e2e_smoke.py` (`Run.step`) · owner: —
+- [x] **T-469 P3** [M] A screenshot timeout aborts the browser suite before it reports the remaining checks. · files: `tools/e2e_smoke.py` (`Run.step`) · owner: —
   - Seen while testing T-397 on Windows: all assertions through the oversized-part split passed, then `Page.screenshot` exceeded 30 seconds and stopped the run outside the step's error handler. The host had about 400 MB of free RAM afterward.
   - Do: handle screenshot failures as test failures and continue to the final summary; investigate an appropriate capture timeout on a busy host.
   - Done when: a timed-out screenshot is reported with its step and the remaining checks still run.
+  - Outcome: `Run.step` catches a failed screenshot, counts it as the failure "<step> (screenshot)" and goes on to the next step and the final summary; capture timeout 90 s instead of 30 s. Checked with a stub page whose screenshot always times out: both steps ran, both screenshot failures reported. Full browser suite not run (no `web/` change).
 
 ## Thermal optimizer (2026-11-18, tag [TO])
 
