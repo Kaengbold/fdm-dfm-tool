@@ -805,10 +805,11 @@ browser (Pyodide: numpy, scipy, shapely, pyyaml only, so no Numba, lib3mf, libbg
 from published sources, show how sure we are, and tune it later. Handle speed with tiers (quick / fine) and finer detail where it matters.
 Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 and later tasks. serves: 2, 3, 4.
 
-- [ ] **T-470 P2** [TO] Thermal constants from published sources. · files: `core/fdmcore/data/thermal.yaml` (new), `research/thermal_constants.md` (new) · owner: —
+- [x] **T-470 P2** [TO] Thermal constants from published sources. · files: `core/fdmcore/data/thermal.yaml` (new), `research/thermal_constants.md` (new) · owner: —
   - Do: for PLA, PETG, ABS/ASA, TPU, PA and PC, collect: density, heat capacity c_p(T) with a latent-heat peak for semi-crystalline plastics (PA, PP, PEEK; PETG is amorphous), thermal conductivity k, emissivity, Tg, the temperature where a printed layer stops sagging, and parameters for welding layers together (reptation / WLF, e.g. Seppala et al. 2017 *Soft Matter*, Coogan & Kazmer 2017 *Rapid Prototyping J.*; check both before citing). Per printer type: heat transfer from the fan vs fan % (with spin-up delay), contact resistance between beads and to the bed, nozzle and heater-block reheating, air temperature for open / passive / heated enclosures, melt temperature drop at high flow. Gemini can do the bulk reading.
   - Every value records its source, a confidence level (`published` / `estimated` / `tuned`) and a range.
   - Done when: every constant T-473 and T-474 need has a value, a source and a confidence level.
+  - Outcome: `core/fdmcore/data/thermal.yaml` (7 materials, process constants) and research/thermal_constants.md. Gemini drafted; every DOI checked with Crossref and the open papers read: 5 of Gemini's 11 DOIs were fake, those values are `estimated` now. Published: ABS WLF (Seppala 2017: 4.65 / 200.9 at 230 C), PLA c_p (Pyda 2004), Costa 2014 convection bracket and emissivity, density / Tg from datasheets. Estimated, to tune in T-477 / T-482: reptation times, WLF for all but ABS / ASA, fan h by fan %, contact conductances, melt drop by flow. Not yet loaded by any code (T-473).
 - [ ] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: —
   - Do: extend `Toolpath` (don't build a second format) with:
     - speed (F) for each line, travel moves, retractions;

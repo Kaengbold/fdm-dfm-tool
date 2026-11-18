@@ -8,6 +8,7 @@
  "data/presets.yaml",
  "data/rules.yaml",
  "data/symptoms.yaml",
+ "data/thermal.yaml",
  "data/thresholds.yaml",
  "export3mf.py",
  "fea.py",
