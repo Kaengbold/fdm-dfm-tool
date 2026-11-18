@@ -593,9 +593,14 @@
         <section class="pane" data-pane="settings">
           <h2>Slicer settings</h2>
           <div id="blk-settings">
+            <label>Import your print settings (OrcaSlicer / Bambu Studio process .json, PrusaSlicer .ini)
+              <input id="import-print-profile" type="file" accept=".json,.ini" />
+            </label>
+            <p id="print-profile-status" class="hint" aria-live="polite"></p>
+            <button type="button" id="remove-print-profile" class="link" hidden>Remove your print settings</button>
             <div id="settings-block">
               <p class="lead" data-info>Settings for this part, compared with the starting point for your goal.</p>
-              <p class="hint">“Usual” means our goal default; your slicer's own settings may differ. Untick a row to leave that setting to your slicer.</p>
+              <p class="hint">“Usual” shows your imported settings where available, otherwise our goal default. Untick a row to leave that setting to your slicer.</p>
               <p id="settings-estimate-note" class="hint" hidden>Estimates use the values shown here. Your slicer's own values can change the result.</p>
               <details id="settings-fold" class="more-block settings-fold" open>
                 <summary>Show the slicer settings</summary>

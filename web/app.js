@@ -1,7 +1,7 @@
 import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
-import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, loadMine, saveMine, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
+import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, fromPrintProfile, loadMine, saveMine, loadPrintProfile, savePrintProfile, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
 import { Steps, STEP_NAMES } from "./steps.js";
 import { projectInReport, reportHtml, formatSafety, strengthBand } from "./report.js";
@@ -875,15 +875,60 @@ $("show-temp").onchange = () => {
 };
 
 const OWN_LABEL = { xy_hole_compensation: "Hole compensation", hole_to_polyhole: "Polyholes" };
+let printProfile = loadPrintProfile();
+function showPrintProfile() {
+  $("remove-print-profile").hidden = !printProfile;
+  $("print-profile-status").textContent = printProfile ? `${printProfile.name} is saved in this browser.${printProfile.missingParent ? ` Can't find its parent “${printProfile.missingParent}”. Missing values: ${printProfile.missing.join(", ") || "none"}.` : ""}` : "";
+  renderSettings();
+}
+$("import-print-profile").onchange = async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text(), isIni = /\.ini$/i.test(file.name);
+    let profiles = {};
+    if (!isIni && JSON.parse(text).inherits) {
+      try {
+        const response = await fetch("../core/fdmcore/data/orca_profiles.json.gz");
+        if (!response.ok) throw new Error("Profiles unavailable");
+        profiles = (await new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).json()).profiles;
+      } catch { /* Report the missing parent along with the missing values. */ }
+    }
+    const imported = fromPrintProfile(text, isIni, profiles);
+    if (!Object.keys(imported.values).length) throw new Error("No print settings found in this file.");
+    printProfile = imported;
+    savePrintProfile(printProfile);
+    showPrintProfile();
+  } catch (error) { $("print-profile-status").textContent = `Could not read print settings: ${error.message}`; }
+  event.target.value = "";
+};
+$("remove-print-profile").onclick = () => { printProfile = null; savePrintProfile(null); showPrintProfile(); };
+
+const sameSetting = (a, b) => {
+  const x = String(a), y = String(b);
+  const numeric = /^\s*[-+]?\d*\.?\d+\s*%?\s*$/;
+  return x === y || (numeric.test(x) && numeric.test(y) && x.includes("%") === y.includes("%") && parseFloat(x) === parseFloat(y));
+};
 
 /** Recommended settings with the user's applied strength suggestions on top. */
 function effectiveSettings(includeUnchecked = false) {
   if (!state.check) return [];
-  const list = state.check.settings.map((s) => (s.key in state.overrides ? { ...s, value: state.overrides[s.key], changed: true } : s));
+  const list = state.check.settings.map((s) => {
+    const yours = printProfile?.values?.[s.key];
+    const overridden = s.key in state.overrides;
+    const goalOnly = s.reason?.startsWith("From your goal") || s.key === "sparse_infill_pattern";
+    const enough = ["wall_loops", "top_shell_layers", "bottom_shell_layers", "sparse_infill_density"].includes(s.key)
+      && parseFloat(yours) >= parseFloat(s.value);
+    return { ...s, ...(yours != null ? { usual: yours, yours: true } : {}),
+      value: overridden ? state.overrides[s.key] : yours != null && (goalOnly || enough) ? yours : s.value,
+      ...(yours != null && !overridden && (goalOnly || (enough && !sameSetting(yours, s.value)))
+        ? { reason: goalOnly ? "Your print settings; nothing on this part asks for a change" : "Your print settings already meet this part's needs" } : {}),
+      ...(overridden ? { changed: true } : {}) };
+  });
   for (const [key, value] of Object.entries(state.overrides)) {
     if (!list.some((s) => s.key === key)) list.push({ key, value, label: OWN_LABEL[key] ?? key, reason: OWN_LABEL[key] ? "Set by you" : "From strength check", changed: true });
   }
-  return includeUnchecked ? list : list.filter((s) => !state.excludedSettings.includes(s.key));
+  return includeUnchecked ? list : list.filter((s) => !state.excludedSettings.includes(s.key) && !(s.yours && sameSetting(s.value, s.usual)));
 }
 
 function renderSettings() {
@@ -896,10 +941,9 @@ function renderSettings() {
   $("polyholes").checked = ["1", "true"].includes(String(value("hole_to_polyhole")));
   $("settings-block").hidden = !settings.length;
   const expanded = $("settings").querySelector("[data-unchanged]")?.hidden === false;
-  const unchanged = (s) => s.usual != null && (String(s.value) === String(s.usual)
-    || (Number.isFinite(Number(s.value)) && Number(s.value) === Number(s.usual)));
+  const unchanged = (s) => s.usual != null && sameSetting(s.value, s.usual);
   const row = (s) => {
-    const tick = el("input", { type: "checkbox", checked: !omitted.has(s.key), onchange: (event) => {
+    const tick = el("input", { type: "checkbox", checked: !omitted.has(s.key) && !(s.yours && unchanged(s)), disabled: Boolean(s.yours && unchanged(s)), onchange: (event) => {
         remember("which slicer settings to include");
         if (event.target.checked) omitted.delete(s.key); else omitted.add(s.key);
         state.excludedSettings = [...omitted];
@@ -909,7 +953,7 @@ function renderSettings() {
     tick.setAttribute("aria-label", `Include ${s.label} in 3MF`);
     const tr = el("tr", {}, el("td", {}, el("label", {}, tick, el("span", {}, s.label,
       s.changed ? el("small", { className: "changed", textContent: " changed by you" }) : ""))),
-      el("td", { textContent: s.usual == null ? "Not set by goal" : settingText(s.key, s.usual) }),
+      el("td", { textContent: s.usual == null ? "Not set by goal" : `${s.yours ? "yours: " : ""}${settingText(s.key, s.usual)}` }),
       el("td", {}, settingText(s.key, s.value), s.reason ? el("small", { className: "setting-reason", textContent: s.reason }) : ""));
     tr.dataset.setting = s.key;
     return tr;
@@ -925,7 +969,7 @@ function renderSettings() {
   toggle.setAttribute("aria-expanded", String(expanded));
   toggle.setAttribute("aria-controls", folded.id);
   $("settings").replaceChildren(
-    el("thead", {}, el("tr", {}, ...["Setting", "Usual (goal)", "For this part"].map((textContent) => el("th", { scope: "col", textContent })))),
+    el("thead", {}, el("tr", {}, ...["Setting", printProfile ? "Usual (yours / goal)" : "Usual (goal)", "For this part"].map((textContent) => el("th", { scope: "col", textContent })))),
     el("tbody", {}, ...settings.filter((s) => !unchanged(s)).map(row)),
     ...(same.length ? [el("tbody", {}, el("tr", {}, el("td", { colSpan: 3 }, toggle))), folded] : []));
   renderShells();
@@ -4492,3 +4536,4 @@ async function offerRestore() {
   $("restore").hidden = false;
 }
 offerRestore();
+showPrintProfile();
