@@ -662,7 +662,7 @@ function renderOptions() {
   const cards = [...$("options").children];
   const options = state.options;
   function picture(i) {
-    if (i >= options.length || state.options !== options || !cards[i].isConnected) return;
+    if (i >= options.length || state.options !== options || !cards[i]?.isConnected) return;
     const src = viewer.thumbnail({ up: options[i].up, size: [112, 84] });
     if (src) cards[i].querySelector("img").src = src;
     requestAnimationFrame(() => picture(i + 1));

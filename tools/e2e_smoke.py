@@ -641,10 +641,10 @@ def main():
             # Hook's second pose has support but no yellow: absent entries must disappear too.
             page.evaluate("() => fdm.steps.go('part')")
             run.act(lambda: click_sample(page, "hook"))
-            run.act(lambda: page.locator("#options > li").nth(1).click())
+            run.act(lambda: page.locator("#options > li > strong").nth(1).click())
             page.evaluate("() => fdm.steps.go('problems')")
             assert page.is_visible("#view-key") and page.is_hidden('#view-key > li[data-face-class="1"]')
-            run.act(lambda: page.locator("#options > li").first.click())
+            run.act(lambda: page.locator("#options > li > strong").first.click())
             assert page.is_hidden("#view-key"), "key survived a switch back to the trouble-free pose"
             return f"feature test key matches {classes}; unused yellow hidden; key clears on pose switch"
         run.step("colour key contains only colours on the part", feature_colour_key)
@@ -701,7 +701,7 @@ def main():
         def other_orientation():
             page.evaluate("() => fdm.viewer.thumbnailCache.clear()")
             check_thumbnails(page)
-            run.act(lambda: page.locator("#options > li").nth(1).click())
+            run.act(lambda: page.locator("#options > li > strong").nth(1).click())
             check_thumbnails(page)  # changing the print orientation invalidates the old images
             return f"{len(findings(page))} findings"
         run.step("select option 2", other_orientation)
@@ -730,7 +730,7 @@ def main():
             run.act(lambda: click_sample(page, "hook"))
             seen = {}
             for i in range(page.locator("#options > li").count()):
-                run.act(lambda i=i: page.locator("#options > li").nth(i).click())
+                run.act(lambda i=i: page.locator("#options > li > strong").nth(i).click())
                 up = tuple(page.evaluate("() => fdm.state.check.up.map(v => Math.round(v))"))
                 shown = tuple(page.evaluate("() => fdm.state.options[fdm.state.active].up.map(v => Math.round(v))"))
                 assert up == shown, f"check is for {up} but option shows {shown}"
@@ -902,7 +902,7 @@ def main():
         def design_keeps_orientation():
             """T-353: a design change made with another orientation picked keeps that orientation."""
             run.act(lambda: click_sample(page, "test_block"))
-            run.act(lambda: page.locator("#options > li").nth(1).click())
+            run.act(lambda: page.locator("#options > li > strong").nth(1).click())
             up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
             page.click("#edits-all")
             assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
@@ -1657,7 +1657,7 @@ def main():
 
         def project_round_trip():
             # Hook is loaded (copy_report): second orientation, a load, a slicer setting -> Save project -> reopen.
-            run.act(lambda: page.locator("#options > li").nth(1).click())
+            run.act(lambda: page.locator("#options > li > strong").nth(1).click())
             up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
             page.evaluate("async () => { const r = await fdm.call('regions'); const flat = r.regions.filter((x) => x.kind === 'flat');"
                           " fdm.state.loads = [{ region: flat[0].id, kind: 'fixed' }, { region: flat[1].id, kind: 'force', kg: 2 }];"
@@ -1709,7 +1709,7 @@ def main():
             fixture = ROOT / "tools" / "fixtures" / "l_bracket.step"
             run.act(lambda: page.set_input_files("#file", str(fixture)), 300_000)
             if "Sideways hole prints oval" not in " ".join(findings(page)):
-                run.act(lambda: page.locator("#options > li").nth(1).click())
+                run.act(lambda: page.locator("#options > li > strong").nth(1).click())
             if not page.locator("input[name=mode][value=both]").is_checked():
                 run.act(lambda: page.click("input[name=mode][value=both] >> xpath=.."))
             boxes = page.locator("#edits label")
@@ -1728,7 +1728,7 @@ def main():
             ups = page.evaluate("() => fdm.state.options.map((o) => o.up.map(Math.round))")
             assert up in ups, f"edited orientation {up} not offered for the written STEP: {ups}"
             if ups.index(up) != page.evaluate("() => fdm.state.active"):
-                run.act(lambda: page.locator("#options > li").nth(ups.index(up)).click())
+                run.act(lambda: page.locator("#options > li > strong").nth(ups.index(up)).click())
             seen = findings(page)
             assert not any("Sideways hole prints oval" in f for f in seen), f"teardrop missing in the written STEP: {seen}"
             return f"{out.stat().st_size // 1024} kB STEP, {text.count('ADVANCED_FACE')} faces; reloaded: {page.locator('#status').inner_text()}"
@@ -1774,7 +1774,7 @@ def main():
             side = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) < 0.1)")
             assert side >= 0, page.evaluate("() => fdm.state.options.map((o) => o.up)")
             if side != page.evaluate("() => fdm.state.active"):
-                run.act(lambda: page.locator("#options > li").nth(side).click())
+                run.act(lambda: page.locator("#options > li > strong").nth(side).click())
             page.evaluate("""async () => {
               const r = await fdm.call("regions");
               fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
@@ -2032,7 +2032,7 @@ def main():
             up = page.evaluate("() => fdm.state.options[fdm.state.active].up")
             if up[2] < 0.99:  # the roof up, as modelled
                 i = page.evaluate("() => fdm.state.options.findIndex((o) => o.up[2] > 0.99)")
-                run.act(lambda: page.locator("#options > li").nth(i).click(), 300_000)
+                run.act(lambda: page.locator("#options > li > strong").nth(i).click(), 300_000)
             assert page.evaluate("() => !document.getElementById('fine-for').hidden"), "no thinner-layers option for a 10° roof"
             text = page.locator("#fine-text").inner_text()
             layer = page.evaluate("() => fdm.state.check.settings.find(s => s.key === 'layer_height')")
@@ -2316,7 +2316,7 @@ def main():
             run.act(lambda: click_sample(page, "mushroom"))
             standing = page.evaluate("() => fdm.state.options.findIndex((o) => Math.abs(o.up[2]) > 0.9)")
             if standing != page.evaluate("() => fdm.state.active"):
-                run.act(lambda: page.locator("#options > li").nth(standing).click())
+                run.act(lambda: page.locator("#options > li > strong").nth(standing).click())
             page.evaluate("""async () => {
               const r = await fdm.call("regions");
               fdm.state.faceRegions = new Uint32Array(r.face_regions.slice().buffer);
@@ -2459,7 +2459,7 @@ def main():
             # Lying its best way the mushroom needs none: take the orientation with the most support.
             most = page.evaluate("() => fdm.state.options.map((o) => o.face_classes.filter((c) => c === 2).length).reduce((b, n, i, a) => (n > a[b] ? i : b), 0)")
             page.evaluate("() => fdm.steps.go('orient')")
-            run.act(lambda: page.locator("#options > li").nth(most).click())
+            run.act(lambda: page.locator("#options > li > strong").nth(most).click())
             page.evaluate("() => fdm.steps.go('extra')")
             page.evaluate("""() => {
               const s = fdm.state, cls = s.options[s.active].face_classes, n = new Map();
