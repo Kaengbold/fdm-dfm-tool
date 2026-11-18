@@ -793,6 +793,109 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: handle screenshot failures as test failures and continue to the final summary; investigate an appropriate capture timeout on a busy host.
   - Done when: a timed-out screenshot is reported with its step and the remaining checks still run.
 
+## Thermal optimizer (2026-11-18, tag [TO])
+
+Start these only after the open tasks above are done. Background: [research/thermal_optimizer_plan.md](research/thermal_optimizer_plan.md)
+(the original plan). The review on 2026-11-18 changed that plan: no server, no accounts and no uploads. The engine is a normal `fdmcore` module:
+browser (Pyodide: numpy, scipy, shapely, pyyaml only, so no Numba, lib3mf, libbgcode or pyGCodeDecode) plus local mode / MCP.
+**Rule for every [TO] task:** don't drop a feature, metric or quality aspect because it's slow or its constants are unknown. Use an approximation
+from published sources, show how sure we are, and tune it later. Handle speed with tiers (quick / fine) and finer detail where it matters.
+Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 and later tasks. serves: 2, 3, 4.
+
+- [ ] **T-470 P2** [TO] Thermal constants from published sources. · files: `core/fdmcore/data/thermal.yaml` (new), `research/thermal_constants.md` (new) · owner: —
+  - Do: for PLA, PETG, ABS/ASA, TPU, PA and PC, collect: density, heat capacity c_p(T) with a latent-heat peak for semi-crystalline plastics (PA, PP, PEEK; PETG is amorphous), thermal conductivity k, emissivity, Tg, the temperature where a printed layer stops sagging, and parameters for welding layers together (reptation / WLF, e.g. Seppala et al. 2017 *Soft Matter*, Coogan & Kazmer 2017 *Rapid Prototyping J.*; check both before citing). Per printer type: heat transfer from the fan vs fan % (with spin-up delay), contact resistance between beads and to the bed, nozzle and heater-block reheating, air temperature for open / passive / heated enclosures, melt temperature drop at high flow. Gemini can do the bulk reading.
+  - Every value records its source, a confidence level (`published` / `estimated` / `tuned`) and a range.
+  - Done when: every constant T-473 and T-474 need has a value, a source and a confidence level.
+- [ ] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: —
+  - Do: extend `Toolpath` (don't build a second format) with:
+    - speed (F) for each line, travel moves, retractions;
+    - fan commands (`M106/M107 P*`, Klipper `SET_FAN_SPEED`);
+    - pressure-advance changes (`M900`, `SET_PRESSURE_ADVANCE`);
+    - object ID (`EXCLUDE_OBJECT` / `M486`) and tool changes;
+    - firmware type (Marlin / Klipper / RRF / Bambu);
+    - the slicer settings block: PrusaSlicer/Orca at the end, Bambu `CONFIG_BLOCK` at the top, `.gcode.3mf` `project_settings.config`. Check with fixture files from each slicer.
+  - Slowdown causes: for each line printed slower than its feature's set speed, record why: `overhang`, `bridge`, `small_perimeter`, `volumetric_cap`, `layer_time` or `unknown`. Only `layer_time` slowdowns may be undone later.
+  - Read big files (50–500 MB) in chunks without holding the whole text in memory. `spot_heat` and the existing detailed checks keep working.
+  - Done when: fixtures from Orca, Bambu Studio and PrusaSlicer parse with correct speeds, fans and slowdown causes; a 200 MB file stays under a set memory limit.
+- [ ] **T-472 P2** [TO] Print timing: when each line is printed and where the nozzle is. · files: `core/fdmcore/kinematics.py` (new) · owner: —
+  - Do: a numpy model of speeding up and slowing down (trapezoid), with look-ahead. It covers Marlin jerk / junction deviation and Klipper `square_corner_velocity` / `minimum_cruise_ratio`; Bambu is approximated and checked against the slicer's own estimate. Output: start and end time of each line and the nozzle position over time, which T-473 needs for the fan and nozzle heat.
+  - Done when: total time is within ~5–10 % of the slicer's estimate on the fixtures, and within a few % against real print times once T-477 has them.
+- [ ] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: —
+  - Do (numpy + `scipy.sparse`):
+    - **Grid:** draw each layer's lines onto a 0.5–1 mm grid; islands = connected areas; columns = islands linked from layer to layer.
+    - **Heat network:** one node per 2–4 mm cell. Plastic is added at melt temperature (minus the drop at high flow), at the time and place it is printed. Heat flows sideways, down (with contact resistance) and into the bed. The model includes:
+      - fan cooling that depends on fan %, its spin-up delay and the nozzle's distance;
+      - reheating from the nozzle;
+      - radiation;
+      - air temperature by enclosure and height;
+      - c_p(T) and latent heat.
+    - **Joint between layers:** a small model of the joint gives its temperature over time T_int(t) for each new node.
+    - **Solver:** implicit and event-driven. The top 20–30 layers are kept in full detail; older layers are merged.
+  - Two tiers, both with every part of the model: **quick** (browser, aim ~60 s for a typical small part, with progress) and **fine** (smaller cells, more layers at full detail, used locally or as a longer browser run). Big parts: fine detail only around hot spots and important regions (T-475).
+  - Check with `node tools/pyodide_check.mjs`; run `make_manifest.py`.
+  - Done when: it matches or beats `gcode.spot_heat` and `heat.py` on the test shapes; quick tier within its time budget; T-477 measurements fall inside an agreed error band.
+- [ ] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: —
+  - Do: each node gets a window with two limits:
+    - **Too hot (shape):** temperature of the layer below when the next bead lands ≤ the sag limit, stricter on overhangs and bridges.
+    - **Too cold (bonding):** seconds the joint stays above Tg ≥ a minimum; add the welding integral with WLF / reptation values from T-470.
+  - Goals: **Fastest / Balanced / Strongest**, which move the window. Design-intent tags (cosmetic / load-bearing / dimension-critical) adjust it per region.
+  - New findings ("spot stays too hot", "spot is overcooled, weak bonding", "slowdown that isn't needed") need `rules.yaml` entries, each with a slicer or process fix, in plain words.
+  - Done when: the thin pin is flagged too hot, a thick load-bearing wall under 100 % fan is flagged too cold, and a block passes.
+- [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: —
+  - Do: a weight for each node from three inputs:
+    - the strength check's "Layer" index (tension across layers, shear along them) for the user's loads;
+    - design-intent tags;
+    - when no loads are entered, guessed importance: thin tall features and pins, sharp inside corners, roots of ribs and pegs, screw and insert holes, outer walls over infill. Mark it "guessed" and link to "Add loads".
+  - The weight makes the window stricter where a spot matters, and it sets where the fine detail goes. Weights never go below a minimum, so every spot keeps the "doesn't sag" limit; only the bonding goal is relaxed on unimportant spots.
+  - Done when: on a bracket with a load, the root gets the highest weight; with no loads, the fallback picks the pins and roots on the T-389 test part.
+- [ ] **T-476 P2** [TO] Heat result back into the strength check. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` (`strength_z`), `core/fdmcore/api.py` · owner: —
+  - Do: at the detailed level, the strength between layers comes from each spot's bonding result instead of one constant for the whole part. Show the safety before and after optimizing ("bracket root: 1.4 → 1.9"). One round of strength → weights → optimize → strength; no looping until nothing changes.
+  - Done when: an overcooled thin wall shows a lower safety factor than the same wall printed inside its window.
+- [ ] **T-477 P1 (go/no-go)** [TO] Real test prints decide whether to go on. · files: `research/thermal_validation.md` (new), `tools/` (test-part generator) · owner: — (needs the human: real prints)
+  - Do: print a thin + thick pin pair, a thick base narrowing to a thin tip, a part with several branches, and one big part limited by flow (as the control). Measure temperature where possible (IR / thermocouple), sag, snap strength between layers, and print time. Compare the T-473 model with `spot_heat` and `heat.py`. Estimate the time saved against OrcaSlicer's own cooling slowdown.
+  - Tune the T-470 defaults with the results (confidence `tuned`).
+  - Done when: model error and achievable savings are written down, with a go / pivot / stop decision. T-480 and later only on "go".
+- [ ] **T-478 P2** [TO] Show the results so users understand them. · files: `web/app.js`, `web/viewer.js`, `web/index.html`, `core/fdmcore/charts.py`, `core/fdmcore/api.py` · owner: —
+  - Do (reuse the "Show heat while printing" colours):
+    - **Window map on the part:** blue = too cold / weak bond, green = OK, red = too hot / may sag; Before / After toggle.
+    - **Layer playback:** a slider and play button showing heat building up.
+    - **Importance map** (T-475) with the reason for each area. A red spot on an important area stands out; one on an unimportant area is faded as "accepted risk".
+    - **Timeline chart:** layer time, fan % and joint temperature against height, before and after, with the window drawn as a shaded band.
+    - **Click a spot** to see why it changed ("printed every 4 s at 85 °C, so we slowed it to 9 s and turned the fan up early").
+    - **Summary card:** time saved, spots fixed, bonding improved, what was traded off on big parts, and what limits the print (cooling / flow / acceleration). When nothing can be gained, say why instead of "0 min saved".
+    - **Confidence label:** "rough, not tuned to your printer" or "tuned".
+  - G-code option (T-481): printed lines coloured by speed change, with markers where the fan changes.
+  - Plain language. The new API calls appear as MCP tools automatically (T-261).
+  - Done when: e2e smoke covers the assess view with a sample G-code; a hobbyist can tell from the screen what changed and why.
+- [ ] **T-479 P2** [TO] Option A (default): settings for the user's own slicer. · files: `core/fdmcore/export3mf.py`, `core/fdmcore/recommend.py`, `tools/slicer_check.py` · owner: —
+  - Do: turn the optimizer's fixes into things the slicer applies: height-range modifiers (fan, minimum layer time, speed), an added cooling tower object, or several copies at once. Export them in the 3MF; check with `slicer_check.py` that Orca, Bambu Studio and PrusaSlicer apply them. Don't switch off the layer-time slowdown in exports.
+  - Done when: the pin-pair part's exported 3MF gives the planned settings per height range in OrcaSlicer.
+- [ ] **T-480 P2** [TO] The optimizer (after a "go" from T-477). · files: `core/fdmcore/thermal_opt.py` (new) · owner: —
+  - Do:
+    - **Sliding window:** look ahead 5–10 layers, fix the current layer, move on.
+    - **What it costs:** time + Σ weight × how far each spot is outside its window + penalties for speed jumps on outer walls, speeds in vibration (VFA) bands, and many fan changes.
+    - **Fixes, cheapest first:** turn the fan up ahead of time; slow other islands; slow the hot island (only when nozzle reheating isn't the main heat source); a cooling park move or tower. When a spot is too cold: lower the fan or skip an unneeded slowdown.
+    - **Never touched:** overhang, bridge, small-perimeter and unknown slowdowns; layers 0–1; travel; wipe and ironing; prime/purge towers.
+    - **Fans:** ignore fan changes shorter than ~2× the spin-up time; respect kick-start; don't turn the fan off mid-layer unless the slicer did.
+    - **Big parts:** prioritise by weight when not everything can be fixed. Total speed-up is capped (e.g. 30 %, Expert can raise it).
+  - Done when: on the T-477 parts it is faster than Orca's cooling slowdown at equal or better window and strength results (simulated, then confirmed with a print).
+- [ ] **T-481 P2** [TO] Option B (opt-in): change the user's G-code directly. · files: `core/fdmcore/gcode_rewrite.py` (new), `core/fdmcore/api.py`, `web/app.js` · owner: —
+  - Do: the user picks "Optimize my G-code directly", loads their file, and downloads the result; the original always stays available.
+    - Change only speed (F) and add fan commands. Never change positions, extrusion (E) or temperatures. Split a line where the speed must change partway.
+    - Re-emit adaptive pressure advance for the new speed (or keep changes within ±X % if there's no PA table). Recompute `M73`. Use each firmware's fan commands (Marlin / Klipper / Bambu). The header names the changes and the time before → after.
+    - **Check before download:** same E per layer, same paths, same bounding box, speeds within machine limits, flow under the cap, no outer walls in vibration bands, and a re-simulation no worse anywhere. If a check fails, don't offer the file and say why.
+    - Plain `.gcode` first; `.gcode.3mf` repack (plate gcode, md5, `slice_info.config`) once tested on a real printer.
+  - Done when: an optimized pin-pair G-code passes all checks and prints; a broken rewrite is refused.
+- [ ] **T-482 P2** [TO] Tuning prints the user can do. · files: `tools/` or `core/fdmcore/` (test part), `web/app.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: —
+  - Do: two printable tests, no lab gear: a **sag test** (pins at falling layer times → the "too hot" limit) and a **snap test** (thin tower at stepped fan speeds, broken by hand → the "too cold" limit). The user enters the result; it is stored with their presets and in the project file, and the confidence changes from "rough" to "tuned".
+  - Done when: entering a result changes the window and the confidence label.
+- [ ] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: —
+  - Do: in local mode, slice the 3MF with OrcaSlicer with the layer-time slowdown switched off (everything else kept), so the starting speeds are clean and no slowdown causes need guessing. Run the fine tier there. Later the same through the browser slicer (T-127).
+  - Done when: the local MCP tool returns the optimized G-code for a 3MF.
+- [ ] **T-484 P3** [TO] Later. · owner: —
+  - Extra fans (Bambu aux / chamber, `M106 P2/P3`), `.bgcode`, GPU / voxel tier for hot spots.
+  - Island reordering (research only): single material, same object, travel-collision checks, seams kept; better as a hint to the slicer than a G-code edit.
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
