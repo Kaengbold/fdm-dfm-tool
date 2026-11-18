@@ -676,7 +676,12 @@ function optionCost(o) {
   const st = state.check?.stats;
   const support = o.support_summary;
   const parts = [support];
-  if (o.print_time_min != null) parts.push(`about ${Math.round(o.print_time_min)} min`);
+  if (o.print_time_min != null) {
+    // The per-pose time comes from a rough slice: scale it so the checked pose shows the check's own time.
+    const checked = state.check && state.options.find((c) => c.up.every((v, k) => Math.abs(v - state.check.up[k]) < 1e-6));
+    const scale = checked?.print_time_min && st?.print_time_min ? st.print_time_min / checked.print_time_min : 1;
+    parts.push(`about ${fmtTime(o.print_time_min * scale)}`);
+  }
   if (st?.filament_g != null) parts.push(`about ${Math.round(st.filament_g + o.support_g)} g of plastic`);
   return parts.join(" · ");
 }
