@@ -83,7 +83,12 @@ class Run:
             print(f"FAIL {name}: {e}")
         # Only letters, digits, - and _: CI's artifact upload refuses names with ':' and the like.
         safe = re.sub(r"[^A-Za-z0-9_-]+", "_", name)[:60]
-        self.page.screenshot(path=str(OUT / f"{len(self.failures):02d}_{safe}.png"))
+        try:
+            # 90 s: on a busy host (little free RAM) the 30 s default ran out and ended the whole run.
+            self.page.screenshot(path=str(OUT / f"{len(self.failures):02d}_{safe}.png"), timeout=90_000)
+        except Exception as e:  # noqa: BLE001 - a missing picture is a failure, not the end of the run
+            self.failures.append(f"{name} (screenshot)")
+            print(f"FAIL {name} (screenshot): {e}")
 
 
 def _box_stl(boxes) -> bytes:
