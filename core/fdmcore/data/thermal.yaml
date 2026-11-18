@@ -1,0 +1,128 @@
+# Thermal constants for the heat model (T-473) and the temperature window (T-474). T-470, 2026-11-18.
+# Every value: value, range [lo, hi], unit, source, confidence.
+#   published: read in the cited paper / datasheet;  estimated: typical value or derived, not measured for
+#   consumer filament;  tuned: fitted to our own test prints (none yet: T-477, T-482).
+# How each source was checked: research/thermal_constants.md. Temperatures in C, the rest SI.
+
+materials:
+  pla:
+    density:      {value: 1240, range: [1230, 1250], unit: kg/m3, source: "NatureWorks Ingeo TDS; presets.yaml", confidence: published}
+    cp_glassy:    {value: 1210, range: [1150, 1300], unit: J/kgK, source: "Pyda, Bopp, Wunderlich 2004, J. Chem. Thermodyn., doi:10.1016/j.jct.2004.05.003", confidence: published}
+    cp_melt:      {value: 2100, range: [1950, 2200], unit: J/kgK, source: "Pyda et al. 2004, liquid fit at about 210 C", confidence: published}
+    k:            {value: 0.16, range: [0.13, 0.20], unit: W/mK, source: "typical handbook value", confidence: estimated}
+    emissivity:   {value: 0.92, range: [0.90, 0.96], unit: "-", source: "typical polymer value; Costa et al. 2014 use 0.96", confidence: estimated}
+    tg_c:         {value: 58, range: [55, 62], unit: C, source: "NatureWorks Ingeo TDS", confidence: published}
+    tm_c:         {value: 150, range: [145, 175], unit: C, source: "NatureWorks Ingeo TDS (grade dependent)", confidence: published}
+    latent_heat:  {value: 0, range: [0, 36000], unit: J/kg, source: "printed PLA cools too fast to crystallise much; upper bound from Garlotta 2001 (dH0 93 J/g at about 40 % crystallinity), doi:10.1023/A:1020200822435", confidence: estimated}
+    tc_c:         {value: 105, range: [95, 115], unit: C, source: "DSC cooling, typical", confidence: estimated}
+    no_sag_c:     {value: 70, range: [62, 80], unit: C, source: "Tg + about 12 C (quenched, mostly amorphous bead)", confidence: estimated}
+    wlf:          {c1: 17.44, c2_k: 51.6, t_ref_c: 58, range_c1: [11, 17.44], range_c2_k: [40, 80], source: "universal WLF constants at Tg", confidence: estimated}
+    reptation_s:  {value: 0.04, range: [0.005, 0.5], unit: s, t_ref_c: 200, source: "order-of-magnitude estimate; no PLA value found", confidence: estimated}
+  petg:
+    density:      {value: 1270, range: [1260, 1290], unit: kg/m3, source: "Eastman / Prusament TDS; presets.yaml", confidence: published}
+    cp_glassy:    {value: 1200, range: [1100, 1320], unit: J/kgK, source: "typical PET-family value", confidence: estimated}
+    cp_melt:      {value: 1850, range: [1700, 2050], unit: J/kgK, source: "typical PET-family value", confidence: estimated}
+    k:            {value: 0.20, range: [0.17, 0.24], unit: W/mK, source: "typical handbook value", confidence: estimated}
+    emissivity:   {value: 0.93, range: [0.90, 0.96], unit: "-", source: "typical polymer value", confidence: estimated}
+    tg_c:         {value: 78, range: [75, 82], unit: C, source: "Eastman TDS", confidence: published}
+    tm_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    latent_heat:  {value: 0, range: [0, 0], unit: J/kg, source: "amorphous", confidence: published}
+    tc_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    no_sag_c:     {value: 93, range: [85, 100], unit: C, source: "Tg + about 15 C", confidence: estimated}
+    wlf:          {c1: 17.44, c2_k: 51.6, t_ref_c: 78, range_c1: [11, 18], range_c2_k: [40, 80], source: "universal WLF constants at Tg", confidence: estimated}
+    reptation_s:  {value: 0.05, range: [0.005, 0.5], unit: s, t_ref_c: 240, source: "order-of-magnitude estimate", confidence: estimated}
+  abs:
+    density:      {value: 1040, range: [1030, 1080], unit: kg/m3, source: "typical TDS; presets.yaml", confidence: published}
+    cp_glassy:    {value: 1350, range: [1250, 1450], unit: J/kgK, source: "typical handbook value", confidence: estimated}
+    cp_melt:      {value: 2100, range: [1950, 2300], unit: J/kgK, source: "typical handbook value", confidence: estimated}
+    k:            {value: 0.18, range: [0.15, 0.21], unit: W/mK, source: "typical handbook value", confidence: estimated}
+    emissivity:   {value: 0.96, range: [0.90, 0.96], unit: "-", source: "Costa, Duarte, Covas 2014, Virtual Phys. Prototyping, doi:10.1080/17452759.2014.984042 (value used in their ABS model)", confidence: published}
+    tg_c:         {value: 105, range: [100, 110], unit: C, source: "typical TDS; presets.yaml heat_limit_c", confidence: published}
+    tm_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    latent_heat:  {value: 0, range: [0, 0], unit: J/kg, source: "amorphous", confidence: published}
+    tc_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    no_sag_c:     {value: 120, range: [112, 128], unit: C, source: "Tg + about 15 C", confidence: estimated}
+    # Seppala et al. measured C1 = 4.65, C2 = 200.9 C at Tref = 230 C. Shifted to Tref = Tg (105 C):
+    # c1 = C1 * C2 / (C2 - 125) = 12.3, c2 = C2 - 125 = 75.9 K.
+    wlf:          {c1: 12.3, c2_k: 75.9, t_ref_c: 105, range_c1: [11, 17.44], range_c2_k: [51.6, 85], source: "Seppala et al. 2017, Soft Matter 13:6761, doi:10.1039/c7sm00950j (Makerbot ABS)", confidence: published}
+    reptation_s:  {value: 0.1, range: [0.01, 1.0], unit: s, t_ref_c: 230, source: "estimate; Seppala 2017 found no terminal viscosity for ABS, so it gives no reptation time", confidence: estimated}
+  asa:
+    density:      {value: 1070, range: [1050, 1090], unit: kg/m3, source: "Prusament ASA TDS; presets.yaml", confidence: published}
+    cp_glassy:    {value: 1300, range: [1200, 1450], unit: J/kgK, source: "as ABS / SAN", confidence: estimated}
+    cp_melt:      {value: 2050, range: [1900, 2300], unit: J/kgK, source: "as ABS / SAN", confidence: estimated}
+    k:            {value: 0.18, range: [0.15, 0.21], unit: W/mK, source: "typical handbook value", confidence: estimated}
+    emissivity:   {value: 0.93, range: [0.90, 0.96], unit: "-", source: "typical polymer value", confidence: estimated}
+    tg_c:         {value: 100, range: [97, 110], unit: C, source: "Polymaker PolyLite ASA TDS (97.8 C); presets.yaml", confidence: published}
+    tm_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    latent_heat:  {value: 0, range: [0, 0], unit: J/kg, source: "amorphous", confidence: published}
+    tc_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    no_sag_c:     {value: 115, range: [107, 125], unit: C, source: "Tg + about 15 C", confidence: estimated}
+    wlf:          {c1: 12.3, c2_k: 75.9, t_ref_c: 100, range_c1: [11, 17.44], range_c2_k: [51.6, 85], source: "taken from ABS (Seppala 2017): same SAN matrix", confidence: estimated}
+    reptation_s:  {value: 0.1, range: [0.01, 1.0], unit: s, t_ref_c: 250, source: "as ABS", confidence: estimated}
+  tpu:
+    density:      {value: 1210, range: [1180, 1240], unit: kg/m3, source: "typical 95A TDS", confidence: published}
+    cp_glassy:    {value: 1500, range: [1350, 1700], unit: J/kgK, source: "typical polyurethane value (rubbery at room temperature)", confidence: estimated}
+    cp_melt:      {value: 1950, range: [1800, 2200], unit: J/kgK, source: "typical value", confidence: estimated}
+    k:            {value: 0.20, range: [0.17, 0.25], unit: W/mK, source: "typical handbook value", confidence: estimated}
+    emissivity:   {value: 0.94, range: [0.90, 0.96], unit: "-", source: "typical polymer value", confidence: estimated}
+    tg_c:         {value: -35, range: [-45, -20], unit: C, source: "soft-segment Tg, typical TDS", confidence: estimated}
+    tm_c:         {value: 175, range: [150, 200], unit: C, source: "hard-segment melting, typical TDS", confidence: estimated}
+    latent_heat:  {value: 15000, range: [5000, 30000], unit: J/kg, source: "hard-segment ordering, typical DSC", confidence: estimated}
+    tc_c:         {value: 110, range: [90, 130], unit: C, source: "hard-segment ordering on cooling, typical DSC", confidence: estimated}
+    no_sag_c:     {value: 110, range: [90, 130], unit: C, source: "about tc (hard domains lock the shape)", confidence: estimated}
+    wlf:          {c1: 17.44, c2_k: 51.6, t_ref_c: -35, range_c1: [11, 19], range_c2_k: [40, 80], source: "universal WLF constants at the soft-segment Tg; a poor fit for a segmented polymer", confidence: estimated}
+    reptation_s:  {value: 0.02, range: [0.002, 0.5], unit: s, t_ref_c: 220, source: "order-of-magnitude estimate", confidence: estimated}
+  pa:
+    density:      {value: 1060, range: [1010, 1140], unit: kg/m3, source: "PA12 1.01-1.03, PA6 1.13 g/cm3 (typical TDS)", confidence: published}
+    cp_glassy:    {value: 1600, range: [1450, 1750], unit: J/kgK, source: "typical handbook value, dry", confidence: estimated}
+    cp_melt:      {value: 2400, range: [2150, 2700], unit: J/kgK, source: "typical handbook value", confidence: estimated}
+    k:            {value: 0.24, range: [0.20, 0.30], unit: W/mK, source: "typical handbook value, dry", confidence: estimated}
+    emissivity:   {value: 0.93, range: [0.90, 0.96], unit: "-", source: "typical polymer value", confidence: estimated}
+    tg_c:         {value: 50, range: [40, 60], unit: C, source: "dry PA12 about 45, PA6 about 55 (lower when wet)", confidence: estimated}
+    tm_c:         {value: 180, range: [175, 225], unit: C, source: "PA12 about 178, PA6 about 220 (typical TDS)", confidence: published}
+    latent_heat:  {value: 55000, range: [35000, 75000], unit: J/kg, source: "typical DSC for printed PA, depends on crystallinity", confidence: estimated}
+    tc_c:         {value: 145, range: [135, 180], unit: C, source: "DSC cooling, PA12 about 145, PA6 about 170", confidence: estimated}
+    no_sag_c:     {value: 145, range: [130, 175], unit: C, source: "about tc (crystallisation stops flow)", confidence: estimated}
+    wlf:          {c1: 17.44, c2_k: 51.6, t_ref_c: 50, range_c1: [11, 19], range_c2_k: [40, 80], source: "universal WLF constants; above Tm an Arrhenius law fits PA better", confidence: estimated}
+    reptation_s:  {value: 0.005, range: [0.0005, 0.05], unit: s, t_ref_c: 250, source: "order-of-magnitude estimate (low melt viscosity)", confidence: estimated}
+  pc:
+    density:      {value: 1200, range: [1190, 1220], unit: kg/m3, source: "Covestro Makrolon TDS", confidence: published}
+    cp_glassy:    {value: 1220, range: [1150, 1300], unit: J/kgK, source: "typical handbook value", confidence: estimated}
+    cp_melt:      {value: 1900, range: [1750, 2050], unit: J/kgK, source: "typical handbook value", confidence: estimated}
+    k:            {value: 0.20, range: [0.19, 0.22], unit: W/mK, source: "Covestro Makrolon TDS", confidence: published}
+    emissivity:   {value: 0.92, range: [0.90, 0.96], unit: "-", source: "typical polymer value", confidence: estimated}
+    tg_c:         {value: 147, range: [110, 153], unit: C, source: "Covestro Makrolon TDS; PC filament blends are often lower (110-145)", confidence: published}
+    tm_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    latent_heat:  {value: 0, range: [0, 0], unit: J/kg, source: "amorphous", confidence: published}
+    tc_c:         {value: null, unit: C, source: "amorphous", confidence: published}
+    no_sag_c:     {value: 160, range: [125, 170], unit: C, source: "Tg + about 15 C (low end for PC blends)", confidence: estimated}
+    wlf:          {c1: 17.44, c2_k: 51.6, t_ref_c: 147, range_c1: [11, 19], range_c2_k: [40, 80], source: "universal WLF constants at Tg", confidence: estimated}
+    reptation_s:  {value: 0.03, range: [0.003, 0.3], unit: s, t_ref_c: 280, source: "order-of-magnitude estimate", confidence: estimated}
+
+process:
+  # Convection. Costa et al. 2014 bracket 5-150 W/m2K and say values of about 60 and above "should correspond to
+  # most practical conditions"; they quote 67 W/m2K (Rodriguez) for a hot ABS bead in natural convection.
+  h_still_air:    {value: 10, range: [5, 30], unit: W/m2K, source: "Costa et al. 2014 lower bracket; natural convection on a cooled part", confidence: estimated}
+  h_fan:          # by part-cooling fan %, on the fresh layer (5015 / 4010 blower near the nozzle)
+    points: {0: 10, 30: 35, 50: 60, 70: 85, 100: 120}
+    range_at_100: [60, 200]
+    unit: W/m2K
+    source: "shape estimated (a bit slower than linear); 50 % tied to Costa et al. 2014's practical value of about 60"
+    confidence: estimated
+    falloff_mm: {value: 30, range: [10, 60], source: "estimate: the fan's effect fades with distance below the nozzle", confidence: estimated}
+  fan_spin_up_s:  {value: 0.4, range: [0.2, 1.0], unit: s, source: "estimate for small DC blowers (time constant)", confidence: estimated}
+  bead_contact_conductance: {value: 500, range: [100, 5000], unit: W/m2K, source: "estimate; Costa et al. 2014 only bracket 0 / 100 / 1e6 (no measured value)", confidence: estimated}
+  z_conductivity_ratio:     {value: 0.7, range: [0.5, 0.9], unit: "-", source: "estimate: voids and the narrow bead contact lower k across layers", confidence: estimated}
+  bed_contact_conductance:  {smooth_pei: 300, textured_pei: 150, range: [50, 1000], unit: W/m2K, source: "estimate (textured: less contact area)", confidence: estimated}
+  nozzle_reheat:  {h_equiv: 70, range: [30, 120], unit: W/m2K, reach_mm: 1.5, reach_range_mm: [0.5, 3.0], source: "estimate: radiation and hot air from the nozzle and heater block onto the top layer", confidence: estimated}
+  chamber_air_c:  # steady state after about 30 min
+    open:           {value: 25, range: [18, 30], source: "room", confidence: estimated}
+    closed_bed_60:  {value: 35, range: [28, 40], source: "estimate, closed desktop printer printing PLA / PETG", confidence: estimated}
+    closed_bed_100: {value: 48, range: [40, 55], source: "estimate, closed desktop printer printing ABS / ASA", confidence: estimated}
+    heated_chamber: {value: 60, range: [45, 90], source: "the chamber heater's set point", confidence: estimated}
+  melt_temp_drop_c:  # below the set point, by volumetric flow (mm3/s), standard hotend within its rated flow
+    points: {0: 0, 10: 5, 20: 15, 30: 30}
+    range_at_20: [5, 30]
+    source: "estimate; Pollard et al. 2017 (doi:10.1016/j.promfg.2017.07.147) measured 12 and 18.5 C overshoots on feed-rate steps; Go & Hart 2017 (doi:10.1016/j.addma.2017.10.016) show flow is limited by heating the filament"
+    confidence: estimated
+  melt_temp_lag_s: {value: 2, range: [0.5, 5], unit: s, source: "estimate from the step responses in Pollard et al. 2017", confidence: estimated}
