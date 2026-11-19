@@ -70,7 +70,7 @@ def test_old_project_has_no_suggestion_overrides():
     assert opened["holes"]["fits"]["4"]["partner_mm"] == 8
 
 
-@pytest.mark.parametrize("choices", [{}, {"excluded_settings": ["wall_loops", "layer_height"]},
+@pytest.mark.parametrize("choices", [{}, {"load_settings": {"values": {"wall_loops": "2"}, "met": True, "kept": False}}, {"excluded_settings": ["wall_loops", "layer_height"]},
                                        {"edit_selections": {"fit-4": False, "teardrop-8": True},
                                         "suggested_boxes": {'["support",4,null,null]': {
                                             "kind": "support", "from": {"region": 4}, "use": False}}}])

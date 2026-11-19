@@ -211,6 +211,36 @@ def test_optimiser_finds_the_lightest_settings_that_hold():
     assert held["safety_factor"] == pytest.approx(o["target"], rel=1e-3)
 
 
+def test_optimiser_for_this_orientation_never_turns_the_part():
+    """The app's automatic settings for a load (T-429): same climb, this orientation only, no extras."""
+    loads = _plank()
+    prof = {"material": "pla", "printer": "bambu_p1s"}
+    for up in ([0, 0, 1], [0, 1, 0]):
+        o = api.optimise_strength(up, loads, prof, this_orientation=True)
+        assert o["orientation"] == "this one" and o["alternatives"] == [] and o["up"] == up
+    heavy = [dict(l, kg=500) if l["kind"] == "force" else l for l in loads]
+    o = api.optimise_strength([0, 0, 1], heavy, prof, this_orientation=True)
+    assert not o["met"] and "beyond" not in o
+
+
+
+def test_optimiser_counts_print_time_and_compares_with_a_baseline():
+    """Walls take longer per gram than infill, so the climb weighs time as well as plastic (T-429),
+    and the goal's settings come back with their safety, grams and minutes for the comparison."""
+    from fdmcore.checks import shell_infill_minutes
+    from fdmcore.profile import Profile
+
+    p = Profile.from_dict({"material": "pla", "printer": "bambu_p1s"})
+    assert shell_infill_minutes(1000, 0, p) > shell_infill_minutes(0, 1000, p) > 0
+    loads = [dict(l, kg=l["kg"] * 3) if l["kind"] == "force" else l for l in _plank()]
+    base = {"walls": 3, "infill": 0.15, "top": 4, "bottom": 3}
+    o = api.optimise_strength([0, 0, 1], loads, {"material": "pla", "printer": "bambu_p1s"}, this_orientation=True, baseline=base)
+    assert o["met"] and o["minutes"] > 0 and o["grams"] > 0
+    b = o["baseline"]
+    check = api.strength([0, 0, 1], loads, {"material": "pla", "printer": "bambu_p1s"}, **base)
+    assert b["safety_factor"] == pytest.approx(check["safety_factor"], rel=1e-6) and b["grams"] > 0 and b["minutes"] > 0
+
+
 def test_fea_view_fields_cover_the_refined_surface():
     loads = hook_loads()
     r = api.strength([1, 0, 0], loads, {"material": "pla"})

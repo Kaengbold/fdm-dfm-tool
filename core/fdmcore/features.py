@@ -263,8 +263,14 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     r = rotation_to_z(up)
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
-    edits += _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"])
-    edits += _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"])
+    protect = _bed_protection(oriented, region, r, fits, gaps)
+    corner_skipped: list[str] = []
+    corner_edits = _corner_chamfers(oriented, to_part, profile, prm["chamfer_mm"], protect, corner_skipped)
+    foot_skipped: list[str] = []
+    foot_edits = _foot_chamfer(oriented, to_part, profile, prm["foot_chamfer_mm"], protect, foot_skipped)
+    _attach_skip_notes(corner_edits, corner_skipped, foot_edits, foot_skipped)
+    edits += corner_edits
+    edits += foot_edits
     edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
                               profile.material["max_overhang_deg"])
     edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
@@ -294,6 +300,70 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             "much stronger. It grows on both sides; check that nothing needs to fit there.",
             [to_part(p) for p in w["pieces"]], op="add", param="wall_lines"))
     return edits
+
+
+# Which check findings each kind of design change (its ``rule``) fixes. A change is offered as a fix only when
+# one of them is in the current check, near the change; the rest are folded away as "Other ideas" (T-432).
+EDIT_FIXES = {
+    "short_bridge": ("sideways_hole_oval", "bridge_sag", "long_bridge", "trapped_support"),
+    "sharp_bed_corners": ("warping",),
+    "elephant_foot": ("elephant_foot",),
+    "support_marks": ("support_marks",),
+    "sacrificial_layer": ("hole_starts_midair",),
+    "pause_to_insert": ("pause_to_insert",),
+    "single_line_wall": ("single_line_wall", "too_thin_to_print"),
+    "tall_boss": ("tall_thin_feature", "weak_upright_pin"),
+}
+ASKED_FOR = {"fit_size", "fastener", "press_fit_fins", "split"}  # sizes the user typed in: their own request
+FROM_STRENGTH = {"stress_at_inside_corner", "thin_neck"}  # from the weak spot of the last strength check
+NEAR_MM = 2.0  # a change this close to a finding's box is at that finding
+
+
+def link_to_findings(edits: list[dict], findings: list[dict], to_print) -> list[dict]:
+    """Say what each edit is for, in ``source``: "finding" (with ``fixes``: the finding's ``rule`` and ``title``),
+    "request" (a size the user asked for), "strength" (the strength check's weak spot) or "other" (no
+    finding asks for it: shown folded as "Other ideas"; ``why_other`` says why when there's more to say). ``findings`` as check returns
+    them (print frame); ``to_print`` maps part-frame points (n × 3) to that frame."""
+    T = load_data("thresholds")["first_layer"]
+    for e in edits:
+        e["fixes"] = None
+        if e["rule"] in ASKED_FOR:
+            e["source"] = "request"
+            continue
+        if e["rule"] in FROM_STRENGTH:
+            e["source"] = "strength"
+            continue
+        e["source"] = "other"
+        e["why_other"] = None
+        wanted = EDIT_FIXES.get(e["rule"], ())
+        pts = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3)
+        box = None
+        if len(pts):
+            p = np.asarray(to_print(pts.astype(float)))
+            box = (p.min(axis=0) - NEAR_MM, p.max(axis=0) + NEAR_MM)
+        match = next((f for f in findings if f["rule"] in wanted and _overlaps(box, f.get("bbox"))), None)
+        if match is None:
+            continue
+        if e["rule"] == "elephant_foot" and T["elephant_foot_compensation_mm"] >= T["elephant_foot_mm"][1]:
+            e["why_other"] = "Your slicer's elephant foot compensation (set in the 3MF) already takes up the bulge."
+            continue
+        e["source"] = "finding"
+        e["fixes"] = {"rule": match["rule"], "title": match.get("title", match["rule"])}
+        e.pop("why_other")
+        if e["rule"] == "elephant_foot":
+            lo, hi = T["elephant_foot_mm"]
+            e["description"] += (f" Your slicer's elephant foot compensation (set in the 3MF) pulls the first layer in by "
+                                 f"{T['elephant_foot_compensation_mm']:g} mm, but the bulge can reach {hi:g} mm: the chamfer takes "
+                                 "the rest, where holes and edges at the bed must be exact.")
+    return edits
+
+
+def _overlaps(box, bbox) -> bool:
+    """Does the edit's box (lo, hi) touch a finding's bbox? A finding without a place (the whole part) always does."""
+    if not bbox or box is None:
+        return True
+    lo, hi = np.asarray(bbox[0], float), np.asarray(bbox[1], float)
+    return bool(np.all(box[0] <= hi) and np.all(lo <= box[1]))
 
 
 FIT_NAMES = {"press": "be pressed in (stays put)", "snug": "push in snugly", "sliding": "slide and turn freely", "loose": "drop in loosely"}
@@ -464,11 +534,298 @@ def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.nda
     return _prism(profile, axis * (f["length"] / 2 + 5 * OFF_CORNER))
 
 
-def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0) -> list[dict]:
+SKIP_ORDER = ("teeth", "thread", "fit", "fine")
+SKIP_LABELS = {
+    "teeth": "the teeth",
+    "thread": "the threads",
+    "fit": "the sized fit",
+    "fine": "the fine details",
+}
+
+
+def _skip_note(reasons: list[str]) -> str:
+    """Plain-language sentence naming the working shapes left alone, once per kind."""
+    ordered = [SKIP_LABELS[k] for k in SKIP_ORDER if k in reasons]
+    if not ordered:
+        return ""
+    what = ordered[0] if len(ordered) == 1 else ", ".join(ordered[:-1]) + f" and {ordered[-1]}"
+    return f"Left {what} alone."
+
+
+def _attach_skip_notes(corner_edits: list[dict], corner_skipped: list[str],
+                       foot_edits: list[dict], foot_skipped: list[str]) -> None:
+    """Say once on a remaining corner or foot edit which working shapes were kept untouched."""
+    if corner_edits and corner_skipped:
+        corner_edits[0]["description"] += " " + _skip_note(corner_skipped)
+    foot_reasons = list(foot_skipped) + ([] if corner_edits else list(corner_skipped))
+    if foot_edits and foot_reasons:
+        foot_edits[0]["description"] += " " + _skip_note(foot_reasons)
+
+
+def _bed_protection(oriented: Mesh, region: np.ndarray, r: np.ndarray,
+                    fits: dict | None, gaps: dict | None) -> dict:
+    """Working-shape context shared by corner rounding and the bottom chamfer: triangles of sized fits
+    (round holes / posts and flat slots / tabs) and modelled threads, both in ``oriented`` coordinates."""
+    fit_regions = {int(k) for k in (fits or {})} | {int(k) for pair in (gaps or {}) for k in pair}
+    fit_tris = oriented.triangles[np.isin(region, list(fit_regions))] if fit_regions else np.zeros((0, 3, 3))
+    threads = find_threads(oriented, axes=r.T)
+    return {"fit_tris": fit_tris, "threads": threads}
+
+
+def _slice_segments(tris: np.ndarray, z: float) -> np.ndarray:
+    """2D segments where triangles ``tris`` cross height ``z``, shape (K, 2, 2)."""
+    if len(tris) == 0:
+        return np.zeros((0, 2, 2))
+    a, b = tris, tris[:, [1, 2, 0]]
+    da, db = a[..., 2] - z, b[..., 2] - z
+    crossing = da * db < 0
+    swap = (da > db)[..., None]
+    lo, hi = np.where(swap, b, a), np.where(swap, a, b)
+    t = (z - lo[..., 2]) / (hi[..., 2] - lo[..., 2] + (~crossing))
+    pts = lo[..., :2] + t[..., None] * (hi[..., :2] - lo[..., :2])
+    ok = crossing.sum(axis=1) == 2
+    return pts[ok][crossing[ok]].reshape(-1, 2, 2) if ok.any() else np.zeros((0, 2, 2))
+
+
+def _point_to_segments_dist(pts: np.ndarray, segs: np.ndarray) -> np.ndarray:
+    """Shortest 2D distance from each point in ``pts`` (M, 2) to any segment in ``segs`` (K, 2, 2)."""
+    if len(pts) == 0:
+        return np.zeros(0)
+    if len(segs) == 0:
+        return np.full(len(pts), np.inf)
+    a = segs[:, 0]
+    ab = segs[:, 1] - a
+    len2 = np.maximum((ab * ab).sum(axis=1), 1e-12)
+    best = np.full(len(pts), np.inf)
+    for k in range(0, len(segs), 200):
+        ak, abk, l2k = a[k:k + 200], ab[k:k + 200], len2[k:k + 200]
+        t = np.clip(np.einsum("pkc,kc->pk", pts[:, None] - ak[None], abk) / l2k[None], 0.0, 1.0)
+        d = np.linalg.norm(pts[:, None] - (ak[None] + t[..., None] * abk[None]), axis=2)
+        best = np.minimum(best, d.min(axis=1))
+    return best
+
+
+def _ring_turns(c: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per vertex of closed ring ``c`` (material on the left): signed turn in degrees (+ convex,
+    - concave), incoming edge length and outgoing edge length."""
+    e1 = c - np.roll(c, 1, axis=0)
+    e2 = np.roll(c, -1, axis=0) - c
+    l1, l2 = np.linalg.norm(e1, axis=1), np.linalg.norm(e2, axis=1)
+    cross = e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]
+    dot = np.einsum("ij,ij->i", e1, e2)
+    return np.degrees(np.arctan2(cross, dot)), l1, l2
+
+
+def _fit_circle_2d(pts: np.ndarray) -> tuple[np.ndarray, float] | None:
+    """Algebraic least-squares circle fit to 2D points (centred for stability)."""
+    if len(pts) < 3:
+        return None
+    mean = pts.mean(axis=0)
+    q = pts - mean
+    A = np.column_stack([q, np.ones(len(q))])
+    sol, *_ = np.linalg.lstsq(A, -(q * q).sum(axis=1), rcond=None)
+    cx, cy = -sol[0] / 2.0, -sol[1] / 2.0
+    r2 = cx * cx + cy * cy - sol[2]
+    if not np.isfinite(r2) or r2 <= 1e-6:
+        return None
+    return np.array([cx, cy]) + mean, float(np.sqrt(r2))
+
+
+def _longest_circular_run(mask: np.ndarray) -> tuple[int, int]:
+    """(start index, length) of the longest contiguous True run in circular boolean ``mask``."""
+    n = len(mask)
+    if n == 0 or not mask.any():
+        return 0, 0
+    if mask.all():
+        return 0, n
+    doubled = np.concatenate([mask, mask])
+    padded = np.r_[False, doubled, False]
+    changes = np.flatnonzero(padded[1:] != padded[:-1])
+    starts, ends = changes[0::2], changes[1::2]
+    lengths = np.minimum(ends - starts, n)
+    best = int(np.argmax(lengths))
+    return int(starts[best] % n), int(lengths[best])
+
+
+def _radial_candidates(c: np.ndarray, idx: np.ndarray, turn: np.ndarray,
+                       min_repeats: int, turn_tol: float) -> list[tuple[np.ndarray, float]]:
+    """Candidate (centre, radius) circle fits for corners ``idx``: whole set first (full gears /
+    knurls), then longest repeating chains along the ring (sector gears or gears with a tab)."""
+    out = []
+    fit = _fit_circle_2d(c[idx])
+    if fit is not None:
+        out.append(fit)
+    pts = c[idx]
+    t = turn[idx]
+    for period in (1, 2):
+        if len(idx) < period * min_repeats:
+            continue
+        step_d = np.linalg.norm(np.roll(pts, -period, axis=0) - pts, axis=1)
+        med = float(np.median(step_d))
+        if med <= 1e-6:
+            continue
+        same = (np.abs(t - np.roll(t, -period)) <= turn_tol) & (np.abs(step_d - np.roll(step_d, -period)) <= 0.25 * med + 0.1)
+        start, run_len = _longest_circular_run(same)
+        if run_len >= period * (min_repeats - 1):
+            chain = idx[(start + np.arange(min(run_len + period, len(idx)))) % len(idx)]
+            fit = _fit_circle_2d(c[chain])
+            if fit is not None:
+                out.append(fit)
+    return out
+
+
+def _radial_pattern_vertices(c: np.ndarray, signed_turn: np.ndarray, W: dict) -> np.ndarray:
+    """Vertices on ring ``c`` belonging to a repeating radial pattern around a centre (gear teeth,
+    splines, knurls): many equal corners at equal angles with both outward and inward bends (so
+    squares, hexagons, octagons and smooth circles are never caught)."""
+    n = len(c)
+    none = np.zeros(n, dtype=bool)
+    min_rep = int(W["radial_min_repeats"])
+    min_turn = float(W["radial_min_turn_deg"])
+    # Teeth / flutes bend both ways; convex shapes (circles, hexagons, boxes) bend only one way.
+    if signed_turn[signed_turn > 1.0].sum() < min_rep * min_turn or (-signed_turn[signed_turn < -1.0]).sum() < min_rep * min_turn:
+        return none
+    turn = np.abs(signed_turn)
+    turn_tol = float(W["radial_turn_tol_deg"])
+    ang_tol = float(W["radial_angle_tol_share"])
+    min_depth = float(W["radial_min_depth_mm"])
+    max_step = 2 * np.pi / min_rep * (1.0 + ang_tol)
+
+    for idx in (np.flatnonzero(signed_turn >= min_turn), np.flatnonzero(signed_turn <= -min_turn)):
+        if len(idx) < min_rep:
+            continue
+        for centre, radius in _radial_candidates(c, idx, turn, min_rep, turn_tol):
+            r_tol = max(float(W["radial_radius_tol_share"]) * radius, float(W["radial_radius_tol_mm"]))
+            r_idx = np.linalg.norm(c[idx] - centre, axis=1)
+            sub = idx[np.abs(r_idx - radius) <= r_tol]
+            if len(sub) < min_rep:
+                continue
+            th = np.arctan2(c[sub, 1] - centre[1], c[sub, 0] - centre[0]) % (2 * np.pi)
+            order = np.argsort(th)
+            sub, th = sub[order], th[order]
+            t_sub = turn[sub]
+            r_all = np.linalg.norm(c - centre, axis=1)
+            for period in (1, 2):
+                if len(sub) < period * min_rep:
+                    continue
+                d_th = (np.roll(th, -period) - th) % (2 * np.pi)
+                small = d_th[(d_th > 1e-3) & (d_th <= max_step)]
+                if len(small) < period * (min_rep - 1):
+                    continue
+                step = float(np.median(small))
+                ok = (np.abs(d_th - step) <= ang_tol * step) & (np.abs(t_sub - np.roll(t_sub, -period)) <= turn_tol)
+                start, run_len = _longest_circular_run(ok)
+                if run_len < period * (min_rep - 1):
+                    continue
+                if run_len == len(sub):
+                    if r_all.max() - r_all.min() >= min_depth:
+                        return np.ones(n, dtype=bool)
+                    continue
+                matched = np.sort(sub[(start + np.arange(run_len + period)) % len(sub)])
+                marked = np.zeros(n, dtype=bool)
+                angs = np.arctan2(c[:, 1] - centre[1], c[:, 0] - centre[0])
+                for a, b in zip(matched, np.roll(matched, -1)):
+                    da = abs((angs[b] - angs[a] + np.pi) % (2 * np.pi) - np.pi)
+                    if da <= 1.5 * step:
+                        span = (int(b) - int(a)) % n
+                        marked[(int(a) + np.arange(span + 1)) % n] = True
+                # Include the end tooth flanks down to their adjacent root vertices.
+                ends = np.flatnonzero(marked & (~np.roll(marked, 1) | ~np.roll(marked, -1)))
+                for k in ends:
+                    for nbr in ((k - 1) % n, (k + 1) % n):
+                        if not marked[nbr] and abs(r_all[nbr] - radius) >= min_depth:
+                            if abs((angs[nbr] - angs[k] + np.pi) % (2 * np.pi) - np.pi) <= 0.75 * step:
+                                marked[nbr] = True
+                if marked.any() and r_all[marked].max() - r_all[marked].min() >= min_depth:
+                    return marked
+    return none
+
+
+def _close_corner_mask(c: np.ndarray, signed_turn: np.ndarray, line_width: float, W: dict,
+                       ignore: np.ndarray | None = None) -> np.ndarray:
+    """Sharp corners on ring ``c`` that have another sharp corner within a few printed line widths
+    (snap hooks, latches, clips, fine slots rather than large bed corners that warp)."""
+    is_sharp = np.abs(signed_turn) >= float(W["close_min_turn_deg"])
+    if ignore is not None:
+        is_sharp &= ~ignore
+    sharp = np.flatnonzero(is_sharp)
+    mask = np.zeros(len(c), dtype=bool)
+    if len(sharp) < 2:
+        return mask
+    limit = float(W["close_corners_lines"]) * line_width
+    pts = c[sharp]
+    close = np.zeros(len(pts), dtype=bool)
+    for k in range(0, len(pts), 200):
+        chunk = pts[k:k + 200]
+        d = np.linalg.norm(chunk[:, None] - pts[None, :], axis=2)
+        d[np.arange(len(chunk)), np.arange(k, k + len(chunk))] = np.inf
+        close[k:k + len(chunk)] = d.min(axis=1) < limit
+    mask[sharp[close]] = True
+    return mask
+
+
+def _on_threads(pts: np.ndarray, z0: float, threads: list[dict], W: dict) -> np.ndarray:
+    """True for 2D points on layer ``z0`` that sit on a detected thread reaching the bed."""
+    mask = np.zeros(len(pts), dtype=bool)
+    if not threads or len(pts) == 0:
+        return mask
+    base_tol = float(W["thread_tol_mm"])
+    p3 = np.column_stack([pts, np.full(len(pts), z0)])
+    for t in threads:
+        tol = base_tol + 0.5 * float(t["pitch_mm"])
+        if t["lo"][2] > z0 + tol:
+            continue
+        centre = np.asarray(t["center"], float)
+        axis = np.asarray(t["axis"], float)
+        v = p3 - centre
+        along = v @ axis
+        radial = np.linalg.norm(v - np.outer(along, axis), axis=1)
+        in_len = np.abs(along) <= float(t["length_mm"]) / 2 + tol
+        r_max = float(t["major_mm"]) / 2 + tol
+        if abs(axis[2]) > 0.7:  # upright thread: annulus so an outer block around a threaded hole stays free
+            r_min = max(float(t["minor_mm"]) / 2 - tol, 0.0)
+            mask |= in_len & (radial >= r_min) & (radial <= r_max)
+        else:  # thread lying across the bed: bed slice cuts across the chord of the cylinder
+            mask |= in_len & (radial <= r_max)
+    return mask
+
+
+def _classify_ring(c: np.ndarray, z0: float, line_width: float,
+                   fit_segs: np.ndarray, threads: list[dict], W: dict) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """Per-vertex and per-edge working-shape masks on simplified ring ``c`` (material on left).
+    Priority: thread > fit > teeth > fine, so a small gear reports teeth rather than fine details."""
+    signed_turn, _, l2 = _ring_turns(c)
+    mids = 0.5 * (c + np.roll(c, -1, axis=0))
+    fit_tol = float(W["fit_tol_mm"])
+    close_limit = float(W["close_corners_lines"]) * line_width
+
+    v_thread = _on_threads(c, z0, threads, W)
+    e_thread = _on_threads(mids, z0, threads, W) | (v_thread & np.roll(v_thread, -1))
+
+    v_fit = (_point_to_segments_dist(c, fit_segs) <= fit_tol) & ~v_thread
+    e_fit = (_point_to_segments_dist(mids, fit_segs) <= fit_tol) & (v_fit | v_thread) & (np.roll(v_fit | v_thread, -1)) & ~e_thread
+
+    v_teeth = _radial_pattern_vertices(c, signed_turn, W) & ~(v_thread | v_fit)
+    e_teeth = (v_teeth & np.roll(v_teeth, -1)) & ~(e_thread | e_fit)
+
+    v_fine = _close_corner_mask(c, signed_turn, line_width, W, ignore=v_thread | v_fit | v_teeth)
+    v_fine_nxt = np.roll(v_fine, -1)
+    e_fine = ((v_fine & v_fine_nxt) | ((v_fine | v_fine_nxt) & (l2 < close_limit))) & ~(e_thread | e_fit | e_teeth)
+
+    return ({"thread": v_thread, "fit": v_fit, "teeth": v_teeth, "fine": v_fine},
+            {"thread": e_thread, "fit": e_fit, "teeth": e_teeth, "fine": e_fine})
+
+
+def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0,
+                     protect: dict | None = None, skipped: list[str] | None = None) -> list[dict]:
     """Round sharp footprint corners (where warping starts): a vertical fillet of radius ``size``,
     cut as a fan of thin wedges between the corner and the arc. Offered for warp-prone materials,
-    and for others once the footprint is a fair part of the length at which they start to lift."""
+    and for others once the footprint is a fair part of the length at which they start to lift.
+    Skips working shapes (teeth/splines/knurls, threads, sized fits, closely spaced corners)."""
+    from shapely.geometry.polygon import orient as orient_poly
+
     from .checks import _rect_sides, _sharp_corners
+    from .slicer import parts
 
     layers = slice_mesh(oriented, profile.layer_height, max_layers=60)
     first = layers[0].geom
@@ -477,18 +834,34 @@ def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0) -> lis
     corners = _sharp_corners(first)
     if not corners:
         return []
+    thresholds = load_data("thresholds")
     if profile.material["warp_risk"] == "low":
-        risk = load_data("thresholds")["warping"]["risk_length_mm"]
+        risk = thresholds["warping"]["risk_length_mm"]
         limit = risk.get(profile.material.get("based_on", profile.material_id), {}).get(profile.enclosure)
         if not limit or _rect_sides(first.minimum_rotated_rectangle)[1] < CORNER_ROUND_SHARE * limit:
             return []
+    W = thresholds["working_shapes"]
+    z0 = layers[0].z
+    fit_segs = _slice_segments((protect or {}).get("fit_tris", np.zeros((0, 3, 3))), z0)
+    threads = (protect or {}).get("threads", [])
+    classified = []
+    for poly in parts(first):
+        c = np.asarray(orient_poly(poly.simplify(0.05), 1.0).exterior.coords)[:-1, :2]
+        c = c[np.linalg.norm(c - np.roll(c, 1, axis=0), axis=1) > 1e-3]
+        if len(c) >= 3:
+            v_masks, _ = _classify_ring(c, z0, profile.line_width, fit_segs, threads, W)
+            classified.append((c, v_masks))
     out = []
-    for i, (x, y) in enumerate(corners):
-        top = _corner_height(layers, np.array([x, y]))
-        e1, e2, edge = _corner_edges(first, np.array([x, y]))
+    for x, y in corners:
+        p, reason = _match_corner(np.array([x, y]), classified)
+        if reason is not None:
+            if skipped is not None and reason not in skipped:
+                skipped.append(reason)
+            continue
+        top = _corner_height(layers, p)
+        e1, e2, edge = _corner_edges(first, p)
         if e1 is None:
             continue
-        p = np.array([x, y])
         half_angle = np.arccos(np.clip(e1 @ e2, -1, 1)) / 2
         # Two roundings on a short edge must not meet, or they leave a new point between them.
         r = min(size, 0.4 * edge * np.tan(half_angle))
@@ -504,17 +877,34 @@ def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0) -> lis
         mid = np.array([0, 0, top / 2 - 0.25])
         half = np.array([0, 0, top / 2 + 0.25])
         piece = _fan_prism([tip, *arc], mid[2] - half[2], mid[2] + half[2])  # one piece: no faces shared between pieces
+        n_idx = len(out)
         out.append(_edit(
-            f"chamfer-{i}", "sharp_bed_corners", f"Round sharp corner {i + 1} (r {r:.1f} mm)",
+            f"chamfer-{n_idx}", "sharp_bed_corners", f"Round sharp corner {n_idx + 1} (r {r:.1f} mm)",
             "A rounded corner shrinks more evenly and is much less likely to lift off the bed (warping starts at sharp corners).",
             [to_part(piece)], param="chamfer_mm"))
     return out
 
 
-def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
+def _match_corner(p: np.ndarray, classified: list[tuple[np.ndarray, dict[str, np.ndarray]]]) -> tuple[np.ndarray, str | None]:
+    """Match rounded corner ``p`` (from _sharp_corners) back to its exact vertex on the simplified
+    exterior ring and return ``(exact_point, skip_reason)`` (reason is None to keep)."""
+    for c, v_masks in classified:
+        d = np.linalg.norm(c - p, axis=1)
+        k = int(np.argmin(d))
+        if d[k] < 0.02:
+            for reason in SKIP_ORDER:
+                if v_masks[reason][k]:
+                    return c[k], reason
+            return c[k], None
+    return p, None
+
+
+def _foot_chamfer(oriented: Mesh, to_part, profile, size: float,
+                  protect: dict | None = None, skipped: list[str] | None = None) -> list[dict]:
     """A small 45° chamfer along every bottom edge (outline and holes): the first layers are squashed
     and bulge out (elephant foot); the chamfer takes that material away, so edges stay straight and
-    holes at the bed keep their size.
+    holes at the bed keep their size. Working outlines (teeth/splines/knurls, threads, sized fits,
+    closely spaced fine details) are skipped so the chamfer never ruins them.
 
     Each outline loop is cut by ONE closed piece: the chamfer's cross-section swept along the loop,
     mitred at the corners. The sections sit just before and after each corner, never on it: a
@@ -526,9 +916,15 @@ def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
 
     from .slicer import parts
 
-    first = slice_mesh(oriented, profile.layer_height, max_layers=2)[0].geom
+    layers = slice_mesh(oriented, profile.layer_height, max_layers=2)
+    first = layers[0].geom
     if first.is_empty:
         return []
+    W = load_data("thresholds")["working_shapes"]
+    z0 = layers[0].z
+    fit_segs = _slice_segments((protect or {}).get("fit_tris", np.zeros((0, 3, 3))), z0)
+    threads = (protect or {}).get("threads", [])
+    min_stretch = float(W["min_foot_stretch_mm"])
     # Cross-section (outward offset, height): the 45° line from (-size, 0) to (0, size), extended past both ends.
     section = np.array([[-(size + 0.3), -0.3], [0.3, size + 0.3], [0.3, -0.3]])
     pieces, points = [], 0
@@ -539,8 +935,17 @@ def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
             c = c[np.linalg.norm(c - np.roll(c, 1, axis=0), axis=1) > 1e-3]
             if len(c) < 3:
                 continue
-            ring_pieces = _ring_chamfer(c, section, size)
-            points += len(c)
+            _, e_masks = _classify_ring(c, z0, profile.line_width, fit_segs, threads, W)
+            skip_edges = np.zeros(len(c), dtype=bool)
+            for reason in SKIP_ORDER:
+                if e_masks[reason].any():
+                    skip_edges |= e_masks[reason]
+                    if skipped is not None and reason not in skipped:
+                        skipped.append(reason)
+            if skip_edges.all():
+                continue
+            ring_pieces = _ring_chamfer(c, section, size, skip_edges if skip_edges.any() else None, min_stretch)
+            points += int((~skip_edges).sum())
             if points > MAX_FOOT_POINTS:
                 return []  # a very detailed footprint: leave it to the slicer's elephant foot compensation
             pieces += ring_pieces
@@ -555,13 +960,17 @@ def _foot_chamfer(oriented: Mesh, to_part, profile, size: float) -> list[dict]:
 SHARP_MITRE = 0.5  # cos of half the turn: corners turning more than 120° break the sweep
 
 
-def _ring_chamfer(c: np.ndarray, section: np.ndarray, size: float) -> list[np.ndarray]:
+def _ring_chamfer(c: np.ndarray, section: np.ndarray, size: float,
+                  skip_edges: np.ndarray | None = None, min_stretch: float = 3.0) -> list[np.ndarray]:
     """Closed pieces cutting the chamfer along one outline loop ``c`` (material on the left). None
     when a piece would fold (a short edge after a big turn) or run into itself (a spot narrower than
-    the cutter, which reaches in from both sides): then this loop keeps its plain edge."""
+    the cutter, which reaches in from both sides): then this loop keeps its plain edge.
+    ``skip_edges`` (bool per edge): working-shape stretches to leave un-chamfered; open sweeps stop
+    cleanly short of them and drop stubs shorter than ``min_stretch``."""
     n = len(c)
-    d = np.roll(c, -1, axis=0) - c
-    d /= np.linalg.norm(d, axis=1, keepdims=True)  # edge k runs from c[k] to c[k + 1]
+    edge_vec = np.roll(c, -1, axis=0) - c
+    edge_len = np.linalg.norm(edge_vec, axis=1)
+    d = edge_vec / edge_len[:, None]  # edge k runs from c[k] to c[k + 1]
     out = np.stack([d[:, 1], -d[:, 0]], axis=1)  # right of the edge = outside
     d_in, o_in = np.roll(d, 1, axis=0), np.roll(out, 1, axis=0)  # the edge arriving at each vertex
     mitre = o_in + out
@@ -583,6 +992,47 @@ def _ring_chamfer(c: np.ndarray, section: np.ndarray, size: float) -> list[np.nd
     def apart(rings, closed):  # the cutter's inner and outer edges don't cross themselves
         loop = rings + rings[:1] if closed else rings
         return all(LineString([r[i, :2] for r in loop]).is_simple for i in (0, 2))
+
+    if skip_edges is not None and skip_edges.any():
+        if skip_edges.all():
+            return []
+        s0 = int(np.flatnonzero(skip_edges)[0])
+        runs, cur = [], []
+        for i in range(1, n):
+            k = (s0 + i) % n
+            if not skip_edges[k]:
+                cur.append(k)
+            elif cur:
+                runs.append(cur)
+                cur = []
+        if cur:
+            runs.append(cur)
+        trim = size + 0.3
+        pieces = []
+        for run in runs:
+            cuts = [0] + [j for j in range(1, len(run)) if cos_half[run[j]] < SHARP_MITRE] + [len(run)]
+            for j0, j1 in zip(cuts, cuts[1:]):
+                ks = run[j0:j1]
+                start_skipped = bool(skip_edges[(ks[0] - 1) % n])
+                end_skipped = bool(skip_edges[(ks[-1] + 1) % n])
+                while len(ks) > 1 and start_skipped and edge_len[ks[0]] <= trim + 2 * OFF_CORNER:
+                    ks = ks[1:]
+                while len(ks) > 1 and end_skipped and edge_len[ks[-1]] <= trim + 2 * OFF_CORNER:
+                    ks = ks[:-1]
+                usable = float(edge_len[ks].sum()) - (trim if start_skipped else 0.0) - (trim if end_skipped else 0.0)
+                if usable < min_stretch:
+                    continue
+                a, b = ks[0], (ks[-1] + 1) % n
+                start = c[a] + d[a] * trim if start_skipped else c[a] - d[a] * (trim if convex[a] else -OFF_CORNER)
+                end = c[b] - d[ks[-1]] * trim if end_skipped else c[b] + d[ks[-1]] * (trim if convex[b] else -OFF_CORNER)
+                rings = [at(start, out[a])] + [r for k in ks[1:] for r in corner(k)] + [at(end, out[ks[-1]])]
+                if not (forward(rings, [d[a]] + [d[k] for k in ks[1:] for _ in range(2)]) and apart(rings, closed=False)):
+                    continue
+                pieces.append(_sweep(rings, closed=False))
+                if not end_skipped and not convex[b]:
+                    back, ahead = at(c[b] - d[ks[-1]] * 0.05, out[ks[-1]]), at(c[b] + d[b] * 0.05, out[b])
+                    pieces.append(_sweep([back, ahead], closed=False))
+        return pieces
 
     if not sharp:
         rings = [r for k in range(n) for r in corner(k)]

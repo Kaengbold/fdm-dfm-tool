@@ -766,15 +766,17 @@ def main():
             assert count > 0, "no suggestions to choose"
             assert page.locator("#edits input:checked").count() == 0, "fresh suggestions ticked"
             assert page.locator("#apply-edits").is_disabled(), "empty selection can be applied"
-            page.click("#edits-all")
-            assert page.locator("#edits input:checked").count() == count
+            page.click("#edits-all")  # ticks the changes that fix a finding, not the folded other ideas
+            assert page.locator("#edits input:checked").count() == page.locator("#edits > li:not(.other-ideas) input").count()
             page.click("#edits-none")
             assert page.locator("#edits input:checked").count() == 0
+            fixes = page.locator("#edits > li:not(.other-ideas) .edit-for").all_inner_texts()
+            assert fixes and all(t.startswith("Fixes: ") for t in fixes), f"changes without their finding: {fixes}"
             boxes.first.check()
             chosen = page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)")
             run.act(lambda: page.dispatch_event("#param-teardrop_angle_deg", "change"))
             assert page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)") == chosen, "re-suggest lost ticks"
-            return f"{count} unticked suggestions; all, none and re-suggest ticks kept"
+            return f"{count} unticked suggestions ({len(fixes)} fix a finding); all, none and re-suggest ticks kept"
         run.step("suggestions start unticked and keep user choices", suggestion_selection)
 
         def project_suggestion_ticks():
@@ -796,6 +798,7 @@ def main():
             page.click("#edits-none")  # In particular, the explicit untick of a direct request must survive.
             optional = page.evaluate("() => fdm.state.edits.findIndex(e => !e.id.startsWith('fit-'))")
             assert optional >= 0, "no optional suggestion"
+            page.evaluate("() => document.querySelectorAll('#edits details').forEach((d) => (d.open = true))")  # Other ideas
             page.locator("#edits input").nth(optional).check()
             edits = page.evaluate("() => Object.fromEntries(fdm.state.edits.map(e => [e.id, e.selected]))")
             assert True in edits.values() and False in edits.values(), edits
@@ -891,15 +894,16 @@ def main():
 
         def added_material():
             run.act(lambda: click_sample(page, "test_block"))
-            edits = page.locator("#edits label").all_inner_texts()
+            edits = page.evaluate("() => fdm.state.edits.map((e) => e.title)")
             assert sum("Thicken" in e for e in edits) == 2, f"expected two thin walls to thicken, got {edits}"
-            ops = page.evaluate("() => fdm.state.edits.map((e) => e.op)")
+            # Tick all: the changes that fix a finding (the 0.30 mm wall too thin to print), not the other ideas.
+            ops = page.evaluate("() => fdm.state.edits.filter((e) => e.source !== 'other').map((e) => e.op)")
             page.evaluate("() => fdm.steps.go('design')")  # previews show while Design changes is in view
             page.click("#edits-all")
             page.wait_for_timeout(800)
             assert "add" in ops and len(page.evaluate("() => fdm.viewer.ghosts.children.map((c) => c.material.color.getHexString())")) == len(ops)
             run.act(lambda: page.click("#apply-edits"))
-            again = page.locator("#edits label").all_inner_texts()
+            again = page.locator("#edits > li:not(.other-ideas) label").all_inner_texts()
             assert not any("Thicken" in e for e in again), f"walls still thin after thickening: {again}"
             return f"{edits} -> {again or 'nothing'} | findings: {findings(page)}"
         run.step("design edits that add material", added_material)
@@ -943,7 +947,9 @@ def main():
               marks: fdm.state.marks.map((m) => [m.kind, fdm.state.regionInfo[m.region].normal.map(Math.round)].join()) })""")  # noqa: E731
             before = where()
             page.evaluate("() => fdm.steps.go('design')")
-            page.click("#edits-all")
+            page.evaluate("() => document.querySelectorAll('#edits details').forEach((d) => (d.open = true))")  # no findings: every change is an other idea
+            for box in page.locator("#edits input[type=checkbox]").all():
+                box.check()
             assert page.locator("#edits input[type=checkbox]:checked").count(), "no design change ticked"
             run.act(lambda: page.click("#apply-edits"), 300_000)
             changed = where()
@@ -1090,6 +1096,8 @@ def main():
                 page.select_option("#load-case", case)
                 page.click("#as-load")
             run.act(lambda: page.click("#run-strength"), 300_000)
+            # T-429: the lightest settings for the load run first (their own busy), then the strength check.
+            page.wait_for_function("() => fdm.state.strength && fdm.state.loadSettings && Number(document.body.dataset.busy || 0) === 0", timeout=300_000)
             page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             text = page.locator("#strength-result").inner_text()
             assert "Weakest is case 2" in text, text
@@ -1097,6 +1105,33 @@ def main():
             assert headline in ("Plenty of reserve", "Enough", "Marginal", "Likely to break"), headline
             return f"loads: {page.locator('#loads li').all_inner_texts()} | {text.splitlines()[0]}"
         run.step("strength with two load cases", load_cases)
+
+        def settings_follow_load():
+            """T-429: after a strength run the settings show the walls / infill the loads need, with a way back."""
+            ls = page.evaluate("() => fdm.state.loadSettings")
+            assert ls["met"] and ls["use"] and ls["values"] and ls["loadText"] == "For your loads" and ls["baseline"], ls
+            page.evaluate("() => fdm.steps.go('settings')")
+            rows = "() => Object.fromEntries([...document.querySelectorAll('#settings tr[data-setting]')].map(r => [r.dataset.setting, r.cells[2].innerText]))"
+            note = page.locator("#load-settings-note")
+            from_load = page.locator("#settings .setting-reason").filter(has_text="For your loads")
+            if not from_load.count():  # the goal's values already hold it: nothing to change
+                assert "already hold it" in note.inner_text(), note.inner_text()
+                return note.inner_text()
+            assert page.evaluate("() => fdm.state.strengthInputs === JSON.stringify(fdm.strengthInputs())"), "strength result is not for the settings shown"
+            suggested = page.evaluate(rows)
+            reason = from_load.first.inner_text()
+            run.act(lambda: note.get_by_role("button", name="Keep the goal default").click(), 300_000)
+            assert not page.evaluate("() => fdm.state.loadSettings.use")
+            assert not page.locator("#settings .setting-reason").filter(has_text="For your loads").count()
+            assert page.evaluate(rows) != suggested, "keeping the goal default did not change the settings"
+            run.act(lambda: note.get_by_role("button", name="Use the values for your load").click(), 300_000)
+            assert page.evaluate(rows) == suggested, "the load's settings did not come back"
+            assert page.evaluate("() => fdm.state.strengthInputs === JSON.stringify(fdm.strengthInputs())"), "strength result is not for the settings shown"
+            text = note.inner_text()
+            assert "goal's settings" in text and " g" in text and " min" in text, text  # says what it costs or saves
+            page.evaluate("() => fdm.steps.go('strength')")
+            return f"{reason} | {text}"
+        run.step("settings follow the load", settings_follow_load)
 
         def spot_load():
             # Replace the case-2 face load by the same weight on a spot of that face.
@@ -1825,7 +1860,8 @@ def main():
             page.evaluate("() => fdm.steps.go('design')")
             # Suggest again with the strength result (the rounds at the weak spot): a size change re-runs them.
             run.act(lambda: page.dispatch_event("#param-stress_chamfer_mm", "change"), 300_000)
-            items = page.locator("#edits li")
+            page.evaluate("() => document.querySelectorAll('#edits details').forEach((d) => (d.open = true))")  # other ideas too
+            items = page.locator("#edits li:has(> label)")  # in the order of fdm.state.edits
             assert items.count(), "no design changes listed"
             seen = []
             for i in range(items.count()):

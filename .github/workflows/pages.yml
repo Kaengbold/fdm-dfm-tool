@@ -8,6 +8,7 @@ on:
     paths:  # only what ends up on the site (a merge of docs or tests doesn't redeploy)
       - "web/**"
       - "core/fdmcore/**"
+      - "tools/make_manifest.py"
       - "tools/vendor.py"
       - "LICENSE"
       - ".github/workflows/pages.yml"
@@ -52,6 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Assemble the site
         run: |
+          python3 tools/make_manifest.py --hashes  # content hashes so returning visitors use their cache
           mkdir -p _site/core
           cp -r web _site/web
           rsync -a --exclude '__pycache__' core/fdmcore/ _site/core/fdmcore/

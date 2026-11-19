@@ -80,6 +80,7 @@ first_layer:
   zone_mm: 0.6                    # bottom layers affected by squish / elephant foot
   detail_min_mm: 0.65             # strokes/gaps on the bed side narrower than this get squashed or closed [text_embossing_debossing_limits, problem_elephant_foot]
   elephant_foot_mm: [0.1, 0.25]   # bulge per side [problem_elephant_foot]
+  elephant_foot_compensation_mm: 0.15  # what the 3MF sets; most printer profiles ship 0.1-0.2 mm
   # Orientation choice: separate spots on the bed smaller than this (a tip, a thin post, a corner)
   # hold on by little and get pulled loose by the nozzle. Estimate, well below the 150 mm² a whole
   # part needs [problem_bed_adhesion_moisture_heat_creep_ringing].
@@ -348,3 +349,26 @@ shape_layers:
   plain_surface_share: 0.999
   normal_tolerance: 0.000001
   min_wall_lines: 2
+
+working_shapes:
+  # Working outlines (gear teeth, splines, knurls, threads, snap hooks, sized fits) must not be
+  # rounded or chamfered at the bed: the edit would ruin the shape that engages or fits.
+  # Repeating radial pattern (teeth, splines, knurls): at least this many matching corners at equal
+  # angles around a centre, with both outward and inward bends (so squares / hexagons / circles stay).
+  radial_min_repeats: 6
+  radial_min_turn_deg: 25.0       # gentler bends are facets of a smooth circle, not teeth
+  radial_turn_tol_deg: 15.0       # matching corners agree in turn angle within this
+  radial_radius_tol_share: 0.06   # ... and sit on one circle within this share of its radius ...
+  radial_radius_tol_mm: 0.25      # ... (or this floor in mm, for small gears / splines)
+  radial_angle_tol_share: 0.20    # angular spacing between repeats agrees within this share
+  radial_min_depth_mm: 0.20       # teeth / knurls dip radially by at least this (ignores mesh noise)
+  # Corners closer together than this many printed lines belong to fine details (snap hooks, latches,
+  # clips, fine slots) rather than large bed corners that lift from warping.
+  close_corners_lines: 6.0        # ~2.7 mm for a 0.4 mm nozzle (0.45 mm line width)
+  close_min_turn_deg: 35.0        # coarser round holes (12-gons: 30 deg) stay chamferable
+  # Sized fits and modelled threads: bed outline edges within this distance of the feature stay sharp.
+  fit_tol_mm: 0.25
+  thread_tol_mm: 0.50             # added to half the thread pitch around a detected thread
+  # A partial bottom chamfer is only kept when a remaining stretch is at least this long.
+  min_foot_stretch_mm: 3.0
+
