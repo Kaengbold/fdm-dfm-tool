@@ -9,8 +9,10 @@ Usage: python tools/make_corpus.py
 import math
 from pathlib import Path
 
+import numpy as np
 import trimesh
-from trimesh.creation import box, cylinder
+from shapely.geometry import box as sbox
+from trimesh.creation import box, cylinder, uv_sphere
 
 OUT = Path(__file__).resolve().parents[1] / "core" / "tests" / "corpus"
 U = lambda *parts: trimesh.boolean.union(list(parts), engine="manifold")
@@ -93,7 +95,86 @@ def gear():
     return D(U(disk, *teeth), at(cylinder(radius=4, height=20, sections=32), z=4))
 
 
-PARTS = {f.__name__: f for f in (shelf_bracket, knob, pencil_cup, drawer_handle, text_sign, pegboard_hook, spool_hub, tray, tall_pin, gear)}
+def bumpy_blob(n: int = 100):
+    """Closed organic sculpt stand-in: bumpy sphere scaled to 80 mm tall (2*n*n triangles)."""
+    lon = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
+    lat = np.linspace(0.0, np.pi, n + 2)[1:-1]
+    az, po = np.meshgrid(lon, lat)
+    r = 30.0 * (1.0 + 0.15 * np.sin(7.0 * az) * np.sin(5.0 * po) + 0.05 * np.sin(23.0 * az + 11.0 * po))
+    rings = r[..., None] * np.stack([np.sin(po) * np.cos(az), np.sin(po) * np.sin(az), np.cos(po)], axis=-1)
+    # Single north/south pole vertices keep the surface strictly closed and watertight.
+    verts = np.vstack([[[0.0, 0.0, 30.0]], rings.reshape(-1, 3), [[0.0, 0.0, -30.0]]])
+    verts[:, 2] *= 80.0 / np.ptp(verts[:, 2])
+    verts[:, 2] -= verts[:, 2].min()
+
+    cols = np.arange(n)
+    nxt = (cols + 1) % n
+    top = np.column_stack([np.zeros(n, dtype=int), 1 + cols, 1 + nxt])
+    south = len(verts) - 1
+    bot_start = 1 + (n - 1) * n
+    bot = np.column_stack([np.full(n, south, dtype=int), bot_start + nxt, bot_start + cols])
+    row, col = np.meshgrid(np.arange(n - 1), cols, indexing="ij")
+    a = 1 + row * n + col
+    b = 1 + row * n + (col + 1) % n
+    c, d = a + n, b + n
+    faces = np.vstack([top, np.stack([a, c, b], -1).reshape(-1, 3), np.stack([b, c, d], -1).reshape(-1, 3), bot])
+    m = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+    if m.volume < 0:
+        m.invert()
+    return m
+
+
+def bumpy_blob_20k():
+    """Organic bumpy blob at 20,000 triangles."""
+    return bumpy_blob(100)
+
+
+def bumpy_blob_80k():
+    """Organic bumpy blob at 80,000 triangles (heavy-mesh timing and scaling test)."""
+    return bumpy_blob(200)
+
+
+def ribbed_housing():
+    """Filleted open-top housing with internal cross stiffening ribs: prints open side up."""
+    w, d, h, r, wall, floor, sections = 90.0, 65.0, 35.0, 4.0, 2.5, 3.0, 32
+    iw, id_ = w - 2 * r, d - 2 * r
+    outer_parts = [
+        at(box([iw, d, h - r]), z=r + (h - r) / 2),
+        at(box([w, id_, h - r]), z=r + (h - r) / 2),
+        at(box([iw, id_, h]), z=h / 2),
+    ]
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            outer_parts.append(at(cylinder(radius=r, height=h - r, sections=sections), x=sx * iw / 2, y=sy * id_ / 2, z=r + (h - r) / 2))
+            outer_parts.append(at(uv_sphere(radius=r, count=[sections // 2, sections // 2]), x=sx * iw / 2, y=sy * id_ / 2, z=r))
+    for sy in (-1, 1):
+        outer_parts.append(at(turned(cylinder(radius=r, height=iw, sections=sections), [0, 1, 0], 90), y=sy * id_ / 2, z=r))
+    for sx in (-1, 1):
+        outer_parts.append(at(turned(cylinder(radius=r, height=id_, sections=sections), [1, 0, 0], 90), x=sx * iw / 2, z=r))
+    outer = U(*outer_parts)
+
+    ri = max(r - wall, 1.5)
+    cw, cd = w - 2 * wall, d - 2 * wall
+    cavity_poly = sbox(-cw / 2 + ri, -cd / 2 + ri, cw / 2 - ri, cd / 2 - ri).buffer(ri, quad_segs=sections // 4)
+    cavity = at(trimesh.creation.extrude_polygon(cavity_poly, h - floor + 2.0), z=floor)
+    shell = D(outer, cavity)
+
+    rib_h, rib_t = 14.0, 2.0
+    ribs = [
+        at(box([rib_t, cd + 1.0, rib_h]), x=-20.0, z=floor + rib_h / 2 - 0.5),
+        at(box([rib_t, cd + 1.0, rib_h]), x=20.0, z=floor + rib_h / 2 - 0.5),
+        at(box([cw + 1.0, rib_t, rib_h]), y=0.0, z=floor + rib_h / 2 - 0.5),
+    ]
+    return U(shell, *ribs)
+
+
+PARTS = {
+    f.__name__: f
+    for f in (
+        shelf_bracket, knob, pencil_cup, drawer_handle, text_sign, pegboard_hook,
+        spool_hub, tray, tall_pin, gear, bumpy_blob_20k, bumpy_blob_80k, ribbed_housing,
+    )
+}
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)

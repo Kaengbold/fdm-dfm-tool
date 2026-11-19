@@ -14,7 +14,9 @@ import yaml
 from fdmcore import api
 
 ROOT = Path(__file__).resolve().parents[2]
-PARTS = sorted((ROOT / "web" / "samples").glob("*.stl")) + sorted((Path(__file__).parent / "corpus").glob("*.stl"))
+# The 80k blob is a timing part with its own (opt-in) test: running it here doubled this file's time.
+PARTS = sorted((ROOT / "web" / "samples").glob("*.stl")) + sorted(
+    p for p in (Path(__file__).parent / "corpus").glob("*.stl") if not p.stem.endswith("_80k"))
 # What the tool must never show a user: internal task numbers, and finding texts that guess at the design.
 FORBIDDEN = re.compile(r"\bT-\d+|The CAD model shows")
 # The shell settings T-424 wants from the part's shape (walls are already raised for weak spots).
