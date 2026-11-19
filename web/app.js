@@ -621,9 +621,6 @@ async function runCheck() {
     if (token !== checkToken) return;
     if (!result?.findings) throw new Error("The analysis returned no result — please try again");
     state.check = result;
-    const fs = await call("fastener_suggestions", { up: activeOption().up, profile: profile() });
-    if (token !== checkToken) return;
-    state.fastenerSuggestions = fs.suggestions ?? [];
     renderCheck();
     renderOptions(); // their cost uses this check's part grams and price
     renderPauses();
@@ -641,6 +638,17 @@ async function runCheck() {
     steps.render();
     suggestDesignIfShown();
   }, ["problems", "settings", "result"]);
+  if (token === checkToken) loadFastenerSuggestions(token);
+}
+
+/** Standard-looking screw holes (T-437), asked after the findings are shown: finding the holes needs face
+ * regions (scipy, a big first download), which must not hold up the check itself. */
+async function loadFastenerSuggestions(token) {
+  const up = activeOption()?.up;
+  const r = up && await call("fastener_suggestions", { up, profile: profile() }).catch(() => null);
+  if (token !== checkToken || !r) return;
+  state.fastenerSuggestions = r.suggestions ?? [];
+  renderFastenerSuggestions();
 }
 
 // ---------- rendering ----------
