@@ -449,6 +449,7 @@ async function partLoaded(info) {
   renderGcode();
   renderMarks();
   viewer.framed = false;
+  state.size_mm = info.size_mm;
   const [x, y, z] = info.size_mm.map((v) => v.toFixed(1));
   const body = info.bodies.length ? ` (${info.bodies[info.body].name})` : "";
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
@@ -3395,6 +3396,7 @@ async function testDesignEdit(id) {
 async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
   if (!chosen.length) return setStatus("Tick a change to apply it.");
   return busy("Applying design changes…", async () => {
+    const beforeSize = state.size_mm ? [...state.size_mm] : null;
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
@@ -3404,7 +3406,11 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     // The edits are made in the model's own frame, so the same build direction still applies (T-353).
     await loadFile(name, stlBytes(soup), null, step, "version", { body: 0, scale: 1, up: activeOption()?.up });
     const lost = await restoreLoads(carry);
-    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost && ` ${lost}`}`);
+    const afterSize = state.size_mm;
+    const sizeChanged = beforeSize && afterSize && afterSize.some((v, i) => Math.abs(v - beforeSize[i]) > 0.05);
+    const fmtSize = (s) => s.map((v) => Number(v.toFixed(1))).join(" × ");
+    const sizeNote = sizeChanged ? ` Outer size changed (now ${fmtSize(afterSize)} mm, was ${fmtSize(beforeSize)}).` : "";
+    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back).${sizeNote} Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost && ` ${lost}`}`);
   });
 }
 

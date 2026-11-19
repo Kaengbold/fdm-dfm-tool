@@ -46,6 +46,7 @@ class Session:
     tags: dict = field(default_factory=dict)  # region id -> what the user says the feature is (features.TAGS)
     weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
     hot_spots: tuple | None = None  # (points, share of the highest stress) where it is nearly as high (features.HOT_SHARE)
+    strength_verdict: str | None = None  # verdict ("fine", "borderline", "likely to break") from the last strength check
     gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
     fits: dict = field(default_factory=dict)  # region id -> {"partner_mm", "fit"}: what goes into a hole / onto a post
     fasteners: dict = field(default_factory=dict)  # region id -> {"size", "use"}: screw / insert / nut holes (set_fastener)
@@ -1711,6 +1712,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     r["stress_zones"] = _stress_zones(model, fi, worst.ignore, up, sh, s.mesh, p)
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
+    s.strength_verdict = r["verdict"]
     r["story_parts"] = _strength_story_parts(r)
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
@@ -2248,7 +2250,8 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     return {
         "features": _features(),
         "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
-                                                gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners), up, keep_clear),
+                                                gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
+                                                strength_verdict=s.strength_verdict), up, keep_clear),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
@@ -2457,6 +2460,7 @@ def session_state() -> dict:
         "fasteners": {str(k): v for k, v in s.fasteners.items()},
         "weak_spot": None if s.weak_spot is None else [np.asarray(s.weak_spot[0], float).tolist(), s.weak_spot[1]],
         "hot_spots": None if s.hot_spots is None else [np.asarray(x, float).tolist() for x in s.hot_spots],
+        "strength_verdict": s.strength_verdict,
     }
 
 
@@ -2471,6 +2475,7 @@ def restore_state(state: dict) -> dict:
     s.weak_spot = None if w is None else (np.asarray(w[0], float), float(w[1]))
     h = state.get("hot_spots")
     s.hot_spots = None if h is None else tuple(np.asarray(x, float) for x in h)
+    s.strength_verdict = state.get("strength_verdict")
     return {"restored": True}
 
 
