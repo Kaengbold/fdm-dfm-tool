@@ -908,17 +908,17 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Seen: `node tools/pyodide_check.mjs` on `core/tests/corpus/spool_hub.stl` (also on `main`, natively too?): `volume_at` at the centre of the first triangle (a spot on the surface) raises it. Most likely the click is on a vertical wall, so the straight up-and-down line runs along the surface and the inside test misses it.
   - Do: find the cause, then for a click on the surface step a little into the part (along the face normal) before the up-and-down search, or say in plain words why a hollow can't go there.
   - Done when: a click on a vertical wall of `spool_hub` and of a simple box places a hollow or gets a clear reason; test.
-- [ ] **T-486 P1** [L] Organic parts are stood on a point. · files: `core/fdmcore/orientation.py` (`candidate_directions`) · owner: —
+- [ ] **T-486 P1** [L] Organic parts are stood on a point. · files: `core/fdmcore/orientation.py` (`candidate_directions`) · owner: Claude (`task/T-486-organic-resting-planes`)
   - Seen (T-462): `bumpy_blob_20k`'s top pick rests on a ~0.1 mm² bump tip and gets `tipping_risk`; the search doesn't try the resting planes of the convex hull, which is where a round part actually sits.
   - Do: add the largest convex-hull faces (by the area of the part's bottom within a few tenths of a mm of them) as candidate directions.
   - Done when: `test_bumpy_blob_20k_not_stood_on_a_point` passes (remove its xfail); the other corpus picks don't change.
   - Done 2026-11-19 (Gemini 4 Neon, reviewed by Claude): the cause was the step inward, which used the caller's normal (none, or an average) instead of the surface's own. A spot within 0.1 mm of the surface now steps in along the nearest face normal; where the wall is too thin it says "The part is too thin there for a hidden gap". `spool_hub` places its hollow in Pyodide.
 
-- [ ] **T-487 P2** [G] The foot chamfer doesn't clear "elephant foot". · files: `core/fdmcore/checks.py` (elephant_foot), `core/fdmcore/features.py` (`_foot_chamfer`) · owner: —
+- [ ] **T-487 P2** [G] The foot chamfer doesn't clear "elephant foot". · files: `core/fdmcore/checks.py` (elephant_foot), `core/fdmcore/features.py` (`_foot_chamfer`) · owner: Claude (`task/T-487-foot-chamfer-clears`)
   - Seen (T-463, `test_design_edits.py`): on `gear`, `detail_plate`, `knob` (also `feature_test`, `hole_block`, `spool_hub`) the re-check after applying `foot-chamfer` gives the same `elephant_foot` finding: the check fires for any hole in the first layer and never looks at whether its bottom edge is chamfered.
   - Do: let the check skip holes / edges whose bottom already has a chamfer (the outline grows over the first ~0.5 mm), or don't offer the chamfer for a finding it can't clear.
   - Done when: the strict xfail `test_foot_chamfer_reduces_elephant_foot` passes (remove the xfail).
-- [ ] **T-488 P2** [G] A teardrop can leave a hairline slit at its tip. · files: `core/fdmcore/features.py` (teardrop edits), `core/fdmcore/checks.py` (`gap_fuses`) · owner: —
+- [ ] **T-488 P2** [G] A teardrop can leave a hairline slit at its tip. · files: `core/fdmcore/features.py` (teardrop edits), `core/fdmcore/checks.py` (`gap_fuses`) · owner: Claude (`task/T-488-teardrop-tip`)
   - Seen (T-463): `feature_test`'s `teardrop-61` (Ø8 sideways hole) removes the oval-hole finding but its sharp 45° tip lands just above a slice (z = 23.6 mm) and the re-check finds a new 0.05 mm `gap_fuses` ("Can fail").
   - Do: flatten the tip to a whole layer (or a small flat of ≥ 1 line width), or have `gap_fuses` ignore slits that close within one layer.
   - Done when: the strict xfail `test_teardrop_introduces_no_gap_fuses[feature_test-teardrop-61]` passes.
