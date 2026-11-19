@@ -1103,7 +1103,7 @@ def main():
         def settings_follow_load():
             """T-429: after a strength run the settings show the walls / infill the loads need, with a way back."""
             ls = page.evaluate("() => fdm.state.loadSettings")
-            assert ls["met"] and ls["values"] and ls["loadText"] == "For your loads", ls
+            assert ls["met"] and ls["use"] and ls["values"] and ls["loadText"] == "For your loads" and ls["baseline"], ls
             page.evaluate("() => fdm.steps.go('settings')")
             rows = "() => Object.fromEntries([...document.querySelectorAll('#settings tr[data-setting]')].map(r => [r.dataset.setting, r.cells[2].innerText]))"
             note = page.locator("#load-settings-note")
@@ -1115,14 +1115,16 @@ def main():
             suggested = page.evaluate(rows)
             reason = from_load.first.inner_text()
             run.act(lambda: note.get_by_role("button", name="Keep the goal default").click(), 300_000)
-            assert page.evaluate("() => fdm.state.loadSettings.kept")
+            assert not page.evaluate("() => fdm.state.loadSettings.use")
             assert not page.locator("#settings .setting-reason").filter(has_text="For your loads").count()
             assert page.evaluate(rows) != suggested, "keeping the goal default did not change the settings"
             run.act(lambda: note.get_by_role("button", name="Use the values for your load").click(), 300_000)
             assert page.evaluate(rows) == suggested, "the load's settings did not come back"
             assert page.evaluate("() => fdm.state.strengthInputs === JSON.stringify(fdm.strengthInputs())"), "strength result is not for the settings shown"
+            text = note.inner_text()
+            assert "goal's settings" in text and " g" in text and " min" in text, text  # says what it costs or saves
             page.evaluate("() => fdm.steps.go('strength')")
-            return reason
+            return f"{reason} | {text}"
         run.step("settings follow the load", settings_follow_load)
 
         def spot_load():

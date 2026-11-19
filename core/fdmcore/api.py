@@ -824,14 +824,16 @@ OPT_MAX_STEPS = 16
 
 
 def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None, zones: bool = False,
-                      this_orientation: bool = False) -> dict:
+                      this_orientation: bool = False, baseline: dict | None = None) -> dict:
     """The least plastic that reaches ``target`` safety (default ×2, ×3 for the strength goal):
     start from a light print and add, one step at a time, whatever buys the most safety per gram
     — walls, top/bottom layers or infill. Tried for this orientation and the strongest one.
     ``zones``: also try stronger zones only around the most stressed places (slicer modifier
     volumes), the rest of the part light; returned as ``zoned`` with the plastic it saves.
     ``this_orientation``: only this orientation and no "what else" ideas: the app's automatic
-    settings for a load, which must not turn the part and should cost about one strength run."""
+    settings for a load, which must not turn the part and should cost about one strength run.
+    ``baseline`` (walls, infill, top, bottom; e.g. the goal's settings): its safety, grams and
+    minutes come back as ``baseline`` so the app can say what the change costs or saves."""
     from .strength import cases_safety, evaluate_cases, find_zones
 
     s = _require()
@@ -856,6 +858,13 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     best["alternatives"] = [q for q in plans if q is not best]
     best["target"] = target
     best["explanation"] = _optimise_story(best, target, len(plans) > 1)
+    if baseline:
+        from .strength import Shells, evaluate_cases
+
+        sh = Shells(walls=int(baseline["walls"]), infill=float(baseline["infill"]), top=int(baseline["top"]), bottom=int(baseline["bottom"]))
+        grams, minutes = _grams_minutes_of(cases[0].model, best["up"], sh, p, s.mesh)
+        best["baseline"] = {"safety_factor": float(evaluate_cases(cases, best["up"], p, sh)["safety_factor"]),
+                            "grams": round(grams, 1), "minutes": round(minutes, 1)}
     if not best["met"] and not this_orientation:  # settings alone aren't enough: what else would do it
         from .strength import Shells
 
@@ -1252,28 +1261,52 @@ def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     return f"{head}: {_format_safety(zoned['safety_factor'])}, but it saves almost nothing here — the load spreads through most of the part."
 
 
+def _grams_minutes_of(model, up, sh, p: Profile, mesh: Mesh) -> tuple[float, float]:
+    """Grams and print minutes of the plastic inside the part with shells ``sh`` (voxel volume scaled
+    to the mesh's true volume)."""
+    from .checks import shell_infill_minutes
+    from .strength import material_split
+
+    scale = abs(mesh.volume()) / (len(model.elems) * model.grid.h**3)
+    shell, infill = (v * scale for v in material_split(model, up, sh, p))
+    return (shell + infill) / 1000 * p.material["density_g_cm3"], shell_infill_minutes(shell, infill, p)
+
+
 def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None = None) -> dict:
-    """Greedy search from a light print: each step takes the change with the most safety per gram.
-    With ``zones`` the zones' own infill and walls are steps too."""
+    """Greedy search from a light print: each step takes the change with the most safety per cost.
+    Cost counts plastic and print time alike (each relative to the light start): walls take longer
+    per gram than infill, so a gram of walls costs more. With ``zones`` the zones' own infill and
+    walls are steps too."""
     from dataclasses import replace
 
-    from .strength import Shells, evaluate_cases, material_volume
+    from .strength import Shells, evaluate_cases
 
     model = cases[0].model
-    to_grams = abs(mesh.volume()) / (len(model.elems) * model.grid.h**3) / 1000 * p.material["density_g_cm3"]
     memo: dict = {}
+    costs: dict = {}
 
     def sf(sh):
         if sh not in memo:
             memo[sh] = evaluate_cases(cases, up, p, sh)["safety_factor"]
         return memo[sh]
 
+    def gm(sh):
+        if sh not in costs:
+            costs[sh] = _grams_minutes_of(model, up, sh, p, mesh)
+        return costs[sh]
+
     def grams(sh):
-        return material_volume(model, up, sh, p) * to_grams
+        return gm(sh)[0]
 
     sh = Shells(walls=OPT_WALLS[0], infill=OPT_INFILL[0], top=OPT_LAYERS[0], bottom=OPT_LAYERS[0], zones=tuple(zones or ()))
     solid = Shells(walls=OPT_WALLS[-1], infill=OPT_INFILL[-1], top=OPT_LAYERS[-1], bottom=OPT_LAYERS[-1],
                    zones=tuple(replace(z, walls=OPT_WALLS[-1], infill=OPT_INFILL[-1]) for z in zones or ()))
+    g0, m0 = (max(v, 1e-6) for v in gm(sh))
+
+    def cost(q):
+        g, m = gm(q)
+        return g / g0 + m / m0
+
     if sf(solid) < target:  # not even a solid print is enough: no need to search
         sh = solid
     steps = []
@@ -1296,7 +1329,7 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
                 moves.append((replace(sh, zones=tuple(replace(q, infill=OPT_INFILL[k + 1]) for q in sh.zones)), f"{OPT_INFILL[k + 1]:.0%} infill in the zones"))
             if z.walls + 1 in OPT_WALLS:
                 moves.append((replace(sh, zones=tuple(replace(q, walls=z.walls + 1) for q in sh.zones)), f"{z.walls + 1} walls in the zones"))
-        gain = [(np.log(sf(m) / sf(sh)) / max(grams(m) - grams(sh), 0.05), m, label) for m, label in moves if np.isfinite(sf(m))]
+        gain = [(np.log(sf(m) / sf(sh)) / max(cost(m) - cost(sh), 1e-3), m, label) for m, label in moves if np.isfinite(sf(m))]
         gain = [g for g in gain if g[0] > 1e-4]
         if not gain:
             break
@@ -1306,7 +1339,7 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
                 "sparse_infill_density": f"{sh.infill:.0%}"}
     if p.goal == "material":  # lightning infill only holds up the top surface, not a load
         settings["sparse_infill_pattern"] = "gyroid"
-    out = {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1),
+    out = {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1), "minutes": round(gm(sh)[1], 1),
            "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": sh.infill, "settings": settings, "steps": steps}
     if sh.zones:
         out["zones"] = [_zone_info(replace(z, walls=max(z.walls, sh.walls), infill=max(z.infill, sh.infill)), mesh, up, p.printer["bed"], _moving(p))

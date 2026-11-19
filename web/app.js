@@ -933,16 +933,15 @@ const sameSetting = (a, b) => {
   return x === y || (numeric.test(x) && numeric.test(y) && x.includes("%") === y.includes("%") && parseFloat(x) === parseFloat(y));
 };
 
-/** The lighter value the loads allow in this row, or null. Only used when the whole set is
- * lighter than the recommendation (``ls.lighter``): a mix (fewer walls but more infill) only holds
- * together. Needing more is left to "How can I make it stronger?", which also weighs turning the
- * part. Top / bottom layers never go below the recommendation (the top surface must close); more of
- * them only adds strength. A print profile that already gives at least as much keeps its value. */
+/** The value the loads ask for in this row, or null. The whole set is used or none of it (``ls.use``):
+ * a mix (fewer walls but more infill) only holds together. Top / bottom layers never go below the
+ * recommendation (the top surface must close); more of them only adds strength. A print profile that
+ * already gives at least as much keeps its own value. */
 function loadValue(s, yours) {
   const ls = state.loadSettings;
-  const v = ls?.met && ls.lighter && !ls.kept ? ls.values?.[s.key] : null;
-  if (v == null || parseFloat(v) >= parseFloat(s.value)) return null;
-  if (["top_shell_layers", "bottom_shell_layers"].includes(s.key)) return null;
+  const v = ls?.met && ls.use ? ls.values?.[s.key] : null;
+  if (v == null || sameSetting(v, s.value)) return null;
+  if (["top_shell_layers", "bottom_shell_layers"].includes(s.key) && parseFloat(v) < parseFloat(s.value)) return null;
   if (yours != null && parseFloat(yours) >= parseFloat(v)) return null;
   return v;
 }
@@ -951,7 +950,8 @@ function loadValue(s, yours) {
 function loadReason(s, v) {
   const ls = state.loadSettings;
   const what = s.key === "sparse_infill_density" ? `${parseFloat(v)} % infill is` : `${v} ${s.label.toLowerCase()} are`;
-  return `${ls.loadText}: ${what} enough (holds ${formatSafety(ls.safety)}, needs ${formatSafety(ls.target)})`;
+  const how = parseFloat(v) < parseFloat(s.value) ? "enough" : "needed";
+  return `${ls.loadText}: ${what} ${how} (holds ${formatSafety(ls.safety)}, needs ${formatSafety(ls.target)})`;
 }
 
 /** Recommended settings with the user's applied strength suggestions on top. */
@@ -1873,40 +1873,65 @@ function invalidateLoadSettings() {
  * settings follow a strength run without a click. Runs before the strength check, which then
  * checks exactly the settings shown. */
 async function suggestLoadSettings() {
-  const args = { up: activeOption().up, loads: structuredClone(state.loads), profile: profile(), zones: false, this_orientation: true };
-  const o = await busy(`Finding the lightest settings that hold your load (about ${fmtSeconds(estimate("optimise_load"))})…`,
+  const recommended = Object.fromEntries(state.check.settings.map((s) => [s.key, s.value]));
+  const num = (k, d) => (recommended[k] == null ? d : parseFloat(recommended[k]));
+  const baseline = { walls: num("wall_loops", 2), infill: num("sparse_infill_density", 15) / 100, top: num("top_shell_layers", 4), bottom: num("bottom_shell_layers", 3) };
+  const args = { up: activeOption().up, loads: structuredClone(state.loads), profile: profile(), zones: false, this_orientation: true, baseline };
+  const o = await busy(`Finding the cheapest settings that hold your load (about ${fmtSeconds(estimate("optimise_load"))})…`,
     () => timed("optimise_load", () => call("optimise_strength", args)), ["settings"]);
   const forces = args.loads.filter((l) => l.kind === "force");
   const keys = Object.values(SHELL_KEYS);
   const values = Object.fromEntries(Object.entries(o.settings ?? {}).filter(([k]) => keys.includes(k)));
-  const recommended = Object.fromEntries(state.check.settings.map((s) => [s.key, s.value]));
   const lighter = Object.entries(values).every(([k, v]) => recommended[k] == null || parseFloat(v) <= parseFloat(recommended[k]));
-  state.loadSettings = { values, met: o.met, lighter, safety: o.safety_factor, target: o.target, kept: false,
+  // Lighter is always taken. More plastic only by itself on the goal Strong; otherwise one click,
+  // because turning the part ("How can I make it stronger?") may do it for less.
+  state.loadSettings = { values, met: o.met, lighter, use: o.met && (lighter || args.profile.goal === "strength"),
+    safety: o.safety_factor, target: o.target, grams: o.grams, minutes: o.minutes, baseline: o.baseline,
     loadText: forces.length === 1 ? `For your ${forces[0].kg} kg load` : "For your loads" };
   renderSettings();
   renderVerdict(); // weight and time follow the new walls and infill
 }
 
-/** One line above the settings: where the load-driven values come from, and the way back. */
+/** "about 2 g and 3 min less" than the goal's settings: what the load's settings cost or save. */
+function loadCost(ls) {
+  if (!ls.baseline) return "";
+  const g = Math.round(ls.grams - ls.baseline.grams), m = Math.round(ls.minutes - ls.baseline.minutes);
+  if (!g && !m) return "about the same plastic and time as your goal's settings";
+  const part = (n, unit) => `${Math.abs(n)} ${unit}`;
+  if (g <= 0 && m <= 0) return `about ${part(g, "g")} and ${part(m, "min")} less than your goal's settings`;
+  if (g >= 0 && m >= 0) return `about ${part(g, "g")} and ${part(m, "min")} more than your goal's settings`;
+  return `${g > 0 ? "+" : "−"}${part(g, "g")}, ${m > 0 ? "+" : "−"}${part(m, "min")} against your goal's settings`;
+}
+
+/** One line above the settings: where the load-driven values come from, what they cost, the way back. */
 function renderLoadNote(settings) {
   const ls = state.loadSettings;
   const note = $("load-settings-note");
   note.hidden = !ls;
   if (!ls) return note.replaceChildren();
   if (!ls.met) return note.replaceChildren(`${ls.loadText}: walls and infill alone can't make it strong enough (best ${formatSafety(ls.safety)}, needs ${formatSafety(ls.target)}). See “How can I make it stronger?” in Strength analysis.`);
-  if (!ls.lighter) return note.replaceChildren(`${ls.loadText}: it needs more than your goal's walls and infill. See “How can I make it stronger?” in Strength analysis: turning the part may do it with less plastic.`);
-  const used = settings.some((s) => s.fromLoad);
-  const toggle = el("button", { type: "button", className: "link", textContent: ls.kept ? "Use the values for your load" : "Keep the goal default",
+  const v = ls.values;
+  // Top / bottom layers are only named when they go up: fewer are never used (the top must close).
+  const top = state.check.settings.find((s) => s.key === "top_shell_layers")?.value;
+  const set = `${v.wall_loops} walls and ${parseFloat(v.sparse_infill_density)} % infill` +
+    (top != null && parseFloat(v.top_shell_layers) > parseFloat(top) ? ` with ${v.top_shell_layers} top and bottom layers` : "");
+  const cost = loadCost(ls);
+  const toggle = el("button", { type: "button", className: "link", textContent: ls.use ? "Keep the goal default" : "Use the values for your load",
     onclick: async () => {
-      remember(ls.kept ? "the settings for your load" : "the goal's settings");
-      ls.kept = !ls.kept;
+      remember(ls.use ? "the goal's settings" : "the settings for your load");
+      ls.use = !ls.use;
       renderSettings();
       renderVerdict();
       if (state.strength && readyForStrength()) await runStrength(); // the result must match the settings shown
     } });
-  note.replaceChildren(
-    ls.kept ? "Using your goal's walls and infill. " : used ? `${ls.loadText}: the walls and infill below come from the strength check. ` : `${ls.loadText}: the usual walls and infill already hold it. `,
-    ls.kept || used ? toggle : "");
+  const used = settings.some((s) => s.fromLoad);
+  if (ls.use && !used) return note.replaceChildren(`${ls.loadText}: the usual walls and infill already hold it.`);
+  if (ls.use) return note.replaceChildren(`${ls.loadText}: ${set} (${cost}) come from the strength check. `, toggle);
+  if (!ls.lighter) {
+    const now = ls.baseline ? `Your goal's settings hold ${formatSafety(ls.baseline.safety_factor)}; it needs ${formatSafety(ls.target)}. ` : "";
+    return note.replaceChildren(`${ls.loadText}: ${now}${set} would do it (${cost}). Turning the part may do it with less plastic: see “How can I make it stronger?”. `, toggle);
+  }
+  note.replaceChildren(`Using your goal's walls and infill. ${set} would hold your load (${cost}). `, toggle);
 }
 
 /** Inputs that must still match before Simple can reuse a strength result. */
