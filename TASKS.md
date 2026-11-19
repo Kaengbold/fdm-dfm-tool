@@ -765,14 +765,14 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen in code: every version keeps its own copy of the part's bytes, `state.source` another, and autosave writes the whole part as text into IndexedDB every minute when something changed. Measured page memory: 242 MB at 980,000 triangles with one version.
   - Do: versions share unchanged bytes (keep edits as a list on top of the original where possible); autosave stores the part once as binary (a Blob) and the settings as text; cap versions by total size, not only count.
   - Done when: five versions of a 300,000-triangle part stay under twice the memory of one.
-- [ ] **T-461 P2** [L] Faster, cacheable engine start. · files: `web/worker.js` (`boot`), `tools/make_manifest.py`, `web/sw.js`, `.github/workflows/pages.yml` · owner: —
+- [ ] **T-461 P2** [L] Faster, cacheable engine start. · files: `web/worker.js` (`boot`), `tools/make_manifest.py`, `web/sw.js`, `.github/workflows/pages.yml` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-461-engine-start`)
   - Seen in code: the ~35 engine files are fetched one after another, each with `?v=<time>`, so nothing is ever cached by the browser, on every start.
   - Do: fetch in parallel (`Promise.all`), and use a content hash per file in the manifest instead of the time, so unchanged files come from the cache; or ship the engine as one zip that Pyodide unpacks. Measure the start on a slow connection (browser dev tools "Slow 4G") before and after.
   - Done when: a second visit loads no engine file again; start time before / after is in this line.
 
 ### M. Tests that would have caught this
 
-- [ ] **T-462 P1** [M] Organic and heavy test parts. · files: `tools/make_corpus.py`, `core/tests/corpus/`, `core/tests/test_corpus.py`, `tools/pyodide_check.mjs` · owner: —
+- [ ] **T-462 P1** [M] Organic and heavy test parts. · files: `tools/make_corpus.py`, `core/tests/corpus/`, `core/tests/test_corpus.py`, `tools/pyodide_check.mjs` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-462-organic-parts`)
   - Do: add generated organic parts (the bumpy blob: a sphere-like surface with radius `30·(1 + 0.15·sin 7u·sin 5v + 0.05·sin(23u + 11v))`, z scaled to 80 mm, at 20,000 and 80,000 triangles) and one filleted, ribbed housing. Expectations: not stood on a point, no CAD-detail findings (T-408), time limit (T-458). Real downloaded parts stay with T-003.
   - Done when: the parts and their expectations run in the corpus test.
 - [ ] **T-463 P1** [M] Apply every suggested design change in the tests. · files: new `core/tests/test_design_edits.py`, `core/fdmcore/booleans.py` · owner: —
