@@ -988,16 +988,19 @@ def volume_at(up, kind: str, region: int | None = None, point=None, point2=None,
     if margin is None:
         margin = VOID_MM / 2 if pin else FACE_SUPPORT_MARGIN_MM if on_face else ZONE_MARGIN_MM
     inside = _inside_test(s.mesh, r0)
-    if pin and normal is not None:  # into the wall: the vertical pin can't run along a side face
-        n = r0 @ np.asarray(normal, float)
-        side = np.hypot(n[0], n[1])
-        if side > 0.3:
-            built = built - [*(n[:2] / side * (VOID_COVER_MM + VOID_MM / 2)), 0.0]
+    surface_n = _surface_normal(s.mesh, pts[0]) if pin else None
+    if pin:  # into the wall: the vertical pin can't run along a side face
+        face_n = surface_n if surface_n is not None else (np.asarray(normal, float) if normal is not None else None)
+        if face_n is not None:
+            n = r0 @ face_n
+            side = np.hypot(n[0], n[1])
+            if side > 0.3:
+                built = built - [*(n[:2] / side * (VOID_COVER_MM + VOID_MM / 2)), 0.0]
     lo, hi = built.min(axis=0) - margin, built.max(axis=0) + margin
     if on_face:
         _reach_supports(s.mesh, int(region), r0, lo, hi, zs)
     if pin:
-        lo[2], hi[2] = _solid_run(inside, built[0], zs.min(), zs.max())
+        lo[2], hi[2] = _solid_run(inside, built[0], zs.min(), zs.max(), on_surface=surface_n is not None)
     return {**_volume_box(up, kind, lo, hi, shape, p, inside), "margin": float(margin)}
 
 
@@ -1169,13 +1172,32 @@ def _reach_supports(mesh: Mesh, region: int, r0: np.ndarray, lo: np.ndarray, hi:
                 lo[k] -= ZONE_MARGIN_MM
 
 
-def _solid_run(inside, at: np.ndarray, zmin: float, zmax: float) -> tuple[float, float]:
+def _surface_normal(mesh: Mesh, pt: np.ndarray, tol: float = 0.1) -> np.ndarray | None:
+    """Outward unit normal at a surface point ``pt`` (part coordinates), or None if farther than ``tol``
+    from the surface. Triangles meeting at an edge or corner are averaged so clicks there step inward."""
+    from .strength import _distance_to_triangles
+
+    t = mesh.triangles
+    near = np.flatnonzero(np.all((pt >= t.min(axis=1) - tol) & (pt <= t.max(axis=1) + tol), axis=1))
+    if not len(near):
+        return None
+    d = _distance_to_triangles(t[near], pt)
+    best = float(d.min())
+    if best > tol:
+        return None
+    normals, _ = mesh.normals_and_areas()
+    n = normals[near[d <= best + 1e-4]].sum(axis=0)
+    length = float(np.linalg.norm(n))
+    return n / length if length > 1e-9 else None
+
+
+def _solid_run(inside, at: np.ndarray, zmin: float, zmax: float, on_surface: bool = False) -> tuple[float, float]:
     """Heights of the solid run straight up and down through ``at`` (build frame), less
     ``VOID_COVER_MM`` at both ends: where a pin hole can go without showing."""
     zs = np.linspace(zmin, zmax, 400)
     solid = inside(np.column_stack([np.full_like(zs, at[0]), np.full_like(zs, at[1]), zs]))
     if not solid.any():
-        raise ValueError("That spot isn't on the part")
+        raise ValueError("The part is too thin there for a hidden gap" if on_surface else "That spot isn't on the part")
     rows = np.flatnonzero(solid)
     k = int(rows[np.argmin(np.abs(zs[rows] - at[2]))])  # a click on the surface: the nearest solid point
     a = b = k
