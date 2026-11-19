@@ -160,62 +160,13 @@ def _lines(geom) -> list[np.ndarray]:
     return [np.asarray(g.simplify(0.05).coords) for g in getattr(merged, "geoms", [merged]) if g.length > 0.5]
 
 
-def _ear_clip(poly: Polygon) -> np.ndarray | None:
-    """Simple CCW ear-clipping fallback for hole-free polygons when Delaunay misses a constrained edge."""
-    if poly.interiors:
-        return None
-    pts = list(np.asarray(poly.exterior.coords)[:-1, :2])
-    pts = [p for i, p in enumerate(pts) if np.linalg.norm(p - pts[i - 1]) > 1e-9]
-    if len(pts) < 3:
-        return None
-    tris = []
-
-    def cross2(u, v):
-        return u[0] * v[1] - u[1] * v[0]
-    for _ in range(len(pts) * len(pts)):
-        if len(pts) <= 3:
-            if len(pts) == 3 and cross2(pts[1] - pts[0], pts[2] - pts[0]) > 1e-12:
-                tris.append([pts[0], pts[1], pts[2]])
-            break
-        clipped = False
-        m = len(pts)
-        for i in range(m):
-            p0, p1, p2 = pts[i - 1], pts[i], pts[(i + 1) % m]
-            if cross2(p1 - p0, p2 - p1) <= 1e-12:
-                continue
-            inside = False
-            for j in range(m):
-                if j in ((i - 1) % m, i, (i + 1) % m):
-                    continue
-                q = pts[j]
-                if (cross2(p1 - p0, q - p0) >= -1e-12 and cross2(p2 - p1, q - p1) >= -1e-12
-                        and cross2(p0 - p2, q - p2) >= -1e-12):
-                    inside = True
-                    break
-            if not inside:
-                tris.append([p0, p1, p2])
-                pts.pop(i)
-                clipped = True
-                break
-        if not clipped:
-            return None
-    if not tris:
-        return None
-    t = np.array(tris, float)
-    area = 0.5 * np.abs((t[:, 1, 0] - t[:, 0, 0]) * (t[:, 2, 1] - t[:, 0, 1])
-                        - (t[:, 1, 1] - t[:, 0, 1]) * (t[:, 2, 0] - t[:, 0, 0])).sum()
-    return t if abs(area - poly.area) <= 1e-5 * poly.area + 1e-5 else None
-
-
 def _clipped_wedge(poly: Polygon, a: np.ndarray, n: np.ndarray, d: float, z_bot: float, z_top: float) -> np.ndarray | None:
     """Closed wedge prism over 2D footprint ``poly``: flat top at ``z_top`` and sloped bottom
     from ``z_bot`` (at offset -OVERLAP along ``n``) up to ``z_top`` (at offset ``d``)."""
     poly = shapely.geometry.polygon.orient(poly, 1.0)
     caps = _triangulate(poly)
     if caps is None:
-        caps = _ear_clip(poly)
-    if caps is None:
-        return None
+        return None  # leave this stretch unfilled rather than add a broken piece
 
     def z_of(xy: np.ndarray) -> np.ndarray:
         v = np.clip((xy - a) @ n, -OVERLAP, d)
