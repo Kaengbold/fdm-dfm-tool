@@ -28,6 +28,7 @@ class OrientationSettings:
     bed_angle_tol_deg: float = 2.0
     sphere_samples: int = 256
     flat_face_candidates: int = 32
+    resting_candidates: int = 8  # sides the part settles on when set down (round parts)
     coarse_faces: int = 20_000  # above this, pre-rank candidates on a sample
     fine_faces: int = 200_000  # finalists are re-scored on a sample this big (the sliced refinement checks them after)
     refine_candidates: int = 10
@@ -45,6 +46,7 @@ class OrientationSettings:
     # even though it needs a little support.
     w_tipping: float = 1.0
     tip_aspect: float = 4.0
+    contact_depth_mm: float = 0.2  # points this close to the bed count as touching it (about the first layer)
     # Risky first layer (the sliced refinement only): per small separate spot on the bed (up to 3),
     # and for a first layer made only of thin strips.
     w_small_spots: float = 0.5
@@ -67,6 +69,7 @@ class OrientationResult:
     support_needed: bool | None = None
     print_time_min: float | None = None  # reuse the finalist estimate for its card and comparison
     bed_rules: tuple[str, ...] = ()  # retain the findings that can override the score
+    resting: bool = False  # a side the part settles on (convex-hull face), kept even without a flat face on the bed
     face_penalties: dict[str, float] = field(default_factory=dict)
 
     def penalize(self, term: str, value: float) -> None:
@@ -96,17 +99,19 @@ def find_orientations(
 ) -> list[OrientationResult]:
     """Score candidate build directions and return the best ``top`` (distinct) ones."""
     s = settings or OrientationSettings()
-    cands = candidate_directions(mesh, s)
+    resting = resting_directions(mesh, s.resting_candidates)
+    cands = np.vstack([candidate_directions(mesh, s), resting])  # resting last: ties keep their old pick
     if mesh.face_count > s.coarse_faces:
         # Rank all candidates on an area-weighted sample, then re-score the best on the full mesh.
         sample, area_scale = _area_sample(mesh, s.coarse_faces)
         coarse = _score(sample, cands, s, size=_size(mesh), area_scale=area_scale)
-        cands = np.array([r.up for r in _best_distinct(coarse, s.refine_candidates)])
+        cands = np.array([r.up for r in _with_resting(_best_distinct(coarse, s.refine_candidates), coarse, resting, _size(mesh))])
     if mesh.face_count > s.fine_faces:
         fine, scale = _area_sample(mesh, s.fine_faces)
-        picked = _best_distinct(_score(fine, cands, s, size=_size(mesh), area_scale=scale), top)
+        scored = _score(fine, cands, s, size=_size(mesh), area_scale=scale)
     else:
-        picked = _best_distinct(_score(mesh, cands, s), top)
+        scored = _score(mesh, cands, s)
+    picked = _with_resting(_best_distinct(scored, top), scored, resting, _size(mesh))
     for r in picked:
         r.reasons = explain(r, mesh)
     return picked
@@ -124,6 +129,31 @@ def _best_distinct(results: list[OrientationResult], n: int, min_angle_deg: floa
     return picked
 
 
+def _with_resting(picked: list[OrientationResult], scored: list[OrientationResult],
+                  resting: np.ndarray, size: float, flat_share: float = 0.01) -> list[OrientationResult]:
+    """For a part with no flat face to lie on (no pick has ``flat_share`` × size² on the bed): mark
+    picks that are resting sides, and add the best-scoring resting side if none was picked.
+
+    Such a part scores alike in every direction on bed contact, so less support alone picks it,
+    often standing on one tip; the sliced check then decides with the real first layer, so a
+    steady side has to reach it (T-486). Parts with a flat face keep the flat-face search as is."""
+    if any(r.bed_area >= flat_share * size**2 for r in picked):
+        return picked
+
+    def is_resting(r):
+        return len(resting) > 0 and bool((resting @ r.up > np.cos(np.radians(0.5))).any())
+
+    for r in picked:
+        r.resting = is_resting(r)
+    if not any(r.resting for r in picked):
+        rest = [r for r in scored if is_resting(r)]
+        if rest:
+            best = min(rest, key=lambda r: r.score)
+            best.resting = True
+            picked = [*picked, best]
+    return picked
+
+
 def evaluate(mesh: Mesh, up, settings: OrientationSettings | None = None) -> OrientationResult:
     r = _score(mesh, _unit(up)[None, :], settings or OrientationSettings())[0]
     r.reasons = explain(r, mesh)
@@ -132,11 +162,7 @@ def evaluate(mesh: Mesh, up, settings: OrientationSettings | None = None) -> Ori
 
 def candidate_directions(mesh: Mesh, s: OrientationSettings) -> np.ndarray:
     """Fibonacci-sphere samples plus "lay this flat face on the bed" directions."""
-    n = s.sphere_samples
-    i = np.arange(n) + 0.5
-    phi = np.arccos(1 - 2 * i / n)
-    theta = np.pi * (1 + 5**0.5) * i
-    sphere = np.stack([np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi)], axis=1)
+    sphere = _sphere(s.sphere_samples)
 
     normals, areas = mesh.normals_and_areas()
     # Group faces by normal rounded to 0.01: one integer key per face sorts far faster than
@@ -151,6 +177,123 @@ def candidate_directions(mesh: Mesh, s: OrientationSettings) -> np.ndarray:
 
     cands = np.vstack([[[0.0, 0.0, 1.0]], flat, sphere])
     return cands / np.linalg.norm(cands, axis=1, keepdims=True)
+
+
+def _sphere(n: int) -> np.ndarray:
+    """``n`` near-evenly spread unit vectors (Fibonacci sphere)."""
+    i = np.arange(n) + 0.5
+    phi = np.arccos(1 - 2 * i / n)
+    theta = np.pi * (1 + 5**0.5) * i
+    return np.stack([np.cos(theta) * np.sin(phi), np.sin(theta) * np.sin(phi), np.cos(phi)], axis=1)
+
+
+def resting_directions(mesh: Mesh, n: int, starts: int = 96, hull_dirs: int = 600,
+                       max_points: int = 200_000) -> np.ndarray:
+    """Build directions (up, part frame) of the ``n`` convex-hull faces the part most often comes to rest
+    on when set down: round parts have no flat face but still sit steady on three bumps.
+
+    The sphere samples almost never hit a hull face exactly, so on a part with no flat face the
+    search stood it on one bump tip (T-486). Here the part is "dropped" from ``starts`` directions
+    and rolled over its lowest point, then its lowest edge, until the centre of mass is above a
+    triangle of three contact points; faces reached from more directions come first. Rolling runs
+    on the extreme points in ``hull_dirs`` directions (a few hundred), so no hull library (scipy
+    isn't loaded for orienting in the browser) and little time on big meshes.
+    """
+    points = mesh.triangles.reshape(-1, 3)
+    if len(points) > max_points:
+        points = points[np.random.default_rng(0).choice(len(points), max_points, replace=False)]
+    points = points[_extreme_points(points, _sphere(hull_dirs))].astype(np.float64)
+    centre = _centroid(mesh)
+    found: list[np.ndarray] = []
+    counts: list[int] = []
+    for g in _sphere(starts):
+        g = _roll(points, centre, g)
+        if g is None:
+            continue
+        for k, known in enumerate(found):
+            if np.dot(known, g) > np.cos(np.radians(2.0)):
+                counts[k] += 1
+                break
+        else:
+            found.append(g)
+            counts.append(1)
+    order = np.argsort(counts, kind="stable")[::-1][:n]
+    return -np.array([found[k] for k in order]).reshape(-1, 3)
+
+
+def _extreme_points(points: np.ndarray, dirs: np.ndarray, block: int = 16384) -> np.ndarray:
+    """Indices of the points farthest along each of ``dirs`` (hull corners). Float32 in blocks of
+    points, directions × points so the arg-max runs along memory: 240k points × 600 directions 0.3 s."""
+    pts = np.ascontiguousarray(points.T, dtype=np.float32)
+    d = dirs.astype(np.float32)
+    best = np.full(len(d), -np.inf, np.float32)
+    index = np.zeros(len(d), dtype=np.intp)
+    rows = np.arange(len(d))
+    for start in range(0, pts.shape[1], block):
+        along = d @ pts[:, start:start + block]
+        arg = along.argmax(axis=1)
+        top = along[rows, arg]
+        better = top > best
+        best[better], index[better] = top[better], arg[better] + start
+    return np.unique(index)
+
+
+def _roll(points: np.ndarray, centre: np.ndarray, g: np.ndarray, steps: int = 40) -> np.ndarray | None:
+    """Gravity direction ``g`` after the hull of ``points`` rolls to rest, or None if it doesn't settle."""
+    contact = [int(np.argmax(points @ g))]
+    for _ in range(steps):
+        p1 = points[contact[0]]
+        if len(contact) == 3:
+            # Resting if the centre of mass is above the contact triangle, else roll over the edge it's beyond.
+            above = centre - np.dot(centre - p1, g) * g
+            beyond = None
+            for i, j, k in ((0, 1, 2), (1, 2, 0), (2, 0, 1)):
+                a, b, c = points[contact[i]], points[contact[j]], points[contact[k]]
+                side = np.cross(g, b - a)
+                if np.dot(above - a, side) * np.dot(c - a, side) < -1e-9:
+                    beyond = [contact[i], contact[j]]
+                    break
+            if beyond is None:
+                return g
+            contact = beyond
+            p1 = points[contact[0]]
+        lever = (centre - p1) - np.dot(centre - p1, g) * g  # from the pivot towards the centre, on the bed
+        if len(contact) == 2:
+            edge = points[contact[1]] - p1
+            length = np.linalg.norm(edge)
+            along = np.dot(centre - p1, edge / length)
+            if not 0 <= along <= length:  # the centre is past one end: pivot on that end alone
+                contact = [contact[0] if along < 0 else contact[1]]
+                continue
+            lever -= along * edge / length
+        size = np.linalg.norm(lever)
+        if size < 1e-9:
+            return g if len(contact) == 2 else None
+        lever /= size
+        # Tip g towards the lever until the next point touches the bed.
+        rel = points - p1
+        down, out = rel @ g, rel @ lever
+        ok = out > 1e-9
+        ok[contact] = False
+        if not ok.any():
+            return None
+        angle = np.where(ok, np.arctan2(-down, np.where(ok, out, 1.0)), np.inf)
+        nxt = int(np.argmin(angle))
+        g = np.cos(angle[nxt]) * g + np.sin(angle[nxt]) * lever
+        g /= np.linalg.norm(g)
+        contact.append(nxt)
+    return None
+
+
+def _centroid(mesh: Mesh) -> np.ndarray:
+    """Centre of mass of the solid (signed tetrahedra from the origin); the box centre for open meshes."""
+    a, b, c = mesh.triangles[:, 0], mesh.triangles[:, 1], mesh.triangles[:, 2]
+    vol = np.einsum("ij,ij->i", a, np.cross(b, c))
+    total = vol.sum()
+    lo, hi = mesh.bounds()
+    if abs(total) < 1e-9 * float(np.prod(np.maximum(hi - lo, 1e-9))):
+        return (lo + hi) / 2
+    return (vol[:, None] * (a + b + c)).sum(axis=0) / (4 * total)
 
 
 def rotation_to_z(up) -> np.ndarray:
@@ -263,6 +406,7 @@ def _score(
         centroid_h = z.mean(axis=1) - zmin
         support_vol = (proj * centroid_h * support).sum(axis=0)
         bed_area = (areas[:, None] * bed).sum(axis=0)
+        width = _contact_width(mesh.triangles, z, zmin, U, s.contact_depth_mm)
 
         bed_frac = bed_area / L**2
         terms = {
@@ -270,7 +414,7 @@ def _score(
             "height": s.w_height * height / L,
             "bed": s.w_small_bed * np.clip(1.0 - bed_frac / s.good_bed_fraction, 0.0, 1.0)
             - s.w_bed_contact * np.minimum(bed_frac, 1.0),
-            "stability": stability_term(height, bed_area, s),
+            "stability": stability_term(height, bed_area, s, width),
         }
         score = sum(terms.values())
         for k in range(len(U)):
@@ -288,13 +432,36 @@ def _score(
     return results
 
 
-def stability_term(height, bed_area, s: OrientationSettings):
-    """Penalty for standing tall on a narrow footprint. The base width is taken from the contact area
-    (the width of a circle that size): cheap enough for every candidate, and the refinement passes
-    the sliced first layer's real area."""
-    width = 2.0 * np.sqrt(np.maximum(bed_area, 1e-6) / np.pi)
+def stability_term(height, bed_area, s: OrientationSettings, width=0.0):
+    """Penalty for standing tall on a narrow footprint. The base width is the larger of the contact
+    area's (the width of a circle that size) and ``width``, how far apart the touching points are
+    (a round part resting on three bumps stands as steady as on a disc that wide)."""
+    width = np.maximum(2.0 * np.sqrt(np.maximum(bed_area, 1e-6) / np.pi), width)
     aspect = np.asarray(height) / width
     return s.w_tipping * np.clip((aspect - s.tip_aspect) / s.tip_aspect, 0.0, 1.0)
+
+
+def _contact_width(tris: np.ndarray, z: np.ndarray, zmin: np.ndarray, ups: np.ndarray, depth: float,
+                   angles: int = 12, cap: int = 2000) -> np.ndarray:
+    """Narrowest width (mm) of the points within ``depth`` of the bed, per build direction: the
+    width of the base the part stands on, as the tipping check measures it on the first layer.
+    Taken over ``angles`` directions on the bed (up to 4 % too wide), on at most ``cap`` points."""
+    points = tris.reshape(-1, 3)
+    widths = np.zeros(len(ups))
+    turn = np.linspace(0.0, np.pi, angles, endpoint=False)
+    for k, up in enumerate(ups):
+        near = np.flatnonzero((z[..., k] - zmin[k]).reshape(-1) < depth)
+        if len(near) < 2:
+            continue
+        if len(near) > cap:
+            near = near[:: len(near) // cap + 1]
+        a = np.cross(up, [1.0, 0.0, 0.0] if abs(up[0]) < 0.9 else [0.0, 1.0, 0.0])
+        a /= np.linalg.norm(a)
+        b = np.cross(up, a)
+        flat = points[near] @ np.stack([a, b], axis=1)  # (n, 2) on the bed
+        along = flat @ np.stack([np.cos(turn), np.sin(turn)])  # (n, angles)
+        widths[k] = float((along.max(axis=0) - along.min(axis=0)).min())
+    return widths
 
 
 def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, settings: OrientationSettings,
@@ -359,7 +526,9 @@ def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, s
             result.penalize(name, value - result.terms.get(name, 0.0))
 
     def eligibility(result):
-        return not placed[id(result)][1]["fits"], risky[id(result)]
+        # Tipping over fails the print; a small contact patch only needs a brim. A part with no
+        # flat face (a sculpt) always has the small patch, so standing steady decides (T-486).
+        return not placed[id(result)][1]["fits"], "tipping_risk" in result.bed_rules, risky[id(result)]
 
     def dominated(result):
         values = (round(result.support_grams, 1), -result.bed_area, result.height)
