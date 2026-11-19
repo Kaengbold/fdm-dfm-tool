@@ -378,15 +378,7 @@ def test_single_edit_reduces_its_finding(part_name: str, up: tuple[float, float,
     "part_name, edit_id",
     [
         pytest.param("l_bracket", "teardrop-8", id="l_bracket-teardrop-8"),
-        pytest.param(
-            "feature_test",
-            "teardrop-61",
-            id="feature_test-teardrop-61",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="T-488: teardrop-61's apex lands just above a slice and makes a new 0.05 mm gap_fuses finding",
-            ),
-        ),
+        pytest.param("feature_test", "teardrop-61", id="feature_test-teardrop-61"),
     ],
 )
 def test_teardrop_introduces_no_gap_fuses(part_name: str, edit_id: str):

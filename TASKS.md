@@ -918,10 +918,11 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Seen (T-463, `test_design_edits.py`): on `gear`, `detail_plate`, `knob` (also `feature_test`, `hole_block`, `spool_hub`) the re-check after applying `foot-chamfer` gives the same `elephant_foot` finding: the check fires for any hole in the first layer and never looks at whether its bottom edge is chamfered.
   - Do: let the check skip holes / edges whose bottom already has a chamfer (the outline grows over the first ~0.5 mm), or don't offer the chamfer for a finding it can't clear.
   - Done when: the strict xfail `test_foot_chamfer_reduces_elephant_foot` passes (remove the xfail).
-- [ ] **T-488 P2** [G] A teardrop can leave a hairline slit at its tip. · files: `core/fdmcore/features.py` (teardrop edits), `core/fdmcore/checks.py` (`gap_fuses`) · owner: Claude (`task/T-488-teardrop-tip`)
+- [x] **T-488 P2** [G] A teardrop can leave a hairline slit at its tip. · files: `core/fdmcore/features.py` (teardrop edits), `core/fdmcore/checks.py` (`gap_fuses`) · owner: Claude (`task/T-488-teardrop-tip`)
   - Seen (T-463): `feature_test`'s `teardrop-61` (Ø8 sideways hole) removes the oval-hole finding but its sharp 45° tip lands just above a slice (z = 23.6 mm) and the re-check finds a new 0.05 mm `gap_fuses` ("Can fail").
   - Do: flatten the tip to a whole layer (or a small flat of ≥ 1 line width), or have `gap_fuses` ignore slits that close within one layer.
   - Done when: the strict xfail `test_teardrop_introduces_no_gap_fuses[feature_test-teardrop-61]` passes.
+  - Outcome: the teardrop's point now ends in a 0.5 mm flat (about one line wide) instead of a knife edge, so its last layer never leaves a slit narrower than the 0.2 mm that fuses; a flat that short bridges cleanly. feature_test's teardrop-61 no longer adds `gap_fuses`; the teardrop tests pass.
 
 ## Done
 
