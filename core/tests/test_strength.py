@@ -211,6 +211,18 @@ def test_optimiser_finds_the_lightest_settings_that_hold():
     assert held["safety_factor"] == pytest.approx(o["target"], rel=1e-3)
 
 
+def test_optimiser_for_this_orientation_never_turns_the_part():
+    """The app's automatic settings for a load (T-429): same climb, this orientation only, no extras."""
+    loads = _plank()
+    prof = {"material": "pla", "printer": "bambu_p1s"}
+    for up in ([0, 0, 1], [0, 1, 0]):
+        o = api.optimise_strength(up, loads, prof, this_orientation=True)
+        assert o["orientation"] == "this one" and o["alternatives"] == [] and o["up"] == up
+    heavy = [dict(l, kg=500) if l["kind"] == "force" else l for l in loads]
+    o = api.optimise_strength([0, 0, 1], heavy, prof, this_orientation=True)
+    assert not o["met"] and "beyond" not in o
+
+
 def test_fea_view_fields_cover_the_refined_surface():
     loads = hook_loads()
     r = api.strength([1, 0, 0], loads, {"material": "pla"})

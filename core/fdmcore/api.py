@@ -823,12 +823,15 @@ OPT_INFILL = (0.10, 0.15, 0.20, 0.25, 0.35, 0.50, 0.75, 1.0)
 OPT_MAX_STEPS = 16
 
 
-def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None, zones: bool = False) -> dict:
+def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None, zones: bool = False,
+                      this_orientation: bool = False) -> dict:
     """The least plastic that reaches ``target`` safety (default ×2, ×3 for the strength goal):
     start from a light print and add, one step at a time, whatever buys the most safety per gram
     — walls, top/bottom layers or infill. Tried for this orientation and the strongest one.
     ``zones``: also try stronger zones only around the most stressed places (slicer modifier
-    volumes), the rest of the part light; returned as ``zoned`` with the plastic it saves."""
+    volumes), the rest of the part light; returned as ``zoned`` with the plastic it saves.
+    ``this_orientation``: only this orientation and no "what else" ideas: the app's automatic
+    settings for a load, which must not turn the part and should cost about one strength run."""
     from .strength import cases_safety, evaluate_cases, find_zones
 
     s = _require()
@@ -837,8 +840,10 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     target = float(target or max(OPT_TARGET.get(p.goal, 2.0), required_safety(p)))
     up = (np.asarray(up, float) / np.linalg.norm(up)).tolist()
     axes = np.vstack([np.eye(3), -np.eye(3)])
-    strongest = axes[int(np.argmax(cases_safety(cases, axes, p, _shells(p))))]
-    ups = [up] + ([strongest.tolist()] if abs(float(np.dot(strongest, up))) < 0.99 else [])
+    ups = [up]
+    if not this_orientation:
+        strongest = axes[int(np.argmax(cases_safety(cases, axes, p, _shells(p))))]
+        ups += [strongest.tolist()] if abs(float(np.dot(strongest, up))) < 0.99 else []
     plans = []
     for i, u in enumerate(ups):
         with stage(i / len(ups), (i + 1) / len(ups)):
@@ -851,7 +856,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     best["alternatives"] = [q for q in plans if q is not best]
     best["target"] = target
     best["explanation"] = _optimise_story(best, target, len(plans) > 1)
-    if not best["met"]:  # settings alone aren't enough: what else would do it
+    if not best["met"] and not this_orientation:  # settings alone aren't enough: what else would do it
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
