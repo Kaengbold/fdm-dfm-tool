@@ -18,7 +18,7 @@ import numpy as np
 import shapely
 from shapely.geometry import Polygon
 
-from .checks import _bridge_span, _opening, _safe_diff, _safe_overlay
+from .checks import _bridge_span, _min_width, _opening, _safe_diff, _safe_overlay
 from .mesh import Mesh
 from .profile import Profile, load_data
 from .slicer import slice_mesh
@@ -66,6 +66,7 @@ def support_stats(mesh: Mesh, profile: Profile, max_layers: int = 40) -> dict:
         volume += column.area * layers[i].dz
     return {
         "bed_area": float(layers[0].geom.area),
+        "base_width": _min_width(layers[0].geom.convex_hull) if not layers[0].geom.is_empty else 0.0,
         "support_volume": float(volume),
         "support_area": float(support_area),
         "scar_area": float(scar),
