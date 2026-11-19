@@ -629,7 +629,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### G. Design changes
 
-- [ ] **T-432 P1** [G] Every suggested change belongs to a finding. · files: `core/fdmcore/features.py` (`design_edits`, `_corner_chamfers`, `_foot_chamfer`), `core/fdmcore/api.py` (`design`), `web/app.js` (`suggestDesign`) · owner: —
+- [ ] **T-432 P1** [G] Every suggested change belongs to a finding. · files: `core/fdmcore/features.py` (`design_edits`, `_corner_chamfers`, `_foot_chamfer`), `core/fdmcore/api.py` (`design`), `web/app.js` (`suggestDesign`) · owner: Claude (`task/T-432-edits-need-finding`)
   - Seen (112 suggestions on 21 parts): 81 were "Round sharp corner", 19 "0.5 mm chamfer along the bottom edge", 8 ledge fills, 2 teardrops, 2 thicker walls, 1 sacrificial layer. Hook, mushroom, pegboard hook and shelf bracket have **no** finding in PLA and still get 5–8 changes each.
   - Do: an edit is offered only when a finding with its `rule` is in the current check (`_edit` already carries `rule`): corner rounding only with `warping` / `sharp_bed_corners`, the foot chamfer only with `elephant_foot` *and* when the slicer's elephant-foot compensation (always set) isn't enough: say which. Show each edit under its finding ("Fixes: Corners of a long base lift off the bed"). Edits without a finding go into a closed fold "Other ideas".
   - Done when: a part with 0 findings shows 0 suggested changes outside "Other ideas"; test over the 21 parts.
