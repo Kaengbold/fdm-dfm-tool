@@ -11,7 +11,9 @@ from fdmcore.profile import load_data
 from fdmcore.regions import planar_share
 
 ROOT = Path(__file__).resolve().parents[2]
-CAD_PARTS = sorted((ROOT / "web" / "samples").glob("*.stl")) + sorted((ROOT / "core" / "tests" / "corpus").glob("*.stl"))
+CORPUS_PARTS = sorted((ROOT / "core" / "tests" / "corpus").glob("*.stl"))
+ORGANIC_PARTS = [p for p in CORPUS_PARTS if p.stem.startswith("bumpy_blob")]
+CAD_PARTS = sorted((ROOT / "web" / "samples").glob("*.stl")) + [p for p in CORPUS_PARTS if p not in ORGANIC_PARTS]
 
 
 def blob(n: int = 120, bumps: bool = True) -> Mesh:
@@ -34,6 +36,12 @@ def blob(n: int = 120, bumps: bool = True) -> Mesh:
 def test_cad_parts_stay_cad(path):
     info = api.load(path.read_bytes(), path.name)
     assert info["kind"] == "cad" and info["cad_checks"]
+
+
+@pytest.mark.parametrize("path", ORGANIC_PARTS, ids=lambda p: p.name)
+def test_organic_corpus_parts_load_as_organic(path):
+    info = api.load(path.read_bytes(), path.name)
+    assert info["kind"] == "organic" and not info["cad_checks"]
 
 
 def test_planar_share_separates_shapes():

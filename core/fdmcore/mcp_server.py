@@ -294,6 +294,13 @@ def set_fastener(region: int, up: list[float], size: str | None = "M3", use: str
 
 
 @server.tool()
+def fastener_suggestions(up: list[float], material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Round holes that look like standard screw holes (within 0.3 mm of an M2–M6 pilot, clearance or insert
+    size), grouped so equal holes get one question ("All four Ø2.8 mm holes: is an M3 screw going in?"),
+    with the likely uses and the hole size each needs. Answer with set_fastener for each region of a group."""
+    return api.fastener_suggestions(up, {"material": material, "nozzle": nozzle})
+
+@server.tool()
 def set_gap(face_a: int, face_b: int, up: list[float], partner_mm: float | None = None, fit: str = "sliding", material: str = "pla") -> dict:
     """A slot or tab between two parallel flat faces (ids from list_faces): their distance and whether
     it is a slot (empty between) or a tab (plastic between). With partner_mm (thickness of what goes in,
@@ -850,6 +857,7 @@ API_TOOLS = {
     "warping": "check_warping",
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",
+    "fastener_suggestions": "fastener_suggestions",
     "split": "split_part",
     "plate": "plan_plate",
     "set_gap": "set_gap",

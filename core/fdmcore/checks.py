@@ -83,6 +83,9 @@ RULE_IMPACT = {
     "setup_flow_too_high": "fails",
     "setup_plate_too_sticky": "fails",
     "modelled_thread": "shape",
+    "wall_line_mismatch": "info",
+    "load_bearing_wall_thin": "weak",
+    "uneven_wall_thickness": "shape",
 }
 IMPACT_ORDER = ["fails", "shape", "surface", "weak", "info"]
 SEVERITY_ORDER = {"problem": 0, "warn": 1, "info": 2}
@@ -163,7 +166,9 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _bed_findings(layers, profile, T)
     findings += _weak_findings(layers, tracker, profile, T)
     findings += _flex_findings(layers, profile, T)
-    stats = shape_settings_stats(layers, profile, T["shape_settings"])
+    wall_layers: list = []
+    stats = shape_settings_stats(layers, profile, T["shape_settings"], wall_layers)
+    findings += _wall_advice_findings(wall_layers, profile, T)
     normals, areas = mesh.normals_and_areas()
     z = mesh.triangles[..., 2]
     top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
@@ -248,19 +253,23 @@ def _wall_width_samples(g, count: int) -> tuple[np.ndarray, float]:
     return widths[np.isfinite(widths)], perimeter / count
 
 
-def _infill_core_area(g, shell_mm: float, cells: int) -> float:
-    """Bounded grid estimate of the area left inside the goal's wall loops."""
+def _infill_core_area(g, shell_mm: float, cells: int) -> tuple[float, float]:
+    """Bounded grid estimate of the area left inside the goal's wall loops, and max local thickness."""
     x0, y0, x1, y1 = g.bounds
     step = max(x1 - x0, y1 - y0) / cells
+    if step <= 1e-9:
+        return 0.0, 0.0
     nx, ny = max(1, int(np.ceil((x1 - x0) / step))), max(1, int(np.ceil((y1 - y0) / step)))
     hx, hy = (x1 - x0) / nx, (y1 - y0) / ny
     x, y = np.meshgrid(x0 + (np.arange(nx) + 0.5) * hx, y0 + (np.arange(ny) + 0.5) * hy)
     inside = shapely.contains_xy(g, x, y)
+    if not inside.any():
+        return 0.0, 0.0
     distances = shapely.distance(g.boundary, shapely.points(x[inside], y[inside]))
-    return min(float(np.count_nonzero(distances > shell_mm) * hx * hy), g.area)
+    return min(float(np.count_nonzero(distances > shell_mm) * hx * hy), g.area), 2.0 * float(distances.max())
 
 
-def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict) -> dict:
+def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict, wall_layers: list | None = None) -> dict:
     """Reuse the check's slices, with height/perimeter-weighted wall widths and volume-weighted core.
 
     Width percentiles suppress tiny tips and intersections; they describe walls, not a certified
@@ -278,11 +287,13 @@ def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict) -> dict
             continue
         key = shapely.normalize(g.simplify(0.001))
         if cached is not None and key.equals_exact(cached[0], 1e-4):
-            w, weight, area = cached[1:]
+            w, weight, area, max_thick = cached[1:]
         else:
             w, weight = _wall_width_samples(g, S["boundary_samples"])
-            area = _infill_core_area(g, plan["walls"] * profile.line_width, S["core_grid_cells"])
-            cached = (key, w, weight, area)
+            area, max_thick = _infill_core_area(g, plan["walls"] * profile.line_width, S["core_grid_cells"])
+            cached = (key, w, weight, area, max_thick)
+        if wall_layers is not None and len(w):
+            wall_layers.append((layer, w, weight * layer.dz, max_thick))
         widths.extend(w)
         weights.extend(np.full(len(w), weight * layer.dz))
         skin = _skin_area(layers, zs, i, plan["top"] * plan["layer_height"], plan["bottom"] * plan["layer_height"])
@@ -306,6 +317,123 @@ def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict) -> dict
     return {"wall_min_mm": quantiles[0], "wall_typical_mm": quantiles[1], "wall_upper_mm": quantiles[2],
             "infill_volume_share": float(core / total), "infill_volume_cm3": float(core / 1000),
             "uneven_wall_share": float(weight[uneven].sum() / weight.sum()), "uneven_wall_mm": uneven_width}
+
+
+def _wall_advice_findings(wall_layers: list, profile: Profile, T: dict) -> list[dict]:
+    """Wall-thickness advice reusing shape_settings_stats samples: non-whole line multiples,
+    load-bearing minimum wall, and thick-next-to-thin warping / sink hints."""
+    if not wall_layers:
+        return []
+    W, S = T["wall_advice"], T["shape_settings"]
+    lw, nozzle = profile.line_width, float(profile.nozzle)
+    plan = goal_plan(profile)
+    w = np.concatenate([x[1] for x in wall_layers])
+    wt = np.concatenate([np.full(len(x[1]), x[2]) for x in wall_layers])
+    total_wt = float(wt.sum())
+    if not len(w) or total_wt <= 0:
+        return []
+    out = []
+    lo = 2 * lw - 1e-3  # under two lines is already covered by thin-wall checks and thicken_walls
+
+    def wmedian(mask):
+        idx = np.flatnonzero(mask)
+        order = idx[np.argsort(w[idx])]
+        c = np.cumsum(wt[order])
+        return float(w[order[min(np.searchsorted(c, c[-1] / 2), len(order) - 1)]])
+
+    def span_bbox(pred):
+        hit = [l for l, lw_s, _, _ in wall_layers if pred(lw_s)]
+        if not hit:
+            return None
+        b = np.array([l.geom.bounds for l in hit])
+        return [[float(b[:, 0].min()), float(b[:, 1].min()), max(hit[0].z - profile.layer_height / 2, 0.0)],
+                [float(b[:, 2].max()), float(b[:, 3].max()), hit[-1].z + profile.layer_height / 2]]
+
+    # 1) Walls not near a whole number of extrusion lines (2 lines up to 2 x wall loops).
+    hi, tol = 2 * plan["walls"] * lw, W["line_fraction_tolerance"]
+    off = (w >= lo) & (w <= hi) & (np.abs(w / lw - np.round(w / lw)) > tol)
+    if wt[off].sum() / total_wt >= W["min_share"]:
+        wall_mm = wmedian(off)
+        clean_n = int(np.ceil(wall_mm / lw))
+        clean_mm = round(clean_n * lw, 2)
+        lo_lw, hi_lw = W["min_line_width_nozzle"] * nozzle, W["max_line_width_nozzle"] * nozzle
+        cands = [(n, wall_mm / n) for n in range(2, clean_n + 2) if lo_lw <= wall_mm / n <= hi_lw]
+        alt = min(cands, key=lambda c: (abs(c[1] - lw), c[1] < lw)) if cands else None
+        if alt is not None and abs(round(alt[1], 2) - round(lw, 2)) >= 0.01:
+            slicer_tip = f"use Arachne wall generator, or set line width to {alt[1]:.2f} mm so {alt[0]} lines fill it"
+            extra = {"alt_line_width_mm": round(alt[1], 2), "alt_lines": alt[0]}
+        else:
+            slicer_tip = "turn on the Arachne wall generator so lines adjust to fill the gap"
+            extra = {}
+        detail = (f"Walls around {wall_mm:.2f} mm aren't a whole number of {lw:.2f} mm lines ({wall_mm / lw:.1f} lines): "
+                  f"in CAD, {clean_mm:.2f} mm prints as {clean_n} clean lines; in the slicer, {slicer_tip}")
+        bbox = span_bbox(lambda s: ((s >= lo) & (s <= hi) & (np.abs(s / lw - np.round(s / lw)) > tol)).any())
+        out.append(_finding("wall_line_mismatch", "info", detail, bbox=bbox,
+                            wall_mm=round(wall_mm, 2), line_width_mm=round(lw, 2),
+                            clean_wall_mm=clean_mm, clean_lines=clean_n, **extra))
+
+    # 2) Rule-of-thumb minimum wall for load-bearing parts.
+    min_load = W["load_bearing_min_mm"]
+    if min_load > lo:
+        thin = (w >= lo) & (w < min_load)
+        if wt[thin].sum() / total_wt >= W["min_share"]:
+            thin_mm = wmedian(thin)
+            rec_n = int(np.ceil(min_load / lw))
+            rec_mm = round(rec_n * lw, 2)
+            load_known = profile.goal == "strength" or profile.constant_load
+            why = "thin for a load-bearing part" if load_known else "fine for a light cover, but thin if this part carries a load"
+            detail = (f"Walls around {thin_mm:.2f} mm are {why}: aim for at least {min_load:.1f} mm "
+                      f"({rec_n} lines, {rec_mm:.2f} mm with {lw:.2f} mm lines) for structural strength")
+            bbox = span_bbox(lambda s: ((s >= lo) & (s < min_load)).any())
+            out.append(_finding("load_bearing_wall_thin", "warn" if load_known else "info", detail, bbox=bbox,
+                                wall_mm=round(thin_mm, 2), min_wall_mm=min_load,
+                                clean_wall_mm=rec_mm, clean_lines=rec_n))
+
+    # 3) Very uneven wall thickness (thick mass right next to a thin wall in one connected piece).
+    thin_max, thick_min, ratio_min = W["uneven_thin_max_mm"], W["uneven_thick_min_mm"], W["uneven_ratio"]
+    uneven_hits, poly_cache = [], None
+    for layer, lw_s, _, max_thick in wall_layers:
+        if max_thick < thick_min:
+            continue
+        tmask = (lw_s >= lo) & (lw_s <= thin_max)
+        if tmask.mean() < W["uneven_thin_share"] or max_thick < ratio_min * float(np.median(lw_s[tmask])):
+            continue
+        polys = parts(layer.geom)
+        if len(polys) == 1:
+            uneven_hits.append((layer, float(np.median(lw_s[tmask])), max_thick, polys[0].bounds))
+            continue
+        key = shapely.normalize(layer.geom.simplify(0.001))
+        if poly_cache is not None and key.equals_exact(poly_cache[0], 1e-4):
+            hit = poly_cache[1]
+        else:
+            hit = None
+            for p in polys:
+                if p.area < thick_min * thick_min * 0.25:
+                    continue
+                _, p_thick = _infill_core_area(p, plan["walls"] * lw, S["core_grid_cells"] // 2)
+                if p_thick < thick_min:
+                    continue
+                pw, _ = _wall_width_samples(p, S["boundary_samples"] // 2)
+                pt = (pw >= lo) & (pw <= thin_max)
+                if len(pw) and pt.mean() >= W["uneven_thin_share"] and p_thick >= ratio_min * float(np.median(pw[pt])):
+                    hit = (float(np.median(pw[pt])), p_thick, p.bounds)
+                    break
+            poly_cache = (key, hit)
+        if hit is not None:
+            uneven_hits.append((layer, *hit))
+    if sum(h[0].dz for h in uneven_hits) >= W["uneven_min_height_mm"]:
+        worst = max(uneven_hits, key=lambda h: h[2] / h[1])
+        b = np.array([h[3] for h in uneven_hits])
+        z0, z1 = uneven_hits[0][0].z, uneven_hits[-1][0].z
+        bbox = [[float(b[:, 0].min()), float(b[:, 1].min()), max(z0 - profile.layer_height / 2, 0.0)],
+                [float(b[:, 2].max()), float(b[:, 3].max()), z1 + profile.layer_height / 2]]
+        detail = (f"Thin walls (~{worst[1]:.1f} mm) sit right next to a much thicker section (~{worst[2]:.0f} mm) at "
+                  f"{z0:.1f}–{z1:.1f} mm: the thick part cools slower and pulls more as it shrinks, which can leave "
+                  "sink marks or warp the thin wall")
+        out.append(_finding("uneven_wall_thickness", "info", detail, bbox=bbox,
+                            thin_mm=round(worst[1], 2), thick_mm=round(worst[2], 1),
+                            ratio=round(worst[2] / worst[1], 1)))
+    return out
 
 
 # ---------------------------------------------------------------- layer scan

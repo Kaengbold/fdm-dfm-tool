@@ -156,6 +156,7 @@ const state = {
   suggested: [], // boxes the app suggests (T-392), like volumes plus why and use (ticked)
   fitNotes: {}, // region -> {partner, fit, text}: what goes into a hole / onto a post (set_fit)
   fastenerNotes: {}, // region -> {size, use, text}: the screw, insert or nut in a hole (set_fastener)
+  fastenerSuggestions: [], // grouped standard-hole fastener suggestions (fastener_suggestions)
   fitSel: null, // the hole, post or slot selected in Tolerances & tuning: {key, regions, label}
   fitList: [], // the holes and posts listed there
   gaps: [], // slots and tabs between two flat faces (set_gap): {faces, kind, distance_mm, partner, fit, text}
@@ -469,13 +470,14 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, loadSettings: null, overrides: {}, excludedSettings: [], fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, loadSettings: null, overrides: {}, excludedSettings: [], fitNotes: {}, fastenerNotes: {}, fastenerSuggestions: [], gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
   renderGcode();
   renderMarks();
   viewer.framed = false;
+  state.size_mm = info.size_mm;
   const [x, y, z] = info.size_mm.map((v) => v.toFixed(1));
   const body = info.bodies.length ? ` (${info.bodies[info.body].name})` : "";
   state.summary = `${info.name}${body}: ${x} × ${y} × ${z} mm`;
@@ -667,6 +669,17 @@ async function runCheck() {
     steps.render();
     suggestDesignIfShown();
   }, ["problems", "settings", "result"]);
+  if (token === checkToken) loadFastenerSuggestions(token);
+}
+
+/** Standard-looking screw holes (T-437), asked after the findings are shown: finding the holes needs face
+ * regions (scipy, a big first download), which must not hold up the check itself. */
+async function loadFastenerSuggestions(token) {
+  const up = activeOption()?.up;
+  const r = up && await call("fastener_suggestions", { up, profile: profile() }).catch(() => null);
+  if (token !== checkToken || !r) return;
+  state.fastenerSuggestions = r.suggestions ?? [];
+  renderFastenerSuggestions();
 }
 
 // ---------- rendering ----------
@@ -855,6 +868,7 @@ function renderCheck() {
   $("findings").replaceChildren(
     ...(findings.length ? renderImpactGroups(findings) : [el("li", { className: "ok", textContent: "Should print as designed in this orientation." })]),
   );
+  renderFastenerSuggestions();
   renderSettings();
   renderVerdict();
   renderCooling();
@@ -3337,6 +3351,7 @@ function renderFits(list) {
       fitControls(f), f.type === "hole" ? fastenerControls(f) : "");
   }));
   renderFitSelection();
+  renderFastenerSuggestions();
 }
 
 // ---------- what's selected in Tolerances & tuning ----------
@@ -3417,6 +3432,48 @@ function fitControls(f) {
 const FASTENER_USES = { screw: "screw into the plastic", insert: "heat-set insert", nut_top: "bolt + nut in a pocket",
   nut_side: "bolt + nut from the side", bolt: "bolt goes through" };
 
+/** Apply a screw / insert / nut choice to one hole or an entire equal-hole group (same path as picking by hand). */
+async function applyFastener(regions, size, use) {
+  await busy("Working out the screw hole…", async () => {
+    const notes = { ...state.fastenerNotes };
+    for (const region of regions) {
+      const r = await call("set_fastener", { region, up: activeOption().up, size, use, profile: profile() });
+      notes[region] = { size, use, text: r.explanation };
+      delete state.fitNotes?.[region]; // one size per hole: the screw's
+    }
+    state.fastenerNotes = notes;
+    const f = state.fitList.find((q) => q.region === regions[0]);
+    if (f) state.fitSel = { key: fitKey(f), regions: [...regions], region: f.region };
+    renderFits(state.fitList);
+    if (mode() === "print") $("design-on").click();
+    await suggestDesign();
+  });
+}
+
+/** Offer screw / insert / nut sizing near findings for standard-sized hole groups (T-437). */
+function renderFastenerSuggestions() {
+  const box = $("fastener-suggestions");
+  if (!box) return;
+  box.replaceChildren(...(state.fastenerSuggestions ?? []).map((s) => {
+    const notes = s.regions.map((r) => state.fastenerNotes?.[r]);
+    const same = notes.every((n) => n && n.size === s.size && n.use === notes[0].use) ? notes[0] : null;
+    const buttons = s.choices.map((c) => {
+      const btn = el("button", { type: "button", textContent: `${c.label} (Ø${c.target_mm} mm)`,
+        onclick: () => applyFastener(s.regions, s.size, c.use) });
+      btn.setAttribute("aria-pressed", String(same?.use === c.use));
+      return btn;
+    });
+    return el("div", { className: "sim-card" },
+      el("p", { textContent: s.prompt }),
+      el("div", { className: "choices" }, ...buttons),
+      same ? el("p", { className: "hint", textContent: same.text }, " ",
+        el("button", { type: "button", className: "link", textContent: "Show in Design changes", onclick: () => {
+          if (!steps.steps.includes("design")) setLevel("advanced");
+          steps.go("design");
+        } })) : "");
+  }));
+}
+
 /** "Screw, insert or nut?": the hole size, depth, wall and nut pocket for it, offered as design changes. */
 function fastenerControls(f) {
   const saved = state.fastenerNotes?.[f.region];
@@ -3425,16 +3482,7 @@ function fastenerControls(f) {
   size.value = saved?.size ?? guess;
   const use = el("select", { title: "What holds it" }, ...Object.entries(FASTENER_USES).map(([v, t]) => el("option", { value: v, textContent: t })));
   use.value = saved?.use ?? "screw";
-  const go = el("button", { textContent: "Size for it", onclick: () =>
-    busy("Working out the screw hole…", async () => {
-      const r = await call("set_fastener", { region: f.region, up: activeOption().up, size: size.value, use: use.value, profile: profile() });
-      state.fastenerNotes = { ...state.fastenerNotes, [f.region]: { size: size.value, use: use.value, text: r.explanation } };
-      delete state.fitNotes?.[f.region]; // one size per hole: the screw's
-      state.fitSel = { key: fitKey(f), regions: [f.region], region: f.region };
-      renderFits(state.fitList);
-      if (mode() === "print") $("design-on").click();
-      await suggestDesign();
-    }) });
+  const go = el("button", { textContent: "Size for it", onclick: () => applyFastener([f.region], size.value, use.value) });
   return el("div", { className: "fit fastener row" }, el("span", { className: "hint", textContent: "Or a screw:" }), size, use, go,
     saved ? el("p", { className: "hint", textContent: saved.text }) : "");
 }
@@ -3549,6 +3597,7 @@ async function testDesignEdit(id) {
 async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
   if (!chosen.length) return setStatus("Tick a change to apply it.");
   return busy("Applying design changes…", async () => {
+    const beforeSize = state.size_mm ? [...state.size_mm] : null;
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
@@ -3565,8 +3614,12 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     // The edits are made in the model's own frame, so the same build direction still applies (T-353).
     await loadFile(name, stl, null, step, "version", { body: 0, scale: 1, up: activeOption()?.up, derived });
     const lost = await restoreLoads(carry);
+    const afterSize = state.size_mm;
+    const sizeChanged = beforeSize && afterSize && afterSize.some((v, i) => Math.abs(v - beforeSize[i]) > 0.05);
+    const fmtSize = (s) => s.map((v) => Number(v.toFixed(1))).join(" × ");
+    const sizeNote = sizeChanged ? ` Outer size changed (now ${fmtSize(afterSize)} mm, was ${fmtSize(beforeSize)}).` : "";
     const dropped = (state.dropCount ?? 0) > droppedBefore ? state.droppedNotice : "";
-    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back). Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost ? ` ${lost}` : ""}${dropped ? ` ${dropped}` : ""}`);
+    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back).${sizeNote} Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost ? ` ${lost}` : ""}${dropped ? ` ${dropped}` : ""}`);
   });
 }
 

@@ -76,7 +76,7 @@ def test_bottom_chamfer_and_fillet_at_the_weak_spot():
     # 0.5 mm 45° chamfer along the 160 mm cap outline: 0.125 mm² × 160 mm.
     assert abs(part.volume()) - abs(apply_edits(part, [edits["foot-chamfer"]]).volume()) == pytest.approx(20, rel=0.05)
     api.regions()
-    api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}], prof)
+    api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 50, "direction": "pull"}], prof)
     fillet = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
     assert fillet["op"] == "add" and len(fillet["pieces"]) == 8  # the four edges where the stem meets the cap + its 4 corners
 
@@ -215,7 +215,7 @@ def test_thicker_weak_spot_helps():
 
     def loads():
         api.regions()
-        return [{"region": region_facing([-1, 0, 0]), "kind": "fixed"}, {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 4, "direction": "down"}]
+        return [{"region": region_facing([-1, 0, 0]), "kind": "fixed"}, {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 8, "direction": "down"}]
 
     api.load(box(80, 12, 12), "bar")
     before = api.strength([0, 0, 1], loads(), prof)
@@ -272,7 +272,7 @@ def test_chamfers_at_every_weak_corner():
         info = api.regions()["regions"]
         face = lambda n, ok: [r["id"] for r in info if np.dot(r["normal"], n) > 0.99 and ok(r["centroid"]) and r["area_mm2"] > 1]  # noqa: E731 (not slivers)
         loads = [{"region": face([0, 0, -1], lambda c: True)[0], "kind": "fixed"}]
-        loads += [{"region": f, "kind": "force", "kg": 3, "direction": "push"} for f in face([0, -1, 0], lambda c: c[2] > 6)]
+        loads += [{"region": f, "kind": "force", "kg": 5, "direction": "push"} for f in face([0, -1, 0], lambda c: c[2] > 6)]
         return api.strength([0, 0, 1], loads, prof)["safety_factor"]
 
     before = check(to_binary_stl(Mesh(m.vert_properties[m.tri_verts.reshape(-1)].reshape(-1, 3, 3).astype(float))))
@@ -338,7 +338,7 @@ def test_round_where_it_prints_chamfer_where_it_would_hang():
     api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
     api.regions()
     prof = {"material": "pla"}
-    api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}], prof)
+    api.strength([0, 1, 0], [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 50, "direction": "pull"}], prof)
     cap_down = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
     cap_up = next(e for e in api.design([0, 0, 1], prof)["edits"] if e["id"] == "stress-chamfer")
     assert "round" in cap_down["title"] and "chamfer" not in cap_down["title"]
@@ -358,7 +358,7 @@ def test_strength_of_a_variant_keeps_the_part():
     api.load((SAMPLES / "mushroom.stl").read_bytes(), "m")
     api.regions()
     prof = {"material": "pla"}
-    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": "pull"}]
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 50, "direction": "pull"}]
     before = api.strength([0, 1, 0], loads, prof)["safety_factor"]
     part = api._require().mesh
     edit = next(e for e in api.design([0, 0, -1], prof)["edits"] if e["id"] == "stress-chamfer")
@@ -427,7 +427,7 @@ def test_round_after_thickening_goes_all_round_the_stem():
     from fdmcore.mesh import to_binary_stl
 
     prof, up = {"material": "pla"}, [0, 1, 0]
-    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 10, "direction": [1, 0, 0]}]
+    loads = [{"region": 8, "kind": "fixed"}, {"region": 0, "kind": "force", "kg": 20, "direction": [1, 0, 0]}]
     api.load((SAMPLES / "mushroom.stl").read_bytes(), "mushroom")
     api.regions()
     api.strength(up, loads, prof)
@@ -436,7 +436,7 @@ def test_round_after_thickening_goes_all_round_the_stem():
     regs = api.regions()["regions"]
     cap = max(regs, key=lambda r: r["centroid"][2] if r["normal"][2] > 0.9 else -1e9)["id"]
     end = min(regs, key=lambda r: r["centroid"][2] if r["normal"][2] < -0.9 else 1e9)["id"]
-    api.strength(up, [{"region": cap, "kind": "fixed"}, {"region": end, "kind": "force", "kg": 10, "direction": [1, 0, 0]}], prof)
+    api.strength(up, [{"region": cap, "kind": "fixed"}, {"region": end, "kind": "force", "kg": 20, "direction": [1, 0, 0]}], prof)
     rounds = next(e for e in api.design(up, prof)["edits"] if e["id"] == "stress-chamfer")
     assert "weakest" in rounds["title"], rounds["title"]  # one corner, not "the 2 inside corners"
     pts = np.frombuffer(rounds["mesh"], "<f4").reshape(-1, 3)

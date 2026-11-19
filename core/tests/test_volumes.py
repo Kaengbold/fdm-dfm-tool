@@ -158,3 +158,36 @@ def test_moved_box_keeps_its_size_and_stays_on_the_part():
     assert up_high["hi"][2] - up_high["lo"][2] == pytest.approx(size[2] - 9 + 8, abs=1e-6)  # 4 mm tall, its top 8 mm under the part's: 1 mm cut off
     with pytest.raises(ValueError, match="outside the part's height"):
         api.volume_move(up, v, [0, -200, 0])
+
+
+def test_pin_hole_on_vertical_wall_without_normal():
+    """T-485: a click on a vertical wall (flat or curved) without a face normal, or with a curved
+    region's near-zero average normal, steps into the wall using the local surface normal."""
+    from pathlib import Path
+
+    # Simple box: vertical side wall with no normal supplied, and rotated orientation.
+    api.load(box(40, 20, 10), "block")
+    v = api.volume_at([0, 0, 1], "void", point=[0.0, 10, 5])
+    assert (v["lo"][0] + v["hi"][0]) / 2 == pytest.approx(api.VOID_COVER_MM + api.VOID_MM / 2, abs=0.01)
+    assert not any("shows as a hole" in n for n in v["notes"])
+    rot = api.volume_at([1, 0, 0], "void", point=[20, 10, 0.0])  # part z = 0 is a vertical wall when +x is up
+    assert rot["hi"][2] - rot["lo"][2] == pytest.approx(40 - 2 * api.VOID_COVER_MM, abs=0.3)
+    assert not any("shows as a hole" in n for n in rot["notes"])
+    with pytest.raises(ValueError, match="isn't on the part"):
+        api.volume_at([0, 0, 1], "void", point=[100, 100, 100])
+
+    # Thin vertical wall: stepping inward crosses the wall, so report it as too thin rather than off-part.
+    api.load(box(1.0, 20, 10), "fin")
+    with pytest.raises(ValueError, match="too thin"):
+        api.volume_at([0, 0, 1], "void", point=[0.0, 10, 5])
+
+    # spool_hub.stl: first triangle lies on the outer cylindrical flange (reproduces tools/pyodide_check.mjs).
+    api.load((Path(__file__).resolve().parent / "corpus" / "spool_hub.stl").read_bytes(), "spool_hub.stl")
+    up = api.orientations({})["orientations"][0]["up"]
+    c = api._require().mesh.triangles[0].mean(axis=0).tolist()
+    hub = api.volume_at(up, "void", point=c, profile={})
+    assert hub["hi"][2] > hub["lo"][2] and not any("shows as a hole" in n for n in hub["notes"])
+    # Curved region's average normal is near zero (as web/app.js passes); local surface normal still wins.
+    reg = api.regions()
+    hub_web = api.volume_at(up, "void", point=c, normal=reg["regions"][reg["face_regions"][0]]["normal"], profile={})
+    assert hub_web["lo"] == pytest.approx(hub["lo"]) and hub_web["hi"] == pytest.approx(hub["hi"])

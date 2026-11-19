@@ -96,8 +96,8 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
     # Hole: normals point toward the axis. Coverage: how much of the circle exists.
     radial = c - (center + np.outer((c - center) @ axis, axis))
     inward = float(np.mean(np.einsum("ij,ij->i", n, radial) < 0))
-    ang = np.arctan2(p2[:, 1] - cy, p2[:, 0] - cx)
-    coverage = len(np.unique(np.floor((ang + np.pi) / (2 * np.pi) * 36))) / 36
+    ang = np.sort(np.arctan2(p2[:, 1] - cy, p2[:, 0] - cx))
+    coverage = 1.0 - float(np.diff(np.append(ang, ang[0] + 2 * np.pi)).max()) / (2 * np.pi)
     hole = inward > 0.5
     return {
         "type": ("rounded_edge" if coverage <= ROUNDED_EDGE_COVERAGE else "hole") if hole else "boss",
@@ -231,12 +231,56 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
     }
 
 
+GROW_TOL_MM = 0.05  # ignore sub-0.05 mm noise when reporting outer-size growth
+
+
+def _growth_text(grow: np.ndarray) -> str:
+    """Plain-language note listing the axes that grow by more than GROW_TOL_MM."""
+    items = [f"{g:.1f} mm in {ax}" if g >= 0.1 else f"{g:.2f} mm in {ax}"
+             for g, ax in zip(grow, ("X", "Y", "Z")) if g > GROW_TOL_MM]
+    joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+    return f"Outer size grows by {joined}: check what it fits into."
+
+
+def _annotate_growth(edits: list[dict], mesh: Mesh) -> list[dict]:
+    """Flag edits whose added geometry reaches outside the part's bounding box: attach ``grows_mm``
+    and spell it out in plain words on the description so the part never grows silently."""
+    pts = mesh.triangles.reshape(-1, 3)
+    if not len(pts):
+        return edits
+    part_lo, part_hi = pts.min(axis=0), pts.max(axis=0)
+    for e in edits:
+        counts = e["pieces"]
+        if not counts:
+            continue
+        ops = e.get("piece_ops") or [e["op"]] * len(counts)
+        if not any(op == "add" for op in ops):
+            continue
+        tris = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)
+        add_chunks = []
+        offset = 0
+        for count, op in zip(counts, ops):
+            if op == "add" and count:
+                add_chunks.append(tris[offset:offset + count])
+            offset += count
+        if not add_chunks:
+            continue
+        add_pts = np.concatenate(add_chunks).reshape(-1, 3)
+        grow = np.maximum(0.0, part_lo - add_pts.min(axis=0)) + np.maximum(0.0, add_pts.max(axis=0) - part_hi)
+        if grow.max() > GROW_TOL_MM:
+            e["grows_mm"] = [round(float(g), 2) if g > GROW_TOL_MM else 0.0 for g in grow]
+            e["description"] = f"{e['description'].rstrip()} {_growth_text(grow)}"
+    return edits
+
+
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
                  weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None,
-                 hot_spots=None, fasteners: dict | None = None) -> list[dict]:
+                 hot_spots=None, fasteners: dict | None = None, strength_verdict: str | None = None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
-    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner,
-    and at the other inside corners near ``hot_spots`` (points, share of the highest stress).
+    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner
+    and thickens the weak stretch — only when ``strength_verdict`` is not ``"fine"`` (a part that is already
+    strong enough shouldn't be thickened). ``hot_spots`` (points, share of the highest stress) extends those
+    edits to the other inside corners and stretches that are nearly as stressed.
     ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
     ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces;
     ``fasteners`` ({region: {"size", "use"}}) holes for screws, inserts and nuts (see fastener_plan)."""
@@ -271,9 +315,10 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     _attach_skip_notes(corner_edits, corner_skipped, foot_edits, foot_skipped)
     edits += corner_edits
     edits += foot_edits
-    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
-                              profile.material["max_overhang_deg"])
-    edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
+    if strength_verdict != "fine":
+        edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
+                                  profile.material["max_overhang_deg"])
+        edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
@@ -299,7 +344,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             f"Grows the wall at {w['z0']:.0f}–{w['z1']:.0f} mm to {prm['wall_lines']:.0f} printed lines so it prints solid and is "
             "much stronger. It grows on both sides; check that nothing needs to fit there.",
             [to_part(p) for p in w["pieces"]], op="add", param="wall_lines"))
-    return edits
+    return _annotate_growth(edits, mesh)
 
 
 # Which check findings each kind of design change (its ``rule``) fixes. A change is offered as a fix only when
@@ -1899,6 +1944,71 @@ def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profi
                          f"A slot {w:.1f} mm wide and {p['depth_mm']:.1f} mm high from the outside to the middle of the hole: "
                          "push the nut in from the side and it lines up with the bolt.",
                          [_axis_prism(f, slot, -p["depth_mm"] / 2, p["depth_mm"] / 2)]))
+    return out
+
+
+FASTENER_SUGGEST_TOL = 0.3  # mm: within this of a standard pilot, clearance, insert or nominal size
+_FASTENER_LABELS = {"screw": "Screw into plastic", "bolt": "Through bolt", "insert": "Heat-set insert",
+                    "nut_top": "Nut from top", "nut_side": "Nut from side"}
+_COUNT_WORDS = {2: "Both", 3: "All three", 4: "All four", 5: "All five", 6: "All six",
+                7: "All seven", 8: "All eight", 9: "All nine", 10: "All ten"}
+_MATCH_FIELDS = (("d", "nominal"), ("pilot_mm", "pilot"), ("clearance_close_mm", "clearance"),
+                 ("clearance_normal_mm", "clearance"), ("insert_hole_mm", "insert"))
+
+
+def suggest_fasteners(mesh: Mesh, features: list[dict], up, profile=None) -> list[dict]:
+    """Group equal round holes near standard metric sizes (``fasteners`` in thresholds.yaml) and
+    return one suggestion per group with the likely uses sized via ``fastener_plan``."""
+    F = {k: v for k, v in load_data("thresholds")["fasteners"].items() if isinstance(v, dict)}
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    matched = []
+    for f in accepted(features):
+        if f["type"] != "hole" or not f["full_circle"]:
+            continue
+        d = float(f["diameter"])
+        # Prefer common whole M-sizes over M2.5, and screw/bolt sizes over insert holes when tied.
+        hits = sorted(
+            (size == "M2.5", kind == "insert", abs(d - s[field]), size, kind)
+            for size, s in F.items() for field, kind in _MATCH_FIELDS
+            if abs(d - s[field]) <= FASTENER_SUGGEST_TOL + 1e-6
+        )
+        if not hits:
+            continue
+        _, _, _, size, kind = hits[0]
+        sideways = abs(np.asarray(f["axis"]) @ up) < 0.7
+        matched.append((size, sideways, d, kind, f))
+    matched.sort(key=lambda x: (x[0], x[1], x[2]))
+    groups: list[list] = []
+    for item in matched:
+        if groups and groups[-1][0][:2] == item[:2] and item[2] - groups[-1][0][2] <= 0.1 + 1e-6:
+            groups[-1].append(item)
+        else:
+            groups.append([item])
+    out = []
+    for grp in groups:
+        size, _, _, kind, rep = grp[0]
+        dia = float(np.mean([x[2] for x in grp]))
+        if kind == "insert":
+            uses = ("insert",)
+        elif kind == "pilot" or (kind == "nominal" and dia < F[size]["d"] - 0.05):
+            uses = ("screw", "bolt", "insert", "nut_top", "nut_side")
+        else:
+            uses = ("bolt", "screw", "insert", "nut_top", "nut_side")
+        choices = [{"use": u, "label": _FASTENER_LABELS[u],
+                    "target_mm": fastener_plan(mesh, rep, size, u, up, profile)["target_mm"]} for u in uses]
+        n, lead = len(grp), choices[0]
+        head = f"Ø{dia:.1f} mm hole" if n == 1 else f"{_COUNT_WORDS.get(n, f'All {n}')} Ø{dia:.1f} mm holes"
+        t = lead["target_mm"]
+        tgt = f"{t:.1f}" if abs(t * 10 - round(t * 10)) < 1e-6 else f"{t:.2f}"
+        if lead["use"] == "screw":
+            prompt = f"{head}: is an {size} screw going in? Then model Ø{tgt} mm to screw into plastic (or pick another use)."
+        elif lead["use"] == "insert":
+            prompt = f"{head}: is an {size} heat-set insert going in? Then model Ø{tgt} mm."
+        else:
+            prompt = f"{head}: is an {size} screw going through? Then model Ø{tgt} mm (or pick how it's held)."
+        regions = sorted(x[4]["region"] for x in grp)
+        out.append({"size": size, "diameter_mm": round(dia, 2), "regions": regions, "count": n,
+                    "label": head, "prompt": prompt, "choices": choices})
     return out
 
 

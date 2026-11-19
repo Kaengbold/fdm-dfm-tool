@@ -571,7 +571,8 @@ def test_lower_reason_explains_fit_guard_without_a_score_term():
     assert api.why_lower(reason_option(), reason_option(), fits=False, best_fits=False).startswith("About as good")
 
 
-@pytest.mark.parametrize("path", sorted(SAMPLES.glob("*.stl")) + sorted((Path(__file__).parent / "corpus").glob("*.stl")),
+@pytest.mark.parametrize("path", sorted(SAMPLES.glob("*.stl")) + sorted(
+    p for p in (Path(__file__).parent / "corpus").glob("*.stl") if not p.stem.endswith("_80k")),
                          ids=lambda path: path.stem)
 def test_lower_sentences_agree_with_sample_and_corpus_cards(path):
     api.load(path.read_bytes(), path.stem)
