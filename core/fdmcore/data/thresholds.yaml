@@ -20,7 +20,8 @@ organic:
   # or engraved lettering, a first layer with fine detail): on a sculpted shape they only find noise.
   # Overhangs, supports, walls too thin to print, bed contact, tipping, cooling and warping stay on.
   cad_rules: [first_layer_detail, shallow_relief, side_detail_small, fine_detail_rough, small_hole_undersized,
-              gap_fuses, flat_gap_fuses, weak_upright_pin, insert_wall_thin, screw_wall_thin]
+              gap_fuses, flat_gap_fuses, weak_upright_pin, insert_wall_thin, screw_wall_thin,
+              wall_line_mismatch, load_bearing_wall_thin]
 
 use_heat:
   # Warned when the part is used this close to (or above) the material's heat limit (presets heat_limit_c).
@@ -371,4 +372,31 @@ working_shapes:
   thread_tol_mm: 0.50             # added to half the thread pitch around a detected thread
   # A partial bottom chamfer is only kept when a remaining stretch is at least this long.
   min_foot_stretch_mm: 3.0
+
+wall_advice:
+  # Walls between two lines and 2 x perimeter loops that don't match a whole number of extrusion lines
+  # leave a narrow gap or messy gap-fill [Prusa KB Arachne perimeter generator,
+  # https://help.prusa3d.com/article/arachne-perimeter-generator_352769].
+  # Printable line width stays clean around 95-140% of nozzle diameter [CNC Kitchen, The effect of
+  # extrusion width on strength and quality,
+  # https://www.cnckitchen.com/blog/the-effect-of-extrusion-width-on-strength-and-quality-of-3d-prints].
+  line_fraction_tolerance: 0.15
+  min_share: 0.15
+  min_line_width_nozzle: 0.95
+  max_line_width_nozzle: 1.4
+  # Rule-of-thumb minimum wall for load-bearing parts: 4 x 0.4 mm = 1.6 mm solid shell [Voron Design
+  # Print Settings, https://docs.vorondesign.com/sourcing.html#print-settings; CNC Kitchen extrusion
+  # width hook load tests,
+  # https://www.cnckitchen.com/blog/the-effect-of-extrusion-width-on-strength-and-quality-of-3d-prints].
+  load_bearing_min_mm: 1.6
+  # Thick mass right next to a thin wall in the same connected section cools unevenly and can pull
+  # sink marks or warp the thin wall [Slant 3D, How to Eliminate Shrink Lines,
+  # https://www.youtube.com/watch?v=d61u_lKFa-U; Hubs, Key design considerations for 3D printing,
+  # https://www.hubs.com/knowledge-base/key-design-considerations-3d-printing/].
+  uneven_thin_max_mm: 3.0
+  uneven_thick_min_mm: 8.0
+  uneven_ratio: 4.0
+  uneven_thin_share: 0.15
+  uneven_min_height_mm: 4.0
+
 

@@ -1,0 +1,50 @@
+name: Browser smoke test (quick)
+
+# Runs the short browser smoke check (~2 min) on every non-draft pull request that touches the web app,
+# the engine files it loads, or the smoke test — no label needed. The full ~15 min suite stays in
+# browser.yml behind the "browser-test" label.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "web/**"
+      - "core/fdmcore/**"
+      - "!core/fdmcore/mcp_server.py"
+      - "!core/fdmcore/booleans.py"
+      - "!core/fdmcore/slicer_cli.py"
+      - "!core/fdmcore/cli.py"
+      - "tools/e2e_smoke.py"
+      - "tools/fixtures/**"
+      - ".github/workflows/browser-quick.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-quick:
+    name: Browser smoke test (quick)
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .github/workflows/browser-quick.yml
+      - run: pip install playwright==1.64.1  # pinned: shares the cached browser with browser.yml
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.64.1
+      - run: python -m playwright install --with-deps chromium
+      - run: python tools/e2e_smoke.py --quick --browser chromium
+      - uses: actions/upload-artifact@v4
+        if: failure()  # screenshots only when something broke
+        with:
+          name: e2e-quick-screenshots
+          path: e2e-output/
+          retention-days: 7
