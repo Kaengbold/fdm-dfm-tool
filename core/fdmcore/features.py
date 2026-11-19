@@ -96,8 +96,8 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
     # Hole: normals point toward the axis. Coverage: how much of the circle exists.
     radial = c - (center + np.outer((c - center) @ axis, axis))
     inward = float(np.mean(np.einsum("ij,ij->i", n, radial) < 0))
-    ang = np.arctan2(p2[:, 1] - cy, p2[:, 0] - cx)
-    coverage = len(np.unique(np.floor((ang + np.pi) / (2 * np.pi) * 36))) / 36
+    ang = np.sort(np.arctan2(p2[:, 1] - cy, p2[:, 0] - cx))
+    coverage = 1.0 - float(np.diff(np.append(ang, ang[0] + 2 * np.pi)).max()) / (2 * np.pi)
     hole = inward > 0.5
     return {
         "type": ("rounded_edge" if coverage <= ROUNDED_EDGE_COVERAGE else "hole") if hole else "boss",
@@ -1449,6 +1449,75 @@ def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profi
                          f"A slot {w:.1f} mm wide and {p['depth_mm']:.1f} mm high from the outside to the middle of the hole: "
                          "push the nut in from the side and it lines up with the bolt.",
                          [_axis_prism(f, slot, -p["depth_mm"] / 2, p["depth_mm"] / 2)]))
+    return out
+
+
+FASTENER_SUGGEST_TOL = 0.3  # mm: within this of a standard pilot, clearance, insert or nominal size
+_FASTENER_LABELS = {"screw": "Screw into plastic", "bolt": "Through bolt", "insert": "Heat-set insert",
+                    "nut_top": "Nut from top", "nut_side": "Nut from side"}
+_COUNT_WORDS = {2: "Both", 3: "All three", 4: "All four", 5: "All five", 6: "All six",
+                7: "All seven", 8: "All eight", 9: "All nine", 10: "All ten"}
+_MATCH_FIELDS = (("d", "nominal"), ("pilot_mm", "pilot"), ("clearance_close_mm", "clearance"),
+                 ("clearance_normal_mm", "clearance"), ("insert_hole_mm", "insert"))
+
+
+def suggest_fasteners(mesh: Mesh, features: list[dict], up, profile=None,
+                      fasteners: dict | None = None) -> list[dict]:
+    """Group equal round holes near standard metric sizes (``fasteners`` in thresholds.yaml) and
+    return one suggestion per group with the likely uses sized via ``fastener_plan``."""
+    F = {k: v for k, v in load_data("thresholds")["fasteners"].items() if isinstance(v, dict)}
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    fasteners = fasteners or {}
+    matched = []
+    for f in accepted(features):
+        if f["type"] != "hole" or not f["full_circle"]:
+            continue
+        d = float(f["diameter"])
+        # Prefer common whole M-sizes over M2.5, and screw/bolt sizes over insert holes when tied.
+        hits = sorted(
+            (size == "M2.5", kind == "insert", abs(d - s[field]), size, kind)
+            for size, s in F.items() for field, kind in _MATCH_FIELDS
+            if abs(d - s[field]) <= FASTENER_SUGGEST_TOL + 1e-6
+        )
+        if not hits:
+            continue
+        _, _, _, size, kind = hits[0]
+        sideways = abs(np.asarray(f["axis"]) @ up) < 0.7
+        matched.append((size, sideways, d, kind, f))
+    matched.sort(key=lambda x: (x[0], x[1], x[2]))
+    groups: list[list] = []
+    for item in matched:
+        if groups and groups[-1][0][:2] == item[:2] and item[2] - groups[-1][0][2] <= 0.1 + 1e-6:
+            groups[-1].append(item)
+        else:
+            groups.append([item])
+    out = []
+    for grp in groups:
+        size, _, _, kind, rep = grp[0]
+        dia = float(np.mean([x[2] for x in grp]))
+        if kind == "insert":
+            uses = ("insert",)
+        elif kind == "pilot" or (kind == "nominal" and dia < F[size]["d"] - 0.05):
+            uses = ("screw", "bolt", "insert", "nut_top", "nut_side")
+        else:
+            uses = ("bolt", "screw", "insert", "nut_top", "nut_side")
+        choices = [{"use": u, "label": _FASTENER_LABELS[u],
+                    "target_mm": fastener_plan(mesh, rep, size, u, up, profile)["target_mm"]} for u in uses]
+        n, lead = len(grp), choices[0]
+        head = f"Ø{dia:.1f} mm hole" if n == 1 else f"{_COUNT_WORDS.get(n, f'All {n}')} Ø{dia:.1f} mm holes"
+        t = lead["target_mm"]
+        tgt = f"{t:.1f}" if abs(t * 10 - round(t * 10)) < 1e-6 else f"{t:.2f}"
+        if lead["use"] == "screw":
+            prompt = f"{head}: is an {size} screw going in? Then model Ø{tgt} mm to screw into plastic (or pick another use)."
+        elif lead["use"] == "insert":
+            prompt = f"{head}: is an {size} heat-set insert going in? Then model Ø{tgt} mm."
+        else:
+            prompt = f"{head}: is an {size} screw going through? Then model Ø{tgt} mm (or pick how it's held)."
+        regions = sorted(x[4]["region"] for x in grp)
+        picks = {tuple(sorted(fasteners[r].items())) for r in regions if r in fasteners}
+        applied = dict(next(iter(picks))) if len(picks) == 1 and len(fasteners) and all(r in fasteners for r in regions) else None
+        out.append({"size": size, "diameter_mm": round(dia, 2), "regions": regions, "count": n,
+                    "label": head, "prompt": prompt, "choices": choices, "applied": applied})
     return out
 
 
