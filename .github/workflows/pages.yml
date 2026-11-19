@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Assemble the site
         run: |
-          python3 tools/make_manifest.py
+          python3 tools/make_manifest.py --hashes  # content hashes so returning visitors use their cache
           mkdir -p _site/core
           cp -r web _site/web
           rsync -a --exclude '__pycache__' core/fdmcore/ _site/core/fdmcore/

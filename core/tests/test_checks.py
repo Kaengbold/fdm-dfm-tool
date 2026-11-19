@@ -230,7 +230,7 @@ def test_manifest_lists_all_engine_files():
     from make_manifest import build_manifest
 
     listed = json.loads((PKG / "manifest.json").read_text(encoding="utf-8"))
-    actual = build_manifest(PKG)
+    actual = list(build_manifest(PKG))  # committed as a plain list; the Pages build adds hashes
     assert listed == actual, "update core/fdmcore/manifest.json (see tools/make_manifest.py)"
 
 

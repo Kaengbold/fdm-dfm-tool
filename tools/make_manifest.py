@@ -1,10 +1,16 @@
-"""Regenerate core/fdmcore/manifest.json — engine files and content hashes for the web worker.
+"""Regenerate core/fdmcore/manifest.json — the engine files the web worker loads.
 
-Usage: python tools/make_manifest.py
+Usage: python tools/make_manifest.py            # file list (committed; changes only when files are added / removed)
+       python tools/make_manifest.py --hashes   # {file: content hash} (Pages build only)
+
+With hashes the worker and sw.js cache each file until its content changes. They are not
+committed: every engine edit would then need a re-run, parallel branches would conflict on
+this file, and a stale hash would serve old code to a local dev server.
 """
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parents[1] / "core" / "fdmcore"
@@ -27,5 +33,7 @@ def build_manifest(pkg: Path = PKG) -> dict[str, str]:
 
 if __name__ == "__main__":
     manifest = build_manifest()
+    if "--hashes" not in sys.argv:
+        manifest = list(manifest)
     (PKG / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n", encoding="utf-8")
     print(f"{len(manifest)} files")
