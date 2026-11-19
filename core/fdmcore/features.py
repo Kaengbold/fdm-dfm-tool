@@ -1461,13 +1461,11 @@ _MATCH_FIELDS = (("d", "nominal"), ("pilot_mm", "pilot"), ("clearance_close_mm",
                  ("clearance_normal_mm", "clearance"), ("insert_hole_mm", "insert"))
 
 
-def suggest_fasteners(mesh: Mesh, features: list[dict], up, profile=None,
-                      fasteners: dict | None = None) -> list[dict]:
+def suggest_fasteners(mesh: Mesh, features: list[dict], up, profile=None) -> list[dict]:
     """Group equal round holes near standard metric sizes (``fasteners`` in thresholds.yaml) and
     return one suggestion per group with the likely uses sized via ``fastener_plan``."""
     F = {k: v for k, v in load_data("thresholds")["fasteners"].items() if isinstance(v, dict)}
     up = np.asarray(up, float) / np.linalg.norm(up)
-    fasteners = fasteners or {}
     matched = []
     for f in accepted(features):
         if f["type"] != "hole" or not f["full_circle"]:
@@ -1514,10 +1512,8 @@ def suggest_fasteners(mesh: Mesh, features: list[dict], up, profile=None,
         else:
             prompt = f"{head}: is an {size} screw going through? Then model Ø{tgt} mm (or pick how it's held)."
         regions = sorted(x[4]["region"] for x in grp)
-        picks = {tuple(sorted(fasteners[r].items())) for r in regions if r in fasteners}
-        applied = dict(next(iter(picks))) if len(picks) == 1 and len(fasteners) and all(r in fasteners for r in regions) else None
         out.append({"size": size, "diameter_mm": round(dia, 2), "regions": regions, "count": n,
-                    "label": head, "prompt": prompt, "choices": choices, "applied": applied})
+                    "label": head, "prompt": prompt, "choices": choices})
     return out
 
 

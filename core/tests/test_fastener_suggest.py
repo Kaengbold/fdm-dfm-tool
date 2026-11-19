@@ -35,14 +35,13 @@ def test_enclosure_one_m3_suggestion_covering_all_four_holes():
     assert "All four" in s["prompt"] and "M3" in s["prompt"] and "Ø2.8" in s["prompt"]
     assert s["choices"][0]["use"] == "screw" and s["choices"][0]["target_mm"] == 2.5
     assert {"screw", "bolt", "insert", "nut_top", "nut_side"} <= {c["use"] for c in s["choices"]}
-    assert s["applied"] is None
 
     # Applying the suggestion sizes all four holes via the existing set_fastener path.
     for r in s["regions"]:
         plan = api.set_fastener(r, UP, s["size"], "screw")
         assert plan["target_mm"] == 2.5
     after = api.fastener_suggestions(UP)["suggestions"]
-    assert len(after) == 1 and after[0]["applied"] == {"size": "M3", "use": "screw"}
+    assert len(after) == 1
     resize_edits = [e for e in api.design(UP)["edits"] if e["id"] in {f"fastener-{r}" for r in s["regions"]}]
     assert len(resize_edits) == 4
 

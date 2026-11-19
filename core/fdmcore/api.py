@@ -2310,7 +2310,7 @@ def fastener_suggestions(up, profile: dict | None = None) -> dict:
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
-    return {"suggestions": suggest_fasteners(s.mesh, _features(), up, Profile.from_dict(profile), s.fasteners)}
+    return {"suggestions": suggest_fasteners(s.mesh, _features(), up, Profile.from_dict(profile))}
 
 
 def _coarse_note(region: int) -> str:
