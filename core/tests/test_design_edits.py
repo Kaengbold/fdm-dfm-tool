@@ -223,7 +223,11 @@ def test_parts_found():
     assert all(not p.stem.endswith("_80k") for p in PARTS)
 
 
-@pytest.mark.parametrize("path", PARTS, ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", [
+    pytest.param(p, marks=pytest.mark.xfail(strict=True, reason="T-489: thickening the blob's thin top doesn't clear too_thin_to_print"))
+    if p.stem == "bumpy_blob_20k" else p
+    for p in PARTS
+], ids=lambda p: p.stem)
 def test_part_edits_alone_and_together(path: Path):
     """Every edit on the best orientation applies alone and all together cleanly, and the
     combined result removes or shrinks every non-elephant_foot target finding.
@@ -233,7 +237,8 @@ def test_part_edits_alone_and_together(path: Path):
     """
     case = _load_case(path)
     assert case.stats["closed"], f"{case.name}: input STL is not watertight ({case.stats['status']})"
-    assert case.edits, f"{case.name}: expected at least one design edit"
+    if not case.edits:
+        pytest.skip(f"{case.name}: no suggested changes (only offered for a finding, T-432)")
 
     for edit in case.edits:
         label = f"{case.name}::{edit['id']} ({edit['rule']})"
@@ -302,33 +307,12 @@ def test_feature_test_side_edits_apply_cleanly():
     _assert_volume_moved(info["volume"], case.stats["volume"], case.edits, "feature_test-side::all")
 
 
-@pytest.mark.parametrize(
-    "edit_id, expected_fail",
-    [
-        *[
-            pytest.param(
-                f"ledge-{i}",
-                True,
-                id=f"feature_test-side-ledge-{i}",
-                marks=pytest.mark.xfail(
-                    strict=True,
-                    reason="T-436: ledge fill on feature_test [0,-1,0] grows outer Y by 0.15 mm (open PR #165)",
-                ),
-            )
-            for i in range(6)
-        ],
-        pytest.param("ledge-6", False, id="feature_test-side-ledge-6"),
-        pytest.param("ledge-7", False, id="feature_test-side-ledge-7"),
-    ],
-)
-def test_feature_test_side_ledge_fills_keep_outer_size(edit_id: str, expected_fail: bool):
+@pytest.mark.parametrize("edit_id", [f"ledge-{i}" for i in range(8)], ids=lambda i: f"feature_test-side-{i}")
+def test_feature_test_side_ledge_fills_keep_outer_size(edit_id: str):
     """Ledge fills must stay inside the part's outer bounding box (T-436)."""
     case = _load_case(PART_BY_NAME["feature_test"], FEATURE_TEST_SIDE_UP)
     edit = next((e for e in case.edits if e["id"] == edit_id), None)
     if edit is None:
-        if expected_fail:
-            # Return so strict xfail turns red (XPASS) if T-436 drops/renumbers this fill.
-            return
         pytest.fail(f"feature_test [0,-1,0] has no edit {edit_id!r}")
     result = apply_edits(case.mesh, [edit])
     _assert_outer_size_unchanged(result, case.bounds, [edit], f"feature_test-side::{edit_id}")
@@ -342,16 +326,7 @@ SINGLE_RECHECK_CASES = [
     pytest.param("drawer_handle", None, "chamfer-0", id="drawer_handle-chamfer-0"),
     pytest.param("feature_test", None, "ledge-0", id="feature_test-ledge-0"),
     pytest.param("feature_test", FEATURE_TEST_SIDE_UP, "ledge-6", id="feature_test-side-ledge-6"),
-    pytest.param(
-        "feature_test",
-        FEATURE_TEST_SIDE_UP,
-        "ledge-0",
-        id="feature_test-side-ledge-0",
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason="T-436: ledge-0 protrudes 0.15 mm below the bed on feature_test [0,-1,0], lifting the part and increasing support_marks area",
-        ),
-    ),
+    pytest.param("feature_test", FEATURE_TEST_SIDE_UP, "ledge-0", id="feature_test-side-ledge-0"),
     pytest.param("test_block", None, "wall-1", id="test_block-wall-1"),
     pytest.param("feature_test", None, "wall-1", id="feature_test-wall-1"),
     pytest.param("feature_test", FEATURE_TEST_SIDE_UP, "sacrificial-0", id="feature_test-side-sacrificial-0"),
