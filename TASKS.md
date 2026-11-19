@@ -772,9 +772,10 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### M. Tests that would have caught this
 
-- [ ] **T-462 P1** [M] Organic and heavy test parts. · files: `tools/make_corpus.py`, `core/tests/corpus/`, `core/tests/test_corpus.py`, `tools/pyodide_check.mjs` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-462-organic-parts`)
+- [x] **T-462 P1** [M] Organic and heavy test parts. · files: `tools/make_corpus.py`, `core/tests/corpus/`, `core/tests/test_corpus.py`, `tools/pyodide_check.mjs` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-462-organic-parts`)
   - Do: add generated organic parts (the bumpy blob: a sphere-like surface with radius `30·(1 + 0.15·sin 7u·sin 5v + 0.05·sin(23u + 11v))`, z scaled to 80 mm, at 20,000 and 80,000 triangles) and one filleted, ribbed housing. Expectations: not stood on a point, no CAD-detail findings (T-408), time limit (T-458). Real downloaded parts stay with T-003.
   - Done when: the parts and their expectations run in the corpus test.
+  - Outcome (Gemini 4 Neon, reviewed by Claude): corpus parts `bumpy_blob_20k` (1 MB), `bumpy_blob_80k` (4 MB) and `ribbed_housing` (filleted shell, cross ribs; prints open side up, no supports, rib sink / floor shrink lines found). Asserted: clean mesh, 80 mm tall, loaded as organic, no CAD-detail findings, pick not beaten on support / bed / height at once, 20k blob load + orient + check under 90 s natively (~22 s). The 80k full run is opt-in (`RUN_SLOW=1`, ~25 s) and left out of the every-part loops in `test_advice_sanity.py` / `test_orientation.py` (it doubled their time). Found: the blob is stood on a bump tip (`tipping_risk`) → T-486, strict xfail until then.
 - [ ] **T-463 P1** [M] Apply every suggested design change in the tests. · files: new `core/tests/test_design_edits.py`, `core/fdmcore/booleans.py` · owner: —
   - Do: for every sample and corpus part: get `design` edits for the best orientation, apply each alone and all together with `booleans.apply_edits` (needs `manifold3d`: skip when missing), and assert: closed, volume moved the right way, outer size unchanged unless the edit says so, piece count unchanged, the edit's finding gone after a re-check. (The audit's run found 112 edits, 0 failures to apply, 6 that grew the outer size.)
   - Done when: the test runs in CI with the engine tests and fails on a growing ledge fill until T-436 fixes it.
@@ -904,6 +905,10 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Seen: `node tools/pyodide_check.mjs` on `core/tests/corpus/spool_hub.stl` (also on `main`, natively too?): `volume_at` at the centre of the first triangle (a spot on the surface) raises it. Most likely the click is on a vertical wall, so the straight up-and-down line runs along the surface and the inside test misses it.
   - Do: find the cause, then for a click on the surface step a little into the part (along the face normal) before the up-and-down search, or say in plain words why a hollow can't go there.
   - Done when: a click on a vertical wall of `spool_hub` and of a simple box places a hollow or gets a clear reason; test.
+- [ ] **T-486 P1** [L] Organic parts are stood on a point. · files: `core/fdmcore/orientation.py` (`candidate_directions`) · owner: —
+  - Seen (T-462): `bumpy_blob_20k`'s top pick rests on a ~0.1 mm² bump tip and gets `tipping_risk`; the search doesn't try the resting planes of the convex hull, which is where a round part actually sits.
+  - Do: add the largest convex-hull faces (by the area of the part's bottom within a few tenths of a mm of them) as candidate directions.
+  - Done when: `test_bumpy_blob_20k_not_stood_on_a_point` passes (remove its xfail); the other corpus picks don't change.
 
 ## Done
 
