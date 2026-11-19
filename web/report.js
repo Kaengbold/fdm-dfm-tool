@@ -57,7 +57,8 @@ ${section("Problems", problems)}
 ${result(r.strength, "Strength analysis") || ""}
 ${result(r.warp, "Warping") || ""}
 ${r.design ? section("Design changes", picture(r.design.picture, "Design changes"),
-    `<p class="muted">Green = plastic added, red = cut away.</p><ul>${r.design.items.map((d) => `<li><b>${esc(d.title)}</b> — ${esc(d.description)}</li>`).join("")}</ul>`) : ""}
+    r.design.items?.length ? `<p class="muted">Green = plastic added, red = cut away.</p><ul>${r.design.items.map((d) => `<li><b>${esc(d.title)}</b> — ${esc(d.description)}</li>`).join("")}</ul>` : "",
+    r.design.advice?.length ? `<h3>Numbers for CAD</h3><ul>${r.design.advice.map((a) => `<li>${esc(a.text)}${a.fixes ? ` <span class="muted">(${esc(a.fixes.title)})</span>` : ""}</li>`).join("")}</ul>` : "") : ""}
 ${r.settings.length ? section("Slicer settings", "<p class=\"muted\">What to change from your slicer's defaults (already set in the 3MF download).</p>",
     `<table><tr><th>Setting</th><th>Value</th><th>Why</th></tr>${r.settings.map((s) => `<tr><td>${esc(s.label)}</td><td><b>${esc(s.value)}</b></td><td class="why">${esc(s.reason)}</td></tr>`).join("")}</table>`) : ""}
 <p class="muted" style="margin-top:36px">Made with FDM Check. Times, strength and warping are rough estimates: check the first print.</p>

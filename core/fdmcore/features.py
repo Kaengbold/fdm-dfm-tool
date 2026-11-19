@@ -177,8 +177,10 @@ def _boss_ribs(mesh: Mesh, features: list[dict]) -> list[dict]:
             pieces.append(placed if np.linalg.det(np.stack([w, d, v])) > 0 else placed[:, ::-1])
         if pieces:
             out.append(_edit(f"boss-ribs-{f['region']}", "tall_boss", f"{len(pieces)} ribs for the Ø{f['diameter']:.1f} mm boss",
-                             f"The boss is {f['length']:.0f} mm tall, more than {BOSS_TALL_RATIO:g} × its width: ribs at its foot keep it "
-                             "from snapping or wobbling there (and let it take a screw's load).", pieces, op="add"))
+                             f"The boss is {f['length']:.0f} mm tall, more than {BOSS_TALL_RATIO:g} × its width: {BOSS_RIB_MM:g} mm thick ribs at its foot keep it "
+                             "from snapping or wobbling there (and let it take a screw's load).", pieces, op="add",
+                             advice={"text": f"Add {len(pieces)} ribs ({BOSS_RIB_MM:g} mm thick, {h:.1f} mm tall) at the foot of this Ø{f['diameter']:.1f} mm post",
+                                     "now": round(float(f["diameter"]), 2), "target": round(BOSS_RIB_MM, 2), "unit": "mm", "point": end.tolist()}))
     return out
 
 
@@ -218,17 +220,22 @@ def edit_params(params: dict | None) -> dict:
     return out
 
 
-def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", param=None) -> dict:
+def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", param=None,
+          advice: dict | None = None) -> dict:
     """A design edit. An edit that both adds and cuts (grip fins) also gets ``piece_ops``, "add" or "cut" per
-    piece; then, as for whole edits, every addition is made before any cut."""
+    piece; then, as for whole edits, every addition is made before any cut. ``advice`` holds exact CAD advice
+    numbers built alongside the edit and popped by ``design_advice`` so edit and advice never disagree."""
     # A piece with a non-finite corner can't be built (the browser's manifold refuses it with an error, T-367):
     # leave it out rather than fail the whole change.
     pieces = [q for q in pieces if np.isfinite(q).all()]
-    return {
+    out = {
         "id": id_, "rule": rule, "title": title, "description": description, "op": op, "param": param,
         "mesh": (np.concatenate(pieces) if pieces else np.zeros((0, 3, 3))).astype("<f4").tobytes(),
         "pieces": [len(q) for q in pieces],
     }
+    if advice is not None:
+        out["_advice"] = advice
+    return out
 
 
 GROW_TOL_MM = 0.05  # ignore sub-0.05 mm noise when reporting outer-size growth
@@ -298,7 +305,9 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             edits.append(_edit(
                 f"teardrop-{f['region']}", "short_bridge", f"Teardrop for the horizontal Ø{f['diameter']:.1f} mm hole",
                 f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
-                [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg"))
+                [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg",
+                advice={"text": f"Give this sideways Ø{f['diameter']:.1f} mm hole a {angle:.0f}° teardrop top",
+                        "now": None, "target": round(float(angle), 1), "unit": "°", "point": f["center"]}))
     edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _grip_fins(mesh, accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _gap_edits(mesh, region, gaps or {}, up, profile)
@@ -323,27 +332,36 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
             "Fills the corner under the overhang at 45°, so it prints without support (and without support marks).",
-            [to_part(p) for p in c["pieces"]], op="add", param="ledge_max_mm"))
+            [to_part(p) for p in c["pieces"]], op="add", param="ledge_max_mm",
+            advice={"text": f"Add a 45° chamfer under this {c['width']:.0f} mm ledge",
+                    "now": None, "target": 45.0, "unit": "°"}))
     for i, s in enumerate(sacrificial_layers(oriented, profile)):
         edits.append(_edit(
             f"sacrificial-{i}", "sacrificial_layer", f"Sacrificial layer over the Ø{s['diameter']:.1f} mm hole at {s['z']:.1f} mm",
             f"Closes the hole with one {profile.layer_height} mm layer where it starts in mid-air, so the layer below "
             "bridges cleanly. Poke or drill it open after printing.",
-            [to_part(p) for p in s["pieces"]], op="add"))
+            [to_part(p) for p in s["pieces"]], op="add",
+            advice={"text": f"Close this Ø{s['diameter']:.1f} mm hole with a {profile.layer_height:g} mm sacrificial layer where it starts in mid-air",
+                    "now": None, "target": round(float(profile.layer_height), 2), "unit": "mm"}))
     for i, m in enumerate(magnet_slots(oriented, profile)):
         x, y, z = m["size"]
         e = _edit(f"magnet-slot-{i}", "pause_to_insert", f"Side slot for the {x:.1f} × {y:.1f} × {z:.1f} mm pocket (no pause)",
                   f"Opens the closed pocket to the nearest side ({m['length_mm']:.1f} mm away), so the magnet or nut slides in after "
                   "printing instead of at a pause mid-print. Two small bumps at the pocket's mouth click it in place and keep "
-                  "it there, without glue.", [to_part(p) for p in m["pieces"]], op="cut")
+                  "it there, without glue.", [to_part(p) for p in m["pieces"]], op="cut",
+                  advice={"text": f"Open this {x:.1f} × {y:.1f} × {z:.1f} mm pocket to the side ({m['length_mm']:.1f} mm away)",
+                          "now": None, "target": round(float(m["length_mm"]), 1), "unit": "mm"})
         e["piece_ops"] = m["ops"]
         edits.append(e)
     for i, w in enumerate(thicken_walls(oriented, profile, prm["wall_lines"])):
+        n_lines = int(round(prm["wall_lines"]))
         edits.append(_edit(
             f"wall-{i}", "single_line_wall", f"Thicken the {w['width']:.2f} mm wall to {w['target']:.2f} mm",
             f"Grows the wall at {w['z0']:.0f}–{w['z1']:.0f} mm to {prm['wall_lines']:.0f} printed lines so it prints solid and is "
             "much stronger. It grows on both sides; check that nothing needs to fit there.",
-            [to_part(p) for p in w["pieces"]], op="add", param="wall_lines"))
+            [to_part(p) for p in w["pieces"]], op="add", param="wall_lines",
+            advice={"text": f"Make this wall {w['target']:.2f} mm = {n_lines} lines (now {w['width']:.2f})",
+                    "now": round(float(w["width"]), 2), "target": round(float(w["target"]), 2), "unit": "mm"}))
     return _annotate_growth(edits, mesh)
 
 
@@ -362,6 +380,8 @@ EDIT_FIXES = {
 ASKED_FOR = {"fit_size", "fastener", "press_fit_fins", "split"}  # sizes the user typed in: their own request
 FROM_STRENGTH = {"stress_at_inside_corner", "thin_neck"}  # from the weak spot of the last strength check
 NEAR_MM = 2.0  # a change this close to a finding's box is at that finding
+_REQUEST_COVERS = ("small_hole_undersized", "hole_closes", "sideways_hole_oval",
+                   "nut_trap_tight", "screw_wall_thin", "insert_wall_thin")
 
 
 def link_to_findings(edits: list[dict], findings: list[dict], to_print) -> list[dict]:
@@ -409,6 +429,281 @@ def _overlaps(box, bbox) -> bool:
         return True
     lo, hi = np.asarray(bbox[0], float), np.asarray(bbox[1], float)
     return bool(np.all(box[0] <= hi) and np.all(lo <= box[1]))
+
+
+def _finding_advice(f: dict, profile, prm: dict, T: dict, part_height: float) -> tuple[str, float | None, float, str] | None:
+    """Plain-language CAD advice ``(text, now, target, unit)`` for a finding that has no applied edit,
+    built purely from the finding's existing metrics and thresholds.yaml (T-435)."""
+    rule = f["rule"]
+    m = f.get("metrics") or {}
+    lw, nozzle, lh = float(profile.line_width), float(profile.nozzle), float(profile.layer_height)
+    if rule == "wall_line_mismatch":
+        now = m.get("wall_mm")
+        tgt = m.get("clean_wall_mm") or round(max(2, round((now or 2 * lw) / lw)) * lw, 2)
+        lines = m.get("clean_lines") or max(2, int(round(tgt / lw)))
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Make this wall {tgt:.2f} mm = {lines} lines{s_now}", _num(now), _num(tgt), "mm")
+    if rule == "load_bearing_wall_thin":
+        now = m.get("wall_mm")
+        tgt = m.get("clean_wall_mm") or m.get("min_wall_mm") or round(4 * lw, 2)
+        lines = m.get("clean_lines")
+        s_lines = f" = {lines} lines" if lines else ""
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Make this load-bearing wall at least {tgt:.2f} mm{s_lines}{s_now}", _num(now), _num(tgt), "mm")
+    if rule == "too_thin_to_print":
+        now = m.get("width")
+        tgt = round(max(2 * lw, T["features"]["vanish_below_nozzle"] * nozzle), 2)
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Make this wall at least {tgt:.2f} mm{s_now}", _num(now), tgt, "mm")
+    if rule == "single_line_wall":
+        now = m.get("width")
+        n = int(round(prm["wall_lines"]))
+        tgt = round(n * lw, 2)
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Make this wall {tgt:.2f} mm = {n} lines{s_now}", _num(now), tgt, "mm")
+    if rule == "fine_detail_rough":
+        now = m.get("width")
+        tgt = round(T["features"]["rough_below_nozzle"] * nozzle, 2)
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Make this detail at least {tgt:.2f} mm wide{s_now}", _num(now), tgt, "mm")
+    if rule == "uneven_wall_thickness":
+        thin, thick = m.get("thin_mm"), m.get("thick_mm")
+        tgt = round(max(2.0, (thin or 1.5) * 1.5), 1)
+        s = f"Hollow this {thick:.0f} mm section into a {tgt:g} mm ribbed shell closer to the {thin:.1f} mm wall" if thick and thin else f"Hollow this thick section into a {tgt:g} mm ribbed shell"
+        return (s, _num(thick), tgt, "mm")
+    if rule == "gap_fuses":
+        now = m.get("width")
+        tgt = round(float(T["gaps"]["fuse_below_mm"]) + 0.1, 2)
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Open this gap to {tgt:g} mm{s_now}", _num(now), tgt, "mm")
+    if rule == "flat_gap_fuses":
+        now = m.get("gap_mm")
+        tgt = round(float(T["gaps"]["z_fuse_below_mm"]), 2)
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Open this flat gap to at least {tgt:g} mm{s_now}", _num(now), tgt, "mm")
+    if rule == "small_hole_undersized":
+        now = m.get("min_d") or m.get("diameter")
+        fn, F = m.get("fastener"), T["fasteners"]
+        if fn in F and isinstance(F[fn], dict):
+            tgt = round(float(F[fn]["clearance_normal_mm"]), 2)
+            s_now = f" (now Ø{now:.1f})" if now is not None else ""
+            return (f"Make this {fn} hole Ø{tgt:g} mm{s_now}", _num(now), tgt, "mm")
+        extra = sum(T["holes"]["typical_undersize_mm"]) / 2
+        tgt = round(float(now) + extra, 2) if now is not None else round(extra, 2)
+        s_now = f" (now Ø{now:.2f})" if now is not None else ""
+        return (f"Make this hole Ø{tgt:.2f} mm{s_now}", _num(now), tgt, "mm")
+    if rule == "hole_closes":
+        now = m.get("min_d") or m.get("diameter")
+        H = T["holes"]
+        tgt = round(max(H["vertical_min_mm"] * nozzle / 0.4, H["vertical_min_nozzle"] * nozzle, 2.0), 1)
+        s_now = f" (now Ø{now:.1f})" if now is not None else ""
+        return (f"Enlarge this hole to at least Ø{tgt:g} mm{s_now}", _num(now), tgt, "mm")
+    if rule == "sideways_hole_oval":
+        now, tgt = m.get("diameter"), round(float(prm["teardrop_angle_deg"]), 1)
+        who = f"sideways Ø{now:.1f} mm hole" if now is not None else "sideways hole"
+        return (f"Give this {who} a {tgt:g}° teardrop top", None, tgt, "°")
+    if rule == "hole_starts_midair":
+        now, tgt = m.get("hole_d"), round(lh, 2)
+        who = f"Ø{now:.1f} mm hole" if now is not None else "hole"
+        return (f"Close this {who} with a {tgt:g} mm sacrificial layer where it starts in mid-air", None, tgt, "mm")
+    if rule == "nut_trap_tight":
+        now, fn, F = m.get("across_flats") or m.get("min_af"), m.get("fastener"), T["fasteners"]
+        tgt = round(float(F[fn]["nut_af_mm"]) + float(F["nut_clearance_mm"]) + 0.1, 2) if fn in F else round(float(now or 5.5) + 0.3, 2)
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        who = f"{fn} nut trap" if fn else "nut trap"
+        return (f"Make this {who} {tgt:g} mm across flats{s_now}", _num(now), tgt, "mm")
+    if rule == "screw_wall_thin":
+        now, fn, F = m.get("wall_mm"), m.get("fastener"), T["fasteners"]
+        tgt = float(F[fn]["d"]) if fn in F else 3.0
+        s_now = f" (now {now:.1f})" if now is not None else ""
+        who = f"{fn} screw hole" if fn else "screw hole"
+        return (f"Give this {who} at least {tgt:g} mm of wall around it{s_now}", _num(now), tgt, "mm")
+    if rule == "insert_wall_thin":
+        now, fn = m.get("wall_mm"), m.get("fastener")
+        tgt = 2.0
+        s_now = f" (now {now:.1f})" if now is not None else ""
+        who = f"{fn} insert hole" if fn else "insert hole"
+        return (f"Give this {who} at least {tgt:g} mm of wall around it{s_now}", _num(now), tgt, "mm")
+    if rule == "support_marks":
+        return ("Add a 45° chamfer or gusset under this overhang so it prints without support", None, 45.0, "°")
+    if rule == "trapped_support":
+        return ("Add a 45° chamfer or arch to this enclosed roof so it prints without trapped support", None, 45.0, "°")
+    if rule == "long_bridge":
+        now = m.get("span")
+        tgt = round(float(profile.material["max_bridge_mm"]), 1)
+        who = f"this {now:.0f} mm bridge" if now is not None else "this long bridge"
+        return (f"Shorten {who} to {tgt:g} mm or less, or add a 45° support arch", _num(now), tgt, "mm")
+    if rule == "bridge_sag":
+        now = m.get("span")
+        who = f"this {now:.0f} mm span" if now is not None else "this span"
+        return (f"Add a 45° pointed roof or arch across {who} so the top doesn't sag", None, 45.0, "°")
+    if rule == "shallow_relief":
+        now = m.get("depth_mm")
+        tgt = round(max(float(T["relief"]["min_mm"]), float(T["relief"]["min_layers"]) * lh), 2)
+        s_now = f" (now {now:.2f})" if now is not None else ""
+        return (f"Make this surface detail at least {tgt:g} mm deep{s_now}", _num(now), tgt, "mm")
+    if rule == "side_detail_small":
+        if m.get("depth_mm") is not None and m["depth_mm"] > T["relief"]["side_max_depth_mm"]:
+            now, tgt = m["depth_mm"], float(T["relief"]["side_max_depth_mm"])
+            return (f"Keep this upright detail under {tgt:g} mm deep (now {now:.1f})", _num(now), tgt, "mm")
+        now, tgt = m.get("height_mm"), float(T["relief"]["side_min_height_mm"])
+        s_now = f" (now {now:.1f})" if now is not None else ""
+        return (f"Make this upright detail at least {tgt:g} mm tall{s_now}", _num(now), tgt, "mm")
+    if rule == "first_layer_detail":
+        tgt = float(T["first_layer"]["detail_min_mm"])
+        return (f"Make bed-side details at least {tgt:g} mm wide and 0.4 mm deep", None, tgt, "mm")
+    if rule == "shallow_slope_stairs":
+        now = m.get("slope_deg")
+        s_now = f" (now {now:.0f}°)" if now is not None else ""
+        return (f"Make this shallow slope steeper, around 45°{s_now}", _num(now), 45.0, "°")
+    if rule in ("warping", "enclosure_recommended"):
+        tgt = round(float(prm["chamfer_mm"]), 1)
+        return (f"Round sharp base corners with r {tgt:g} mm", None, tgt, "mm")
+    if rule == "elephant_foot":
+        tgt = round(float(prm["foot_chamfer_mm"]), 2)
+        return (f"Add a {tgt:g} mm 45° chamfer along the bottom edge", None, tgt, "mm")
+    if rule in ("tall_thin_feature", "weak_upright_pin"):
+        now, tgt = m.get("width"), round(float(prm["stress_chamfer_mm"]), 1)
+        return (f"Round the foot of this upright pin with r {tgt:g} mm (or lay it flat)", _num(now), tgt, "mm")
+    if rule == "thin_neck":
+        tgt = round(float(prm["stress_chamfer_mm"]), 1)
+        return (f"Round the inside corners at this narrow neck with r {tgt:g} mm and thicken it", None, tgt, "mm")
+    if rule == "stress_at_inside_corner":
+        tgt = round(float(prm["stress_chamfer_mm"]), 1)
+        return (f"Round this inside corner with r {tgt:g} mm", None, tgt, "mm")
+    if rule == "living_hinge":
+        now, tgt = m.get("thickness_mm"), 0.5
+        s_now = f" (now {now:.1f})" if now is not None else ""
+        return (f"Keep this living hinge around {tgt:g} mm thick{s_now} and print it lying flat", _num(now), tgt, "mm")
+    if rule == "snap_fit_upright":
+        now = m.get("hook_mm")
+        tgt = round(float(m.get("max_hook_upright_mm") or 0.5), 1)
+        s_now = f" (now {now:.1f})" if now is not None else ""
+        return (f"Reduce this upright snap hook to {tgt:g} mm{s_now} or print it flat", _num(now), tgt, "mm")
+    if rule == "thick_solid_block":
+        return ("Hollow this thick block into a 3 mm ribbed shell to save plastic and warping", None, 3.0, "mm")
+    if rule == "floor_shrink_line":
+        return ("Cut a 1 mm relief groove round this floor edge to hide the outside shrink line", None, 1.0, "mm")
+    if rule == "rib_sink_line":
+        now, wall = m.get("rib_mm"), m.get("wall_mm")
+        tgt = round(0.6 * float(wall), 2) if wall is not None else 1.0
+        s_now = f" (now {now:.1f})" if now is not None else ""
+        return (f"Make this rib at most {tgt:g} mm thick{s_now}", _num(now), tgt, "mm")
+    if rule == "pause_to_insert":
+        return ("Leave 0.25 mm clearance per side in this pocket (or open a side slot)", None, 0.25, "mm")
+    if rule == "modelled_thread":
+        now, tgt = m.get("major_mm"), float(T["threads"]["clearance_mm"])
+        return (f"Model {tgt:g} mm clearance on this thread (stand upright if under Ø8 mm)", _num(now), tgt, "mm")
+    if rule == "shrinkage_size_error":
+        short, length, pct = m.get("short_mm"), m.get("length_mm"), m.get("shrinkage_pct")
+        tgt = round(float(short), 2) if short is not None else 0.3
+        if length is not None and pct is not None:
+            return (f"Add {tgt:g} mm ({pct:g}% shrinkage) to critical dimensions along the {length:.0f} mm length", _num(short), tgt, "mm")
+        return (f"Add {tgt:g} mm to critical dimensions for cooling shrinkage", _num(short), tgt, "mm")
+    if rule == "small_bed_contact":
+        now, tgt = m.get("bed_area"), float(T["stability"]["min_bed_contact_mm2"])
+        s_now = f" (now {now:.0f})" if now is not None else ""
+        return (f"Widen the flat base to at least {tgt:.0f} mm²{s_now}", _num(now, 0), tgt, "mm²")
+    if rule == "tipping_risk":
+        tgt = round(max(part_height / float(T["stability"]["tip_aspect"]), 5.0), 1)
+        return (f"Widen the base to at least {tgt:g} mm (or lay the part flat)", None, tgt, "mm")
+    if rule == "small_layers_cooling":
+        return ("Blunt or thicken this small top tip to at least 2 mm so layers have time to cool", None, 2.0, "mm")
+    if rule == "grip_texture":
+        tgt = float(T["grip"]["thickness_mm"])
+        return (f"Model grip ribs or knurling {tgt:g} mm deep (or turn on fuzzy skin)", None, tgt, "mm")
+    if rule == "exceeds_build_volume":
+        bed = profile.printer["bed"]
+        tgt = float(min(bed[:2]))
+        return (f"Split the part into pieces that fit within {bed[0]:.0f} × {bed[1]:.0f} × {bed[2]:.0f} mm", None, tgt, "mm")
+    if rule == "too_hot_in_use":
+        lim = m.get("heat_limit_c") or float(profile.material.get("heat_limit_c", 50))
+        return (f"Keep use temperature below {lim:.0f} °C or switch to a higher-temp material", _num(m.get("use_temp_c"), 0), round(float(lim), 0), "°C")
+    return None
+
+
+def _num(v, digits: int = 2) -> float | None:
+    return None if v is None else round(float(v), digits)
+
+
+def design_advice(mesh: Mesh, edits: list[dict], findings: list[dict], profile, params: dict | None,
+                  to_print, from_print) -> list[dict]:
+    """One CAD advice item per design fix (T-435): exact numbers and a point inside the part's bounding box,
+    whether or not an auto-apply edit exists. Edit-backed items reuse the edit's own numbers so they never
+    disagree; findings without a matching edit get advice from their existing metrics and thresholds.yaml."""
+    lo, hi = mesh.bounds()
+    centre = (lo + hi) / 2
+    part_height = float(hi[2] - lo[2]) if len(mesh.triangles) else 0.0
+    if len(mesh.triangles):
+        p_pts = np.asarray(to_print(mesh.triangles.reshape(-1, 3).astype(float)))
+        part_height = float(p_pts[:, 2].max() - p_pts[:, 2].min())
+
+    def clamp(pt) -> list[float]:
+        return np.clip(np.asarray(pt, float), lo, hi).tolist()
+
+    advice: list[dict] = []
+    covered: list[tuple[tuple[str, ...], tuple[np.ndarray, np.ndarray] | None]] = []
+    for e in edits:
+        spec = e.pop("_advice", None)
+        if e.get("source") == "other" or spec is None:
+            continue
+        pts = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3)
+        pt = spec.get("point") if spec.get("point") is not None else (pts.mean(axis=0) if len(pts) else centre)
+        advice.append({
+            "id": f"advice-{e['id']}",
+            "rule": e["rule"],
+            "text": spec["text"],
+            "now": spec.get("now"),
+            "target": spec["target"],
+            "unit": spec["unit"],
+            "point": clamp(pt),
+            "fixes": e.get("fixes"),
+            "edit_id": e["id"],
+        })
+        box = None
+        if len(pts):
+            p = np.asarray(to_print(pts.astype(float)))
+            box = (p.min(axis=0) - NEAR_MM, p.max(axis=0) + NEAR_MM)
+        if e.get("source") == "finding":
+            covered.append((EDIT_FIXES.get(e["rule"], ()), box))
+        elif e.get("source") == "request":
+            covered.append((_REQUEST_COVERS, box))
+        elif e.get("source") == "strength":
+            covered.append(((e["rule"],), box))
+
+    prm = edit_params(params)
+    T = load_data("thresholds")
+    has_warping = any((a.get("fixes") or {}).get("rule") == "warping" or a["rule"] == "sharp_bed_corners" for a in advice)
+    for i, f in enumerate(findings):
+        rule = f["rule"]
+        if any(rule in rules and _overlaps(box, f.get("bbox")) for rules, box in covered):
+            continue
+        if rule == "enclosure_recommended" and has_warping:
+            continue
+        built = _finding_advice(f, profile, prm, T, part_height)
+        if built is None:
+            continue
+        text, now, target, unit = built
+        bbox = f.get("bbox")
+        if bbox:
+            mid = (np.asarray(bbox[0], float) + np.asarray(bbox[1], float)) / 2
+            pt = from_print(mid)
+        else:
+            pt = centre
+        advice.append({
+            "id": f"advice-{rule}-{i}",
+            "rule": rule,
+            "text": text,
+            "now": now,
+            "target": target,
+            "unit": unit,
+            "point": clamp(pt),
+            "fixes": {"rule": rule, "title": f.get("title", rule)},
+            "edit_id": None,
+        })
+        if rule == "warping":
+            has_warping = True
+    return advice
 
 
 FIT_NAMES = {"press": "be pressed in (stays put)", "snug": "push in snugly", "sliding": "slide and turn freely", "loose": "drop in loosely"}
@@ -463,7 +758,9 @@ def _fit_edits(features: list[dict], fits: dict, up, profile=None) -> list[dict]
             inner, outer = (r_old - overlap, r_new) if grow_part else (r_new, r_old + overlap)
         name = "hole" if hole else "post"
         out.append(_edit(f"fit-{f['region']}", "fit_size", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm {name} for a {want['fit']} fit",
-                         why, [_ring(f, inner, outer, grow_part)], op="add" if grow_part else "cut"))
+                         why, [_ring(f, inner, outer, grow_part)], op="add" if grow_part else "cut",
+                         advice={"text": f"Make this {name} Ø{size:.2f} mm (now Ø{f['diameter']:.2f})",
+                                 "now": round(float(f["diameter"]), 2), "target": round(float(size), 2), "unit": "mm", "point": f["center"]}))
     return out
 
 
@@ -524,7 +821,9 @@ def _grip_fins(mesh: Mesh, features: list[dict], fits: dict, up, profile=None) -
                   f"Opens the hole to a Ø{2 * r_pocket:.1f} mm pocket with {count} angled fins, {thick:.1f} mm thick, whose tips reach "
                   f"{G['interference_mm']:.1f} mm into the Ø{want['partner_mm']:g} mm part. The fins bend as it goes in and keep "
                   "gripping even when your printer makes holes a tenth or two off, where a rigid press fit goes loose or cracks "
-                  "the part. Slice with Arachne walls so each fin prints as one solid loop.", pieces, op="cut")
+                  "the part. Slice with Arachne walls so each fin prints as one solid loop.", pieces, op="cut",
+                  advice={"text": f"Open this Ø{f['diameter']:.2f} mm hole to a Ø{2 * r_pocket:.1f} mm pocket with {count} grip fins ({thick:.1f} mm thick)",
+                          "now": round(float(f["diameter"]), 2), "target": round(float(2 * r_pocket), 1), "unit": "mm", "point": f["center"]})
         e["piece_ops"] = ["add"] * len(fins) + ["cut"] * (len(pieces) - len(fins))
         out.append(e)
     return out
@@ -926,7 +1225,9 @@ def _corner_chamfers(oriented: Mesh, to_part, profile, size: float = 3.0,
         out.append(_edit(
             f"chamfer-{n_idx}", "sharp_bed_corners", f"Round sharp corner {n_idx + 1} (r {r:.1f} mm)",
             "A rounded corner shrinks more evenly and is much less likely to lift off the bed (warping starts at sharp corners).",
-            [to_part(piece)], param="chamfer_mm"))
+            [to_part(piece)], param="chamfer_mm",
+            advice={"text": f"Round this bed corner with r {r:.1f} mm",
+                    "now": None, "target": round(float(r), 1), "unit": "mm"}))
     return out
 
 
@@ -999,7 +1300,9 @@ def _foot_chamfer(oriented: Mesh, to_part, profile, size: float,
     return [_edit("foot-chamfer", "elephant_foot", f"{size:.1f} mm chamfer along the bottom edge",
                   "The first layers are pressed flat and bulge out (elephant foot). A small 45° chamfer at the bottom edge "
                   "takes that away, so the edges look straight and holes at the bed keep their size.",
-                  [to_part(t) for t in pieces], param="foot_chamfer_mm")]
+                  [to_part(t) for t in pieces], param="foot_chamfer_mm",
+                  advice={"text": f"Add a {size:.1f} mm 45° chamfer along the bottom edge",
+                          "now": None, "target": round(float(size), 1), "unit": "mm"})]
 
 
 SHARP_MITRE = 0.5  # cos of half the turn: corners turning more than 120° break the sweep
@@ -1189,7 +1492,12 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
            if not rounds else
            "Rounds spread the load best; where one would hang over in this orientation it is a 45° chamfer, which prints "
            "without support.")
-    return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how, pieces, op="add", param="stress_chamfer_mm")]
+    advice_text = (f"Round this inside corner with r {r_mm:.1f} mm" if rounds == every
+                   else f"Add a {size:.1f} mm 45° chamfer at this inside corner" if not rounds
+                   else f"Round this inside corner with r {r_mm:.1f} mm (or {size:.1f} mm 45° chamfer where it overhangs)")
+    return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how, pieces, op="add", param="stress_chamfer_mm",
+                  advice={"text": advice_text, "now": None,
+                          "target": round(float(r_mm if rounds else size), 1), "unit": "mm", "point": spot.tolist()})]
 
 
 CORNER_STEPS = 6  # pieces of a corner piece's turn
@@ -1375,7 +1683,10 @@ def _thicker_weak_spot(mesh: Mesh, weak_spot, grow: float, hot_spots=None, up=No
     return [_edit("thicken-weak", "thin_neck", f"Make the weak spot {grow:.1f} mm thicker",
                   f"Adds {grow:.1f} mm of plastic all round {where} and {sleeve:.0f} mm past it either side, with a 45° end; "
                   "parts that are already thicker stay as they are. More cross-section is the direct fix when the plastic "
-                  "itself is the limit. Check that nothing needs to fit there.", pieces, op="add", param="thicken_mm")]
+                  "itself is the limit. Check that nothing needs to fit there.", pieces, op="add", param="thicken_mm",
+                  advice={"text": f"Make this weak spot {grow:.1f} mm thicker all round",
+                          "now": round(float(thickness), 1) if thickness > 0 else None,
+                          "target": round(float(grow), 1), "unit": "mm", "point": spot.tolist()})]
 
 
 def _same_outline(a, b, tol: float = 0.1) -> bool:
@@ -1707,8 +2018,11 @@ def _gap_edits(mesh: Mesh, region: np.ndarray, gaps: dict, up, profile=None) -> 
         if not pieces:
             continue
         name = "slot" if pair["kind"] == "slot" else "tab"
+        mid = ((pair["centre_a"] + pair["centre_b"]) / 2).tolist()
         out.append(_edit(f"gap-{a}-{b}", "fit_size", f"{pair['distance_mm']:.2f} → {size:.2f} mm {name} for a {want['fit']} fit",
-                         why, pieces, op="add" if move > 0 else "cut"))
+                         why, pieces, op="add" if move > 0 else "cut",
+                         advice={"text": f"Make this {name} {size:.2f} mm {'wide' if pair['kind'] == 'slot' else 'thick'} (now {pair['distance_mm']:.2f})",
+                                 "now": round(float(pair["distance_mm"]), 2), "target": round(float(size), 2), "unit": "mm", "point": mid}))
     return out
 
 
@@ -1910,13 +2224,18 @@ def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profi
             if smaller:
                 ring = ring.difference(Point(0, 0).buffer(r_new, 64))
             out.append(_edit(f"fastener-{rid}", "fastener", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm hole for {what} ({plan['size']})",
-                             plan["explanation"], [_axis_prism(f, ring, *_ends(f, smaller))], op="add" if smaller else "cut"))
+                             plan["explanation"], [_axis_prism(f, ring, *_ends(f, smaller))], op="add" if smaller else "cut",
+                             advice={"text": f"Make this {plan['size']} hole Ø{size:.2f} mm (now Ø{f['diameter']:.2f})",
+                                     "now": round(float(f["diameter"]), 2), "target": round(float(size), 2), "unit": "mm", "point": f["center"]}))
         if plan["walls"]:
             boss = Point(0, 0).buffer(size / 2 + plan["need_wall_mm"], 64).difference(Point(0, 0).buffer(size / 2, 64))
+            s_now = f" (now {plan['wall_mm']:.1f})" if plan["wall_mm"] is not None else ""
             out.append(_edit(f"fastener-boss-{rid}", "fastener", f"Boss with {plan['need_wall_mm']:g} mm of plastic round the {plan['size']} hole",
                              "Adds a ring of plastic round the hole where the wall is thin, so the screw or insert can't "
                              "split it. Check that nothing else needs that space.",
-                             [_axis_prism(f, boss, *_ends(f, True))], op="add"))
+                             [_axis_prism(f, boss, *_ends(f, True))], op="add",
+                             advice={"text": f"Add a boss with {plan['need_wall_mm']:g} mm wall round this {plan['size']} hole{s_now}",
+                                     "now": plan["wall_mm"], "target": round(float(plan["need_wall_mm"]), 2), "unit": "mm", "point": f["center"]}))
         p = plan["pocket"]
         if p is None:
             continue
@@ -1929,7 +2248,9 @@ def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profi
             z0, z1 = (end - p["depth_mm"], end + 0.5) if end > 0 else (end - 0.5, end + p["depth_mm"])
             out.append(_edit(f"fastener-nut-{rid}", "fastener", f"Nut pocket for the {plan['size']} nut",
                              f"A hexagonal pocket {p['across_flats_mm']:.1f} mm across the flats and {p['depth_mm']:.1f} mm "
-                             "deep at the hole's upper end: the nut drops in and can't turn.", [_axis_prism(f, hexa, z0, z1)]))
+                             "deep at the hole's upper end: the nut drops in and can't turn.", [_axis_prism(f, hexa, z0, z1)],
+                             advice={"text": f"Add an {plan['size']} nut pocket: {p['across_flats_mm']:.1f} mm across flats, {p['depth_mm']:.1f} mm deep",
+                                     "now": None, "target": round(float(p["across_flats_mm"]), 1), "unit": "mm", "point": f["center"]}))
             continue
         # A slot out to the nearest outside, along one of the four directions across the hole (not
         # straight up: its open end would be a long bridge).
@@ -1943,7 +2264,9 @@ def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profi
         out.append(_edit(f"fastener-nut-{rid}", "fastener", f"Nut slot for the {plan['size']} nut, from the side",
                          f"A slot {w:.1f} mm wide and {p['depth_mm']:.1f} mm high from the outside to the middle of the hole: "
                          "push the nut in from the side and it lines up with the bolt.",
-                         [_axis_prism(f, slot, -p["depth_mm"] / 2, p["depth_mm"] / 2)]))
+                         [_axis_prism(f, slot, -p["depth_mm"] / 2, p["depth_mm"] / 2)],
+                         advice={"text": f"Add an {plan['size']} nut side slot: {w:.1f} mm wide, {p['depth_mm']:.1f} mm high",
+                                 "now": None, "target": round(float(w), 1), "unit": "mm", "point": f["center"]}))
     return out
 
 

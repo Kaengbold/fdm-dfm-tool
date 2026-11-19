@@ -161,6 +161,8 @@ const state = {
   fitList: [], // the holes and posts listed there
   gaps: [], // slots and tabs between two flat faces (set_gap): {faces, kind, distance_mm, partner, fit, text}
   edits: [], // suggested design edits: {id, title, description, op: "add"|"cut", mesh: Float32Array, pieces, selected}
+  advice: [], // exact-number CAD advice for every design fix (T-435)
+  activeAdvice: null, // id of the clicked advice item, highlighted in 3D
   features: [], // detected holes/posts from the last design suggestion
   versions: [], // models to switch between and compare: {label, source, step, results: {time, grams, problems, safety}}
   version: 0,
@@ -1136,6 +1138,7 @@ function recolor() {
   setCompare(false); // anything redrawn is the "after"
   viewer.showLoadSymbols(shows("strength") ? loadSymbols() : []);
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : []);
+  viewer.showAdvice(shows("design") ? state.advice : [], state.activeAdvice);
   viewer.showFit(shows("fits") ? shownFit() : null);
   drawBoxes();
   showMarkers();
@@ -3150,19 +3153,55 @@ async function applyOption(o, recheck = true) {
 // ---------- design changes ----------
 function clearEdits() {
   state.edits = [];
+  state.advice = [];
+  state.activeAdvice = null;
   state.designFor = null;
   $("edits").replaceChildren();
+  $("advice").replaceChildren();
+  $("advice-section").hidden = true;
   $("edit-selection").hidden = true;
   $("apply-edits").hidden = true;
   viewer.showGhosts([]);
+  viewer.showAdvice([]);
 }
 
 function showSelectedGhosts(highlight = null) {
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : [], highlight);
+  viewer.showAdvice(shows("design") ? state.advice : [], state.activeAdvice);
   $("apply-edits").hidden = !state.edits.length;
   $("apply-edits").disabled = !state.edits.some((e) => e.selected);
   $("apply-edits").title = $("apply-edits").disabled ? "Tick a change to apply it." : "";
 }
+
+/** Findings payload for api.design, including metrics so exact-number advice can reuse them. */
+const designFindingsPayload = (up) => state.check?.up?.join() === up.join()
+  ? state.check.findings.map(({ rule, bbox, title, detail, metrics }) => ({ rule, bbox, title, detail, metrics })) : null;
+
+function renderAdvice() {
+  const list = $("advice");
+  const sec = $("advice-section");
+  sec.hidden = !state.advice.length;
+  if (!state.advice.length) return list.replaceChildren();
+  list.replaceChildren(...state.advice.map((a) => {
+    const li = el("li", { className: a.id === state.activeAdvice ? "active" : "" });
+    const sub = a.fixes ? a.fixes.title : a.edit_id ? "Matches a suggested change above" : "";
+    const btn = el("button", { type: "button" }, a.text, sub ? el("small", { textContent: sub }) : "");
+    btn.onclick = () => {
+      state.activeAdvice = a.id;
+      list.querySelectorAll("li").forEach((n, i) => n.classList.toggle("active", state.advice[i]?.id === a.id));
+      const edit = a.edit_id ? state.edits.find((e) => e.id === a.edit_id) : null;
+      showSelectedGhosts(edit);
+      viewer.focusAdvice(a);
+    };
+    li.append(btn);
+    return li;
+  }));
+}
+$("copy-advice").onclick = async () => {
+  if (!state.advice.length) return;
+  await navigator.clipboard.writeText(state.advice.map((a) => a.text).join("\n"));
+  setStatus("Copied the list of CAD numbers.");
+};
 
 /** Choices belong to this model version; keep them even when a re-check rebuilds the list. */
 const editSelections = () => (state.versions[state.version].editSelections ??= {});
@@ -3198,8 +3237,7 @@ async function suggestDesign(savedChoices = null) {
   return state.designPending = busy("Looking for design improvements…", async () => {
     const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
     // The check on screen says which findings the changes fix; for another orientation the engine checks itself.
-    const findings = state.check?.up?.join() === activeOption().up.join()
-      ? state.check.findings.map(({ rule, bbox, title }) => ({ rule, bbox, title })) : null;
+    const findings = designFindingsPayload(activeOption().up);
     const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear, findings });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
     $("edit-params").hidden = !r.edits.length;
@@ -3214,6 +3252,8 @@ async function suggestDesign(savedChoices = null) {
       selected: choices[e.id] ?? (!e.clash && /^(fit-|gap-|fastener-(?!boss-)|solid-)/.test(e.id)) }));
     const fixing = edits.filter((e) => e.source !== "other"), ideas = edits.filter((e) => e.source === "other");
     state.edits = [...fixing, ...ideas];
+    state.advice = r.advice ?? [];
+    state.activeAdvice = null;
     $("edit-selection").hidden = !state.edits.length;
     const item = (e) => {
       const box = el("input", { type: "checkbox", checked: e.selected });
@@ -3238,6 +3278,7 @@ async function suggestDesign(savedChoices = null) {
       ...(fixing.length ? fixing.map(item) : [el("li", { className: "hint", textContent: "Nothing to fix for this orientation and material." })]),
       ...other,
     );
+    renderAdvice();
     showSelectedGhosts();
     setStatus(state.summary);
     return r;
@@ -4608,7 +4649,7 @@ const makeReport = (project = false) =>
     const p = profile();
     const o = activeOption();
     const { findings, stats } = state.check;
-    const keep = { showHeat: state.showHeat, showWarp: state.showWarp, showSwing: state.showSwing };
+    const keep = { showHeat: state.showHeat, showWarp: state.showWarp, showSwing: state.showSwing, advice: state.advice };
     const report = {
       title: `Print check: ${state.name}`,
       date: new Date().toLocaleDateString(),
@@ -4651,7 +4692,15 @@ const makeReport = (project = false) =>
           lines: [w.explanation], picture: pictureWith("printing", () => viewer.snapshot()), note: "Shape exaggerated; red dots lift first." };
       }
       const chosen = state.edits.filter((e) => e.selected);
-      if (chosen.length) report.design = { items: chosen, picture: pictureWith("design", () => viewer.snapshot()) };
+      let advice = state.designFor === o.up.join() ? state.advice : [];
+      if (mode() !== "print" && state.designFor !== o.up.join()) {
+        const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
+        advice = (await call("design", { up: o.up, profile: p, params: designParams(), keep_clear, findings: designFindingsPayload(o.up) })).advice ?? [];
+      }
+      if (chosen.length || advice.length) {
+        state.advice = advice;
+        report.design = { items: chosen, advice, picture: pictureWith("design", () => viewer.snapshot()) };
+      }
     } finally {
       Object.assign(state, keep);
       recolor();
