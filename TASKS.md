@@ -901,10 +901,11 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
 - [ ] **T-484 P3** [TO] Later. · owner: —
   - Extra fans (Bambu aux / chamber, `M106 P2/P3`), `.bgcode`, GPU / voxel tier for hot spots.
   - Island reordering (research only): single material, same object, travel-collision checks, seams kept; better as a hint to the slicer than a G-code edit.
-- [ ] **T-485 P2** Placing a hollow (`volume_at`, kind "void") on a wall fails with "That spot isn't on the part". · files: `core/fdmcore/api.py` (`_solid_run`, `volume_at`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-485-void-on-wall`)
+- [x] **T-485 P2** Placing a hollow (`volume_at`, kind "void") on a wall fails with "That spot isn't on the part". · files: `core/fdmcore/api.py` (`_solid_run`, `volume_at`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-485-void-on-wall`)
   - Seen: `node tools/pyodide_check.mjs` on `core/tests/corpus/spool_hub.stl` (also on `main`, natively too?): `volume_at` at the centre of the first triangle (a spot on the surface) raises it. Most likely the click is on a vertical wall, so the straight up-and-down line runs along the surface and the inside test misses it.
   - Do: find the cause, then for a click on the surface step a little into the part (along the face normal) before the up-and-down search, or say in plain words why a hollow can't go there.
   - Done when: a click on a vertical wall of `spool_hub` and of a simple box places a hollow or gets a clear reason; test.
+  - Done 2026-11-19 (Gemini 4 Neon, reviewed by Claude): the cause was the step inward, which used the caller's normal (none, or an average) instead of the surface's own. A spot within 0.1 mm of the surface now steps in along the nearest face normal; where the wall is too thin it says "The part is too thin there for a hidden gap". `spool_hub` places its hollow in Pyodide.
 
 ## Done
 
