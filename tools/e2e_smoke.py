@@ -1,12 +1,14 @@
 """Browser smoke test of the web app (headless Edge/Chrome via Playwright).
 
     pip install playwright
-    python tools/e2e_smoke.py [extra parts .stl/.step ...] [--headed] [--browser chrome|chromium] [--gemini-review]
+    python tools/e2e_smoke.py [extra parts .stl/.step ...] [--quick] [--headed] [--browser chrome|chromium] [--gemini-review]
 
 Starts its own static server, drives the UI like a user, and prints one line per
 step plus every console error. Screenshots go to ./e2e-output/. Exit code 1 on failure.
-With --gemini-review, the Gemini CLI looks at each screenshot for visual problems and
-writes its notes to e2e-output/gemini-review.md (it only gets the image, no shell access).
+With --quick, runs a short subset (~2 min: boot, phone start screen, Simple flow to 3MF,
+level switch, one finding). With --gemini-review, the Gemini CLI looks at each screenshot
+for visual problems and writes its notes to e2e-output/gemini-review.md (it only gets the
+image, no shell access).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import re
 import socketserver
 import sys
 import threading
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -177,9 +180,12 @@ def check_thumbnails(page) -> str:
     return f"{result['count']} images, slowest {max(result['times']):.1f} ms; cached, nonblank, live view unchanged"
 
 
-def check_finding_views(page) -> str:
-    """Click every place, checking the actual live pixels and the camera throughout each flight."""
+def check_finding_views(page, limit: int | None = None) -> str:
+    """Click every place (or the first ``limit``), checking live pixels and camera flights."""
     entries = page.evaluate("() => fdm.state.check.findings")
+    if limit is not None:
+        entries = ([f for f in entries if f.get("bbox")] or entries)[:limit]
+        assert entries, "no findings to open"
     page.evaluate("() => document.querySelectorAll('#findings .impact > details').forEach(d => d.open = true)")
     focused, worst = 0, 0
     place_indices = {}
@@ -238,6 +244,90 @@ def check_finding_views(page) -> str:
     return f"{len(entries)} findings clicked, {focused} places framed; most common colour {worst:.1%}; flights outside, whole-part return works"
 
 
+def check_fresh_start(page):
+    """Shared fresh-visit assertions for the start screen."""
+    assert page.evaluate("() => document.body.dataset.level") == "simple"
+    assert page.evaluate("() => fdm.steps.current") == "part"
+    assert page.locator("#drop").is_visible(), "fresh visit hides the drop zone"
+    assert not page.locator("#guide").evaluate("d => d.open"), "guide opened by itself"
+    assert page.locator("#more-tools").is_hidden(), "more tools offered before a result"
+    assert page.evaluate("() => localStorage.getItem('fdm-guided')") == "1"
+
+
+def check_phone_start_screen(page) -> str:
+    """Verify the start screen fits cleanly at phone width without horizontal overflow."""
+    check_fresh_start(page)
+    assert page.locator(".samples").evaluate("e => e.scrollWidth <= e.clientWidth"), "sample list overflows phone width"
+    assert page.locator("[data-pane=part]").evaluate("e => e.scrollWidth <= e.clientWidth"), "start pane overflows phone width"
+    assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth"), "page overflows phone width"
+    return "390x844 start screen: Simple drop zone and samples fit without overflow"
+
+
+def check_levels_and_guide(page) -> str:
+    """Open the start guide, verify Simple visibility, and switch to Expert."""
+    assert not page.locator("#guide").evaluate("d => d.open")
+    page.click("#show-guide")
+    assert page.locator("#guide").evaluate("d => d.open")
+    assert page.locator("[data-guide=settings]").get_attribute("class") == "current"
+    page.click("[data-guide=settings]")
+    simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
+    assert simple == ["simple", False, False], simple
+    assert page.locator("#failed-guide").is_enabled(), "fix-my-print path unavailable in the guide"
+
+    # T-374: strength is a step of its own in Simple; the optional fold stays hidden.
+    assert page.evaluate("() => document.getElementById('load-optional').hidden && fdm.steps.steps.includes('strength')"), "Simple: strength not a step"
+    page.click("input[name=level][value=expert] >> xpath=..")
+    assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+    order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
+    assert order.index("sims") < order.index("printing") < order.index("problems"), order
+
+    # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
+    assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
+    return f"guide -> {simple[0]}; back to expert"
+
+
+def assert_primary_at_foot(page, button: str):
+    """Verify exactly one primary action is visible and it sits in the panel foot."""
+    visible = page.locator(".panes button.primary:visible, .pane-foot button.primary:visible")
+    assert visible.count() == 1, visible.all_inner_texts()
+    assert visible.first.get_attribute("id") == button, visible.all_inner_texts()
+    assert page.locator(f".pane-foot #{button}").is_visible(), f"{button} is not at the foot"
+
+
+def simple_flow_to_3mf(run: Run, sample: str = "mushroom") -> str:
+    """Walk one sample through the Simple steps (part -> have -> strength -> result) to the 3MF download."""
+    page = run.page
+    page.click("input[name=level][value=simple] >> xpath=..")
+    page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
+    assert_primary_at_foot(page, "step-next")
+    run.act(lambda: click_sample(page, sample))
+    assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
+    assert page.locator("#compute").count() == 0, "redundant Compute button remains"
+    assert_primary_at_foot(page, "step-next")
+    before = run.done()
+    page.click("#step-next")
+    assert page.evaluate("() => fdm.steps.current") == "strength"
+    assert_primary_at_foot(page, "step-next")
+    # T-414: with no load set, the step says it is optional and the foot button says it skips it.
+    assert page.locator("#step-next").inner_text() == "Skip: show my result"
+    assert "Optional" in page.locator("[data-pane=strength]").inner_text()
+    page.click("#step-next")
+    assert run.done() == before, "completed checks were run again with no load set"
+    items = page.locator("#compute-steps li")
+    states = items.evaluate_all("lis => lis.map((li) => li.className)")
+    assert states == ["done", "done", "skipped", "done"], states
+    assert not page.locator("#result-progress").evaluate("d => d.open"), "finished progress should be folded"
+    assert "no load set" in items.nth(2).text_content(), "missing optional-strength explanation"
+    assert page.evaluate("() => fdm.steps.current") == "result"
+    assert_primary_at_foot(page, "dl-3mf")
+    with page.expect_download() as download:
+        run.act(lambda: page.click("#dl-3mf"))
+    assert download.value.suggested_filename.endswith(".3mf")
+    assert page.locator("#after-dl").is_visible(), "next steps hidden inside More options"
+    page.click("#after-dl-close")
+    return f"{sample} -> {download.value.suggested_filename}"
+
+
 REVIEW_PROMPT = (
     "Do not run commands or edit files. This is a screenshot of a browser app that analyses 3D-print parts "
     "(sidebar with settings/findings, 3D view of the part on a print bed). List concrete visual problems only: "
@@ -265,19 +355,35 @@ def gemini_review(binary: str):
     (OUT / "gemini-review.md").write_text("# Gemini screenshot review\n\n" + "\n".join(notes), encoding="utf-8")
 
 
-def main():
-    sys.stdout.reconfigure(errors="replace")  # results quote UI text (🔒, ×); Windows consoles may not have them
-    ap = argparse.ArgumentParser()
-    ap.add_argument("parts", nargs="*", type=Path)
-    ap.add_argument("--headed", action="store_true")
-    ap.add_argument("--browser", default="msedge", choices=["msedge", "chrome", "chromium"],
-                    help="chromium = Playwright's own build (CI: playwright install chromium)")
-    ap.add_argument("--gemini-review", action="store_true", help="have the Gemini CLI review the screenshots")
-    ap.add_argument("--gemini-bin", default=str(Path.home() / ".gemini" / "bin" / "agy.exe"))
-    args = ap.parse_args()
-    OUT.mkdir(exist_ok=True)
-    port = serve()
+def run_quick(run: Run) -> None:
+    """Short smoke check (~2 min): phone start screen, Simple flow to 3MF, level switch, one finding."""
+    page = run.page
+    page.set_viewport_size({"width": 390, "height": 844})
+    try:
+        run.step("phone start screen", lambda: check_phone_start_screen(page))
+    finally:
+        page.set_viewport_size({"width": 1500, "height": 950})
+    run.step("simple flow to 3MF download", lambda: simple_flow_to_3mf(run, "hole_block"))
+    run.step("levels and start guide", lambda: check_levels_and_guide(page))
 
+    def open_one_finding():
+        page.evaluate("() => fdm.steps.go('problems')")
+        return check_finding_views(page, limit=1)
+
+    run.step("open one finding", open_one_finding)
+
+
+def run_extra_parts(run: Run, parts: list[Path]) -> None:
+    page = run.page
+    for part in parts:
+        def load_part(part=part):
+            status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)
+            top = page.locator("#options > li").first.inner_text().splitlines()
+            return f"{status} | top: {top[1:4]} | findings: {findings(page)}"
+        run.step(f"file {part.name}", load_part)
+
+
+def _run_suite(port: int, args) -> Run:
     with sync_playwright() as p:
         channel = None if args.browser == "chromium" else args.browser
         browser = p.chromium.launch(channel=channel, headless=not args.headed)
@@ -292,6 +398,11 @@ def main():
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
+        if args.quick:
+            run_quick(run)
+            run_extra_parts(run, args.parts)
+            browser.close()
+            return run
 
         def failed_without_part():
             page.click("#failed-start")
@@ -305,12 +416,7 @@ def main():
         run.step("failed print without a part", failed_without_part)
 
         def part_first():
-            assert page.evaluate("() => document.body.dataset.level") == "simple"
-            assert page.evaluate("() => fdm.steps.current") == "part"
-            assert page.locator("#drop").is_visible(), "fresh visit hides the drop zone"
-            assert not page.locator("#guide").evaluate("d => d.open"), "guide opened by itself"
-            assert page.locator("#more-tools").is_hidden(), "more tools offered before a result"
-            assert page.evaluate("() => localStorage.getItem('fdm-guided')") == "1"
+            check_fresh_start(page)
             page.click("input[name=level][value=advanced] >> xpath=..")
             page.reload()
             run.booted()
@@ -374,27 +480,7 @@ def main():
 
         run.step("starts when browser storage is blocked", blocked_storage)
 
-        def levels_and_guide():
-            assert not page.locator("#guide").evaluate("d => d.open")
-            page.click("#show-guide")
-            assert page.locator("#guide").evaluate("d => d.open")
-            assert page.locator("[data-guide=settings]").get_attribute("class") == "current"
-            page.click("[data-guide=settings]")
-            simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
-            assert simple == ["simple", False, False], simple
-            assert page.locator("#failed-guide").is_enabled(), "fix-my-print path unavailable in the guide"
-
-            # T-374: strength is a step of its own in Simple; the optional fold stays hidden.
-            assert page.evaluate("() => document.getElementById('load-optional').hidden && fdm.steps.steps.includes('strength')"), "Simple: strength not a step"
-            page.click("input[name=level][value=expert] >> xpath=..")
-            assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
-            order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
-            assert order.index("sims") < order.index("printing") < order.index("problems"), order
-
-            # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
-            assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
-            return f"guide -> {simple[0]}; back to expert"
-        run.step("levels and start guide", levels_and_guide)
+        run.step("levels and start guide", lambda: check_levels_and_guide(page))
 
         def showcase_samples():
             assert page.locator(".more-samples").evaluate("d => !d.open"), "More samples starts open"
@@ -2582,41 +2668,9 @@ def main():
 
         def simple_result():
             """T-374 / T-397: one primary per step, with missing work started by Show my result."""
-            def primary_at_foot(button):
-                visible = page.locator(".panes button.primary:visible, .pane-foot button.primary:visible")
-                assert visible.count() == 1, visible.all_inner_texts()
-                assert visible.first.get_attribute("id") == button, visible.all_inner_texts()
-                assert page.locator(f".pane-foot #{button}").is_visible(), f"{button} is not at the foot"
-
-            page.click("input[name=level][value=simple] >> xpath=..")
-            page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
-            primary_at_foot("step-next")
-            run.act(lambda: click_sample(page, "mushroom"))
-            assert page.locator("input[name=goal][value=strength]").is_visible(), "goal choice hidden in Simple"
-            assert page.locator("#compute").count() == 0, "redundant Compute button remains"
-            primary_at_foot("step-next")
+            simple_flow_to_3mf(run, "mushroom")
             page.evaluate("() => { window.simpleCompleted = { options: fdm.state.options, check: fdm.state.check }; }")
-            before = run.done()
-            page.click("#step-next")
-            assert page.evaluate("() => fdm.steps.current") == "strength"
-            primary_at_foot("step-next")
-            # T-414: with no load set, the step says it is optional and the foot button says it skips it.
-            assert page.locator("#step-next").inner_text() == "Skip: show my result"
-            assert "Optional" in page.locator("[data-pane=strength]").inner_text()
-            page.click("#step-next")
-            assert run.done() == before, "completed checks were run again with no load set"
             items = page.locator("#compute-steps li")
-            states = items.evaluate_all("lis => lis.map((li) => li.className)")
-            assert states == ["done", "done", "skipped", "done"], states
-            assert not page.locator("#result-progress").evaluate("d => d.open"), "finished progress should be folded"
-            assert "no load set" in items.nth(2).text_content(), "missing optional-strength explanation"
-            assert page.evaluate("() => fdm.steps.current") == "result"
-            primary_at_foot("dl-3mf")
-            with page.expect_download() as download:
-                run.act(lambda: page.click("#dl-3mf"))
-            assert download.value.suggested_filename.endswith(".3mf")
-            assert page.locator("#after-dl").is_visible(), "next steps hidden inside More options"
-            page.click("#after-dl-close")
 
             # Set loads without running Check strength. Show my result must supply that missing work.
             page.evaluate("""async () => {
@@ -2635,7 +2689,7 @@ def main():
                 page.click("#step-next")
                 assert page.evaluate("() => fdm.steps.current") == "result"
                 assert page.locator("#compute-steps li.working").is_visible(), "missing work has no progress list"
-                primary_at_foot("dl-3mf")
+                assert_primary_at_foot(page, "dl-3mf")
 
             run.act(show_missing_result, 300_000)
             assert page.evaluate("() => !!fdm.state.strength"), "missing strength check was skipped"
@@ -2753,18 +2807,32 @@ def main():
 
             run.step(f"finding views {sample.stem}", finding_views)
 
-        for part in args.parts:
-            def load_part(part=part):
-                status = run.act(lambda: page.set_input_files("#file", str(part)), 300_000)
-                top = page.locator("#options > li").first.inner_text().splitlines()
-                return f"{status} | top: {top[1:4]} | findings: {findings(page)}"
-            run.step(f"file {part.name}", load_part)
-
+        run_extra_parts(run, args.parts)
         browser.close()
+    return run
+
+
+def main():
+    sys.stdout.reconfigure(errors="replace")  # results quote UI text (🔒, ×); Windows consoles may not have them
+    ap = argparse.ArgumentParser()
+    ap.add_argument("parts", nargs="*", type=Path)
+    ap.add_argument("--quick", action="store_true",
+                    help="short smoke check (~2 min): boot, phone start screen, Simple flow to 3MF, level switch, one finding")
+    ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--browser", default="msedge", choices=["msedge", "chrome", "chromium"],
+                    help="chromium = Playwright's own build (CI: playwright install chromium)")
+    ap.add_argument("--gemini-review", action="store_true", help="have the Gemini CLI review the screenshots")
+    ap.add_argument("--gemini-bin", default=str(Path.home() / ".gemini" / "bin" / "agy.exe"))
+    args = ap.parse_args()
+    started = time.monotonic()
+    OUT.mkdir(exist_ok=True)
+    port = serve()
+    run = _run_suite(port, args)
 
     if args.gemini_review:
         gemini_review(args.gemini_bin)
-    print(f"\n{len(run.failures)} failure(s); screenshots in {OUT}")
+    elapsed = time.monotonic() - started
+    print(f"\n{len(run.failures)} failure(s) in {elapsed:.1f}s; screenshots in {OUT}")
     if run.console:
         print("console errors:", *run.console[:10], sep="\n  ")
     sys.exit(1 if run.failures else 0)
