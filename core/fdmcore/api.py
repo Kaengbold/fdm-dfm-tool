@@ -2269,24 +2269,33 @@ def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", p
             "vertex_temp_c": _wall_temps(fine, source, power_w, u, inside, corners=True).astype(np.float32).tobytes()}
 
 
-def design(up, profile: dict | None = None, params: dict | None = None, keep_clear: list[dict] | None = None) -> dict:
+def design(up, profile: dict | None = None, params: dict | None = None, keep_clear: list[dict] | None = None,
+           findings: list[dict] | None = None) -> dict:
     """Detected features (holes, bosses) and suggested geometry edits for this orientation.
     Each edit has a ``mesh`` (float32 triangles, part coordinates) made of closed ``pieces`` (triangle
-    counts) to add to the part (``op: "add"``) or cut away (``op: "cut"``).
+    counts) to add to the part (``op: "add"``) or cut away (``op: "cut"``), and says what it is for
+    (features.link_to_findings): a finding of the check (``fixes``), the user's request, the strength
+    check, or none ("other": only an idea).
     ``params`` adjusts edit sizes (see features.PARAMS); the values used come back in ``params``.
     ``keep_clear``: boxes (volume_at, kind "keep_clear") that must stay empty: edits adding plastic
-    there come back with ``clash``."""
-    from .features import PARAMS, design_edits, edit_params
+    there come back with ``clash``. ``findings``: the current check's findings for this orientation
+    (``rule``, ``bbox``, ``title``); left out, the check runs here."""
+    from .features import PARAMS, design_edits, edit_params, link_to_findings
     from .regions import find_regions
 
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
+    if findings is None:
+        findings = check(up, profile)["findings"]
+    rotation, _ = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
+    edits = design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
+                         gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners)
+    edits = link_to_findings(edits, findings, _print_frame_map(s.mesh, rotation))
     return {
         "features": _features(),
-        "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
-                                                gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners), up, keep_clear),
+        "edits": _keep_clear_clash(edits, up, keep_clear),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
@@ -2577,10 +2586,15 @@ def _drop_rejected(findings: list[dict], mesh: Mesh, r: np.ndarray) -> list[dict
 
 def _to_print_frame(mesh: Mesh, r: np.ndarray, point) -> list[float]:
     """Part-frame point -> coordinates of the oriented part shown on the bed (print rotation ``r``)."""
+    return _print_frame_map(mesh, r)(np.asarray(point, float)).tolist()
+
+
+def _print_frame_map(mesh: Mesh, r: np.ndarray):
+    """Part-frame points (… × 3) -> the print frame of ``orient(mesh, r)``, where check's findings are."""
     pts = mesh.triangles.reshape(-1, 3) @ r.T
     lo, hi = pts.min(axis=0), pts.max(axis=0)
     shift = np.array([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
-    return (r @ np.asarray(point) + shift).tolist()
+    return lambda p: np.asarray(p) @ r.T + shift
 
 
 # Support is printed sparse (~15 %) with denser interface layers under the part: about a quarter of
