@@ -13,7 +13,7 @@ import numpy as np
 import shapely
 from shapely.geometry import LineString, MultiPoint, Point, Polygon
 
-from .checks import QUAD, Tracker, _bridge_span, _opening, _safe_diff, _strip_width
+from .checks import QUAD, Tracker, _bridge_span, _opening, _safe_diff, _safe_overlay, _strip_width
 from .mesh import Mesh
 from .profile import Profile, load_data
 from .slicer import parts, section, slice_mesh
@@ -116,9 +116,13 @@ def _below(mesh: Mesh, z: float):
 
 def ledge_chamfers(mesh: Mesh, profile: Profile, max_width: float) -> list[dict]:
     """A flat ledge sticking out from a wall needs support. Filling the corner under it at 45°
-    (a gusset as wide as the ledge) makes the whole underside print without support."""
+    (a gusset as wide as the ledge) makes the whole underside print without support.
+    Each wedge is clipped to the outline of the layers it joins and the part's Z span, so
+    adding it never grows the part's outer bounding box."""
     lw, lh = profile.line_width, profile.layer_height
     max_bridge = profile.material["max_bridge_mm"]
+    z_lo = float(mesh.triangles[..., 2].min())
+    z_hi = float(mesh.triangles[..., 2].max())
     out = []
     for zc, ceiling in ceilings(mesh, 2 * lh):
         below = _below(mesh, zc - 0.05)
@@ -130,9 +134,14 @@ def ledge_chamfers(mesh: Mesh, profile: Profile, max_width: float) -> list[dict]
             continue  # a bridge the material spans fine
         if ceiling.exterior.intersection(anchor).length > 0.9 * ceiling.exterior.length:
             continue  # roof of a pocket or counterbore: walls all around, filling it changes the pocket
+        above = _below(mesh, zc + 0.05)
+        outline = below
+        for g in (above, ceiling):
+            if not g.is_empty:
+                outline = _safe_overlay(shapely.union, outline, g)
         wedges, widths = [], []
         for line in _lines(ceiling.boundary.intersection(anchor)):
-            for prism, w in _line_wedges(line, ceiling, zc, max_width):
+            for prism, w in _line_wedges(line, ceiling, zc, max_width, outline, z_lo, z_hi):
                 wedges.append(prism)
                 widths.append(w)
         if wedges:
@@ -151,8 +160,50 @@ def _lines(geom) -> list[np.ndarray]:
     return [np.asarray(g.simplify(0.05).coords) for g in getattr(merged, "geoms", [merged]) if g.length > 0.5]
 
 
-def _line_wedges(c: np.ndarray, ceiling: Polygon, zc: float, max_width: float):
-    """Triangular prisms along each segment of the wall–ledge line ``c``."""
+def _clipped_wedge(poly: Polygon, a: np.ndarray, n: np.ndarray, d: float, z_bot: float, z_top: float) -> np.ndarray | None:
+    """Closed wedge prism over 2D footprint ``poly``: flat top at ``z_top`` and sloped bottom
+    from ``z_bot`` (at offset -OVERLAP along ``n``) up to ``z_top`` (at offset ``d``)."""
+    poly = shapely.geometry.polygon.orient(poly, 1.0)
+    caps = _triangulate(poly)
+    if caps is None:
+        return None  # leave this stretch unfilled rather than add a broken piece
+
+    def z_of(xy: np.ndarray) -> np.ndarray:
+        v = np.clip((xy - a) @ n, -OVERLAP, d)
+        z = z_bot + (v + OVERLAP) * (z_top - z_bot) / (d + OVERLAP)
+        return np.where(z_top - z <= 1e-6, z_top, z)
+
+    top = np.concatenate([caps, np.full((len(caps), 3, 1), z_top)], axis=2)
+    bot_xy = caps[:, ::-1]
+    bot = np.concatenate([bot_xy, z_of(bot_xy)[..., None]], axis=2)
+    walls = []
+    for ring in [poly.exterior, *poly.interiors]:
+        c = np.asarray(ring.coords)[:, :2]
+        zb = z_of(c)
+        for i in range(len(c) - 1):
+            p, q = c[i], c[i + 1]
+            hp, hq = z_top - zb[i], z_top - zb[i + 1]
+            if hp <= 1e-6 and hq <= 1e-6:
+                continue
+            pt, qt = np.array([p[0], p[1], z_top]), np.array([q[0], q[1], z_top])
+            pb, qb = np.array([p[0], p[1], zb[i]]), np.array([q[0], q[1], zb[i + 1]])
+            if hp <= 1e-6:
+                walls.append([pt, qb, qt])
+            elif hq <= 1e-6:
+                walls.append([pb, qt, pt])
+            else:
+                walls += [[pb, qb, qt], [pb, qt, pt]]
+    t = np.concatenate([bot, top, np.array(walls)]) if walls else np.concatenate([bot, top])
+    vol = Mesh(t).volume()
+    if abs(vol) < 1e-6:
+        return None
+    return t if vol > 0 else t[:, ::-1]
+
+
+def _line_wedges(c: np.ndarray, ceiling: Polygon, zc: float, max_width: float,
+                 outline=None, z_lo: float = 0.0, z_hi: float = np.inf):
+    """Triangular prisms along each segment of the wall–ledge line ``c``, clipped to ``outline``
+    in XY and ``[z_lo, z_hi]`` in Z."""
     closed = np.allclose(c[0], c[-1])
     segs = []
     for a, b in zip(c[:-1], c[1:]):
@@ -167,7 +218,7 @@ def _line_wedges(c: np.ndarray, ceiling: Polygon, zc: float, max_width: float):
             if not ceiling.contains(Point(mid + 0.3 * n)):
                 continue
         w = min(_reach(ceiling, a + (b - a) * f, n, max_width) for f in (0.1, 0.5, 0.9))
-        d = min(w * 0.98, zc - 0.05)
+        d = min(w * 0.98, zc - z_lo - 0.05)
         if w > max_width or d < 0.5:
             segs.append(None)
             continue
@@ -191,9 +242,21 @@ def _line_wedges(c: np.ndarray, ceiling: Polygon, zc: float, max_width: float):
             turn = np.arccos(np.clip(o[2] @ t, -1, 1))
             ext.append(d * np.tan(min(turn, np.radians(120)) / 2))
         a2, b2 = a - t * ext[0], b + t * ext[1]
-        p3 = lambda p, z: np.array([p[0], p[1], z])
-        prof = [p3(a2 - n * OVERLAP, zc + OVERLAP), p3(a2 + n * d, zc + OVERLAP), p3(a2 - n * OVERLAP, zc - d - OVERLAP)]
-        out.append((sweep(prof, p3(a2, 0), p3(b2, 0)), d))
+        z_top = min(zc + OVERLAP, z_hi)
+        z_bot = max(z_lo, zc - d - OVERLAP)
+        if z_top <= zc or z_top - z_bot < 0.2:
+            continue
+        rect = Polygon([a2 - n * OVERLAP, b2 - n * OVERLAP, b2 + n * d, a2 + n * d])
+        if outline is None or outline.covers(rect):
+            p3 = lambda p, z: np.array([p[0], p[1], z])
+            prof = [p3(a2 - n * OVERLAP, z_top), p3(a2 + n * d, z_top), p3(a2 - n * OVERLAP, z_bot)]
+            out.append((sweep(prof, p3(a2, 0), p3(b2, 0)), d))
+        else:
+            clipped = _safe_overlay(shapely.intersection, rect, outline)
+            for poly in parts(clipped, 0.01):
+                prism = _clipped_wedge(poly, a, n, d, z_bot, z_top)
+                if prism is not None:
+                    out.append((prism, d))
     return out
 
 

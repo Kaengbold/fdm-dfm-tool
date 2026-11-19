@@ -231,12 +231,56 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
     }
 
 
+GROW_TOL_MM = 0.05  # ignore sub-0.05 mm noise when reporting outer-size growth
+
+
+def _growth_text(grow: np.ndarray) -> str:
+    """Plain-language note listing the axes that grow by more than GROW_TOL_MM."""
+    items = [f"{g:.1f} mm in {ax}" if g >= 0.1 else f"{g:.2f} mm in {ax}"
+             for g, ax in zip(grow, ("X", "Y", "Z")) if g > GROW_TOL_MM]
+    joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+    return f"Outer size grows by {joined}: check what it fits into."
+
+
+def _annotate_growth(edits: list[dict], mesh: Mesh) -> list[dict]:
+    """Flag edits whose added geometry reaches outside the part's bounding box: attach ``grows_mm``
+    and spell it out in plain words on the description so the part never grows silently."""
+    pts = mesh.triangles.reshape(-1, 3)
+    if not len(pts):
+        return edits
+    part_lo, part_hi = pts.min(axis=0), pts.max(axis=0)
+    for e in edits:
+        counts = e["pieces"]
+        if not counts:
+            continue
+        ops = e.get("piece_ops") or [e["op"]] * len(counts)
+        if not any(op == "add" for op in ops):
+            continue
+        tris = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)
+        add_chunks = []
+        offset = 0
+        for count, op in zip(counts, ops):
+            if op == "add" and count:
+                add_chunks.append(tris[offset:offset + count])
+            offset += count
+        if not add_chunks:
+            continue
+        add_pts = np.concatenate(add_chunks).reshape(-1, 3)
+        grow = np.maximum(0.0, part_lo - add_pts.min(axis=0)) + np.maximum(0.0, add_pts.max(axis=0) - part_hi)
+        if grow.max() > GROW_TOL_MM:
+            e["grows_mm"] = [round(float(g), 2) if g > GROW_TOL_MM else 0.0 for g in grow]
+            e["description"] = f"{e['description'].rstrip()} {_growth_text(grow)}"
+    return edits
+
+
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
                  weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None,
-                 hot_spots=None, fasteners: dict | None = None) -> list[dict]:
+                 hot_spots=None, fasteners: dict | None = None, strength_verdict: str | None = None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
-    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner,
-    and at the other inside corners near ``hot_spots`` (points, share of the highest stress).
+    ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner
+    and thickens the weak stretch — only when ``strength_verdict`` is not ``"fine"`` (a part that is already
+    strong enough shouldn't be thickened). ``hot_spots`` (points, share of the highest stress) extends those
+    edits to the other inside corners and stretches that are nearly as stressed.
     ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
     ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces;
     ``fasteners`` ({region: {"size", "use"}}) holes for screws, inserts and nuts (see fastener_plan)."""
@@ -271,9 +315,10 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     _attach_skip_notes(corner_edits, corner_skipped, foot_edits, foot_skipped)
     edits += corner_edits
     edits += foot_edits
-    edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
-                              profile.material["max_overhang_deg"])
-    edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
+    if strength_verdict != "fine":
+        edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
+                                  profile.material["max_overhang_deg"])
+        edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
@@ -299,7 +344,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             f"Grows the wall at {w['z0']:.0f}–{w['z1']:.0f} mm to {prm['wall_lines']:.0f} printed lines so it prints solid and is "
             "much stronger. It grows on both sides; check that nothing needs to fit there.",
             [to_part(p) for p in w["pieces"]], op="add", param="wall_lines"))
-    return edits
+    return _annotate_growth(edits, mesh)
 
 
 # Which check findings each kind of design change (its ``rule``) fixes. A change is offered as a fix only when
