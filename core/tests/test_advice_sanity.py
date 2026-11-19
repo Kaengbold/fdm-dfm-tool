@@ -123,3 +123,24 @@ def test_default_profile_has_no_use_temperature():
     from fdmcore.profile import Profile
 
     assert Profile.from_dict({}).use_temp_c is None
+
+
+def test_design_changes_belong_to_a_finding(advice):
+    """T-432: a change is offered as a fix only for a finding of the current check; a part with no findings gets
+    none outside "Other ideas". Teardrops and corner roundings still come with their findings."""
+    linked, wrong = {}, []
+    for path in PARTS:
+        _, check = advice[path.stem]
+        api.load(path.read_bytes(), path.stem)
+        edits = api.design(check["up"], findings=check["findings"])["edits"]
+        rules = {f["rule"] for f in check["findings"]}
+        for e in edits:
+            if e["source"] == "finding" and e["fixes"]["rule"] not in rules:
+                wrong.append(f"{path.stem}: {e['title']} fixes {e['fixes']['rule']}, not in the check")
+            if not rules and e["source"] != "other":
+                wrong.append(f"{path.stem} (no findings): {e['title']} offered as {e['source']}")
+        linked[path.stem] = {e["rule"] for e in edits if e["source"] == "finding"}
+    assert not wrong, "\n".join(wrong)
+    assert "sharp_bed_corners" in linked["tray"], linked["tray"]  # warping: its corners
+    assert "short_bridge" in linked["l_bracket"], linked["l_bracket"]  # oval sideways holes: teardrops
+    assert not linked["hook"] and not linked["shelf_bracket"], (linked["hook"], linked["shelf_bracket"])

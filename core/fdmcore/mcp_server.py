@@ -367,7 +367,9 @@ def suggest_design_changes(
     mid-air and thicker walls (added, ``op: add``).
     ``params`` sets edit sizes, e.g. {"chamfer_mm": 2, "teardrop_angle_deg": 40, "ledge_max_mm": 20,
     "wall_lines": 3}; ranges come back in the result. ``keep_clear``: boxes from place_box(kind="keep_clear");
-    edits that would add plastic into one come back with ``clash``."""
+    edits that would add plastic into one come back with ``clash``. Each edit says what it is for in ``source``:
+    "finding" (``fixes``: the check finding it fixes), "request" (a size the user asked for), "strength" (the weak
+    spot of the last strength check) or "other" (no finding asks for it: offer it only as an idea)."""
     return _clean(api.design(up, _profile(printer, material, nozzle), params, keep_clear))
 
 
