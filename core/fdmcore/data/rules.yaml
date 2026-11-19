@@ -1113,3 +1113,73 @@ rules:
     - Polymaker — PolyLite PLA Technical Data Sheet — https://shop.polymaker.com/products/polylite-pla
     - Bambu Lab Wiki — ASA-CF / PAHT-CF guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf
     - CNC Kitchen — Does carbon fiber make 3D prints stronger? — https://www.youtube.com/watch?v=64dd03814yU
+  wall_line_mismatch:
+    title: Wall width doesn't match whole print lines
+    why: The wall falls between whole extrusion line widths, so the slicer leaves a narrow gap inside the wall or fills
+      it with slow, messy zigzags that weaken the shell.
+    fixes:
+    - domain: geometry
+      text: Make the wall a whole multiple of your extrusion line width (see the suggested thickness above) so every
+        pass sits tightly side by side with no gap.
+    - domain: slicer
+      text: Turn on the Arachne wall generator so the slicer widens or narrows lines to fill the wall cleanly, or set
+        the slicer's line width to the suggested value above so whole lines fill it.
+      settings:
+        wall_generator: arachne
+    tags:
+    - walls
+    - line-width
+    - arachne
+    sources:
+    - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
+    - CNC Kitchen — The Effect of Extrusion Width on Strength and Quality of 3D Prints — https://www.cnckitchen.com/blog/the-effect-of-extrusion-width-on-strength-and-quality-of-3d-prints
+  load_bearing_wall_thin:
+    title: Wall is thin for a part that carries a load
+    why: Walls under about 1.6 mm only fit two or three perimeter lines. They are fine for light covers, but flex and
+      crack quickly under steady load, clamping, or impact.
+    fixes:
+    - domain: geometry
+      text: Thicken load-bearing walls to at least 1.6 mm (about 4 perimeter lines on a 0.4 mm nozzle) or add ribs
+        along the load path.
+    - domain: slicer
+      text: Increase wall loops so thin sections print completely solid instead of with sparse infill, and try slightly
+        wider extrusion lines (up to 1.4x the nozzle) for better layer bonding.
+      settings:
+        wall_loops: '4'
+    - domain: process
+      text: Orient the part so pulling and bending loads run along the printed lines rather than pulling layers apart,
+        or use a tougher filament such as PETG or ASA.
+    tags:
+    - walls
+    - strength
+    - perimeters
+    sources:
+    - Voron Design — Print Settings (4 walls x 0.4 mm = 1.6 mm structural shell) — https://docs.vorondesign.com/sourcing.html#print-settings
+    - CNC Kitchen — The Effect of Extrusion Width on Strength and Quality of 3D Prints — https://www.cnckitchen.com/blog/the-effect-of-extrusion-width-on-strength-and-quality-of-3d-prints
+    - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
+  uneven_wall_thickness:
+    title: Thick section right next to a thin wall
+    why: Thick solid sections hold heat longer and shrink more as they cool than thin walls right beside them. That
+      uneven pull can leave sink marks along the transition or warp the thinner wall.
+    fixes:
+    - domain: geometry
+      text: Keep wall thicknesses closer together by hollowing out thick blocks into a shell with ribs, and blend
+        stepped transitions with gradual chamfers or fillets.
+    - domain: slicer
+      text: Keep infill low and uniform (around 15% gyroid) inside the thick section so it holds less heat and pulls
+        less as it cools, and add a brim if the thin wall sits near the bed.
+      settings:
+        sparse_infill_density: 15%
+        sparse_infill_pattern: gyroid
+    - domain: process
+      text: Slow down cooling drafts or use an enclosure (especially for ABS, ASA, or PETG) so thick and thin sections
+        cool at a more even rate.
+    tags:
+    - walls
+    - warping
+    - cooling
+    - sink
+    sources:
+    - Slant 3D — How to Eliminate Shrink Lines — https://www.youtube.com/watch?v=d61u_lKFa-U
+    - Hubs — What are the key design elements for 3D printing? — https://www.hubs.com/knowledge-base/key-design-considerations-3d-printing/
+
