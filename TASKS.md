@@ -924,6 +924,11 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Done when: the strict xfail `test_teardrop_introduces_no_gap_fuses[feature_test-teardrop-61]` passes.
   - Outcome: the teardrop's point now ends in a 0.5 mm flat (about one line wide) instead of a knife edge, so its last layer never leaves a slit narrower than the 0.2 mm that fuses; a flat that short bridges cleanly. feature_test's teardrop-61 no longer adds `gap_fuses`; the teardrop tests pass.
 
+- [ ] **T-489 P2** [G] "Too thin to print" on the top of a round part: the suggested thickening doesn't help. · files: `core/fdmcore/checks.py` (`too_thin_to_print`), `core/fdmcore/additions.py` (`thicken_walls`) · owner: —
+  - Seen (`test_design_edits.py` after T-462 + T-463 merged): `bumpy_blob_20k` (organic, 80 mm tall) gets "About 0.17 mm thin at 74.3–74.8 mm … it won't print" near its top; after applying the suggested thickening it says 0.15 mm. The top of a dome is a thin sliver in the last layers, not a thin wall.
+  - Do: find out whether the check should flag a dome's last layers at all (likely not: the slicer just closes them with top layers), and if so why the thickening makes it thinner. Organic parts may need no geometry edit here.
+  - Done when: the strict xfail `test_part_edits_alone_and_together[bumpy_blob_20k]` passes.
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
