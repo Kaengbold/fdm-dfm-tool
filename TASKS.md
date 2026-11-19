@@ -765,10 +765,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen in code: every version keeps its own copy of the part's bytes, `state.source` another, and autosave writes the whole part as text into IndexedDB every minute when something changed. Measured page memory: 242 MB at 980,000 triangles with one version.
   - Do: versions share unchanged bytes (keep edits as a list on top of the original where possible); autosave stores the part once as binary (a Blob) and the settings as text; cap versions by total size, not only count.
   - Done when: five versions of a 300,000-triangle part stay under twice the memory of one.
-- [ ] **T-461 P2** [L] Faster, cacheable engine start. · files: `web/worker.js` (`boot`), `tools/make_manifest.py`, `web/sw.js`, `.github/workflows/pages.yml` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-461-engine-start`)
+- [x] **T-461 P2** [L] Faster, cacheable engine start. · files: `web/worker.js` (`boot`), `tools/make_manifest.py`, `web/sw.js`, `.github/workflows/pages.yml` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-461-engine-start`)
   - Seen in code: the ~35 engine files are fetched one after another, each with `?v=<time>`, so nothing is ever cached by the browser, on every start.
   - Do: fetch in parallel (`Promise.all`), and use a content hash per file in the manifest instead of the time, so unchanged files come from the cache; or ship the engine as one zip that Pyodide unpacks. Measure the start on a slow connection (browser dev tools "Slow 4G") before and after.
   - Done when: a second visit loads no engine file again; start time before / after is in this line.
+  - Outcome: Engine files are now fetched in parallel (`Promise.all`) overlapped with `py.loadPackage` using per-file LF-normalised SHA-256 hashes (`?v=<hash>`) in `manifest.json`, cached cache-first in `web/sw.js` (`fdm-engine-v1`, evicting older hashes) with `manifest.json` always revalidated (`no-cache`). The hashes are written only by the Pages build (`make_manifest.py --hashes`); the committed manifest stays a file list, so engine edits need no re-run and a local server always serves fresh code (fetched in parallel, not cached). Headless Edge via `http.server` on Slow 4G (400 kbit/s, 400 ms latency via CDP on page + workers): first visit 49.60 s → 34.58 s (engine fetch 31.69 s → 16.09 s); second visit 39.59 s → 7.41 s with 0 engine files fetched from the network (was 36); unthrottled second visit 5.16 s → 5.20 s with 0 engine files fetched.
 
 ### M. Tests that would have caught this
 
