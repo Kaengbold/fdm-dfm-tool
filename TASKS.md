@@ -761,7 +761,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: at load, count open edges, flipped faces, separate shells and zero-area triangles (numpy only). Report in plain words ("This file has 3 holes in its surface: results may be off; your slicer's repair can fix it") with the places marked. No auto-repair in the browser (GEOS / robustness risk); say how to repair in the slicer.
   - Done when: a cube with one face removed gives the message; clean samples give none.
   - Outcome: Load reports mesh health and the app warns about damaged surfaces; cube, samples, Pyodide and browser smoke checks pass.
-- [ ] **T-460 P2** [L] Memory with big parts. · files: `web/app.js` (`state.versions`, `state.source`, `autosave`, `projectText`) · owner: —
+- [ ] **T-460 P2** [L] Memory with big parts. · files: `web/app.js` (`state.versions`, `state.source`, `autosave`, `projectText`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-460-big-part-memory`)
   - Seen in code: every version keeps its own copy of the part's bytes, `state.source` another, and autosave writes the whole part as text into IndexedDB every minute when something changed. Measured page memory: 242 MB at 980,000 triangles with one version.
   - Do: versions share unchanged bytes (keep edits as a list on top of the original where possible); autosave stores the part once as binary (a Blob) and the settings as text; cap versions by total size, not only count.
   - Done when: five versions of a 300,000-triangle part stay under twice the memory of one.
@@ -775,7 +775,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 - [ ] **T-462 P1** [M] Organic and heavy test parts. · files: `tools/make_corpus.py`, `core/tests/corpus/`, `core/tests/test_corpus.py`, `tools/pyodide_check.mjs` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-462-organic-parts`)
   - Do: add generated organic parts (the bumpy blob: a sphere-like surface with radius `30·(1 + 0.15·sin 7u·sin 5v + 0.05·sin(23u + 11v))`, z scaled to 80 mm, at 20,000 and 80,000 triangles) and one filleted, ribbed housing. Expectations: not stood on a point, no CAD-detail findings (T-408), time limit (T-458). Real downloaded parts stay with T-003.
   - Done when: the parts and their expectations run in the corpus test.
-- [ ] **T-463 P1** [M] Apply every suggested design change in the tests. · files: new `core/tests/test_design_edits.py`, `core/fdmcore/booleans.py` · owner: —
+- [ ] **T-463 P1** [M] Apply every suggested design change in the tests. · files: new `core/tests/test_design_edits.py`, `core/fdmcore/booleans.py` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-463-apply-all-edits`)
   - Do: for every sample and corpus part: get `design` edits for the best orientation, apply each alone and all together with `booleans.apply_edits` (needs `manifold3d`: skip when missing), and assert: closed, volume moved the right way, outer size unchanged unless the edit says so, piece count unchanged, the edit's finding gone after a re-check. (The audit's run found 112 edits, 0 failures to apply, 6 that grew the outer size.)
   - Done when: the test runs in CI with the engine tests and fails on a growing ledge fill until T-436 fixes it.
 - [x] **T-464 P2** [M] Sanity tests for advice. · files: `core/tests/` · owner: Claude, with Gemini Flash (`task/T-464-advice-sanity`)
