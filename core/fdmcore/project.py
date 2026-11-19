@@ -20,7 +20,7 @@ import json
 FORMAT = "fdm-check-project"
 VERSION = 1
 FIELDS = ("profile", "mode", "up", "loads", "faces", "zones", "volumes", "settings", "holes",
-          "edit_selections", "suggested_boxes", "excluded_settings")
+          "edit_selections", "suggested_boxes", "excluded_settings", "load_settings")
 
 
 def dump(name: str, stl: bytes, face_ids: list[int] | None = None, **fields) -> str:

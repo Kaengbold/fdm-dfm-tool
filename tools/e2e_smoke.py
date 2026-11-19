@@ -1090,6 +1090,8 @@ def main():
                 page.select_option("#load-case", case)
                 page.click("#as-load")
             run.act(lambda: page.click("#run-strength"), 300_000)
+            # T-429: the lightest settings for the load run first (their own busy), then the strength check.
+            page.wait_for_function("() => fdm.state.strength && fdm.state.loadSettings && Number(document.body.dataset.busy || 0) === 0", timeout=300_000)
             page.locator("#strength-result .strength-more").evaluate("e => e.open = true")
             text = page.locator("#strength-result").inner_text()
             assert "Weakest is case 2" in text, text
@@ -1097,6 +1099,33 @@ def main():
             assert headline in ("Plenty of reserve", "Enough", "Marginal", "Likely to break"), headline
             return f"loads: {page.locator('#loads li').all_inner_texts()} | {text.splitlines()[0]}"
         run.step("strength with two load cases", load_cases)
+
+        def settings_follow_load():
+            """T-429: after a strength run the settings show the walls / infill the loads need, with a way back."""
+            ls = page.evaluate("() => fdm.state.loadSettings")
+            assert ls["met"] and ls["use"] and ls["values"] and ls["loadText"] == "For your loads" and ls["baseline"], ls
+            page.evaluate("() => fdm.steps.go('settings')")
+            rows = "() => Object.fromEntries([...document.querySelectorAll('#settings tr[data-setting]')].map(r => [r.dataset.setting, r.cells[2].innerText]))"
+            note = page.locator("#load-settings-note")
+            from_load = page.locator("#settings .setting-reason").filter(has_text="For your loads")
+            if not from_load.count():  # the goal's values already hold it: nothing to change
+                assert "already hold it" in note.inner_text(), note.inner_text()
+                return note.inner_text()
+            assert page.evaluate("() => fdm.state.strengthInputs === JSON.stringify(fdm.strengthInputs())"), "strength result is not for the settings shown"
+            suggested = page.evaluate(rows)
+            reason = from_load.first.inner_text()
+            run.act(lambda: note.get_by_role("button", name="Keep the goal default").click(), 300_000)
+            assert not page.evaluate("() => fdm.state.loadSettings.use")
+            assert not page.locator("#settings .setting-reason").filter(has_text="For your loads").count()
+            assert page.evaluate(rows) != suggested, "keeping the goal default did not change the settings"
+            run.act(lambda: note.get_by_role("button", name="Use the values for your load").click(), 300_000)
+            assert page.evaluate(rows) == suggested, "the load's settings did not come back"
+            assert page.evaluate("() => fdm.state.strengthInputs === JSON.stringify(fdm.strengthInputs())"), "strength result is not for the settings shown"
+            text = note.inner_text()
+            assert "goal's settings" in text and " g" in text and " min" in text, text  # says what it costs or saves
+            page.evaluate("() => fdm.steps.go('strength')")
+            return f"{reason} | {text}"
+        run.step("settings follow the load", settings_follow_load)
 
         def spot_load():
             # Replace the case-2 face load by the same weight on a spot of that face.
