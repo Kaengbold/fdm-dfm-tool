@@ -10,16 +10,36 @@ import numpy as np
 from .mesh import Mesh
 
 
-def apply_edits(part: Mesh, edits: list[dict]) -> Mesh:
-    """Apply design edits (from ``api.design``): additions first, then cuts, piece by piece."""
-    from manifold3d import Error, Manifold
+def _to_manifold(tris: np.ndarray):
+    from manifold3d import Manifold
     from manifold3d import Mesh as MMesh
 
+    v = tris.reshape(-1, 3).astype(np.float32)
+    mesh = MMesh(vert_properties=v, tri_verts=np.arange(len(v), dtype=np.uint32).reshape(-1, 3))
+    mesh.merge()
+    return Manifold(mesh)
+
+
+def inspect_mesh(part: Mesh) -> dict:
+    """Closedness, separate piece count and volume of ``part`` according to manifold3d."""
+    from manifold3d import Error
+
+    m = _to_manifold(part.triangles)
+    closed = m.status() == Error.NoError
+    return {
+        "closed": closed,
+        "status": str(m.status()),
+        "pieces": len(m.decompose()) if closed else 0,
+        "volume": float(m.volume()) if closed else 0.0,
+    }
+
+
+def apply_edits(part: Mesh, edits: list[dict]) -> Mesh:
+    """Apply design edits (from ``api.design``): additions first, then cuts, piece by piece."""
+    from manifold3d import Error
+
     def to_manifold(tris: np.ndarray, what: str):
-        v = tris.reshape(-1, 3).astype(np.float32)
-        mesh = MMesh(vert_properties=v, tri_verts=np.arange(len(v), dtype=np.uint32).reshape(-1, 3))
-        mesh.merge()
-        m = Manifold(mesh)
+        m = _to_manifold(tris)
         if m.status() != Error.NoError:
             raise ValueError(f"{what} is not a closed (watertight) mesh: {m.status()}")
         return m
