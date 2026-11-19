@@ -296,6 +296,70 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     return edits
 
 
+# Which check findings each kind of design change (its ``rule``) fixes. A change is offered as a fix only when
+# one of them is in the current check, near the change; the rest are folded away as "Other ideas" (T-432).
+EDIT_FIXES = {
+    "short_bridge": ("sideways_hole_oval", "bridge_sag", "long_bridge", "trapped_support"),
+    "sharp_bed_corners": ("warping",),
+    "elephant_foot": ("elephant_foot",),
+    "support_marks": ("support_marks",),
+    "sacrificial_layer": ("hole_starts_midair",),
+    "pause_to_insert": ("pause_to_insert",),
+    "single_line_wall": ("single_line_wall", "too_thin_to_print"),
+    "tall_boss": ("tall_thin_feature", "weak_upright_pin"),
+}
+ASKED_FOR = {"fit_size", "fastener", "press_fit_fins", "split"}  # sizes the user typed in: their own request
+FROM_STRENGTH = {"stress_at_inside_corner", "thin_neck"}  # from the weak spot of the last strength check
+NEAR_MM = 2.0  # a change this close to a finding's box is at that finding
+
+
+def link_to_findings(edits: list[dict], findings: list[dict], to_print) -> list[dict]:
+    """Say what each edit is for, in ``source``: "finding" (with ``fixes``: the finding's ``rule`` and ``title``),
+    "request" (a size the user asked for), "strength" (the strength check's weak spot) or "other" (no
+    finding asks for it: shown folded as "Other ideas"; ``why_other`` says why when there's more to say). ``findings`` as check returns
+    them (print frame); ``to_print`` maps part-frame points (n × 3) to that frame."""
+    T = load_data("thresholds")["first_layer"]
+    for e in edits:
+        e["fixes"] = None
+        if e["rule"] in ASKED_FOR:
+            e["source"] = "request"
+            continue
+        if e["rule"] in FROM_STRENGTH:
+            e["source"] = "strength"
+            continue
+        e["source"] = "other"
+        e["why_other"] = None
+        wanted = EDIT_FIXES.get(e["rule"], ())
+        pts = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3)
+        box = None
+        if len(pts):
+            p = np.asarray(to_print(pts.astype(float)))
+            box = (p.min(axis=0) - NEAR_MM, p.max(axis=0) + NEAR_MM)
+        match = next((f for f in findings if f["rule"] in wanted and _overlaps(box, f.get("bbox"))), None)
+        if match is None:
+            continue
+        if e["rule"] == "elephant_foot" and T["elephant_foot_compensation_mm"] >= T["elephant_foot_mm"][1]:
+            e["why_other"] = "Your slicer's elephant foot compensation (set in the 3MF) already takes up the bulge."
+            continue
+        e["source"] = "finding"
+        e["fixes"] = {"rule": match["rule"], "title": match.get("title", match["rule"])}
+        e.pop("why_other")
+        if e["rule"] == "elephant_foot":
+            lo, hi = T["elephant_foot_mm"]
+            e["description"] += (f" Your slicer's elephant foot compensation (set in the 3MF) pulls the first layer in by "
+                                 f"{T['elephant_foot_compensation_mm']:g} mm, but the bulge can reach {hi:g} mm: the chamfer takes "
+                                 "the rest, where holes and edges at the bed must be exact.")
+    return edits
+
+
+def _overlaps(box, bbox) -> bool:
+    """Does the edit's box (lo, hi) touch a finding's bbox? A finding without a place (the whole part) always does."""
+    if not bbox or box is None:
+        return True
+    lo, hi = np.asarray(bbox[0], float), np.asarray(bbox[1], float)
+    return bool(np.all(box[0] <= hi) and np.all(lo <= box[1]))
+
+
 FIT_NAMES = {"press": "be pressed in (stays put)", "snug": "push in snugly", "sliding": "slide and turn freely", "loose": "drop in loosely"}
 
 

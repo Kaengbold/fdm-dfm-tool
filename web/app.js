@@ -3154,9 +3154,10 @@ function showSelectedGhosts(highlight = null) {
 const editSelections = () => (state.versions[state.version].editSelections ??= {});
 const editsForProject = () => ({ ...editSelections(), ...Object.fromEntries(state.edits.map((e) => [e.id, e.selected])) });
 const suggestedForProject = () => Object.fromEntries(state.suggested.map((v) => [suggestedBoxKey(v), v]));
+/** "Tick all" ticks the changes that fix something, never the folded "Other ideas"; "None" unticks every one. */
 function selectEdits(selected) {
-  for (const e of state.edits) editSelections()[e.id] = e.selected = selected;
-  document.querySelectorAll("#edits input[type=checkbox]").forEach((box) => (box.checked = selected));
+  for (const e of state.edits) if (!selected || e.source !== "other") editSelections()[e.id] = e.selected = selected;
+  document.querySelectorAll("#edits input[type=checkbox]").forEach((box, i) => (box.checked = state.edits[i].selected));
   showSelectedGhosts();
 }
 $("edits-all").onclick = () => selectEdits(true);
@@ -3170,11 +3171,22 @@ function suggestDesignIfShown() {
   if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
 }
 
+/** The line under a design change saying what it is for (features.link_to_findings). */
+const EDIT_FOR = {
+  finding: (e) => `Fixes: ${e.fixes.title}`,
+  request: () => "The size you asked for",
+  strength: () => "For the weak spot the strength check found",
+  other: (e) => e.why_other ?? "",
+};
+
 async function suggestDesign(savedChoices = null) {
   state.designFor = activeOption().up.join();
   return state.designPending = busy("Looking for design improvements…", async () => {
     const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
-    const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear });
+    // The check on screen says which findings the changes fix; for another orientation the engine checks itself.
+    const findings = state.check?.up?.join() === activeOption().up.join()
+      ? state.check.findings.map(({ rule, bbox, title }) => ({ rule, bbox, title })) : null;
+    const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear, findings });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
     $("edit-params").hidden = !r.edits.length;
     state.features = r.features;
@@ -3183,23 +3195,34 @@ async function suggestDesign(savedChoices = null) {
     const choices = editSelections();
     for (const e of state.edits) choices[e.id] = e.selected;
     if (savedChoices) Object.assign(choices, savedChoices);
-    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
+    // Changes that fix a finding (or that the user asked for) first; ideas no finding asks for after them, folded.
+    const edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
       selected: choices[e.id] ?? (!e.clash && /^(fit-|gap-|fastener-(?!boss-)|solid-)/.test(e.id)) }));
+    const fixing = edits.filter((e) => e.source !== "other"), ideas = edits.filter((e) => e.source === "other");
+    state.edits = [...fixing, ...ideas];
     $("edit-selection").hidden = !state.edits.length;
+    const item = (e) => {
+      const box = el("input", { type: "checkbox", checked: e.selected });
+      box.onchange = () => {
+        e.selected = box.checked;
+        choices[e.id] = box.checked;
+        showSelectedGhosts();
+      };
+      const why = e.clash ? `${e.clash} ${e.description}` : e.description;
+      // Pointing at a change turns the part to it and lights it up.
+      return el("li", { onmouseenter: () => (showSelectedGhosts(e), viewer.focusEdit(e)), onmouseleave: () => showSelectedGhosts() },
+        el("label", {}, box, el("span", {}, e.title, el("small", { className: "edit-for", textContent: EDIT_FOR[e.source]?.(e) ?? "" }),
+          el("small", { textContent: why }))));
+    };
+    const other = ideas.length
+      ? [el("li", { className: "other-ideas" }, el("details", { open: state.otherIdeasOpen, ontoggle: (ev) => (state.otherIdeasOpen = ev.target.open) },
+          el("summary", { textContent: `Other ideas (${ideas.length})` }),
+          el("p", { className: "hint", textContent: "The check found no problem these fix. They're here if you want them anyway." }),
+          el("ol", { className: "edits" }, ...ideas.map(item))))]
+      : [];
     $("edits").replaceChildren(
-      ...(state.edits.length
-        ? state.edits.map((e) => {
-            const box = el("input", { type: "checkbox", checked: e.selected });
-            box.onchange = () => {
-              e.selected = box.checked;
-              choices[e.id] = box.checked;
-              showSelectedGhosts();
-            };
-            // Pointing at a change turns the part to it and lights it up.
-            return el("li", { onmouseenter: () => (showSelectedGhosts(e), viewer.focusEdit(e)), onmouseleave: () => showSelectedGhosts() },
-              el("label", {}, box, el("span", {}, e.title, el("small", { textContent: e.clash ? `${e.clash} ${e.description}` : e.description }))));
-          })
-        : [el("li", { className: "hint", textContent: "Nothing to change for this orientation and material." })]),
+      ...(fixing.length ? fixing.map(item) : [el("li", { className: "hint", textContent: "Nothing to fix for this orientation and material." })]),
+      ...other,
     );
     showSelectedGhosts();
     setStatus(state.summary);
