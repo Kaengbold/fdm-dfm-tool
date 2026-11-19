@@ -2371,6 +2371,17 @@ def set_fastener(region: int, up, size: str | None = "M3", use: str = "screw", p
     return {"region": region, **plan, "explanation": plan["explanation"] + _coarse_note(region)}
 
 
+def fastener_suggestions(up, profile: dict | None = None) -> dict:
+    """Grouped screw / insert / nut sizing suggestions for round holes near standard metric sizes."""
+    from .features import suggest_fasteners
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    return {"suggestions": suggest_fasteners(s.mesh, _features(), up, Profile.from_dict(profile))}
+
+
 def _coarse_note(region: int) -> str:
     """A warning to add when the hole / post ``region`` was exported with too few facets (coarse_facets):
     its measured size, and so the advice, is off by about the facets' error."""
@@ -3180,6 +3191,7 @@ METHODS = {
     "warping": warping,
     "set_fit": set_fit,
     "set_fastener": set_fastener,
+    "fastener_suggestions": fastener_suggestions,
     "split": split,
     "set_gap": set_gap,
     "volume_solid": volume_solid,
