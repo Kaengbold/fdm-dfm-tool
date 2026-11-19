@@ -1718,6 +1718,16 @@ def print_minutes(volume_mm3: float, profile: Profile) -> float:
     return float(volume_mm3) / (lw * lh * v) / 60
 
 
+def shell_infill_minutes(shell_mm3: float, infill_mm3: float, profile: Profile) -> float:
+    """Rough minutes for this much shell (at wall speed) and infill plastic (at infill speed), each
+    capped by the melt rate, as in ``_estimate``: walls cost more time per gram than infill."""
+    lw, lh = profile.line_width, goal_plan(profile)["layer_height"]
+    flow = profile.material["max_flow_mm3s"] / (lw * lh)
+    v_wall = min(profile.speeds["outer_wall"] * TIME_EFFICIENCY, flow)
+    v_inf = min(profile.speeds["infill"] * TIME_EFFICIENCY, flow)
+    return float(shell_mm3 / (lw * lh * v_wall) + infill_mm3 / (lw * lh * v_inf)) / 60
+
+
 def _estimate(layers: list[Layer], profile: Profile, plan: dict | None = None) -> dict:
     """Rough print time and filament use, with the shape-adjusted plan (or just the user's goal).
     Counts solid top/bottom skins and the slicer slowing down small layers to the material's

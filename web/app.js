@@ -146,6 +146,7 @@ const state = {
   loads: [],
   marks: [], // faces the user marked: {region, kind: "clean" | "bed"}
   strength: null,
+  loadSettings: null, // shell settings worked out for the loads (T-429); below the user's own overrides
   showHeat: false,
   overrides: {}, // slicer settings the user applied from strength suggestions
   excludedSettings: [], // per-part settings left to the user's slicer
@@ -186,7 +187,7 @@ const steps = new Steps({
 });
 
 // Debug/test hook: lets automated browser tests and devtools inspect the app.
-globalThis.fdm = { state, viewer, steps, call: (...args) => call(...args) };
+globalThis.fdm = { state, viewer, steps, call: (...args) => call(...args), strengthInputs: () => strengthInputs() };
 
 const profile = () => ({
   printer: $("printer").value,
@@ -350,6 +351,7 @@ async function openProject(bytes) {
     await selectOption(0);
   } else if (marks.length) await runCheck();
   state.loads = p.loads ?? []; // after the check: with loads it would start a strength run first
+  state.loadSettings = p.load_settings ?? null;
   renderLoads();
   setZones(p.zones ?? []); // after selectOption: it clears zones and boxes of the old orientation
   setVolumes(p.volumes ?? []);
@@ -442,7 +444,7 @@ async function partLoaded(info) {
   state.name = info.name;
   // Copy: bytes from Pyodide may not be 4-byte aligned for a Float32Array view.
   state.triangles = new Float32Array(info.triangles.slice().buffer);
-  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, overrides: {}, excludedSettings: [], fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
+  Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, loadSettings: null, overrides: {}, excludedSettings: [], fitNotes: {}, fastenerNotes: {}, gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
@@ -556,6 +558,7 @@ async function selectOption(i) {
   state.placed = viewer.showPart(state.triangles, activeOption().rotation);
   viewer.clearMarkers(); // remove old orientation's warning boxes immediately
   state.strength = null;
+  invalidateLoadSettings();
   state.showHeat = false;
   $("strength-result").replaceChildren();
   $("dynamics-result").textContent = "";
@@ -931,19 +934,42 @@ const sameSetting = (a, b) => {
   return x === y || (numeric.test(x) && numeric.test(y) && x.includes("%") === y.includes("%") && parseFloat(x) === parseFloat(y));
 };
 
+/** The value the loads ask for in this row, or null. The whole set is used or none of it (``ls.use``):
+ * a mix (fewer walls but more infill) only holds together. Top / bottom layers never go below the
+ * recommendation (the top surface must close); more of them only adds strength. A print profile that
+ * already gives at least as much keeps its own value. */
+function loadValue(s, yours) {
+  const ls = state.loadSettings;
+  const v = ls?.met && ls.use ? ls.values?.[s.key] : null;
+  if (v == null || sameSetting(v, s.value)) return null;
+  if (["top_shell_layers", "bottom_shell_layers"].includes(s.key) && parseFloat(v) < parseFloat(s.value)) return null;
+  if (yours != null && parseFloat(yours) >= parseFloat(v)) return null;
+  return v;
+}
+
+/** "For your 5 kg load: 2 walls are enough (holds ×2.4, needs ×2)". */
+function loadReason(s, v) {
+  const ls = state.loadSettings;
+  const what = s.key === "sparse_infill_density" ? `${parseFloat(v)} % infill is` : `${v} ${s.label.toLowerCase()} are`;
+  const how = parseFloat(v) < parseFloat(s.value) ? "enough" : "needed";
+  return `${ls.loadText}: ${what} ${how} (holds ${formatSafety(ls.safety)}, needs ${formatSafety(ls.target)})`;
+}
+
 /** Recommended settings with the user's applied strength suggestions on top. */
 function effectiveSettings(includeUnchecked = false) {
   if (!state.check) return [];
   const list = state.check.settings.map((s) => {
     const yours = printProfile?.values?.[s.key];
     const overridden = s.key in state.overrides;
+    const load = loadValue(s, yours);
     const goalOnly = s.reason?.startsWith("From your goal") || s.key === "sparse_infill_pattern";
     const enough = ["wall_loops", "top_shell_layers", "bottom_shell_layers", "sparse_infill_density"].includes(s.key)
       && parseFloat(yours) >= parseFloat(s.value);
     return { ...s, ...(yours != null ? { usual: yours, yours: true } : {}),
-      value: overridden ? state.overrides[s.key] : yours != null && (goalOnly || enough) ? yours : s.value,
+      value: overridden ? state.overrides[s.key] : load != null ? load : yours != null && (goalOnly || enough) ? yours : s.value,
       ...(yours != null && !overridden && (goalOnly || (enough && !sameSetting(yours, s.value)))
         ? { reason: goalOnly ? "Your print settings; nothing on this part asks for a change" : "Your print settings already meet this part's needs" } : {}),
+      ...(load != null && !overridden ? { reason: loadReason(s, load), fromLoad: true } : {}),
       ...(overridden ? { changed: true } : {}) };
   });
   for (const [key, value] of Object.entries(state.overrides)) {
@@ -989,6 +1015,7 @@ function renderSettings() {
     } });
   toggle.setAttribute("aria-expanded", String(expanded));
   toggle.setAttribute("aria-controls", folded.id);
+  renderLoadNote(settings);
   $("settings").replaceChildren(
     el("thead", {}, el("tr", {}, ...["Setting", printProfile ? "Usual (yours / goal)" : "Usual (goal)", "For this part"].map((textContent) => el("th", { scope: "col", textContent })))),
     el("tbody", {}, ...settings.filter((s) => !unchanged(s)).map(row)),
@@ -1288,6 +1315,7 @@ $("paint-clear").onclick = () => {
 
 function addLoad(load) {
   remember(load.kind === "fixed" ? "where it is held" : "a load");
+  invalidateLoadSettings();
   // One entry per face (or spot) and case: it can be loaded differently in each case, and "held" is shared.
   const same = (l) => where(l) === where(load) && (l.kind === "fixed" || load.kind === "fixed" || l.case === load.case);
   state.loads = state.loads.filter((l) => !same(l)).concat(load);
@@ -1574,6 +1602,7 @@ function loadEditor(l) {
     el("label", {}, "Lean ", lean), el("label", {}, "Towards ", toward), out,
     el("p", { className: "hint", textContent: "Lean: 0° pushes straight in, 90° slides along the face, 180° pulls out. Towards: 0° is up. Or drag the arrow on the part." }));
   const changed = () => {
+    invalidateLoadSettings();
     viewer.showLoadSymbols(loadSymbols());
     $("loads").querySelector(`#load-${state.loads.indexOf(l)} > span`).textContent = loadText(l);
   };
@@ -1581,7 +1610,7 @@ function loadEditor(l) {
     if (Number(kg.value) > 0) l.kg = Number(kg.value);
     changed();
   };
-  kase.onchange = () => ((l.case = Number(kase.value)), renderLoads());
+  kase.onchange = () => ((l.case = Number(kase.value)), invalidateLoadSettings(), renderLoads());
   dir.onchange = () => {
     angles.hidden = dir.value !== "angle";
     l.direction = dir.value === "angle" ? faceAngle(faceNormal(l), Number(lean.value), Number(toward.value)) : dir.value;
@@ -1627,6 +1656,7 @@ $("viewer").addEventListener("pointerdown", (e) => {
 }, { capture: true });
 addEventListener("pointermove", (e) => {
   if (!drag) return;
+  invalidateLoadSettings();
   state.loads[drag.i].direction = viewer.dragDirection(drag.dir, e.clientX - drag.x, e.clientY - drag.y);
   viewer.showLoadSymbols(loadSymbols());
 });
@@ -1680,6 +1710,7 @@ function renderLoads() {
           title: "Remove",
           onclick: () => {
             remember("removing a load");
+            invalidateLoadSettings();
             state.loads.splice(i, 1);
             state.angleOpen = null;
             renderLoads();
@@ -1784,7 +1815,7 @@ function renderGcodeResult() {
 // The strength grid has about the same number of cubes for every part, so one strength check takes
 // about the same time on a given computer; the others are a steady multiple of it (measured on the
 // samples in the browser: fine grid 2.6–5.4×, warping 1.8–2.9×, shaking 2.5–5.2×, optimiser 3.6–5.1×).
-const RUN_RATIO = { topology: 6, topology_fine: 25, strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3, trials: 8.5, trials_few: 4.3 };
+const RUN_RATIO = { topology: 6, topology_fine: 25, strength: 1, fine: 3.5, warping: 2.4, dynamics: 3.5, optimise: 4.5, optimise_quick: 3, optimise_load: 1.5, trials: 8.5, trials_few: 4.3 };
 const ASK_ABOVE_S = 30;
 let strengthSeconds = Number(store.get("fdm-strength-s")) || 8; // this computer, once measured
 
@@ -1832,6 +1863,78 @@ function askLong(what, kind, choices = null) {
   });
 }
 
+/** The loads, orientation or setup changed: the settings worked out for the old ones no longer apply. */
+function invalidateLoadSettings() {
+  if (!state.loadSettings) return;
+  state.loadSettings = null;
+  if (state.check) renderSettings();
+}
+
+/** The lightest walls / layers / infill that hold the loads in this orientation (T-429), so the
+ * settings follow a strength run without a click. Runs before the strength check, which then
+ * checks exactly the settings shown. */
+async function suggestLoadSettings() {
+  const recommended = Object.fromEntries(state.check.settings.map((s) => [s.key, s.value]));
+  const num = (k, d) => (recommended[k] == null ? d : parseFloat(recommended[k]));
+  const baseline = { walls: num("wall_loops", 2), infill: num("sparse_infill_density", 15) / 100, top: num("top_shell_layers", 4), bottom: num("bottom_shell_layers", 3) };
+  const args = { up: activeOption().up, loads: structuredClone(state.loads), profile: profile(), zones: false, this_orientation: true, baseline };
+  const o = await busy(`Finding the cheapest settings that hold your load (about ${fmtSeconds(estimate("optimise_load"))})…`,
+    () => timed("optimise_load", () => call("optimise_strength", args)), ["settings"]);
+  const forces = args.loads.filter((l) => l.kind === "force");
+  const keys = Object.values(SHELL_KEYS);
+  const values = Object.fromEntries(Object.entries(o.settings ?? {}).filter(([k]) => keys.includes(k)));
+  const lighter = Object.entries(values).every(([k, v]) => recommended[k] == null || parseFloat(v) <= parseFloat(recommended[k]));
+  // Lighter is always taken. More plastic only by itself on the goal Strong; otherwise one click,
+  // because turning the part ("How can I make it stronger?") may do it for less.
+  state.loadSettings = { values, met: o.met, lighter, use: o.met && (lighter || args.profile.goal === "strength"),
+    safety: o.safety_factor, target: o.target, grams: o.grams, minutes: o.minutes, baseline: o.baseline,
+    loadText: forces.length === 1 ? `For your ${forces[0].kg} kg load` : "For your loads" };
+  renderSettings();
+  renderVerdict(); // weight and time follow the new walls and infill
+}
+
+/** "about 2 g and 3 min less" than the goal's settings: what the load's settings cost or save. */
+function loadCost(ls) {
+  if (!ls.baseline) return "";
+  const g = Math.round(ls.grams - ls.baseline.grams), m = Math.round(ls.minutes - ls.baseline.minutes);
+  if (!g && !m) return "about the same plastic and time as your goal's settings";
+  const part = (n, unit) => `${Math.abs(n)} ${unit}`;
+  if (g <= 0 && m <= 0) return `about ${part(g, "g")} and ${part(m, "min")} less than your goal's settings`;
+  if (g >= 0 && m >= 0) return `about ${part(g, "g")} and ${part(m, "min")} more than your goal's settings`;
+  return `${g > 0 ? "+" : "−"}${part(g, "g")}, ${m > 0 ? "+" : "−"}${part(m, "min")} against your goal's settings`;
+}
+
+/** One line above the settings: where the load-driven values come from, what they cost, the way back. */
+function renderLoadNote(settings) {
+  const ls = state.loadSettings;
+  const note = $("load-settings-note");
+  note.hidden = !ls;
+  if (!ls) return note.replaceChildren();
+  if (!ls.met) return note.replaceChildren(`${ls.loadText}: walls and infill alone can't make it strong enough (best ${formatSafety(ls.safety)}, needs ${formatSafety(ls.target)}). See “How can I make it stronger?” in Strength analysis.`);
+  const v = ls.values;
+  // Top / bottom layers are only named when they go up: fewer are never used (the top must close).
+  const top = state.check.settings.find((s) => s.key === "top_shell_layers")?.value;
+  const set = `${v.wall_loops} walls and ${parseFloat(v.sparse_infill_density)} % infill` +
+    (top != null && parseFloat(v.top_shell_layers) > parseFloat(top) ? ` with ${v.top_shell_layers} top and bottom layers` : "");
+  const cost = loadCost(ls);
+  const toggle = el("button", { type: "button", className: "link", textContent: ls.use ? "Keep the goal default" : "Use the values for your load",
+    onclick: async () => {
+      remember(ls.use ? "the goal's settings" : "the settings for your load");
+      ls.use = !ls.use;
+      renderSettings();
+      renderVerdict();
+      if (state.strength && readyForStrength()) await runStrength(); // the result must match the settings shown
+    } });
+  const used = settings.some((s) => s.fromLoad);
+  if (ls.use && !used) return note.replaceChildren(`${ls.loadText}: the usual walls and infill already hold it.`);
+  if (ls.use) return note.replaceChildren(`${ls.loadText}: ${set} (${cost}) come from the strength check. `, toggle);
+  if (!ls.lighter) {
+    const now = ls.baseline ? `Your goal's settings hold ${formatSafety(ls.baseline.safety_factor)}; it needs ${formatSafety(ls.target)}. ` : "";
+    return note.replaceChildren(`${ls.loadText}: ${now}${set} would do it (${cost}). Turning the part may do it with less plastic: see “How can I make it stronger?”. `, toggle);
+  }
+  note.replaceChildren(`Using your goal's walls and infill. ${set} would hold your load (${cost}). `, toggle);
+}
+
 /** Inputs that must still match before Simple can reuse a strength result. */
 function strengthInputs() {
   return { up: activeOption().up, loads: state.loads, profile: profile(), ...currentShells(), detailed: useGcode(), zones: printZones() };
@@ -1840,6 +1943,7 @@ function strengthInputs() {
 async function runStrength(fine = false) {
   const before = state.strength;
   if (fine && !(await askLong("Finer grid", "fine"))) return;
+  if (!fine && !state.loadSettings && readyForStrength()) await suggestLoadSettings();
   const what = useGcode() ? " with your sliced print (its walls, infill and line directions)" : "";
   const r = await busy(fine ? `Simulating again with a finer grid${what} (about ${fmtSeconds(estimate("fine"))})…` : `Simulating the load${what} (about ${fmtSeconds(estimate("strength"))})…`, async () => {
     const args = strengthInputs();
@@ -3051,9 +3155,10 @@ function showSelectedGhosts(highlight = null) {
 const editSelections = () => (state.versions[state.version].editSelections ??= {});
 const editsForProject = () => ({ ...editSelections(), ...Object.fromEntries(state.edits.map((e) => [e.id, e.selected])) });
 const suggestedForProject = () => Object.fromEntries(state.suggested.map((v) => [suggestedBoxKey(v), v]));
+/** "Tick all" ticks the changes that fix something, never the folded "Other ideas"; "None" unticks every one. */
 function selectEdits(selected) {
-  for (const e of state.edits) editSelections()[e.id] = e.selected = selected;
-  document.querySelectorAll("#edits input[type=checkbox]").forEach((box) => (box.checked = selected));
+  for (const e of state.edits) if (!selected || e.source !== "other") editSelections()[e.id] = e.selected = selected;
+  document.querySelectorAll("#edits input[type=checkbox]").forEach((box, i) => (box.checked = state.edits[i].selected));
   showSelectedGhosts();
 }
 $("edits-all").onclick = () => selectEdits(true);
@@ -3067,11 +3172,22 @@ function suggestDesignIfShown() {
   if (state.designFor !== activeOption().up.join()) suggestDesign().catch(() => {});
 }
 
+/** The line under a design change saying what it is for (features.link_to_findings). */
+const EDIT_FOR = {
+  finding: (e) => `Fixes: ${e.fixes.title}`,
+  request: () => "The size you asked for",
+  strength: () => "For the weak spot the strength check found",
+  other: (e) => e.why_other ?? "",
+};
+
 async function suggestDesign(savedChoices = null) {
   state.designFor = activeOption().up.join();
   return state.designPending = busy("Looking for design improvements…", async () => {
     const keep_clear = state.volumes.filter((v) => v.kind === "keep_clear").map(({ kind, lo, hi }) => ({ kind, lo, hi }));
-    const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear });
+    // The check on screen says which findings the changes fix; for another orientation the engine checks itself.
+    const findings = state.check?.up?.join() === activeOption().up.join()
+      ? state.check.findings.map(({ rule, bbox, title }) => ({ rule, bbox, title })) : null;
+    const r = await call("design", { up: activeOption().up, profile: profile(), params: designParams(), keep_clear, findings });
     for (const [k, range] of Object.entries(r.param_ranges)) Object.assign($(`param-${k}`), { ...range, value: r.params[k] });
     $("edit-params").hidden = !r.edits.length;
     state.features = r.features;
@@ -3080,23 +3196,34 @@ async function suggestDesign(savedChoices = null) {
     const choices = editSelections();
     for (const e of state.edits) choices[e.id] = e.selected;
     if (savedChoices) Object.assign(choices, savedChoices);
-    state.edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
+    // Changes that fix a finding (or that the user asked for) first; ideas no finding asks for after them, folded.
+    const edits = r.edits.map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer),
       selected: choices[e.id] ?? (!e.clash && /^(fit-|gap-|fastener-(?!boss-)|solid-)/.test(e.id)) }));
+    const fixing = edits.filter((e) => e.source !== "other"), ideas = edits.filter((e) => e.source === "other");
+    state.edits = [...fixing, ...ideas];
     $("edit-selection").hidden = !state.edits.length;
+    const item = (e) => {
+      const box = el("input", { type: "checkbox", checked: e.selected });
+      box.onchange = () => {
+        e.selected = box.checked;
+        choices[e.id] = box.checked;
+        showSelectedGhosts();
+      };
+      const why = e.clash ? `${e.clash} ${e.description}` : e.description;
+      // Pointing at a change turns the part to it and lights it up.
+      return el("li", { onmouseenter: () => (showSelectedGhosts(e), viewer.focusEdit(e)), onmouseleave: () => showSelectedGhosts() },
+        el("label", {}, box, el("span", {}, e.title, el("small", { className: "edit-for", textContent: EDIT_FOR[e.source]?.(e) ?? "" }),
+          el("small", { textContent: why }))));
+    };
+    const other = ideas.length
+      ? [el("li", { className: "other-ideas" }, el("details", { open: state.otherIdeasOpen, ontoggle: (ev) => (state.otherIdeasOpen = ev.target.open) },
+          el("summary", { textContent: `Other ideas (${ideas.length})` }),
+          el("p", { className: "hint", textContent: "The check found no problem these fix. They're here if you want them anyway." }),
+          el("ol", { className: "edits" }, ...ideas.map(item))))]
+      : [];
     $("edits").replaceChildren(
-      ...(state.edits.length
-        ? state.edits.map((e) => {
-            const box = el("input", { type: "checkbox", checked: e.selected });
-            box.onchange = () => {
-              e.selected = box.checked;
-              choices[e.id] = box.checked;
-              showSelectedGhosts();
-            };
-            // Pointing at a change turns the part to it and lights it up.
-            return el("li", { onmouseenter: () => (showSelectedGhosts(e), viewer.focusEdit(e)), onmouseleave: () => showSelectedGhosts() },
-              el("label", {}, box, el("span", {}, e.title, el("small", { textContent: e.clash ? `${e.clash} ${e.description}` : e.description }))));
-          })
-        : [el("li", { className: "hint", textContent: "Nothing to change for this orientation and material." })]),
+      ...(fixing.length ? fixing.map(item) : [el("li", { className: "hint", textContent: "Nothing to fix for this orientation and material." })]),
+      ...other,
     );
     showSelectedGhosts();
     setStatus(state.summary);
@@ -3421,7 +3548,7 @@ const redoStack = []; // what Undo took back, for Redo (emptied by any new chang
 
 /** The loads, marks, settings, boxes and model version now, labelled with the change about to happen. */
 const snapshot = (label) => ({ label, version: state.version, loads: structuredClone(state.loads), marks: structuredClone(state.marks),
-  overrides: { ...state.overrides }, excludedSettings: [...state.excludedSettings], zones: structuredClone(state.zones), volumes: structuredClone(state.volumes) });
+  overrides: { ...state.overrides }, loadSettings: structuredClone(state.loadSettings), excludedSettings: [...state.excludedSettings], zones: structuredClone(state.zones), volumes: structuredClone(state.volumes) });
 
 /** Call before a change: Undo (and Ctrl+Z) puts the loads, marks, settings and model version back. */
 function remember(label) {
@@ -3444,7 +3571,7 @@ function renderUndo() {
 async function restoreSnapshot(u) {
   const marksChanged = JSON.stringify(u.marks) !== JSON.stringify(state.marks);
   if (u.version !== state.version) await showVersion(u.version, false);
-  Object.assign(state, { loads: u.loads, marks: u.marks, overrides: u.overrides, excludedSettings: u.excludedSettings ?? [] });
+  Object.assign(state, { loads: u.loads, marks: u.marks, overrides: u.overrides, loadSettings: u.loadSettings ?? null, excludedSettings: u.excludedSettings ?? [] });
   if (state.loads.length) await ensureRegions();
   renderLoads();
   renderMarks();
@@ -3911,6 +4038,7 @@ async function setupChanged(id, recheck = true) {
   if (id === "material") renderTempCurve();
   if (!state.triangles) return;
   const hadStrength = Boolean(state.strength);
+  invalidateLoadSettings();
   await findOrientations();
   if (recheck && hadStrength && readyForStrength()) await runStrength();
 }
@@ -4011,6 +4139,7 @@ async function compute() {
 
 document.querySelectorAll("input[name=goal]").forEach((r) => (r.onchange = () => {
   updateGoalNote();
+  invalidateLoadSettings();
   if (state.triangles) findOrientations();
 }));
 updateModeNote();
@@ -4404,7 +4533,7 @@ for (const pill of document.querySelectorAll(".estimate")) {
 const projectText = () => writeProject({
   name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
   up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
-  excluded_settings: state.excludedSettings,
+  excluded_settings: state.excludedSettings, load_settings: state.loadSettings,
   holes: holesForProject(),
   edit_selections: editsForProject(), suggested_boxes: suggestedForProject(),
 });
@@ -4541,7 +4670,7 @@ async function autosave() {
   if (!state.triangles || !activeOption() || busyCount) return;
   // Cheap fingerprint first: writing out the whole part every minute would be wasted work.
   const sig = JSON.stringify([state.name, state.version, state.triangles.length, activeOption().up, state.loads, faceMarks(),
-    state.zones, state.volumes, state.overrides, state.excludedSettings, profile(), mode(), editsForProject(), suggestedForProject()]);
+    state.zones, state.volumes, state.overrides, state.loadSettings, state.excludedSettings, profile(), mode(), editsForProject(), suggestedForProject()]);
   if (sig === autosaved) return;
   autosaved = sig;
   await autosaveStore("readwrite", (s) => s.put({ text: projectText(), name: state.name, time: Date.now() }, AUTOSAVE_KEY));

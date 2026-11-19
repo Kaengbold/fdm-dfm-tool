@@ -824,12 +824,17 @@ OPT_INFILL = (0.10, 0.15, 0.20, 0.25, 0.35, 0.50, 0.75, 1.0)
 OPT_MAX_STEPS = 16
 
 
-def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None, zones: bool = False) -> dict:
+def optimise_strength(up, loads: list[dict], profile: dict | None = None, target: float | None = None, zones: bool = False,
+                      this_orientation: bool = False, baseline: dict | None = None) -> dict:
     """The least plastic that reaches ``target`` safety (default ×2, ×3 for the strength goal):
     start from a light print and add, one step at a time, whatever buys the most safety per gram
     — walls, top/bottom layers or infill. Tried for this orientation and the strongest one.
     ``zones``: also try stronger zones only around the most stressed places (slicer modifier
-    volumes), the rest of the part light; returned as ``zoned`` with the plastic it saves."""
+    volumes), the rest of the part light; returned as ``zoned`` with the plastic it saves.
+    ``this_orientation``: only this orientation and no "what else" ideas: the app's automatic
+    settings for a load, which must not turn the part and should cost about one strength run.
+    ``baseline`` (walls, infill, top, bottom; e.g. the goal's settings): its safety, grams and
+    minutes come back as ``baseline`` so the app can say what the change costs or saves."""
     from .strength import cases_safety, evaluate_cases, find_zones
 
     s = _require()
@@ -838,8 +843,10 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     target = float(target or max(OPT_TARGET.get(p.goal, 2.0), required_safety(p)))
     up = (np.asarray(up, float) / np.linalg.norm(up)).tolist()
     axes = np.vstack([np.eye(3), -np.eye(3)])
-    strongest = axes[int(np.argmax(cases_safety(cases, axes, p, _shells(p))))]
-    ups = [up] + ([strongest.tolist()] if abs(float(np.dot(strongest, up))) < 0.99 else [])
+    ups = [up]
+    if not this_orientation:
+        strongest = axes[int(np.argmax(cases_safety(cases, axes, p, _shells(p))))]
+        ups += [strongest.tolist()] if abs(float(np.dot(strongest, up))) < 0.99 else []
     plans = []
     for i, u in enumerate(ups):
         with stage(i / len(ups), (i + 1) / len(ups)):
@@ -852,7 +859,14 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     best["alternatives"] = [q for q in plans if q is not best]
     best["target"] = target
     best["explanation"] = _optimise_story(best, target, len(plans) > 1)
-    if not best["met"]:  # settings alone aren't enough: what else would do it
+    if baseline:
+        from .strength import Shells, evaluate_cases
+
+        sh = Shells(walls=int(baseline["walls"]), infill=float(baseline["infill"]), top=int(baseline["top"]), bottom=int(baseline["bottom"]))
+        grams, minutes = _grams_minutes_of(cases[0].model, best["up"], sh, p, s.mesh)
+        best["baseline"] = {"safety_factor": float(evaluate_cases(cases, best["up"], p, sh)["safety_factor"]),
+                            "grams": round(grams, 1), "minutes": round(minutes, 1)}
+    if not best["met"] and not this_orientation:  # settings alone aren't enough: what else would do it
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
@@ -1248,28 +1262,52 @@ def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     return f"{head}: {_format_safety(zoned['safety_factor'])}, but it saves almost nothing here — the load spreads through most of the part."
 
 
+def _grams_minutes_of(model, up, sh, p: Profile, mesh: Mesh) -> tuple[float, float]:
+    """Grams and print minutes of the plastic inside the part with shells ``sh`` (voxel volume scaled
+    to the mesh's true volume)."""
+    from .checks import shell_infill_minutes
+    from .strength import material_split
+
+    scale = abs(mesh.volume()) / (len(model.elems) * model.grid.h**3)
+    shell, infill = (v * scale for v in material_split(model, up, sh, p))
+    return (shell + infill) / 1000 * p.material["density_g_cm3"], shell_infill_minutes(shell, infill, p)
+
+
 def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None = None) -> dict:
-    """Greedy search from a light print: each step takes the change with the most safety per gram.
-    With ``zones`` the zones' own infill and walls are steps too."""
+    """Greedy search from a light print: each step takes the change with the most safety per cost.
+    Cost counts plastic and print time alike (each relative to the light start): walls take longer
+    per gram than infill, so a gram of walls costs more. With ``zones`` the zones' own infill and
+    walls are steps too."""
     from dataclasses import replace
 
-    from .strength import Shells, evaluate_cases, material_volume
+    from .strength import Shells, evaluate_cases
 
     model = cases[0].model
-    to_grams = abs(mesh.volume()) / (len(model.elems) * model.grid.h**3) / 1000 * p.material["density_g_cm3"]
     memo: dict = {}
+    costs: dict = {}
 
     def sf(sh):
         if sh not in memo:
             memo[sh] = evaluate_cases(cases, up, p, sh)["safety_factor"]
         return memo[sh]
 
+    def gm(sh):
+        if sh not in costs:
+            costs[sh] = _grams_minutes_of(model, up, sh, p, mesh)
+        return costs[sh]
+
     def grams(sh):
-        return material_volume(model, up, sh, p) * to_grams
+        return gm(sh)[0]
 
     sh = Shells(walls=OPT_WALLS[0], infill=OPT_INFILL[0], top=OPT_LAYERS[0], bottom=OPT_LAYERS[0], zones=tuple(zones or ()))
     solid = Shells(walls=OPT_WALLS[-1], infill=OPT_INFILL[-1], top=OPT_LAYERS[-1], bottom=OPT_LAYERS[-1],
                    zones=tuple(replace(z, walls=OPT_WALLS[-1], infill=OPT_INFILL[-1]) for z in zones or ()))
+    g0, m0 = (max(v, 1e-6) for v in gm(sh))
+
+    def cost(q):
+        g, m = gm(q)
+        return g / g0 + m / m0
+
     if sf(solid) < target:  # not even a solid print is enough: no need to search
         sh = solid
     steps = []
@@ -1292,7 +1330,7 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
                 moves.append((replace(sh, zones=tuple(replace(q, infill=OPT_INFILL[k + 1]) for q in sh.zones)), f"{OPT_INFILL[k + 1]:.0%} infill in the zones"))
             if z.walls + 1 in OPT_WALLS:
                 moves.append((replace(sh, zones=tuple(replace(q, walls=z.walls + 1) for q in sh.zones)), f"{z.walls + 1} walls in the zones"))
-        gain = [(np.log(sf(m) / sf(sh)) / max(grams(m) - grams(sh), 0.05), m, label) for m, label in moves if np.isfinite(sf(m))]
+        gain = [(np.log(sf(m) / sf(sh)) / max(cost(m) - cost(sh), 1e-3), m, label) for m, label in moves if np.isfinite(sf(m))]
         gain = [g for g in gain if g[0] > 1e-4]
         if not gain:
             break
@@ -1302,7 +1340,7 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
                 "sparse_infill_density": f"{sh.infill:.0%}"}
     if p.goal == "material":  # lightning infill only holds up the top surface, not a load
         settings["sparse_infill_pattern"] = "gyroid"
-    out = {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1),
+    out = {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1), "minutes": round(gm(sh)[1], 1),
            "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": sh.infill, "settings": settings, "steps": steps}
     if sh.zones:
         out["zones"] = [_zone_info(replace(z, walls=max(z.walls, sh.walls), infill=max(z.infill, sh.infill)), mesh, up, p.printer["bed"], _moving(p))
@@ -2233,25 +2271,34 @@ def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", p
             "vertex_temp_c": _wall_temps(fine, source, power_w, u, inside, corners=True).astype(np.float32).tobytes()}
 
 
-def design(up, profile: dict | None = None, params: dict | None = None, keep_clear: list[dict] | None = None) -> dict:
+def design(up, profile: dict | None = None, params: dict | None = None, keep_clear: list[dict] | None = None,
+           findings: list[dict] | None = None) -> dict:
     """Detected features (holes, bosses) and suggested geometry edits for this orientation.
     Each edit has a ``mesh`` (float32 triangles, part coordinates) made of closed ``pieces`` (triangle
-    counts) to add to the part (``op: "add"``) or cut away (``op: "cut"``).
+    counts) to add to the part (``op: "add"``) or cut away (``op: "cut"``), and says what it is for
+    (features.link_to_findings): a finding of the check (``fixes``), the user's request, the strength
+    check, or none ("other": only an idea).
     ``params`` adjusts edit sizes (see features.PARAMS); the values used come back in ``params``.
     ``keep_clear``: boxes (volume_at, kind "keep_clear") that must stay empty: edits adding plastic
-    there come back with ``clash``."""
-    from .features import PARAMS, design_edits, edit_params
+    there come back with ``clash``. ``findings``: the current check's findings for this orientation
+    (``rule``, ``bbox``, ``title``); left out, the check runs here."""
+    from .features import PARAMS, design_edits, edit_params, link_to_findings
     from .regions import find_regions
 
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
+    if findings is None:
+        findings = check(up, profile)["findings"]
+    rotation, _ = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
+    edits = design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
+                         gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
+                         strength_verdict=s.strength_verdict)
+    edits = link_to_findings(edits, findings, _print_frame_map(s.mesh, rotation))
     return {
         "features": _features(),
-        "edits": _keep_clear_clash(design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
-                                                gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
-                                                strength_verdict=s.strength_verdict), up, keep_clear),
+        "edits": _keep_clear_clash(edits, up, keep_clear),
         "params": edit_params(params),
         "param_ranges": {k: {"min": lo, "max": hi} for k, (_, lo, hi) in PARAMS.items()},
     }
@@ -2544,10 +2591,15 @@ def _drop_rejected(findings: list[dict], mesh: Mesh, r: np.ndarray) -> list[dict
 
 def _to_print_frame(mesh: Mesh, r: np.ndarray, point) -> list[float]:
     """Part-frame point -> coordinates of the oriented part shown on the bed (print rotation ``r``)."""
+    return _print_frame_map(mesh, r)(np.asarray(point, float)).tolist()
+
+
+def _print_frame_map(mesh: Mesh, r: np.ndarray):
+    """Part-frame points (… × 3) -> the print frame of ``orient(mesh, r)``, where check's findings are."""
     pts = mesh.triangles.reshape(-1, 3) @ r.T
     lo, hi = pts.min(axis=0), pts.max(axis=0)
     shift = np.array([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
-    return (r @ np.asarray(point) + shift).tolist()
+    return lambda p: np.asarray(p) @ r.T + shift
 
 
 # Support is printed sparse (~15 %) with denser interface layers under the part: about a quarter of

@@ -407,8 +407,15 @@ def element_scale(model: Model, up, shells: Shells, profile: Profile) -> np.ndar
 
 def material_volume(model: Model, up, shells: Shells, profile: Profile) -> float:
     """Plastic in the part (mm³) with these shells: what more walls or infill cost."""
+    return sum(material_split(model, up, shells, profile))
+
+
+def material_split(model: Model, up, shells: Shells, profile: Profile) -> tuple[float, float]:
+    """Plastic (mm³) in the solid shell (walls, top / bottom layers) and in the infill: they print at
+    different speeds, so the print time of a change depends on where the plastic goes."""
     solid, infill = _zoned(model, up, shells, profile)
-    return float(((solid + (1 - solid) * infill) * _fill(model)).sum() * model.grid.h**3)
+    fill, v = _fill(model), model.grid.h**3
+    return float((solid * fill).sum() * v), float(((1 - solid) * infill * fill).sum() * v)
 
 
 def _fill(model: Model) -> np.ndarray | float:

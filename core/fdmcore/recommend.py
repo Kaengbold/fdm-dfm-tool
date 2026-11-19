@@ -253,7 +253,7 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
             f"Gives small layers time to cool: {part_fact(findings, 'small_layers_cooling', 'tall_thin_feature')}")
     # The first layer is squashed onto the bed and bulges out; pulling it in a little keeps bottom
     # edges straight. Most printer profiles ship 0.1-0.2 mm; harmless when the profile already has it.
-    put("elefant_foot_compensation", 0.15, "Elephant foot compensation",
+    put("elefant_foot_compensation", T["first_layer"]["elephant_foot_compensation_mm"], "Elephant foot compensation",
         "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
         else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight")
     if stats.get("top_flat_mm2", 0) >= T["ironing"]["min_top_area_mm2"] and goal in ("balanced", "strength"):
