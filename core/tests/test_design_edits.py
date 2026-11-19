@@ -115,12 +115,8 @@ def _edit_volumes(edit: dict) -> tuple[float, float]:
 
 
 def _may_change_outer_size(edit: dict) -> bool:
-    """Whether an edit explicitly declares that it may grow the part's outer bounding box.
-
-    No edit carries such a field on main yet (T-436); checking known candidate names keeps this
-    aligned once T-436 lands while still catching silent growth on undeclared edits.
-    """
-    return bool(edit.get("grows_outer") or edit.get("outer_growth") or edit.get("changes_outer_size"))
+    """Whether an edit says it grows the part's outer size (``grows_mm``, added by T-436)."""
+    return any(edit.get("grows_mm") or [])
 
 
 def _assert_watertight_and_pieces(result: Mesh, base_pieces: int, label: str) -> dict:
@@ -276,7 +272,7 @@ def test_part_edits_alone_and_together(path: Path):
 )
 @pytest.mark.xfail(
     strict=True,
-    reason="Engine bug: checks.py flags elephant_foot on any first-layer interior hole without checking whether the bottom edge is already chamfered",
+    reason="T-487: elephant_foot is flagged for any first-layer hole, chamfered or not",
 )
 def test_foot_chamfer_reduces_elephant_foot(part_name: str):
     """Applying foot-chamfer should clear the elephant_foot finding it claims to fix."""
@@ -388,7 +384,7 @@ def test_single_edit_reduces_its_finding(part_name: str, up: tuple[float, float,
             id="feature_test-teardrop-61",
             marks=pytest.mark.xfail(
                 strict=True,
-                reason="Engine bug: teardrop-61 sharp apex at z=23.6 mm introduces a new 0.05 mm gap_fuses ('Can fail') finding",
+                reason="T-488: teardrop-61's apex lands just above a slice and makes a new 0.05 mm gap_fuses finding",
             ),
         ),
     ],
