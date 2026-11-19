@@ -5,16 +5,34 @@ import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodi
 
 const ENGINE = new URL("../core/fdmcore/", import.meta.url);
 
+async function fetchEngineFiles() {
+  // Always revalidate the manifest so a deploy's new hashes are seen right away;
+  // offline, sw.js serves the last manifest it saw via networkFirst.
+  const manifestRes = await fetch(new URL("manifest.json", ENGINE), { cache: "no-cache" });
+  if (!manifestRes.ok) throw new Error("Could not load engine manifest");
+  const manifest = await manifestRes.json();
+  const entries = Array.isArray(manifest) ? manifest.map((name) => [name, null]) : Object.entries(manifest);
+  return Promise.all(entries.map(async ([name, hash]) => {
+    // Each URL carries its content hash, so unchanged files can come straight from cache.
+    const url = hash ? new URL(`${name}?v=${hash}`, ENGINE) : new URL(name, ENGINE);
+    const res = await fetch(url, { cache: hash ? "force-cache" : "no-cache" });
+    if (!res.ok) throw new Error(`Could not load engine file ${name}`);
+    return [name, await res.text()];
+  }));
+}
+
 async function boot() {
   const py = await loadPyodide();
-  await py.loadPackage(["numpy", "shapely", "pyyaml"]);
-  const files = await (await fetch(new URL(`manifest.json?v=${Date.now()}`, ENGINE))).json();
-  for (const name of files) {
-    const res = await fetch(new URL(`${name}?v=${Date.now()}`, ENGINE));
-    if (!res.ok) throw new Error(`Could not load engine file ${name}`);
+  // Overlap engine file fetches with Pyodide package loading; starting after loadPyodide also
+  // gives sw.js time to claim this worker on a first visit so files land in the offline cache.
+  const [, files] = await Promise.all([
+    py.loadPackage(["numpy", "shapely", "pyyaml"]),
+    fetchEngineFiles(),
+  ]);
+  for (const [name, text] of files) {
     const path = `/home/pyodide/fdmcore/${name}`;
     py.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
-    py.FS.writeFile(path, await res.text());
+    py.FS.writeFile(path, text);
   }
   py.runPython("import sys; sys.path.insert(0, '/home/pyodide')");
   py.pyimport("fdmcore.progress").set_sink(progress);
@@ -39,7 +57,7 @@ ready.then(
 );
 
 // Methods that need scipy; it is a big download, so it's fetched on first use.
-const NEEDS_SCIPY = new Set(["clearance", "regions", "set_gap", "snap_model", "stronger_orientation", "strength", "strength_variant", "strength_options", "optimise_strength", "design", "tag_feature", "warping", "dynamics", "box_heat", "topology"]);
+const NEEDS_SCIPY = new Set(["clearance", "regions", "set_gap", "set_fastener", "fastener_suggestions", "snap_model", "stronger_orientation", "strength", "strength_variant", "strength_options", "optimise_strength", "design", "tag_feature", "warping", "dynamics", "box_heat", "topology"]);
 // Loads and marked faces need face regions (scipy) too.
 const marksFaces = (args) => args?.faces && Object.values(args.faces).some((ids) => ids?.length);
 const needsScipy = (method, args) =>

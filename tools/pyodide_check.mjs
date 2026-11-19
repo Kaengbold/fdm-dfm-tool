@@ -14,7 +14,8 @@ const arg = process.argv[2] || fs.readdirSync(`${root}/web/samples`).filter((f) 
 const files = arg.split(",").map((s) => (/\.(stl|3mf)$/i.test(s) ? s : `${root}/web/samples/${s}.stl`));
 const py = await loadPyodide();
 await py.loadPackage(["numpy", "shapely", "pyyaml", "scipy"]);
-for (const name of JSON.parse(fs.readFileSync(`${root}/core/fdmcore/manifest.json`, "utf8"))) {
+const manifest = JSON.parse(fs.readFileSync(`${root}/core/fdmcore/manifest.json`, "utf8"));
+for (const name of Array.isArray(manifest) ? manifest : Object.keys(manifest)) {
   const file = `/home/pyodide/fdmcore/${name}`;
   py.FS.mkdirTree(file.slice(0, file.lastIndexOf("/")));
   py.FS.writeFile(file, fs.readFileSync(`${root}/core/fdmcore/${name}`, "utf8"));
