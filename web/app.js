@@ -322,6 +322,11 @@ async function openProject(bytes) {
   } catch (err) {
     return setStatus(err.message, true);
   }
+  return applyProject(p);
+}
+
+/** Load a parsed project (from a project file or binary autosave): the part, then what was set on it. */
+async function applyProject(p) {
   const pr = p.profile ?? {};
   for (const key of ["printer", "material", "nozzle"]) {
     if (pr[key] && [...$(key).options].some((o) => o.value === pr[key])) $(key).value = pr[key];
@@ -402,7 +407,8 @@ function showBodyPicker(bodies, active, pick) {
 
 /** ``step``: the STEP file this part came from (and the edits applied so far), or null. ``as``: "new"
  * starts the version list over; otherwise the model is the current version (see versions).
- * ``keep.up``: the build direction to stay on (another version of the same part). */
+ * ``keep.up``: the build direction to stay on (another version of the same part).
+ * ``keep.derived``: ``{base, editSteps, name}`` when this version can be rebuilt from a base model + edits. */
 async function loadFile(name, bytes, faceIds = null, step = null, as = "new", keep = { body: 0, scale: 1 }) {
   await busy("Reading the part…", async () => {
     await engineReady;
@@ -414,6 +420,14 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
       document.querySelector('input[name=mode][value=print]').checked = true;
       updateModeNote();
     }
+    if (as !== "new" && state.versions.length) {
+      bytes = shareVersionBytes(bytes);
+      faceIds = shareVersionFaceIds(faceIds);
+      if (step?.bytes) {
+        const shared = shareVersionStepBytes(step.bytes);
+        if (shared !== step.bytes) step = { ...step, bytes: shared };
+      }
+    }
     state.step = step;
     $("dl-step").hidden = !step?.edits.length;
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
@@ -422,21 +436,32 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
       state.turnOffered = false; // a new part: offer a stronger orientation again (T-368)
       state.versions = [{ label: "Original" }];
       state.version = 0;
+      state.droppedNotice = "";
       undoStack.length = 0;
       redoStack.length = 0;
       renderUndo();
     }
-    Object.assign(state.versions[state.version], { source: state.source, step });
-    trimVersions();
+    const v = state.versions[state.version];
+    if (keep.derived) {
+      // Derived design-edit version: keep the tiny edit steps on top of the base model instead of
+      // another full copy of the mesh bytes (state.source still holds the active version's bytes).
+      Object.assign(v, { source: null, name: keep.derived.name, base: keep.derived.base, editSteps: keep.derived.editSteps, step });
+    } else {
+      Object.assign(v, { source: state.source, name, base: null, editSteps: null, step });
+    }
+    const dropped = trimVersions();
     renderVersions();
     if (info.bodies.length) {
       showBodyPicker(info.bodies, info.body, (i) => busy("Switching part…", async () => {
         const next = await call("select_body", { index: i });
         state.source.body = i;
+        const cur = state.versions[state.version];
+        if (cur?.base) Object.assign(cur, { source: state.source, base: null, editSteps: null });
         await partLoaded(next);
       }));
     }
     await partLoaded(info);
+    if (dropped.length) setStatus(`${state.summary} — ${state.droppedNotice}`);
   });
 }
 
@@ -517,6 +542,8 @@ function showUnitHint(hint) {
       const next = await call("scale", { factor: o.factor });
       state.source.scale *= o.factor;
       state.step = null; // the CAD file keeps its own units: edits would no longer line up
+      const cur = state.versions[state.version];
+      if (cur?.base) Object.assign(cur, { source: state.source, base: null, editSteps: null });
       $("dl-step").hidden = true;
       await partLoaded(next);
     });
@@ -3574,17 +3601,25 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     const soup = await applyDesignEdits(state.triangles, chosen);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
+    const prev = state.versions[state.version];
+    const base = prev?.base ?? (prev?.source ? { ...prev.source } : null);
+    const editSteps = base ? [...(prev?.editSteps ?? []), chosen.map(compactEdit)] : null;
+    const stl = stlBytes(soup);
+    const editBytes = editSteps ? editSteps.reduce((n, s) => n + s.reduce((m, e) => m + (e.mesh?.byteLength ?? 0), 0), 0) : Infinity;
+    const derived = base && editBytes < stl.byteLength ? { base, editSteps, name } : null;
     remember("design changes");
     const carry = carryLoads();
+    const droppedBefore = state.dropCount ?? 0;
     addVersion(chosen[0].title.replace(/ \(.*\)$/, "") + (chosen.length > 1 ? ` + ${chosen.length - 1} more` : ""));
     // The edits are made in the model's own frame, so the same build direction still applies (T-353).
-    await loadFile(name, stlBytes(soup), null, step, "version", { body: 0, scale: 1, up: activeOption()?.up });
+    await loadFile(name, stl, null, step, "version", { body: 0, scale: 1, up: activeOption()?.up, derived });
     const lost = await restoreLoads(carry);
     const afterSize = state.size_mm;
     const sizeChanged = beforeSize && afterSize && afterSize.some((v, i) => Math.abs(v - beforeSize[i]) > 0.05);
     const fmtSize = (s) => s.map((v) => Number(v.toFixed(1))).join(" × ");
     const sizeNote = sizeChanged ? ` Outer size changed (now ${fmtSize(afterSize)} mm, was ${fmtSize(beforeSize)}).` : "";
-    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back).${sizeNote} Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost && ` ${lost}`}`);
+    const dropped = (state.dropCount ?? 0) > droppedBefore ? state.droppedNotice : "";
+    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back).${sizeNote} Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost ? ` ${lost}` : ""}${dropped ? ` ${dropped}` : ""}`);
   });
 }
 
@@ -3655,26 +3690,156 @@ addEventListener("keydown", (e) => {
   else if (key === "y" || (key === "z" && e.shiftKey)) (e.preventDefault(), redo());
 });
 
+/** True when two byte views hold identical bytes (fast-path rejects differing lengths or samples in O(1)). */
+function bytesEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b || a.byteLength !== b.byteLength) return false;
+  const n = a.byteLength;
+  if (n && (a[0] !== b[0] || a[n >> 1] !== b[n >> 1] || a[n - 1] !== b[n - 1])) return false;
+  const aligned = a.byteOffset % 4 === 0 && b.byteOffset % 4 === 0;
+  const words = aligned ? n >> 2 : 0;
+  if (words) {
+    const ua = new Uint32Array(a.buffer, a.byteOffset, words);
+    const ub = new Uint32Array(b.buffer, b.byteOffset, words);
+    for (let i = 0; i < words; i++) if (ua[i] !== ub[i]) return false;
+  }
+  for (let i = words << 2; i < n; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** Reuse an existing identical byte buffer from any version or state.source instead of keeping a copy. */
+function shareVersionBytes(bytes) {
+  if (!bytes) return bytes;
+  const candidates = [state.source?.bytes];
+  for (const v of state.versions) {
+    if (v?.source?.bytes) candidates.push(v.source.bytes);
+    if (v?.base?.bytes) candidates.push(v.base.bytes);
+  }
+  for (const existing of candidates) {
+    if (existing && bytesEqual(existing, bytes)) return existing;
+  }
+  return bytes;
+}
+
+function shareVersionFaceIds(faceIds) {
+  if (!faceIds) return faceIds;
+  const asBytes = (f) => (ArrayBuffer.isView(f) ? new Uint8Array(f.buffer, f.byteOffset, f.byteLength) : null);
+  const b = asBytes(faceIds);
+  const candidates = [state.source?.faceIds, ...state.versions.flatMap((v) => [v?.source?.faceIds, v?.base?.faceIds])];
+  for (const existing of candidates) {
+    if (!existing) continue;
+    if (existing === faceIds) return existing;
+    const eb = asBytes(existing);
+    if (b && eb && bytesEqual(eb, b)) return existing;
+    if (!b && !eb && existing.length === faceIds.length && existing.every((x, i) => x === faceIds[i])) return existing;
+  }
+  return faceIds;
+}
+
+function shareVersionStepBytes(bytes) {
+  if (!bytes) return bytes;
+  const candidates = [state.step?.bytes, ...state.versions.map((v) => v?.step?.bytes)];
+  for (const existing of candidates) {
+    if (existing && bytesEqual(existing, bytes)) return existing;
+  }
+  return bytes;
+}
+
+/** Minimal fields needed to replay a design edit onto a base mesh later. */
+const compactEdit = (e) => ({
+  title: e.title, op: e.op, mesh: e.mesh, pieces: e.pieces,
+  ...(e.piece_ops ? { piece_ops: e.piece_ops } : {}),
+});
+
+/** Read triangle vertices from a binary STL (Float32Array, 9 floats/tri), or null if ASCII / other format. */
+function binaryStlTriangles(bytes) {
+  if (!bytes || bytes.byteLength < 84) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const count = view.getUint32(80, true);
+  if (84 + count * 50 !== bytes.byteLength) return null;
+  const soup = new Float32Array(count * 9);
+  for (let f = 0; f < count; f++) {
+    const off = 84 + f * 50 + 12;
+    for (let k = 0; k < 9; k++) soup[f * 9 + k] = view.getFloat32(off + k * 4, true);
+  }
+  return soup;
+}
+
+/** Rebuild a derived version's STL bytes by replaying its edit steps onto its base model. */
+async function rebuildVersionBytes(v) {
+  const { base, editSteps } = v;
+  let soup = base.body === 0 && base.scale === 1 && /\.stl$/i.test(base.name)
+    ? binaryStlTriangles(base.bytes) : null;
+  if (!soup) {
+    let info = await call("load", { name: base.name, face_ids: base.faceIds ? Array.from(base.faceIds) : undefined }, base.bytes);
+    if (base.body) info = await call("select_body", { index: base.body });
+    if (base.scale !== 1) info = await call("scale", { factor: base.scale });
+    soup = new Float32Array(info.triangles.slice().buffer);
+  }
+  for (const stepEdits of editSteps) soup = await applyDesignEdits(soup, stepEdits);
+  return stlBytes(soup);
+}
+
 /** A new version (the model about to be loaded) after the current ones. */
 function addVersion(label) {
   state.versions.push({ label, results: {} });
   state.version = state.versions.length - 1;
 }
 
-// Each version keeps its whole model to switch back to; a long session of design changes on a big
-// part would fill the tab's memory. Past this, the oldest in-between versions let go of their model
-// (their results stay in the table). The original and the shown version are always kept.
+// Cap versions by total distinct byte size (shared buffers are counted once): a long session of
+// big models would fill the tab's memory. Past this, the oldest in-between versions that own extra
+// memory let go of their model (their results stay in the table). Original and the shown version stay.
 const MAX_VERSIONS_MB = 300;
 
-function trimVersions() {
-  const size = (v) => v.source?.bytes?.byteLength ?? 0;
-  let total = state.versions.reduce((n, v) => n + size(v), 0);
-  for (let i = 1; i < state.versions.length && total > MAX_VERSIONS_MB * 2 ** 20; i++) {
-    const v = state.versions[i];
-    if (i === state.version || !v.source) continue;
-    total -= size(v);
-    Object.assign(v, { source: null, step: null, dropped: true });
+function collectVersionBuffers(v, out) {
+  if (!v || v.dropped) return;
+  const add = (view) => { if (view?.buffer) out.add(view.buffer); };
+  add(v.source?.bytes);
+  add(v.source?.faceIds);
+  add(v.base?.bytes);
+  add(v.base?.faceIds);
+  add(v.step?.bytes);
+  if (v.editSteps) {
+    for (const step of v.editSteps) for (const e of step) add(e.mesh);
   }
+}
+
+function distinctVersionBytes(versions = state.versions) {
+  const seen = new Set();
+  for (const v of versions) collectVersionBuffers(v, seen);
+  let total = 0;
+  for (const buf of seen) total += buf.byteLength;
+  return total;
+}
+
+function trimVersions() {
+  const limit = (state.maxVersionsMB ?? MAX_VERSIONS_MB) * 2 ** 20;
+  const dropped = [];
+  if (distinctVersionBytes() <= limit) return dropped;
+  const protectedBufs = new Set();
+  collectVersionBuffers(state.versions[0], protectedBufs);
+  collectVersionBuffers(state.versions[state.version], protectedBufs);
+  if (state.source?.bytes?.buffer) protectedBufs.add(state.source.bytes.buffer);
+  if (state.source?.faceIds?.buffer) protectedBufs.add(state.source.faceIds.buffer);
+  for (let i = 1; i < state.versions.length && distinctVersionBytes() > limit; i++) {
+    const v = state.versions[i];
+    if (i === state.version || v.dropped || (!v.source && !v.base)) continue;
+    const bufs = new Set();
+    collectVersionBuffers(v, bufs);
+    // Don't drop a version that only shares bytes with Original or the active model (frees nothing).
+    let ownsExtra = false;
+    for (const buf of bufs) if (!protectedBufs.has(buf)) { ownsExtra = true; break; }
+    if (!ownsExtra) continue;
+    Object.assign(v, { source: null, base: null, editSteps: null, step: null, dropped: true });
+    dropped.push(versionName(v, i));
+  }
+  if (dropped.length) {
+    state.dropCount = (state.dropCount ?? 0) + dropped.length;
+    state.droppedNotice = dropped.length === 1
+      ? `Cleared older version "${dropped[0]}" to save memory (its results stay in the table).`
+      : `Cleared ${dropped.length} older versions to save memory (their results stay in the table).`;
+  }
+  return dropped;
 }
 
 /** Results of the shown version, for the comparison table. */
@@ -3701,8 +3866,18 @@ function renderVersions() {
       v.results?.safety != null
         ? el("td", { className: "safety-band", textContent: strengthBand(v.results.safety, v.results.safetyNeed).label, title: `Safety ${formatSafety(v.results.safety)}` })
         : el("td", { textContent: "–" }),
-      el("td", {}, i === state.version ? "shown" : el("button", { className: "small", textContent: "Show", onclick: () => showVersion(i) })))),
+      el("td", {}, i === state.version ? "shown"
+        : v.dropped ? el("span", { className: "hint", textContent: "results only" })
+        : el("button", { className: "small", textContent: "Show", onclick: () => showVersion(i) })))),
   );
+  let note = $("versions-note");
+  if (!note) {
+    note = el("p", { id: "versions-note", className: "hint", role: "status", hidden: true });
+    $("versions").after(note);
+  }
+  const hasDropped = list.some((v) => v.dropped);
+  note.hidden = !hasDropped;
+  note.textContent = hasDropped ? (state.droppedNotice || "Older versions were cleared to save memory (their results stay in the table).") : "";
 }
 $("version").onchange = () => showVersion(Number($("version").value));
 $("compare-file").onchange = async (e) => {
@@ -3710,10 +3885,12 @@ $("compare-file").onchange = async (e) => {
   e.target.value = "";
   if (!file) return;
   const carry = carryLoads(); // another version of the same part: what was set on it stays
+  const droppedBefore = state.dropCount ?? 0;
   await openFile(file.name, new Uint8Array(await file.arrayBuffer()), "version");
   if (state.triangles && !/\.(json|html?)$/i.test(file.name)) { // a project brings its own
     const lost = await restoreLoads(carry);
-    if (lost) setStatus(`${state.summary} — ${lost}`);
+    const dropped = (state.dropCount ?? 0) > droppedBefore ? state.droppedNotice : "";
+    if (lost || dropped) setStatus(`${state.summary} — ${[lost, dropped].filter(Boolean).join(" ")}`);
   }
 };
 
@@ -3770,14 +3947,32 @@ async function restoreLoads(carry) {
  * which restores its own). */
 async function showVersion(i, carry = true) {
   const v = state.versions[i];
-  if (v?.dropped) setStatus(`${versionName(v, i)} was let go to save memory: its results stay in the table, but it can't be shown again.`);
-  if (!v?.source || i === state.version) return renderVersions();
+  if (v?.dropped) setStatus(`${versionName(v, i)} was cleared to save memory: its results stay in the table, but it can't be shown again.`);
+  if ((!v?.source && !v?.base) || i === state.version) return renderVersions();
   const loads = carry ? carryLoads() : null;
-  state.version = i;
-  const { name, bytes, faceIds, body, scale } = v.source;
-  await loadFile(name, bytes, faceIds, v.step, "version", { body, scale, up: activeOption()?.up });
-  const lost = loads ? await restoreLoads(loads) : "";
-  setStatus(`${state.summary} — showing ${versionName(v, i)}.${lost && ` ${lost}`}`);
+  const prevVersion = state.version;
+  const keepUp = activeOption()?.up;
+  try {
+    await busy(`Showing ${versionName(v, i)}…`, async () => {
+      state.version = i;
+      if (v.source) {
+        const { name, bytes, faceIds, body, scale } = v.source;
+        await loadFile(name, bytes, faceIds, v.step, "version", { body, scale, up: keepUp });
+      } else {
+        const bytes = await rebuildVersionBytes(v);
+        await loadFile(v.name, bytes, null, v.step, "version", {
+          body: 0, scale: 1, up: keepUp,
+          derived: { base: v.base, editSteps: v.editSteps, name: v.name },
+        });
+      }
+      const lost = loads ? await restoreLoads(loads) : "";
+      setStatus(`${state.summary} — showing ${versionName(v, i)}.${lost && ` ${lost}`}`);
+    });
+  } catch (err) {
+    state.version = prevVersion;
+    renderVersions();
+    throw err;
+  }
 }
 $("apply-edits").onclick = () => applyEdits();
 
@@ -4576,13 +4771,29 @@ for (const pill of document.querySelectorAll(".estimate")) {
   };
 }
 
-/** The open part and what was set on it, as a project file (web/project.js). */
-const projectText = () => writeProject({
-  name: state.name, stl: stlBytes(state.triangles), faceIds: state.faceRegions, profile: profile(), mode: mode(),
-  up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes, settings: state.overrides,
-  excluded_settings: state.excludedSettings, load_settings: state.loadSettings,
+/** What the user set on the current part (without the mesh bytes), for project files and autosave. */
+const projectFields = () => ({
+  profile: profile(), mode: mode(),
+  up: activeOption().up, loads: state.loads, faces: faceMarks(), zones: state.zones, volumes: state.volumes,
+  settings: state.overrides, excluded_settings: state.excludedSettings, load_settings: state.loadSettings,
   holes: holesForProject(),
   edit_selections: editsForProject(), suggested_boxes: suggestedForProject(),
+});
+
+/** Binary STL bytes for the currently loaded part (reuses state.source.bytes when it already matches). */
+function currentStlBytes() {
+  const src = state.source;
+  if (src?.bytes && src.body === 0 && src.scale === 1 && /\.stl$/i.test(src.name)
+    && state.triangles && src.bytes.byteLength === 84 + (state.triangles.length / 9) * 50) {
+    const count = new DataView(src.bytes.buffer, src.bytes.byteOffset, src.bytes.byteLength).getUint32(80, true);
+    if (count === state.triangles.length / 9) return src.bytes;
+  }
+  return stlBytes(state.triangles);
+}
+
+/** The open part and what was set on it, as a project file (web/project.js). */
+const projectText = () => writeProject({
+  name: state.name, stl: currentStlBytes(), faceIds: state.faceRegions, ...projectFields(),
 });
 
 $("dl-project").onclick = () => {
@@ -4690,18 +4901,25 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) naviga
 
 // ---------- autosave ----------
 // The open project is kept in this browser so a refresh or a closed tab can carry on ("Continue where
-// you left off?"). IndexedDB, not localStorage: a project with a big part is several MB. Saved when the
-// tab is hidden and every minute, only when something changed. Storage blocked: no autosave, nothing breaks.
+// you left off?"). IndexedDB, not localStorage: a big part is several MB. The mesh is stored once as a
+// binary Blob (only rewritten when the part's bytes actually change) and the settings as a tiny JSON
+// string. Older text-only autosaves still restore. Storage blocked: no autosave, nothing breaks.
 const AUTOSAVE_KEY = "current";
+const AUTOSAVE_PART_KEY = "part";
+
+function openAutosaveDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("fdm-autosave", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("projects");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
 
 async function autosaveStore(mode, op) {
+  let db;
   try {
-    const db = await new Promise((resolve, reject) => {
-      const req = indexedDB.open("fdm-autosave", 1);
-      req.onupgradeneeded = () => req.result.createObjectStore("projects");
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
+    db = await openAutosaveDb();
     return await new Promise((resolve, reject) => {
       const req = op(db.transaction("projects", mode).objectStore("projects"));
       req.onsuccess = () => resolve(req.result);
@@ -4709,18 +4927,91 @@ async function autosaveStore(mode, op) {
     });
   } catch {
     return undefined;
+  } finally {
+    db?.close();
+  }
+}
+
+async function autosaveWrite(op) {
+  let db;
+  try {
+    db = await openAutosaveDb();
+    const tx = db.transaction("projects", "readwrite");
+    op(tx.objectStore("projects"));
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    db?.close();
   }
 }
 
 let autosaved = "";
+// WeakRefs so autosave bookkeeping never pins a previous part's buffers in memory.
+let autosavedPart = null; // { id, trianglesRef, bytesRef, body, scale, faceIdsRef, hasFaceIds }
 async function autosave() {
   if (!state.triangles || !activeOption() || busyCount) return;
-  // Cheap fingerprint first: writing out the whole part every minute would be wasted work.
-  const sig = JSON.stringify([state.name, state.version, state.triangles.length, activeOption().up, state.loads, faceMarks(),
-    state.zones, state.volumes, state.overrides, state.loadSettings, state.excludedSettings, profile(), mode(), editsForProject(), suggestedForProject()]);
-  if (sig === autosaved) return;
-  autosaved = sig;
-  await autosaveStore("readwrite", (s) => s.put({ text: projectText(), name: state.name, time: Date.now() }, AUTOSAVE_KEY));
+  const settings = JSON.stringify(projectFields());
+  const sig = `${state.name}\0${settings}`;
+  const src = state.source;
+  const body = src?.body ?? 0;
+  const scale = src?.scale ?? 1;
+  const faceIds = state.faceRegions ?? null;
+  const sameGeom = Boolean(autosavedPart) && (
+    autosavedPart.trianglesRef?.deref() === state.triangles
+    || (src?.bytes && autosavedPart.bytesRef?.deref() === src.bytes
+      && autosavedPart.body === body && autosavedPart.scale === scale)
+  );
+  const sameFaces = Boolean(autosavedPart) && (
+    (!faceIds && !autosavedPart.hasFaceIds)
+    || (Boolean(faceIds) && autosavedPart.faceIdsRef?.deref() === faceIds)
+  );
+  let needPart = !sameGeom || !sameFaces;
+  if (!needPart && sig === autosaved) return;
+  let partRecord = null;
+  let nextPart = autosavedPart;
+  if (needPart) {
+    const bytes = currentStlBytes();
+    const prevBytes = autosavedPart?.bytesRef?.deref();
+    if (prevBytes && sameFaces && bytesEqual(prevBytes, bytes)) {
+      needPart = false;
+      nextPart = {
+        ...autosavedPart,
+        trianglesRef: new WeakRef(state.triangles),
+        bytesRef: new WeakRef(bytes),
+        body,
+        scale,
+      };
+      autosavedPart = nextPart;
+      if (sig === autosaved) return;
+    } else {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      partRecord = { id, name: state.name, stl: new Blob([bytes], { type: "model/stl" }), faceIds };
+      nextPart = {
+        id,
+        trianglesRef: new WeakRef(state.triangles),
+        bytesRef: new WeakRef(bytes),
+        body,
+        scale,
+        faceIdsRef: faceIds ? new WeakRef(faceIds) : null,
+        hasFaceIds: Boolean(faceIds),
+      };
+    }
+  }
+  const metaRecord = { format: "split", partId: nextPart.id, settings, name: state.name, time: Date.now() };
+  const ok = await autosaveWrite((s) => {
+    if (partRecord) s.put(partRecord, AUTOSAVE_PART_KEY);
+    s.put(metaRecord, AUTOSAVE_KEY);
+  });
+  if (ok) {
+    autosaved = sig;
+    autosavedPart = nextPart;
+  }
 }
 setInterval(autosave, 60_000);
 globalThis.fdm.autosave = autosave; // for the browser test
@@ -4729,12 +5020,33 @@ document.addEventListener("visibilitychange", () => document.visibilityState ===
 /** At start: offer the project from last time, if there is one. */
 async function offerRestore() {
   const saved = await autosaveStore("readonly", (s) => s.get(AUTOSAVE_KEY));
-  if (!saved?.text) return;
+  if (!saved) return;
+  const isSplit = saved.format === "split" && typeof saved.settings === "string";
+  if (!isSplit && !saved.text) return;
+  if (isSplit) {
+    const part = await autosaveStore("readonly", (s) => s.get(AUTOSAVE_PART_KEY));
+    if (!part?.stl || (saved.partId && part.id && part.id !== saved.partId)) return;
+  }
   const when = new Date(saved.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
   const close = () => ($("restore").hidden = true);
+  const restore = async () => {
+    close();
+    if (!isSplit) return openProject(new TextEncoder().encode(saved.text));
+    const part = await autosaveStore("readonly", (s) => s.get(AUTOSAVE_PART_KEY));
+    if (!part?.stl) return setStatus("Could not find the saved part anymore.", true);
+    let fields;
+    try {
+      fields = JSON.parse(saved.settings);
+    } catch {
+      return setStatus("The autosaved settings could not be read.", true);
+    }
+    const stl = part.stl instanceof Blob ? new Uint8Array(await part.stl.arrayBuffer()) : new Uint8Array(part.stl);
+    await applyProject({ ...fields, name: saved.name || part.name || "part", stl, faceIds: part.faceIds ?? null });
+  };
+  const clear = () => (close(), autosaveWrite((s) => { s.delete(AUTOSAVE_KEY); s.delete(AUTOSAVE_PART_KEY); }));
   $("restore").replaceChildren(`Continue where you left off? ${saved.name || "Your part"}, ${when}. `,
-    el("button", { textContent: "Open it", onclick: () => (close(), openProject(new TextEncoder().encode(saved.text))) }),
-    el("button", { className: "link", textContent: "No thanks", onclick: () => (close(), autosaveStore("readwrite", (s) => s.delete(AUTOSAVE_KEY))) }));
+    el("button", { textContent: "Open it", onclick: restore }),
+    el("button", { className: "link", textContent: "No thanks", onclick: clear }));
   $("restore").hidden = false;
 }
 offerRestore();

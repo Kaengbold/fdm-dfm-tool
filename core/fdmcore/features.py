@@ -319,11 +319,19 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
         edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
                                   profile.material["max_overhang_deg"])
         edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
+    part_pts = mesh.triangles.reshape(-1, 3)
+    part_lo, part_hi = part_pts.min(axis=0) - GROW_TOL_MM, part_pts.max(axis=0) + GROW_TOL_MM
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
+        # The wedges are clipped in the print frame; on a tilted part (a round part on a resting side)
+        # one can still poke past the part's own box. A ledge fill never grows the part: drop those.
+        pieces = [q for q in (to_part(p) for p in c["pieces"])
+                  if np.all(q.reshape(-1, 3) >= part_lo) and np.all(q.reshape(-1, 3) <= part_hi)]
+        if not pieces:
+            continue
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
             "Fills the corner under the overhang at 45°, so it prints without support (and without support marks).",
-            [to_part(p) for p in c["pieces"]], op="add", param="ledge_max_mm"))
+            pieces, op="add", param="ledge_max_mm"))
     for i, s in enumerate(sacrificial_layers(oriented, profile)):
         edits.append(_edit(
             f"sacrificial-{i}", "sacrificial_layer", f"Sacrificial layer over the Ø{s['diameter']:.1f} mm hole at {s['z']:.1f} mm",
