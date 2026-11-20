@@ -16,6 +16,7 @@ from .slicer import parts, section
 
 PLANES = 14  # cuts per direction
 MAX_AXES = 4
+ANGLE_BINS = 36  # 5° bins for the axis directions
 ROUND_TOL = 0.06  # max radial deviation / radius for "round" (a 16-gon is ~2%, a teardrop tip ~40%)
 
 
@@ -63,21 +64,19 @@ def _axis_angles(mesh: Mesh) -> list[float]:
         return []
     # Axis is perpendicular to the normal's horizontal part.
     ang = np.mod(np.arctan2(n[slanted, 1], n[slanted, 0]) + np.pi / 2, np.pi)
-    # One bin index for both the histogram and the averaging below: np.histogram's own edge rounding can put
-    # an angle on a bin edge in the neighbouring bin, leaving the picked bin empty (seen on Linux CI).
-    bins = np.minimum((ang * (36 / np.pi)).astype(int), 35)
-    hist = np.bincount(bins, weights=a[slanted], minlength=36)
+    w = a[slanted]
+    # One bin index per face for both the counting and the averaging: np.histogram's own binning
+    # disagrees with re-selecting by its edges for an angle on an edge (np.mod gives exactly π for a
+    # normal a hair off -y), which left a counted bin with no faces and crashed the check (#178).
+    idx = np.minimum((ang * (ANGLE_BINS / np.pi)).astype(np.intp), ANGLE_BINS - 1)
+    hist = np.bincount(idx, weights=w, minlength=ANGLE_BINS)
     picks = []
     for i in np.argsort(-hist):
         if hist[i] <= 0 or hist[i] < 0.1 * hist.max() or len(picks) == MAX_AXES:
             break
-        if all(min(abs(i - j), 36 - abs(i - j)) > 1 for j in picks):
+        if all(min(abs(i - j), ANGLE_BINS - abs(i - j)) > 1 for j in picks):
             picks.append(i)
-    out = []
-    for i in picks:
-        sel = bins == i
-        out.append(float(np.average(ang[sel], weights=a[slanted][sel])))
-    return out
+    return [float(np.average(ang[idx == i], weights=w[idx == i])) for i in picks]
 
 
 def _round_ring(pts: np.ndarray) -> tuple[float, float, float] | None:

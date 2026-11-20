@@ -2293,6 +2293,12 @@ def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", p
             "vertex_temp_c": _wall_temps(fine, source, power_w, u, inside, corners=True).astype(np.float32).tobytes()}
 
 
+# Edits that reshape a designed part: on a sculpt, 45° fills under every bump would change how it looks
+# (its overhangs are what supports are for), and dozens of wedges on a curved surface touch each other
+# edge on edge (T-489).
+CAD_ONLY_EDITS = ("ledge-",)
+
+
 def design(up, profile: dict | None = None, params: dict | None = None, keep_clear: list[dict] | None = None,
            findings: list[dict] | None = None) -> dict:
     """Detected features (holes, bosses), suggested geometry edits and plain-language CAD ``advice`` for this
@@ -2320,6 +2326,8 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     edits = design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
                          gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
                          strength_verdict=s.strength_verdict)
+    if not s.cad_checks:  # an organic shape (T-408), until the user turns the CAD checks back on
+        edits = [e for e in edits if not e["id"].startswith(CAD_ONLY_EDITS)]
     edits = link_to_findings(edits, findings, to_print)
     feats = _features()
     advice = design_advice(s.mesh, edits, findings, p, to_print, from_print, features=feats, up=up)

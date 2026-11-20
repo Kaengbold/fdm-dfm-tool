@@ -8,7 +8,7 @@ import pytest
 
 from fdmcore import api
 from fdmcore.checks import orient, run_checks
-from fdmcore.mesh import load_stl
+from fdmcore.mesh import Mesh, load_stl
 from fdmcore.profile import Profile, load_data
 from fdmcore.slicer import section, slice_mesh
 
@@ -927,3 +927,16 @@ def test_layer_strength_test_print_breaks_in_the_middle():
     x = case.model.grid.centers(case.model.elems)[:, 0]
     middle = (x > d["end_l"] + 2) & (x < length - d["end_l"] - 2)
     assert fi[middle].max() > fi[~middle].max()
+
+
+def test_sideways_axis_on_a_bin_edge_does_not_crash():
+    """A face whose sideways axis comes out at exactly 180° (normal a hair off -y, as on a smooth round
+    part) fell between the angle histogram's last bin and the re-selection of that bin: zero weights,
+    and the whole check crashed (#178 on Linux)."""
+    from fdmcore.holes import _axis_angles
+
+    m = Mesh(np.zeros((2, 3, 3)))
+    m._normals = np.array([[-1e-16, -0.9, 0.4], [-1e-16, -0.9, 0.4]])
+    m._areas = np.array([1.0, 1.0])
+    (angle,) = _axis_angles(m)
+    assert min(angle, np.pi - angle) < 0.1  # along x
