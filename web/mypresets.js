@@ -95,9 +95,12 @@ export function closestPrinter(builtins, { enclosure, side, moving_bed = null })
   return Object.entries(builtins).sort(([, a], [, b]) => cost(a) - cost(b))[0][0];
 }
 
+// Text as {key, params} messages (web/i18n.js formats them): this module stays free of imports so Node can test it.
+const msg = (key, params = {}) => ({ key, params });
+
 /** Printer form values from an OrcaSlicer catalogue entry (core/fdmcore/data/orca_printers.json) and the user's
- * enclosure, on top of the closest built-in printer. ``note`` says which values came from the profile and which
- * are assumed (to check before saving). */
+ * enclosure, on top of the closest built-in printer. ``note`` (a message for t()) says which values came from
+ * the profile and which are assumed (to check before saving). */
 export function fromOrcaPrinter(entry, builtins, enclosure) {
   const side = Math.max(entry.bed[0], entry.bed[1]);
   const based_on = closestPrinter(builtins, { enclosure, side, moving_bed: entry.moving_bed });
@@ -105,31 +108,28 @@ export function fromOrcaPrinter(entry, builtins, enclosure) {
   const [bed_x, bed_y, bed_z] = entry.bed;
   const values = { ...toForm("printers", base), based_on, name: entry.name, bed_x, bed_y, bed_z, enclosure,
     multi_material: "none", hardened_nozzle: false, bed_surface: "unknown" };
-  const from = [`bed ${bed_x} × ${bed_y} × ${bed_z} mm`];
-  const assumed = ["no hardened nozzle", "no multi-material unit", "build plate unknown"];
-  if (entry.moving_bed == null) assumed.push(base.moving_bed ? "the bed moves back and forth" : "the bed stays still");
+  const from = [msg("printer.fact.bed", { x: bed_x, y: bed_y, z: bed_z })];
+  const assumed = [msg("printer.fact.noHardened"), msg("printer.fact.noMultiMaterial"), msg("printer.fact.plateUnknown")];
+  const bedKind = (moves) => msg(moves ? "printer.fact.bedMoves" : "printer.fact.bedStill");
+  if (entry.moving_bed == null) assumed.push(bedKind(base.moving_bed));
   else {
     values.moving_bed = entry.moving_bed;
-    from.push(entry.moving_bed ? "the bed moves back and forth" : "the bed stays still");
+    from.push(bedKind(entry.moving_bed));
   }
   if (entry.speed) {
     values.speed = entry.speed;
-    from.push(`speed class ${entry.speed}`);
-  } else assumed.push(`speed class ${values.speed}`);
-  const note = `From the OrcaSlicer profile: ${from.join(", ")}. Assumed, please check: ${assumed.join(", ")}. `
-    + `Enclosure as you said. Other values start from the ${base.name}.`;
-  return { values, note };
+    from.push(msg("printer.fact.speed", { speed: entry.speed }));
+  } else assumed.push(msg("printer.fact.speed", { speed: values.speed }));
+  return { values, note: msg("printer.noteFromProfile", { from, assumed, base: base.name }) };
 }
 
 /** Printer form values from three answers (enclosure, bed size, direct drive), on top of the closest built-in. */
-export function fromAnswers(builtins, { enclosure, side, directDrive }) {
+export function fromAnswers(builtins, { enclosure, side, directDrive, name }) {
   const based_on = closestPrinter(builtins, { enclosure, side });
   const base = builtins[based_on];
-  const values = { ...toForm("printers", base), based_on, name: "My printer", bed_x: side, bed_y: side, enclosure };
+  const values = { ...toForm("printers", base), based_on, name: name ?? "My printer", bed_x: side, bed_y: side, enclosure };
   if (!directDrive) values.speed = "medium"; // a Bowden tube needs slower printing, more so with flexible filament
-  const note = `Starts from the ${base.name}, the closest printer here, with your bed size and enclosure. `
-    + `Check the height (${values.bed_z} mm) and the rest before saving.`;
-  return { values, note };
+  return { values, note: msg("printer.noteFromAnswers", { base: base.name, height: values.bed_z }) };
 }
 
 export function loadMine() {

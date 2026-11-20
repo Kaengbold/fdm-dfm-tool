@@ -29,7 +29,7 @@ A new feature task names the use case it serves (`serves: 1, 3`; the numbered li
 - [x] **T-023 P2** Threads & fasteners: detect small holes meant for screws, suggest heat-set inserts / nut traps / correct pilot diameters. · owner: Claude (`task/T-026-presets-fasteners`) — holes modelled at M2–M6 nominal size get clearance / pilot / insert sizes (`thresholds.yaml` fasteners). 2026-10-30: nut traps (hex pockets) checked against the nut size, and the wall around heat-set insert holes (`nut_trap_tight`, `insert_wall_thin`). Left: sideways nut slots, hex pockets bigger than 6 mm across corners in non-vertical orientations.
 - [x] **T-024 P2** (done as `bridge_sag`) Horizontal hole droop as an *info* finding even when the bridge is short (link to the teardrop edit). · owner: —
 - [x] **T-025 P3** Seam / cosmetic surface hints, ironing suggestion for flat tops. · owner: Claude — ironing for large flat tops (T-151); scarf seam (`seam_slope_type: external`) when most layers have only round outlines.
-- [~] **T-026 P2** More presets: Creality K1/K2/Ender-3 V3, Elegoo, Anycubic; materials TPU, ASA, PC, PLA+. Cite sources. · files: `data/presets.yaml` · owner: Claude (`task/T-020-knowledge`) — K1 series: CFS through Creality's upgrade kit (multi-material optional); Prusa hardened-nozzle note made neutral (depends on the nozzle fitted). Left: PLA+ layer bond and TPU stiffness are estimates (marked verify).
+- [~] **T-026 P2** More presets: Creality K1/K2/Ender-3 V3, Elegoo, Anycubic; materials TPU, ASA, PC, PLA+. Cite sources. · files: `data/presets.yaml` · owner: Claude (`task/T-020-knowledge`; leftover: `task/T-026-sourced-values`) — K1 series: CFS through Creality's upgrade kit (multi-material optional); Prusa hardened-nozzle note made neutral (depends on the nozzle fitted). Left: PLA+ layer bond and TPU stiffness are estimates (marked verify).
 
 ## Findings model (impact-based) — follow-ups
 
@@ -741,10 +741,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: keep the last ~10 projects (name, date, small picture, verdict), opened from the start screen; "Save project" still writes a file. Limit by size, oldest out first; a clear "Delete all".
   - Done when: two parts worked on in a row can both be reopened.
   - Outcome: "Your recent projects" on the start screen: the last 10 projects (at most 150 MB of parts, oldest out first, the open one always kept) with a small picture, name, date and verdict; the newest 3 shown, older ones folded. Opening one keeps it as the same entry; Remove per project and Delete all (asks first; a deleted open project isn't saved again until another part is loaded). The single autosave slot of older versions moves into the list once. "Continue where you left off?" now opens the newest; "No thanks" only hides it. Browser test: two samples in a row, reload, both reopen, no copies, Delete all empties the list.
-- [ ] **T-454 P3** [J] Prepare for other languages. · files: `web/index.html`, `web/app.js`, `core/fdmcore/data/rules.yaml`, engine texts in `api.py` / `checks.py` · owner: Claude (`task/T-454-message-keys`)
+- [x] **T-454 P3** [J] Prepare for other languages. · files: `web/index.html`, `web/app.js`, `core/fdmcore/data/rules.yaml`, engine texts in `api.py` / `checks.py` · owner: Claude (`task/T-454-message-keys`)
   - Seen: user text is spread over HTML, JS string templates, YAML and Python f-strings. English only for now (PRODUCT.md).
   - Do: don't translate yet. Decide the shape (message keys with parameters; the engine returns key + numbers, the app formats) and move new text to it from now on; write the rule in AGENTS.md. Easiest after T-382 cut the text.
   - Done when: the approach is written down and one pane uses it as the example.
+  - Outcome (Claude, 2026-11-20): message keys with parameters. `web/i18n.js`: `t(key, params)` (one whole sentence per key, `{name}` placeholders, plurals by `count`, numbers / lists / nested messages formatted with Intl for the language, a missing key shows as the key) and `translatePage()` for `data-i18n` attributes; English in `web/messages/en.js`. Code that doesn't show text returns `{key, params}` (the engine too, when its texts are touched). The rule is in AGENTS.md ("User text"). The example pane: "My printer isn't listed" (HTML, status lines, the plural "+ about N more", the profile note built from facts). Tests: formatting, and every key the page uses exists.
 - [x] **T-455 P3** [J] Use cases to design for (write into PRODUCT.md). · files: PRODUCT.md · owner: Claude, built with Gemini Flash (`task/T-455-use-cases`)
   - Add under Users: (1) beginner with a downloaded model: "will this print on my A1?" → verdict, time, grams, one file, no CAD words; (2) functional maker with own CAD: bracket, hook, enclosure that must hold → strength, fits, design advice back to CAD; (3) tinkerer with a tuned profile → a real difference to their profile, numbers, pick and choose; (4) small seller / print farm: the same part many times → failure risk, time and cost, saved projects; (5) teacher or club → a report to share and plain reasons; (6) agent user → easy local install.
   - Done when: PRODUCT.md lists them and each new feature task names which one it serves.
@@ -828,7 +829,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Every value records its source, a confidence level (`published` / `estimated` / `tuned`) and a range.
   - Done when: every constant T-473 and T-474 need has a value, a source and a confidence level.
   - Outcome: `core/fdmcore/data/thermal.yaml` (7 materials, process constants) and research/thermal_constants.md. Gemini drafted; every DOI checked with Crossref and the open papers read: 5 of Gemini's 11 DOIs were fake, those values are `estimated` now. Published: ABS WLF (Seppala 2017: 4.65 / 200.9 at 230 C), PLA c_p (Pyda 2004), Costa 2014 convection bracket and emissivity, density / Tg from datasheets. Estimated, to tune in T-477 / T-482: reptation times, WLF for all but ABS / ASA, fan h by fan %, contact conductances, melt drop by flow. Not yet loaded by any code (T-473).
-- [ ] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: Claude (task/T-471-gcode-reader)
+- [x] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: Claude (task/T-471-gcode-reader)
   - Do: extend `Toolpath` (don't build a second format) with:
     - speed (F) for each line, travel moves, retractions;
     - fan commands (`M106/M107 P*`, Klipper `SET_FAN_SPEED`);
@@ -839,10 +840,18 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Slowdown causes: for each line printed slower than its feature's set speed, record why: `overhang`, `bridge`, `small_perimeter`, `volumetric_cap`, `layer_time` or `unknown`. Only `layer_time` slowdowns may be undone later.
   - Read big files (50–500 MB) in chunks without holding the whole text in memory. `spot_heat` and the existing detailed checks keep working.
   - Done when: fixtures from Orca, Bambu Studio and PrusaSlicer parse with correct speeds, fans and slowdown causes; a 200 MB file stays under a set memory limit.
+  - Outcome: `Toolpath` now also carries:
+    - each line's speed, set speed and slowdown cause;
+    - feature, tool, object and part fan;
+    - fan / pressure-advance / retraction events, and travel moves;
+    - firmware and the slicer's settings (from the G-code block, or the `.gcode.3mf` project_settings.config).
+    Fixtures from OrcaSlicer 2.5, PrusaSlicer 2.8 and Bambu Studio 1.8 (`tools/make_gcode_fixtures.py`): every slowed line gets a cause, none `unknown`.
+    Big files are read 4 MB at a time: 200 MB (5.9 M lines) peaks at 619 MB, ~40 s native; 21 MB takes 7.5 s in Pyodide. The test limit is 120 bytes a line + 8 MB.
+    `load_gcode` reports `firmware` and `slowdown_min` per cause. Engine tests 650 passed, full browser test 0 failures.
 - [ ] **T-472 P2** [TO] Print timing: when each line is printed and where the nozzle is. · files: `core/fdmcore/kinematics.py` (new) · owner: Claude (task/T-472-print-timing)
   - Do: a numpy model of speeding up and slowing down (trapezoid), with look-ahead. It covers Marlin jerk / junction deviation and Klipper `square_corner_velocity` / `minimum_cruise_ratio`; Bambu is approximated and checked against the slicer's own estimate. Output: start and end time of each line and the nozzle position over time, which T-473 needs for the fan and nozzle heat.
   - Done when: total time is within ~5–10 % of the slicer's estimate on the fixtures, and within a few % against real print times once T-477 has them.
-- [ ] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: —
+- [ ] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: Claude (task/T-473-heat-model)
   - Do (numpy + `scipy.sparse`):
     - **Grid:** draw each layer's lines onto a 0.5–1 mm grid; islands = connected areas; columns = islands linked from layer to layer.
     - **Heat network:** one node per 2–4 mm cell. Plastic is added at melt temperature (minus the drop at high flow), at the time and place it is printed. Heat flows sideways, down (with contact resistance) and into the bed. The model includes:
@@ -949,6 +958,11 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Do: merge or space the wedges of one ledge level so they overlap or keep apart, or apply them as one union first; organic parts don't get ledge fills by default any more, so CAD parts with many small ledges are the case to test.
   - Done when: all ledge fills of the blob (CAD checks on) apply together watertight.
   - Outcome (Claude, 2026-11-20): the wedges were fine; manifold evaluated all pieces of the changes as one lazy batch and got that wrong (the same fault cost the two-post stress chamfer 224 mm³). Evaluating after each piece (T-434, #181) gives 0 non-manifold edges for all 30 fills. Test: `test_organic_part_gets_no_ledge_fills_until_cad_checks_are_on` applies them all together.
+
+- [x] **T-491 P1** [UX] The header can jump to the bottom of the page: it had no grid row, so anything added before it (e.g. a browser extension's element) pushes it below the app. · files: `web/style.css` · owner: Claude (`task/T-491-header-row`)
+  - Outcome: `.top` now has a fixed grid row (`grid-area: 1 / 1 / 2 / -1`); with an element injected before it the header stays on top at 1960, 800 and 390 px (it dropped to y=962 before). Quick smoke test green.
+- [ ] **T-491 P1** [UX] The header can jump to the bottom of the page: it had no grid row, so anything added before it (e.g. a browser extension's element) pushes it below the app. · files: `web/style.css` · owner: Claude (`task/T-491-header-row`)
+- [ ] **T-492 P3** [UX] Info boxes (the text behind an ⓘ) without the coloured stripe on the left: the user prefers the plain tinted box. · files: `web/style.css` · owner: Claude (task/T-492-no-side-stripe)
 
 ## Done
 

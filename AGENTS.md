@@ -72,6 +72,22 @@ run by itself at all: add the label `browser-test` to a pull request when it's r
 re-runs it; remove the label to stop), or start it by hand from the Actions tab ("Run workflow"). So run the
 checks locally as above before opening a pull request. Engine tests run on both of the runner's cores (`-n 2`).
 
+## User text (getting ready for other languages)
+
+English only for now, but new text goes in by key, so a translation is one more table later (T-454):
+
+- **Web app:** text lives in `web/messages/en.js` under a key (`<area>.<what>`). Use `t("key", {params})` from
+  `web/i18n.js` in scripts and `data-i18n="key"` (or `-placeholder`, `-title`) in `index.html`. Write one whole
+  sentence per key with `{name}` placeholders; never glue sentences together from pieces, word order differs
+  between languages. Plurals: `{one: "…", other: "…"}` chosen by `params.count`. Numbers, lists and nested
+  messages are formatted by `t()` for the language: pass them as parameters, not as text.
+- **Code that doesn't show text itself** (pure helpers like `mypresets.js`, later the engine) returns
+  `{key, params}` messages; the app calls `t()` on them. Engine texts move the same way when they're touched:
+  the result carries `message: {key, params}` beside today's English `detail`, the table for them goes in
+  `core/fdmcore/data/messages/`.
+- Move old text over when you change a pane anyway; "My printer isn't listed" is the first one and the example.
+  `core/tests/test_more_printers.py` checks that every key the page uses is in the table.
+
 ## Style
 
 - Match the surrounding code: small functions, docstrings that say *why*, no dead code.
