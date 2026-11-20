@@ -777,7 +777,7 @@ body.painting #viewer canvas { cursor: crosshair; }
   font: italic 700 12px/1 Georgia, serif; vertical-align: 2px; cursor: pointer;
 }
 .info-btn[aria-expanded="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-.info-text { margin: 6px 0 10px; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--soft); border-radius: var(--r); }
+.info-text { margin: 6px 0 10px; padding: 8px 12px; background: var(--soft); border-radius: var(--r); }
 .tour { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
 .tour-ring {
   position: fixed; border-radius: 10px; outline: 3px solid var(--now);
