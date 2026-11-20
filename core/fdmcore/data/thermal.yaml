@@ -125,4 +125,5 @@ process:
     range_at_20: [5, 30]
     source: "estimate; Pollard et al. 2017 (doi:10.1016/j.promfg.2017.07.147) measured 12 and 18.5 C overshoots on feed-rate steps; Go & Hart 2017 (doi:10.1016/j.addma.2017.10.016) show flow is limited by heating the filament"
     confidence: estimated
+  air_bed_layer_mm: {value: 5, range: [2, 15], unit: mm, source: "estimate: air near the hot bed is warmer, fading to the chamber's over a few mm (T-473)", confidence: estimated}
   melt_temp_lag_s: {value: 2, range: [0.5, 5], unit: s, source: "estimate from the step responses in Pollard et al. 2017", confidence: estimated}

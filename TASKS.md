@@ -855,7 +855,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     The limits are the G-code's own commands (M204/M205/M201/M203/M566, SET_VELOCITY_LIMIT; now recorded by `gcode.parse`), else the machine settings. Retractions and G4 pauses stop the nozzle and take their time. `nozzle_at(tp, tm, times)` gives the nozzle position.
     Against the slicers' own estimates on the T-471 fixtures: OrcaSlicer −6 % (201 vs 214 s), PrusaSlicer −2 %, Bambu Studio +1 %. Feed rates alone are 20–30 % too fast.
     It plans in pieces of 200 k moves, cut where the nozzle stops: 600 k lines take 0.3 s natively and in Pyodide, peak 89 MB. Engine tests 665 passed (no web/api change). Real print times: T-477.
-- [ ] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: Claude (task/T-473-heat-model)
+- [x] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: Claude (task/T-473-heat-model)
   - Do (numpy + `scipy.sparse`):
     - **Grid:** draw each layer's lines onto a 0.5–1 mm grid; islands = connected areas; columns = islands linked from layer to layer.
     - **Heat network:** one node per 2–4 mm cell. Plastic is added at melt temperature (minus the drop at high flow), at the time and place it is printed. Heat flows sideways, down (with contact resistance) and into the bed. The model includes:
@@ -869,6 +869,19 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Two tiers, both with every part of the model: **quick** (browser, aim ~60 s for a typical small part, with progress) and **fine** (smaller cells, more layers at full detail, used locally or as a longer browser run). Big parts: fine detail only around hot spots and important regions (T-475).
   - Check with `node tools/pyodide_check.mjs`; run `make_manifest.py`.
   - Done when: it matches or beats `gcode.spot_heat` and `heat.py` on the test shapes; quick tier within its time budget; T-477 measurements fall inside an agreed error band.
+  - Outcome: `thermal.simulate(tp, timing, profile, tier)`, behind `api.heat_model` / MCP `heat_model` (scipy in the worker). Each layer's plastic is drawn into 2 mm (quick) or 1 mm (fine) cells:
+    - each cell is born at nozzle temperature minus the flow drop, at its real print time (T-472);
+    - heat flows sideways (and across 45° infill corners), down through contact resistance, and into the bed;
+    - losses: still air plus the part fan (%, spin-up, distance below the nozzle), radiation, air warmer near the bed (new `air_bed_layer_mm` in thermal.yaml, estimated), nozzle reheating;
+    - c_p(T) and latent heat; slivers merge into their fullest neighbour.
+    Implicit solver with warm-started conjugate gradients. Only the top 25 / 60 layers stay in detail; older ones merge into one lump per column.
+    Per node: temperature and seconds until covered, joint T_int at 0.5–64 s, seconds above Tg, islands and columns.
+    Checks:
+    - matches the exact cooling of a plate within 3 %;
+    - on the fixture, the pin is covered at ~150 °C vs ~80 °C for the block, ranked the same as `spot_heat`;
+    - quick and fine tiers agree on cover temperature within 10 %.
+    Timing: a 20-min print takes 13 s in Pyodide and 6 s natively; a 73-min print 30 s natively.
+    Engine tests 674 passed, full browser test 0 failures, pyodide_check ok. Not done yet: the error band against real prints (T-477).
 - [ ] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: —
   - Do: each node gets a window with two limits:
     - **Too hot (shape):** temperature of the layer below when the next bead lands ≤ the sag limit, stricter on overhangs and bridges.
