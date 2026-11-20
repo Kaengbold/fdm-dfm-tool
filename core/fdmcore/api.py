@@ -47,6 +47,7 @@ class Session:
     weak_spot: tuple | None = None  # (critical point in part coords, voxel size) from the last strength check
     hot_spots: tuple | None = None  # (points, share of the highest stress) where it is nearly as high (features.HOT_SHARE)
     strength_verdict: str | None = None  # verdict ("fine", "borderline", "likely to break") from the last strength check
+    stressed: dict | None = None  # the last strength check's stress per cube (fi, ignore) with its model, up and material (T-290)
     gcode: dict | None = None  # the sliced part (load_gcode): toolpath, orientation and placement
     fits: dict = field(default_factory=dict)  # region id -> {"partner_mm", "fit"}: what goes into a hole / onto a post
     fasteners: dict = field(default_factory=dict)  # region id -> {"size", "use"}: screw / insert / nut holes (set_fastener)
@@ -958,18 +959,35 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
         best["beyond"] = _preferred(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target), target)
     if zones:
         with stage(0.9, 1.0):
-            light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
-            r = evaluate_cases(cases, best["up"], p, light)
-            worst = cases[[c.number for c in cases].index(r["case"])]
-            boxes = find_zones(cases[0].model, r["fi"], worst.ignore, best["up"], OPT_WALLS[0], OPT_INFILL[0])
+            # Where the zones go: where the user's own strength check found the stress, when it is for this
+            # orientation, loads and material; else a quick solve of a light print shows it (T-290).
+            mine = _stressed_for(s, cases[0].model, best["up"], p)
+            if mine is not None:
+                fi, ignore = mine
+            else:
+                light = _shells(p, walls=OPT_WALLS[0], infill=OPT_INFILL[0])
+                r = evaluate_cases(cases, best["up"], p, light)
+                fi, ignore = r["fi"], cases[[c.number for c in cases].index(r["case"])].ignore
+            boxes = find_zones(cases[0].model, fi, ignore, best["up"], OPT_WALLS[0], OPT_INFILL[0])
             if boxes:
                 zoned = _climb(cases, best["up"], p, target, s.mesh, boxes)
                 zoned["up"] = best["up"]
                 zoned["saves_grams"] = round(best["grams"] - zoned["grams"], 1)
                 zoned["saves_min"] = round(_grams_minutes(zoned["saves_grams"], p), 1)
+                zoned["zones_from"] = "strength result" if mine is not None else "light print"
                 zoned["explanation"] = _zoned_story(zoned, best, target)
                 best["zoned"] = zoned
     return best
+
+
+def _stressed_for(s: Session, model, up, p: Profile) -> tuple[np.ndarray, np.ndarray] | None:
+    """The last strength check's stress (fi, ignore), if it was for this model (the same loads and grid),
+    build direction and material; None otherwise."""
+    st = s.stressed
+    if (st is None or st["model"] is not model or float(np.dot(st["up"], np.asarray(up, float) / np.linalg.norm(up))) < 0.999
+            or st["material"] != json.dumps(p.material, sort_keys=True)):
+        return None
+    return st["fi"], st["ignore"]
 
 
 def _zone_info(z, mesh: Mesh, up, bed, moving: bool = False) -> dict:
@@ -1360,13 +1378,14 @@ def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     z = zoned["zones"][0]
     head = (f"Stronger only where it's needed: {len(zoned['zones'])} zone{'s' if len(zoned['zones']) > 1 else ''} with "
             f"{z['infill']:.0%} infill and {z['walls']} walls, the rest {zoned['walls']} walls and {zoned['infill']:.0%} infill")
+    where = " The zones sit where your strength check found the stress." if zoned.get("zones_from") == "strength result" else ""
     if not zoned["met"]:
-        return f"{head} only reach {_format_safety(zoned['safety_factor'])} (you need ×{target:.0f})."
+        return f"{head} only reach {_format_safety(zoned['safety_factor'])} (you need ×{target:.0f}).{where}"
     if zoned["saves_grams"] > 0.5:
         time = f" and about {zoned['saves_min']:.0f} min" if zoned.get("saves_min", 0) >= 1 else ""
         return (f"{head}: {_format_safety(zoned['safety_factor'])} with {zoned['grams']:.0f} g — {zoned['saves_grams']:.0f} g{time} less than the same settings"
-                " everywhere (checked again with the zones).")
-    return f"{head}: {_format_safety(zoned['safety_factor'])}, but it saves almost nothing here — the load spreads through most of the part."
+                f" everywhere (checked again with the zones).{where}")
+    return f"{head}: {_format_safety(zoned['safety_factor'])}, but it saves almost nothing here — the load spreads through most of the part.{where}"
 
 
 def _grams_minutes_of(model, up, sh, p: Profile, mesh: Mesh) -> tuple[float, float]:
@@ -1867,6 +1886,8 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
     s.strength_verdict = r["verdict"]
+    s.stressed = None if printed is not None else {"model": model, "up": np.asarray(up, float) / np.linalg.norm(up),
+                                                   "material": json.dumps(p.material, sort_keys=True), "fi": fi, "ignore": worst.ignore}
     r["story_parts"] = _strength_story_parts(r)
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
