@@ -744,7 +744,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### K. Phone layout
 
-- [ ] **T-456 P2** [K] Phone: content first. · files: `web/style.css` (`@media (max-width: 820px)`), `web/index.html` · owner: — · continues T-081
+- [ ] **T-456 P2** [K] Phone: content first. · files: `web/style.css` (`@media (max-width: 820px)`), `web/index.html` · owner: Claude (`task/T-456-phone-content-first`) · continues T-081
   - Seen (390 × 844): header, level switch, step strip and 3D view take more than half the screen before any content; on Result the sticky foot (status line + Back) lies over "Download the report".
   - Do: header in one row (name, a menu button holding level and Guide); step strip as dots with the current name; the 3D view 30 vh and collapsible to a strip; the foot only as high as its buttons, and the panel gets bottom padding of the foot's height so nothing hides under it.
   - Done when: at 390 × 844 the step's heading and first control are visible without scrolling, and no control is covered by the foot (browser test with a phone viewport).
