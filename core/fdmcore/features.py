@@ -18,7 +18,7 @@ import numpy as np
 import shapely
 from shapely.geometry import LineString
 
-from .checks import orient
+from .checks import _safe_overlay, orient
 from .mesh import Mesh
 from .orientation import rotation_to_z
 from .profile import load_data
@@ -313,6 +313,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _grip_fins(mesh, accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _gap_edits(mesh, region, gaps or {}, up, profile)
+    edits += _open_gaps(mesh, region, up, profile, gaps or {})
     edits += _fastener_edits(mesh, accepted(detect_features(mesh, region, tags)), fasteners or {}, up, profile)
     edits += _boss_ribs(mesh, accepted(detect_features(mesh, region, tags)))
     r = rotation_to_z(up)
@@ -385,6 +386,7 @@ EDIT_FIXES = {
     "sacrificial_layer": ("hole_starts_midair",),
     "pause_to_insert": ("pause_to_insert",),
     "single_line_wall": ("single_line_wall", "too_thin_to_print"),
+    "open_gap": ("gap_fuses", "flat_gap_fuses"),
     "tall_boss": ("tall_thin_feature", "weak_upright_pin"),
 }
 ASKED_FOR = {"fit_size", "fastener", "press_fit_fins", "split"}  # sizes the user typed in: their own request
@@ -465,7 +467,7 @@ _ADVICE_RULES = {
     "too_thin_to_print": ("Make this wall at least {tgt:.2f} mm{now}", lambda m, p, T, h: max(float(p.line_width), T["features"]["vanish_below_nozzle"] * float(p.nozzle)), "width", "mm"),
     "single_line_wall": ("Make this wall {tgt:.2f} mm = {min_lines} lines{now}", lambda m, p, T, h: T["shape_layers"]["min_wall_lines"] * float(p.line_width), "width", "mm"),
     "fine_detail_rough": ("Make this detail at least {tgt:.2f} mm wide{now}", lambda m, p, T, h: T["features"]["rough_below_nozzle"] * float(p.nozzle), "width", "mm"),
-    "gap_fuses": ("Open this gap past {tgt:g} mm{now}", lambda m, p, T, h: T["gaps"]["fuse_below_mm"], "width", "mm"),
+    "gap_fuses": ("Open this gap to {tgt:g} mm{now}", lambda m, p, T, h: T["gaps"]["open_to_mm"], "width", "mm"),
     "flat_gap_fuses": ("Open this flat gap to at least {tgt:g} mm{now}", lambda m, p, T, h: T["gaps"]["z_fuse_below_mm"], "gap_mm", "mm"),
     "hole_closes": ("Enlarge this hole to at least Ø{tgt:g} mm{now_d}", lambda m, p, T, h: max(T["holes"]["vertical_min_mm"] * float(p.nozzle) / 0.4, T["holes"]["vertical_min_nozzle"] * float(p.nozzle)), ("min_d", "diameter"), "mm"),
     "sideways_hole_oval": ("Give this sideways {dia}hole a {tgt:g}° teardrop top", lambda m, p, T, h: PARAMS["teardrop_angle_deg"][0], None, "°"),
@@ -515,6 +517,8 @@ def _finding_advice(f: dict, profile, T: dict, part_height: float) -> tuple[str,
             tgt = round(float(R["side_min_height_mm"]), 2)
             return f"Make this upright detail at least {tgt:g} mm tall (now {m['height_mm']:.1f})", _num(m["height_mm"]), tgt, "mm"
         return None
+    if rule == "living_hinge":
+        return _hinge_advice(m, T["flex"])
     spec = _ADVICE_RULES.get(rule)
     if spec is None:
         return None
@@ -540,6 +544,22 @@ def _finding_advice(f: dict, profile, T: dict, part_height: float) -> tuple[str,
         bed=f"{bed[0]:.0f} × {bed[1]:.0f} × {bed[2]:.0f} mm",
     )
     return text, _num(now, digits), tgt, unit
+
+
+def _hinge_advice(m: dict, X: dict) -> tuple[str, float | None, float, str] | None:
+    """A living hinge: the thickness that bends and still prints, and laid flat when it stands up (T-439)."""
+    lo, hi = X["hinge_thick_mm"]
+    t = m.get("thickness_mm")
+    off = t is not None and not lo <= t <= hi
+    tgt = round(float(min(max(t, lo), hi)) if t is not None else hi, 2)
+    size = f"{tgt:g} mm thick (now {t:.2f})" if off else ""
+    if m.get("upright"):
+        text = "Lay the part so this hinge lies flat on the bed" + (f" and make it {size}" if size else "")
+    elif size:
+        text = f"Make this hinge {size}"
+    else:
+        return None
+    return text, _num(t), tgt, "mm"
 
 
 def _num(v, digits: int = 2) -> float | None:
@@ -1996,6 +2016,83 @@ def _face_slab(mesh: Mesh, mask: np.ndarray, lo: float, hi: float) -> list[np.nd
         prism = extrude(poly.simplify(0.01), lo, hi)
         if prism is not None:
             out.append(origin + prism[..., :1] * u + prism[..., 1:2] * v + prism[..., 2:] * n)
+    return out
+
+
+def _flat_faces(mesh: Mesh, region: np.ndarray, min_area: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Flat regions of at least ``min_area`` mm²: their ids, unit normals and area-weighted middles."""
+    normals, areas = mesh.normals_and_areas()
+    k = int(region.max()) + 1 if len(region) else 0
+    n_sum = np.zeros((k, 3))
+    c_sum = np.zeros((k, 3))
+    np.add.at(n_sum, region, normals * areas[:, None])
+    np.add.at(c_sum, region, mesh.triangles.mean(axis=1) * areas[:, None])
+    area = np.bincount(region, areas, minlength=k)
+    unit = n_sum / np.maximum(np.linalg.norm(n_sum, axis=1), 1e-12)[:, None]
+    worst = np.ones(k)
+    np.minimum.at(worst, region, np.einsum("ij,ij->i", normals, unit[region]))
+    ids = np.flatnonzero((worst >= 0.999) & (area >= min_area))
+    return ids, unit[ids], c_sum[ids] / area[ids, None]
+
+
+def _face_outline(mesh: Mesh, mask: np.ndarray, origin: np.ndarray, u: np.ndarray, v: np.ndarray):
+    """A flat face's outline in the plane through ``origin`` spanned by ``u``, ``v``."""
+    tris = mesh.triangles[mask] - origin
+    polys = shapely.polygons(np.stack([tris @ u, tris @ v], axis=-1))
+    return shapely.union_all(shapely.make_valid(polys[shapely.area(polys) > 1e-9]), grid_size=1e-4)
+
+
+def _open_gaps(mesh: Mesh, region: np.ndarray, up, profile, picked: dict) -> list[dict]:
+    """Gaps between two flat faces that fuse when printed (gap_fuses, flat_gap_fuses): one cut across the gap
+    where the faces overlap opens it to a gap that prints, half into each face (T-439). Faces standing up open to
+    ``gaps.open_to_mm``; faces lying flat (a gap in height, bridged) to ``z_fuse_below_mm`` in whole layers. Gaps
+    the user sized for a fit (``picked``, see _gap_edits) are left to that."""
+    from .additions import extrude
+
+    G = load_data("thresholds")["gaps"]
+    lh = float(profile.layer_height) if profile is not None else 0.2
+    ids, n, c = _flat_faces(mesh, region, G["z_min_area_mm2"])
+    tilt = np.abs(n @ up)
+    keep = (tilt < 0.1) | (tilt > 0.9)  # a slanted gap: neither rule says how wide
+    ids, n, c, tilt = ids[keep], n[keep], c[keep], tilt[keep]
+    if len(ids) < 2:
+        return []
+    flat = tilt > 0.9
+    fuse = np.where(flat, G["z_fuse_below_mm"], G["fuse_below_mm"])
+    target = np.where(flat, np.ceil(G["z_fuse_below_mm"] / lh - 1e-6) * lh, G["open_to_mm"])
+    dist = np.einsum("jk,ik->ij", c, n) - np.einsum("ik,ik->i", c, n)[:, None]  # (c_j - c_i) · n_i
+    facing = (n @ n.T < -0.999) & (dist > 0.005) & (dist < fuse[:, None])  # face j across a thin empty gap from face i
+    picked_pairs = {frozenset(p) for p in picked}
+    out = []
+    for i, j in zip(*np.nonzero(np.triu(facing))):
+        a, b = int(ids[i]), int(ids[j])
+        if frozenset((a, b)) in picked_pairs:
+            continue
+        na, ca, d = n[i], c[i], float(dist[i, j])
+        u = np.cross(na, [1.0, 0, 0] if abs(na[0]) < 0.9 else [0, 1.0, 0])
+        u /= np.linalg.norm(u)
+        v = np.cross(na, u)
+        both = _safe_overlay(shapely.intersection, _face_outline(mesh, region == a, ca, u, v),
+                             _face_outline(mesh, region == b, ca, u, v))
+        half = (float(target[i]) - d) / 2
+        pieces = []
+        for poly in getattr(both, "geoms", [both]):
+            if poly.geom_type == "Polygon" and poly.area >= G["z_min_area_mm2"]:
+                prism = extrude(poly.simplify(0.01), -half, d + half)
+                if prism is not None:
+                    pieces.append(ca + prism[..., :1] * u + prism[..., 1:2] * v + prism[..., 2:] * na)
+        if not pieces:
+            continue
+        tgt = round(float(target[i]), 2)
+        where = "in height" if flat[i] else "between the two faces"
+        why = (f"Moves both faces back by {half:.2f} mm, so the {d:.2f} mm gap {where} becomes {tgt:g} mm and the parts don't "
+               "weld together when printed.")
+        if flat[i]:
+            why += f" It is a gap in height, bridged over the plastic below: rounded up to whole {lh:g} mm layers."
+        mid = (ca + na * d / 2).tolist()
+        out.append(_edit(f"open-gap-{a}-{b}", "open_gap", f"Open the {d:.2f} mm gap to {tgt:g} mm", why, pieces, op="cut",
+                         advice={"text": f"Open this gap to {tgt:g} mm (now {d:.2f})", "now": round(d, 2), "target": tgt,
+                                 "unit": "mm", "point": mid}))
     return out
 
 

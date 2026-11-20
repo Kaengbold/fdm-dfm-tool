@@ -74,3 +74,20 @@ def test_thick_block_and_thin_box():
     assert [f["rule"] for f in found] == ["thick_solid_block"]
     assert found[0]["metrics"]["thick_cm3"] > 15
     assert not findings(orient(Mesh(extrude(box(0, 0, 40, 40).difference(box(3, 3, 37, 37)), 0, 30)), np.eye(3)))
+
+
+def _hinge_advice(part) -> list[str]:
+    from fdmcore.features import _finding_advice
+    from fdmcore.profile import load_data
+
+    T = load_data("thresholds")
+    return [a[0] for f in findings(part) if (a := _finding_advice(f, Profile(material_id="pla"), T, 10.0))]
+
+
+def test_hinge_advice_says_how_thick_and_to_lay_it_flat():
+    """T-439: a hinge in the 0.4–0.6 mm range printed flat needs nothing; a 1 mm one gets the thickness; one
+    printed standing up is told to lie flat."""
+    assert _hinge_advice(side_profile(HINGE, 20, (0, 2, 1))) == []
+    thick = [box(0, 0, 20, 5), box(20, 0, 22, 1.0), box(22, 0, 42, 5)]
+    assert _hinge_advice(side_profile(thick, 20, (0, 2, 1))) == ["Make this hinge 0.6 mm thick (now 1.00)"]
+    assert _hinge_advice(side_profile(HINGE, 20, (1, 2, 0))) == ["Lay the part so this hinge lies flat on the bed"]
