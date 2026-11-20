@@ -887,7 +887,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - quick and fine tiers agree on cover temperature within 10 %.
     Timing: a 20-min print takes 13 s in Pyodide and 6 s natively; a 73-min print 30 s natively.
     Engine tests 674 passed, full browser test 0 failures, pyodide_check ok. Not done yet: the error band against real prints (T-477).
-- [ ] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: —
+- [ ] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: Claude (task/T-474-temperature-window)
   - Do: each node gets a window with two limits:
     - **Too hot (shape):** temperature of the layer below when the next bead lands ≤ the sag limit, stricter on overhangs and bridges.
     - **Too cold (bonding):** seconds the joint stays above Tg ≥ a minimum; add the welding integral with WLF / reptation values from T-470.
