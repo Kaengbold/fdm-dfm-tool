@@ -851,7 +851,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
 - [ ] **T-472 P2** [TO] Print timing: when each line is printed and where the nozzle is. · files: `core/fdmcore/kinematics.py` (new) · owner: Claude (task/T-472-print-timing)
   - Do: a numpy model of speeding up and slowing down (trapezoid), with look-ahead. It covers Marlin jerk / junction deviation and Klipper `square_corner_velocity` / `minimum_cruise_ratio`; Bambu is approximated and checked against the slicer's own estimate. Output: start and end time of each line and the nozzle position over time, which T-473 needs for the fan and nozzle heat.
   - Done when: total time is within ~5–10 % of the slicer's estimate on the fixtures, and within a few % against real print times once T-477 has them.
-- [ ] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: —
+- [ ] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: Claude (task/T-473-heat-model)
   - Do (numpy + `scipy.sparse`):
     - **Grid:** draw each layer's lines onto a 0.5–1 mm grid; islands = connected areas; columns = islands linked from layer to layer.
     - **Heat network:** one node per 2–4 mm cell. Plastic is added at melt temperature (minus the drop at high flow), at the time and place it is printed. Heat flows sideways, down (with contact resistance) and into the bed. The model includes:
