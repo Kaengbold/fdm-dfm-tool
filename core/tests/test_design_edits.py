@@ -235,11 +235,7 @@ def test_parts_found():
     assert all(not p.stem.endswith("_80k") for p in PARTS)
 
 
-@pytest.mark.parametrize("path", [
-    pytest.param(p, marks=pytest.mark.xfail(strict=True, reason="T-489: thickening the blob's thin top doesn't clear too_thin_to_print"))
-    if p.stem == "bumpy_blob_20k" else p
-    for p in PARTS
-], ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", PARTS, ids=lambda p: p.stem)
 def test_part_edits_alone_and_together(path: Path):
     """Every edit on the best orientation applies alone and all together cleanly, and the
     combined result removes or shrinks every non-elephant_foot target finding.
