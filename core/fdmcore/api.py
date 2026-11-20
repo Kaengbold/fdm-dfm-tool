@@ -3042,7 +3042,7 @@ def clearance(data: bytes, profile: dict | None = None) -> dict:
         if nxt:
             text += f" For them to {FIT_WORDS[nxt]}, leave {side[nxt]:.2f} mm."
     measured = bool(p.material.get("fit_gap_mm"))
-    text += " (Gaps from your fit test print.)" if measured else " (Typical gaps: the fit test print in My materials gives your printer's.)"
+    text += " (Gaps from your fit test print.)" if measured else " (Typical gaps: “Tune to my printer” gives your printer's with one test print.)"
     return {**r, "explanation": text}
 
 

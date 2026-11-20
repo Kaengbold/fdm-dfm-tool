@@ -1,0 +1,37 @@
+# The whole tool as one installable package, for local mode without a checkout (T-450):
+#
+#   uv tool install "fdmdfm[local] @ git+https://github.com/Kaengbold/fdm-dfm-tool"
+#   (or: pipx install "fdmdfm[local] @ git+https://github.com/Kaengbold/fdm-dfm-tool")
+#
+# It carries the engine (core/fdmcore), the web app (web/, served by `fdmdfm open`) and the agent guide
+# (agents/, copied by `fdmdfm setup`). Developers keep using core/pyproject.toml (`pip install -e "core[local]"`).
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fdmdfm"
+version = "0.1.0"
+description = "Check 3D prints before printing: orientation, printability, rough strength, design fixes, slicer settings"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "shapely>=2.0", "pyyaml>=6"]
+
+[project.optional-dependencies]
+strength = ["scipy>=1.11"]
+local = ["scipy>=1.11", "mcp>=2.3", "manifold3d>=3.0"]
+
+[project.scripts]
+fdmdfm = "fdmcore.cli:main"
+fdm-dfm-mcp = "fdmcore.mcp_server:main"
+
+[tool.setuptools]
+packages = ["fdmcore", "fdmdfm_web", "fdmdfm_agents"]
+package-dir = { "fdmcore" = "core/fdmcore", "fdmdfm_web" = "web", "fdmdfm_agents" = "agents" }
+
+[tool.setuptools.package-data]
+fdmcore = ["data/*.yaml", "data/*.json", "data/*.json.gz", "manifest.json"]
+fdmdfm_web = ["*.html", "*.js", "*.css", "fonts/*", "img/**/*", "samples/*"]
+fdmdfm_agents = ["*.md", "fdm-check/*"]

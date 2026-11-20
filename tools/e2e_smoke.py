@@ -1416,6 +1416,12 @@ def _run_suite(port: int, args) -> Run:
         run.step("strength result fits at 1440 x 900", compact_strength)
 
         def shaking():
+            # T-373: an optional fold in the third stage of Strength analysis, with the two pictures of what it simulates.
+            page.evaluate("() => fdm.steps.go('strength')")
+            page.click(".sa-stage[data-stage=extra] .sa-head")
+            page.click("#dynamics > summary", position={"x": 12, "y": 12})  # on its title, not the info button
+            assert page.evaluate("() => document.getElementById('dynamics').open"), "the fold did not open"
+            assert page.locator(".dyn-demo svg").count() == 2 and page.locator(".dyn-demo svg").first.is_visible()
             page.check("#dyn-shake")
             run.act(lambda: page.click("#run-dynamics"), 300_000)
             text = page.locator("#dynamics-result").inner_text()
@@ -2139,33 +2145,42 @@ def _run_suite(port: int, args) -> Run:
         run.step("thorough: test design changes in the background", thorough_design_test)
 
         def my_presets():
-            page.click("#my-presets > summary")
-            page.click("#new-material")
-            page.fill("#preset-fields [name=name]", "My PETG")
-            page.select_option("#preset-fields [name=based_on]", "petg")
+            # T-446: "Tune to my printer" from the start screen, without the "New material" form: the results are
+            # saved as the user's own PETG for this printer and chosen.
+            material = page.evaluate("() => document.getElementById('material').value")
+            run.act(lambda: page.select_option("#material", "petg"), 300_000)
+            page.evaluate("() => document.getElementById('tune-start').click()")
+            page.wait_for_selector("#tune[open]")
+            assert "My PETG on my " in page.locator("#tune-for").inner_text(), page.locator("#tune-for").inner_text()
+            assert "typical for PETG" in page.locator("#tune-values").inner_text()
+            page.click("#tune-save")
+            assert "at least one result" in page.locator("#tune-error").inner_text(), "saved with nothing filled in"
             page.fill("#cal-flat", "10")
             page.fill("#cal-upright", "4")
-            page.click("#cal-z")
             page.select_option("#cal-warp", "120")
-            page.click("#cal-warp-use")
             page.select_option("#cal-fit-snug", "0.2")
             page.select_option("#cal-fit-slide", "0.4")
-            page.click("#cal-fit-use")
             page.select_option("#cal-overhang", "60")
-            page.click("#cal-overhang-use")
             page.select_option("#cal-bridge", "30")
-            page.click("#cal-bridge-use")
             page.fill("#cal-hole-model", "8")
             page.fill("#cal-hole-meas", "7.7")
-            page.click("#cal-size-use")
-            run.act(lambda: page.click("#preset-form button.primary"))
+            run.act(lambda: page.click("#tune-save"), 300_000)
+            assert not page.locator("#tune").evaluate("d => d.open") and page.locator("#preset-form").is_hidden()
             chosen = page.evaluate("() => document.getElementById('material').value")
             mat = page.evaluate(f"() => fdm.state.presets.materials['{chosen}']")
-            assert chosen.startswith("my_") and mat["name"] == "My PETG" and mat["z_strength_factor"]["none"] == 0.4, mat
+            assert chosen.startswith("my_") and mat["name"].startswith("My PETG on my ") and mat["z_strength_factor"]["none"] == 0.4, mat
             assert mat["warp_length_mm"]["none"] == 185, mat
             assert mat["fit_gap_mm"] == {"snug": 0.2, "press": 0.1, "sliding": 0.4, "loose": 0.55}, mat["fit_gap_mm"]
             assert mat["max_overhang_deg"] == 60 and mat["max_bridge_mm"] == 30, mat
             assert mat["hole_error_mm"] == -0.3 and "outer_error_mm" not in mat, mat  # measured on a print (T-345)
+            assert page.evaluate("() => JSON.parse(localStorage.getItem('fdm-setup')).material") == chosen, "not remembered"
+            # Tuning it again updates the same material; the dialog says which values are measured.
+            page.evaluate("() => document.getElementById('tune-start').click()")
+            assert "your results update it" in page.locator("#tune-for").inner_text()
+            assert page.locator("#tune-values li.yours").count() == 6, page.locator("#tune-values").inner_text()
+            page.click("#tune-cancel")
+            page.click("#my-presets > summary")
+            page.click("#new-material")  # the material form still works for other values
             orca = OUT / "orca_filament.json"
             orca.write_text('{"name": "Test PETG @BBL X1C", "filament_type": ["PETG"], "filament_density": ["1.27"], "filament_max_volumetric_speed": ["11"]}')
             page.set_input_files("#import-orca", str(orca))
@@ -2184,8 +2199,9 @@ def _run_suite(port: int, args) -> Run:
             page.reload()
             run.booted()
             names = page.locator("#material option").all_inner_texts()
-            assert "My PETG" in names and "Test PETG" in names, names
+            assert any(n.startswith("My PETG on my ") for n in names) and "Test PETG" in names, names
             page.select_option("#printer", "bambu_p1s")  # the later steps use the built-in printer
+            page.select_option("#material", material)  # and the material from before (the tuned one is remembered)
             return f"{warned[0][:60]} | materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
         run.step("my presets + calibration + Orca import", my_presets)
 
@@ -2209,6 +2225,20 @@ def _run_suite(port: int, args) -> Run:
             page.select_option("#printer", "bambu_p1s")  # the later steps use the built-in printer
             return f"{label} | saved {printer['name']} ({printer['bed']}, {printer['speed']})"
         run.step("printer not listed: pick it from OrcaSlicer's profiles", printer_not_listed)
+
+        def open_from_link():
+            # T-450: `fdmdfm open part.stl` starts the page with ?open=<the part on the same server>.
+            other = browser.new_page()
+            other_run = Run(other)
+            try:
+                other.goto(f"http://127.0.0.1:{port}/web/?open=/web/samples/hook.stl")
+                other.wait_for_function("() => window.fdm && fdm.state.name === 'hook.stl' && document.querySelectorAll('#options > li').length > 0",
+                                        timeout=300_000)
+                assert not other_run.console, other_run.console
+                return other.inner_text("#status")[:80]
+            finally:
+                other.close()
+        run.step("open a part from the page's address (fdmdfm open)", open_from_link)
 
         def offline():
             # The reload above ran under the service worker, so the engine and libraries are cached now.
