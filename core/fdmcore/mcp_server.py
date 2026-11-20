@@ -555,7 +555,9 @@ def check_warping(up: list[float], printer: str = "bambu_p1s", material: str = "
 def load_gcode(path: str, up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
     """Read the G-code the part was sliced to (from our 3MF, in orientation ``up``; plain G-code or a
     ``.gcode.3mf``) and check that it is this part. Afterwards check_warping(detailed=True) uses its real
-    layer times; detailed_strength does the same for strength (and can slice by itself)."""
+    layer times; detailed_strength does the same for strength (and can slice by itself). Also reports the
+    firmware and ``slowdown_min``: minutes added by each reason the slicer printed lines slower than set
+    (overhang, bridge, small_perimeter, volumetric_cap, layer_time; only layer_time is for cooling)."""
     return _clean(api.load_gcode(_in(path, GCODE, "G-code file").read_bytes(), up, _profile(printer, material, nozzle)))
 
 
