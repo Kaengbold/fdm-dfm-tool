@@ -401,7 +401,7 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
         candidates.sort(key=lambda r: r.score)
     # Hide options that don't sit on any flat face or are far worse than the best — unless
     # nothing better exists (e.g. a sphere). Users shouldn't have to wade through bad choices.
-    flat = [r for r in candidates if r.bed_area > 0]
+    flat = [r for r in candidates if r.bed_area > 0 or r.resting]
     if flat:
         best = min(r.score for r in flat)
         keep = [r for r in flat if r.score <= best + MAX_SCORE_GAP] or flat[:1]
@@ -628,7 +628,7 @@ def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettin
             + SCAR_WEIGHT * st["scar_area"] / L**2,
             "bed": settings.w_small_bed * float(np.clip(1.0 - frac / settings.good_bed_fraction, 0.0, 1.0))
             - settings.w_bed_contact * min(frac, 1.0),
-            "stability": float(stability_term(r.height, st["bed_area"], settings)),
+            "stability": float(stability_term(r.height, st["bed_area"], settings, st.get("base_width", 0.0))),
             "first_layer": settings.w_small_spots * min(st["small_spots"], 3) + settings.w_thin_first_layer * st["thin_share"],
         }
         for k, v in new.items():

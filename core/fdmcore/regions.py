@@ -76,7 +76,7 @@ def planar_share(mesh: Mesh, planar_deg: float = 0.05, max_faces: int = 150_000)
     if mesh.face_count > max_faces:
         c = mesh.triangles.mean(axis=1)
         lo, size = c.min(axis=0), max(float(np.ptp(c, axis=0).max()), 1e-9)
-        cell = np.minimum((8 * (c - lo) / size).astype(np.int64), 7)
+        cell = np.minimum((8 * (c - lo) / size).astype(np.intp), 7)
         key = (cell[:, 0] * 8 + cell[:, 1]) * 8 + cell[:, 2]
         counts = np.bincount(key, minlength=512)
         order = np.random.default_rng(0).permutation(np.flatnonzero(counts))

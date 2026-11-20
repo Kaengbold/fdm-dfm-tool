@@ -29,7 +29,7 @@ from .mesh import Mesh
 from .profile import Profile, load_data
 from .progress import report
 from .recommend import goal_plan, shape_plan
-from .slicer import Layer, parts, slice_mesh
+from .slicer import Layer, parts, section, slice_mesh
 
 QUAD = 2  # buffer resolution; coarse is fine and much faster
 
@@ -163,7 +163,8 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _fastener_findings(tracker, profile, T)
     findings = _sideways_hole_findings(mesh, profile, T, findings)
     findings += _first_layer_findings(layers, profile, T)
-    findings += _bed_findings(layers, profile, T)
+    above = section(mesh.triangles, layers[0].z + FOOT_PROBE_MM)
+    findings += _bed_findings(layers, profile, T, above)
     findings += _weak_findings(layers, tracker, profile, T)
     findings += _flex_findings(layers, profile, T)
     wall_layers: list = []
@@ -1549,7 +1550,28 @@ def _first_layer_findings(layers: list[Layer], profile: Profile, T: dict) -> lis
 # ---------------------------------------------------------------- bed contact
 
 
-def _bed_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
+FOOT_PROBE_MM = 0.2  # how far above the first layer to look for a chamfered hole rim
+FOOT_RIM_MM = 0.08  # the band just inside a first-layer hole's edge that a chamfer covers higher up
+
+
+def _straight_holes(first, above) -> list[Polygon]:
+    """Holes in the first layer that the bulge of the first layers narrows. With ``above`` (the
+    section ``FOOT_PROBE_MM`` higher), holes that narrow just above (plastic covers most of the band
+    along their edge there) are left out: they have a bottom chamfer that takes the bulge (T-487)."""
+    holes = [Polygon(ring) for poly in parts(first) for ring in poly.interiors]
+    if above is None:
+        return holes
+    straight = []
+    for hole in holes:
+        band = _safe_diff(hole, hole.buffer(-FOOT_RIM_MM))
+        if band.is_empty or _safe_overlay(shapely.intersection, band, above).area < 0.8 * band.area:
+            straight.append(hole)
+    return straight
+
+
+def _bed_findings(layers: list[Layer], profile: Profile, T: dict, above=None) -> list[dict]:
+    """Bed contact, tipping, warping and elephant foot from the sliced layers. ``above``: the section
+    ``FOOT_PROBE_MM`` above the first layer (holes chamfered at the bottom don't get elephant foot)."""
     out = []
     first = layers[0].geom
     mat = profile.material
@@ -1584,10 +1606,13 @@ def _bed_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]:
             out.append(_finding("warping", sev,
                                 f"{length:.0f} mm long base in {mat['name']} ({profile.printer['name']}) — corners likely lift{where}",
                                 bbox=_layer_bbox(island, 0.0, lh), points=corners, length_mm=length, risk_length_mm=limit))
-    if any(len(p.interiors) for p in parts(first)):
+    straight = _straight_holes(first, above)
+    if straight:
         lo, hi = T["first_layer"]["elephant_foot_mm"]
+        n = len(straight)
         out.append(_finding("elephant_foot", "info",
-                            f"Holes and bottom edges at the bed bulge {lo}–{hi} mm (elephant foot) — holes there come out tight", bbox=bed_bbox))
+                            f"Holes and bottom edges at the bed bulge {lo}–{hi} mm (elephant foot) — "
+                            f"{n} hole{'s' if n > 1 else ''} there come{'' if n > 1 else 's'} out tight", bbox=bed_bbox, holes=n))
     return out
 
 

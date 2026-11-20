@@ -328,11 +328,19 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
         edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
                                   profile.material["max_overhang_deg"])
         edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
+    part_pts = mesh.triangles.reshape(-1, 3)
+    part_lo, part_hi = part_pts.min(axis=0) - GROW_TOL_MM, part_pts.max(axis=0) + GROW_TOL_MM
     for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
+        # The wedges are clipped in the print frame; on a tilted part (a round part on a resting side)
+        # one can still poke past the part's own box. A ledge fill never grows the part: drop those.
+        pieces = [q for q in (to_part(p) for p in c["pieces"])
+                  if np.all(q.reshape(-1, 3) >= part_lo) and np.all(q.reshape(-1, 3) <= part_hi)]
+        if not pieces:
+            continue
         edits.append(_edit(
             f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
             "Fills the corner under the overhang at 45°, so it prints without support (and without support marks).",
-            [to_part(p) for p in c["pieces"]], op="add", param="ledge_max_mm",
+            pieces, op="add", param="ledge_max_mm",
             advice={"text": f"Add a 45° chamfer under this {c['width']:.0f} mm ledge",
                     "now": None, "target": 45.0, "unit": "°"}))
     for i, s in enumerate(sacrificial_layers(oriented, profile)):
@@ -861,12 +869,17 @@ def _to_part(mesh: Mesh, r: np.ndarray):
     return lambda tris: ((np.asarray(tris).reshape(-1, 3) - shift) @ r).reshape(-1, 3, 3)  # r.T @ v per point
 
 
+TEARDROP_FLAT_MM = 0.5  # the point ends in a flat about one line wide
+
+
 def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.ndarray:
-    """Kite-shaped prism (centre, two tangent points, apex) along the hole axis. The roof
+    """Kite-shaped prism (centre, two tangent points, roof) along the hole axis. The roof
     lines are ``angle_deg`` from vertical: they touch the circle at r·(sin θ up ± cos θ side)
-    and meet at r / sin θ above the centre. The tangent points sit a hair outside the circle and the
-    prism a hair past both ends of the hole: touching the hole's own corners and end faces exactly
-    leaves zero-thickness fins in the result."""
+    and would meet at r / sin θ above the centre. They stop ``TEARDROP_FLAT_MM`` apart instead: a
+    knife-sharp tip is a hairline slit in the last layer it reaches, narrower than any gap that prints
+    open (gap_fuses, T-488), and a flat that short bridges cleanly. The tangent points sit a hair
+    outside the circle and the prism a hair past both ends of the hole: touching the hole's own corners
+    and end faces exactly leaves zero-thickness fins in the result."""
     axis, c, r = np.asarray(f["axis"]), np.asarray(f["center"]), f["radius"]
     u = up - (up @ axis) * axis
     u /= np.linalg.norm(u)
@@ -874,7 +887,10 @@ def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.nda
     th = np.radians(angle_deg)
     rt = r + OFF_CORNER
     up_k, side_k = rt * np.sin(th), rt * np.cos(th)
-    profile = [c - 0.5 * r * u, c + side_k * s + up_k * u, c + r / np.sin(th) * u, c - side_k * s + up_k * u]
+    half = TEARDROP_FLAT_MM / 2
+    flat_k = r / np.sin(th) - half / np.tan(th)  # height of the flat above the centre
+    profile = [c - 0.5 * r * u, c + side_k * s + up_k * u, c + half * s + flat_k * u,
+               c - half * s + flat_k * u, c - side_k * s + up_k * u]
     return _prism(profile, axis * (f["length"] / 2 + 5 * OFF_CORNER))
 
 

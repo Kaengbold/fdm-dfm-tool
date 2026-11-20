@@ -92,11 +92,6 @@ def test_bumpy_blob_20k_organic_no_cad_findings_and_timed(bumpy_blob_20k_run):
     assert elapsed < 90.0, f"bumpy_blob_20k took {elapsed:.1f} s (limit 90 s)"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T-486: the orientation search doesn't try convex-hull resting planes, so the "
-           "top pick stands on a ~0.1 mm² bump tip with tipping_risk",
-)
 def test_bumpy_blob_20k_not_stood_on_a_point(bumpy_blob_20k_run):
     _, options, result, _ = bumpy_blob_20k_run
     top = options[0]
