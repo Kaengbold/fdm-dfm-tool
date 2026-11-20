@@ -828,7 +828,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Every value records its source, a confidence level (`published` / `estimated` / `tuned`) and a range.
   - Done when: every constant T-473 and T-474 need has a value, a source and a confidence level.
   - Outcome: `core/fdmcore/data/thermal.yaml` (7 materials, process constants) and research/thermal_constants.md. Gemini drafted; every DOI checked with Crossref and the open papers read: 5 of Gemini's 11 DOIs were fake, those values are `estimated` now. Published: ABS WLF (Seppala 2017: 4.65 / 200.9 at 230 C), PLA c_p (Pyda 2004), Costa 2014 convection bracket and emissivity, density / Tg from datasheets. Estimated, to tune in T-477 / T-482: reptation times, WLF for all but ABS / ASA, fan h by fan %, contact conductances, melt drop by flow. Not yet loaded by any code (T-473).
-- [ ] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: Claude (task/T-471-gcode-reader)
+- [x] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: Claude (task/T-471-gcode-reader)
   - Do: extend `Toolpath` (don't build a second format) with:
     - speed (F) for each line, travel moves, retractions;
     - fan commands (`M106/M107 P*`, Klipper `SET_FAN_SPEED`);
@@ -839,6 +839,14 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Slowdown causes: for each line printed slower than its feature's set speed, record why: `overhang`, `bridge`, `small_perimeter`, `volumetric_cap`, `layer_time` or `unknown`. Only `layer_time` slowdowns may be undone later.
   - Read big files (50–500 MB) in chunks without holding the whole text in memory. `spot_heat` and the existing detailed checks keep working.
   - Done when: fixtures from Orca, Bambu Studio and PrusaSlicer parse with correct speeds, fans and slowdown causes; a 200 MB file stays under a set memory limit.
+  - Outcome: `Toolpath` now also carries:
+    - each line's speed, set speed and slowdown cause;
+    - feature, tool, object and part fan;
+    - fan / pressure-advance / retraction events, and travel moves;
+    - firmware and the slicer's settings (from the G-code block, or the `.gcode.3mf` project_settings.config).
+    Fixtures from OrcaSlicer 2.5, PrusaSlicer 2.8 and Bambu Studio 1.8 (`tools/make_gcode_fixtures.py`): every slowed line gets a cause, none `unknown`.
+    Big files are read 4 MB at a time: 200 MB (5.9 M lines) peaks at 619 MB, ~40 s native; 21 MB takes 7.5 s in Pyodide. The test limit is 120 bytes a line + 8 MB.
+    `load_gcode` reports `firmware` and `slowdown_min` per cause. Engine tests 650 passed, full browser test 0 failures.
 - [ ] **T-472 P2** [TO] Print timing: when each line is printed and where the nozzle is. · files: `core/fdmcore/kinematics.py` (new) · owner: Claude (task/T-472-print-timing)
   - Do: a numpy model of speeding up and slowing down (trapezoid), with look-ahead. It covers Marlin jerk / junction deviation and Klipper `square_corner_velocity` / `minimum_cruise_ratio`; Bambu is approximated and checked against the slicer's own estimate. Output: start and end time of each line and the nozzle position over time, which T-473 needs for the fan and nozzle heat.
   - Done when: total time is within ~5–10 % of the slicer's estimate on the fixtures, and within a few % against real print times once T-477 has them.

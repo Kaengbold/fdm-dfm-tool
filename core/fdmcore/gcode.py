@@ -1,4 +1,4 @@
-"""Read a sliced part's G-code: every extruded line with its kind, direction, plastic and time.
+"""Read a sliced part's G-code: every extruded line with its kind, direction, plastic, time and speed.
 
 The detailed level of the simulation works from what the printer will really do instead of
 estimates: which lines are walls, solid layers or sparse infill, which way each line runs (a
@@ -6,12 +6,16 @@ printed line is strong along itself and weak across), how much plastic sits wher
 each spot was printed (for heat). Works with OrcaSlicer / Bambu Studio (``; FEATURE:``),
 PrusaSlicer (``;TYPE:``) and Cura (``;TYPE:``) comments. Pure numpy, so it runs in the browser
 on a G-code the user sliced themselves, and locally on one OrcaSlicer wrote for us.
+
+For the heat model (T-473) it also keeps what changes the heat: each line's speed and why the
+slicer printed it slower than set (only a slowdown for layer cooling may be undone), the fans,
+travel and retractions, pressure advance, objects and tools, the firmware and the slicer's
+settings. Big files (hundreds of MB) are read a few MB at a time.
 """
 
 from __future__ import annotations
 
 import re
-from array import array
 from dataclasses import dataclass
 
 import numpy as np
@@ -29,10 +33,11 @@ MAX_SIZE_GAP_MM = 2.0  # G-code and model sizes may differ this much (elephant-f
 
 @dataclass
 class Toolpath:
-    """Extruded lines in printer coordinates (z = top of the line, as the nozzle sees it)."""
+    """Extruded lines in printer coordinates (z = top of the line, as the nozzle sees it), and what
+    else the printer does between them (travel, retractions, fans, pressure advance)."""
 
-    p0: np.ndarray  # (N, 3) start
-    p1: np.ndarray  # (N, 3) end
+    p0: np.ndarray  # (N, 3) float32 start
+    p1: np.ndarray  # (N, 3) float32 end
     volume: np.ndarray  # (N,) mm³ of plastic
     kind: np.ndarray  # (N,) uint8, WALL / SOLID / SPARSE / SUPPORT / OTHER
     layer: np.ndarray  # (N,) layer index
@@ -42,9 +47,33 @@ class Toolpath:
     layer_z: np.ndarray  # (L,) nozzle height of each layer
     total_s: float  # whole print, slicer's estimate when the file has one
     slicer: str
+    speed: np.ndarray  # (N,) float32 mm/s, the feed rate the line is printed at
+    set_speed: np.ndarray  # (N,) float32 mm/s, its feature's speed setting (NaN: not known)
+    cause: np.ndarray  # (N,) uint8 why it is slower than set_speed (CAUSE_NAMES; 0: it isn't)
+    feature: np.ndarray  # (N,) uint8 index into ``features``
+    features: tuple  # the slicer's feature names ("Outer wall", "External perimeter", …)
+    tool: np.ndarray  # (N,) uint8 extruder
+    obj: np.ndarray  # (N,) int16 index into ``objects``, -1 outside any object
+    objects: tuple  # object labels (EXCLUDE_OBJECT name, M486 / slicer label id)
+    part_fan: np.ndarray  # (N,) float32 part cooling fan 0..1 while the line prints
+    fans: dict  # every fan command: {"line", "t", "fan" (index into fan_names), "value" 0..1}
+    fan_names: tuple  # "part", "P2", "P3", Klipper fan names
+    pressure_advance: dict  # {"line", "t", "value"}: M900 K / SET_PRESSURE_ADVANCE / M572
+    retracts: dict  # {"line", "t", "mm"}: filament pulled back (< 0) or pushed again (> 0)
+    travel: dict  # moves without plastic: {"p0", "p1", "t0", "t1", "speed", "line"}
+    firmware: str  # marlin / klipper / rrf / bambu
+    settings: dict  # the slicer's settings block, key -> text
 
     def part(self) -> np.ndarray:
         return np.isin(self.kind, PART_KINDS)
+
+
+# Why a line is slower than its feature's speed setting. Only LAYER_TIME (the slicer slowing a whole
+# layer so it has time to cool) may be undone by a better cooling plan; the others protect the print.
+NOT_SLOWED, OVERHANG, BRIDGE, SMALL_PERIMETER, VOLUMETRIC_CAP, LAYER_TIME, UNKNOWN = range(7)
+CAUSE_NAMES = ("", "overhang", "bridge", "small_perimeter", "volumetric_cap", "layer_time", "unknown")
+SPEED_TOL = 0.02  # a speed "matches" a setting within 2 % (slicers round F to 0.1 mm/min … 1 mm/s)
+CHUNK_BYTES = 4 << 20  # big files are read this much at a time
 
 
 def kind_of(feature: str) -> int:
@@ -64,7 +93,8 @@ def kind_of(feature: str) -> int:
 _FEATURE = re.compile(r"^;\s*(?:FEATURE|TYPE):\s*(.+?)\s*$")
 _TIME = (re.compile(r";\s*model printing time:\s*([^;\n]+)"), re.compile(r";\s*total estimated time:\s*([^;\n]+)"),
          re.compile(r";\s*estimated printing time \(normal mode\)\s*=\s*([^\n]+)"), re.compile(r";TIME:(\d+)"))
-_DIAMETER = re.compile(r";\s*filament_diameter\s*=\s*([\d.]+)")
+_SETTING = re.compile(r"^;\s*([a-z_][a-z0-9_]*)\s*=\s?(.*?)\s*$")
+_LABEL_ID = re.compile(r"unique label id:\s*(\S+)")
 
 
 def _seconds(text: str) -> float:
@@ -84,104 +114,327 @@ def _words(line: str) -> dict[str, float]:
     return out
 
 
-def parse(text: str) -> Toolpath:
-    """Every extruding move as a straight line (arcs split into chords). Times come from the feed
-    rates and are scaled to the slicer's own estimate when the file has one (it knows the
-    printer's acceleration; we don't)."""
-    m = _DIAMETER.search(text)
-    fil_area = np.pi * (float(m.group(1)) if m else 1.75) ** 2 / 4
-    slicer = "orca" if "; FEATURE:" in text else "prusa" if ";TYPE:" in text and "PrusaSlicer" in text else "cura" if ";TYPE:" in text else "unknown"
+def _params(line: str) -> dict[str, str]:
+    """Klipper-style ``NAME=value`` words."""
+    return dict(w.split("=", 1) for w in line.split(";", 1)[0].split()[1:] if "=" in w)
 
+
+def _line_blocks(source):
+    """The file's lines, a few MB at a time, so a 500 MB G-code never sits in memory as one list of
+    lines (a Python string per line costs ~50 bytes on top of its text). ``source``: text, bytes, a
+    binary or text file, or any iterable of text / bytes pieces."""
+    if isinstance(source, (str, bytes, bytearray, memoryview)):
+        pieces = (source[i:i + CHUNK_BYTES] for i in range(0, len(source), CHUNK_BYTES))
+    elif hasattr(source, "read"):
+        pieces = iter(lambda: source.read(CHUNK_BYTES), source.read(0))
+    else:
+        pieces = source
+    rest_b, rest_s = b"", ""
+    for piece in pieces:
+        if isinstance(piece, str):
+            cut = piece.rfind("\n") + 1
+            text, rest_s = rest_s + piece[:cut], piece[cut:]
+        else:
+            piece = bytes(piece)
+            cut = piece.rfind(b"\n") + 1  # never inside a UTF-8 character
+            text, rest_b = (rest_b + piece[:cut]).decode("utf-8", "replace"), piece[cut:]
+        if text:
+            yield text.splitlines()
+    tail = rest_s + rest_b.decode("utf-8", "replace")
+    if tail:
+        yield tail.splitlines()
+
+
+class _Columns:
+    """Rows gathered as tuples for one chunk of the file, then stored as compact numpy columns: a big
+    print has millions of lines, and doubles for all of them would cost several times more."""
+
+    def __init__(self, dtypes: tuple):
+        self.dtypes, self.parts, self.rows, self.done = dtypes, [[] for _ in dtypes], [], 0
+
+    def __len__(self) -> int:
+        return self.done + len(self.rows)
+
+    def flush(self) -> None:
+        if self.rows:
+            a = np.array(self.rows, dtype=float)
+            for k, dt in enumerate(self.dtypes):
+                self.parts[k].append(a[:, k].astype(dt))
+            self.done += len(self.rows)
+            self.rows = []
+
+    def columns(self) -> list[np.ndarray]:
+        """Each column joined; the pieces are freed column by column to keep the peak low."""
+        self.flush()
+        out = []
+        for k, dt in enumerate(self.dtypes):
+            parts, self.parts[k] = self.parts[k], []
+            out.append(np.concatenate(parts) if parts else np.zeros(0, dt))
+        return out
+
+
+# x0 y0 z0 x1 y1 z1, filament mm, t0, t1, feed mm/min, state (index into the (kind, feature, object, tool, fan) table)
+_LINE_COLS = ("f4",) * 6 + ("f8", "f8", "f8", "f4", "i4")
+_TRAVEL_COLS = ("f4",) * 6 + ("f8", "f8", "f4", "i4")  # x0 … z1, t0, t1, feed, next line
+_MOVES = {"G0": False, "G1": False, "G2": True, "G3": True}  # value: an arc
+
+
+def parse(source, settings: dict | None = None) -> Toolpath:
+    """Every extruding move as a straight line (arcs split into chords), with its speed, fan, tool and
+    object, and the moves, retractions, fan and pressure-advance changes in between. Times come from
+    the feed rates and are scaled to the slicer's own estimate when the file has one (it knows the
+    printer's acceleration; we don't). ``source`` as for ``_line_blocks``; ``settings`` fills gaps in
+    the file's own settings block (a ``.gcode.3mf``'s project_settings.config)."""
     x = y = z = 0.0
     e_abs, e_rel, xyz_rel = 0.0, False, False
     feed = 1800.0  # mm/min
-    kind = OTHER
     t = 0.0
-    # (x0, y0, z0, x1, y1, z1, volume, kind, t0, t1) per line, as raw doubles: a list of tuples costs
-    # ~10× the memory and a slow np.array at the end, with millions of moves in a big print.
-    rows = array("d")
+    lines, travel = _Columns(_LINE_COLS), _Columns(_TRAVEL_COLS)
+    fan_ev, pa_ev, retract_ev = [], [], []
+    features, feature_id, feature_kind = ["(none)"], {"(none)": 0}, [OTHER]
+    objects, object_id, label_ids, named = [], {}, False, set()  # named: objects from PrusaSlicer-style labels
+    fan_names, fan_id = ["part"], {"part": 0}
+    found: dict[str, str] = {}  # the file's settings
+    times: dict[int, float] = {}
+    flags = set()  # firmware hints seen in commands
+    generator, style = "", ""  # the "generated by" line; "FEATURE" (Orca, Bambu) or "TYPE" (Prusa, Cura) comments
+    # What changes rarely is kept once per combination, not per line.
+    feat, obj, tool, part_fan = 0, -1, 0, 0.0
+    states, state_id = [], {}
 
+    def state_of() -> int:
+        key = (feat, obj, tool, part_fan)
+        if key not in state_id:
+            state_id[key] = len(states)
+            states.append(key)
+        return state_id[key]
+
+    def index(name: str, names: list, ids: dict) -> int:
+        if name not in ids:
+            ids[name] = len(names)
+            names.append(name)
+        return ids[name]
+
+    state = state_of()
     # Plain floats in the loop: a big print has millions of moves (and Pyodide is ~3× slower).
-    for line in text.splitlines():
-        if not line:
-            continue
-        c = line[0]
-        if c == ";":
-            if (fm := _FEATURE.match(line)) is not None:
-                kind = kind_of(fm.group(1))
-            continue
-        if c not in "GM":
-            continue
-        cmd = line.split(None, 1)[0].split(";", 1)[0].upper()
-        if cmd in ("G0", "G1", "G2", "G3"):
-            w = _words(line)
-            if "F" in w:
-                feed = max(w["F"], 1.0)
-            nx = (x + w["X"] if xyz_rel else w["X"]) if "X" in w else x
-            ny = (y + w["Y"] if xyz_rel else w["Y"]) if "Y" in w else y
-            nz = (z + w["Z"] if xyz_rel else w["Z"]) if "Z" in w else z
-            de = 0.0
-            if "E" in w:
-                de = w["E"] if e_rel else w["E"] - e_abs
-                e_abs = e_abs + w["E"] if e_rel else w["E"]
-            if cmd in ("G2", "G3") and ("I" in w or "J" in w):
-                pts = _arc(np.array([x, y, z]), np.array([nx, ny, nz]), w.get("I", 0.0), w.get("J", 0.0), cmd == "G2")
-                lengths = np.linalg.norm(np.diff(pts, axis=0), axis=1)
-                total = float(lengths.sum())
-                dt = (total if total > 0 else abs(de)) / feed * 60
-                if de > 0 and total > 1e-6:
-                    ts = t + np.concatenate([[0], np.cumsum(lengths)]) / total * dt
-                    for k in range(len(lengths)):
-                        rows.extend((*pts[k], *pts[k + 1], de * fil_area * lengths[k] / total, kind, ts[k], ts[k + 1]))
+    for block in _line_blocks(source):
+        lines.flush()
+        travel.flush()
+        add_line, add_travel = lines.rows.append, travel.rows.append
+        for line in block:
+            if not line:
+                continue
+            c = line[0]
+            if c == ";":
+                if (fm := _FEATURE.match(line)) is not None:
+                    name = fm.group(1)
+                    if name not in feature_id:
+                        feature_kind.append(kind_of(name))
+                    feat = index(name, features, feature_id)
+                    state = state_of()
+                    style = style or ("FEATURE" if "FEATURE" in line[:12] else "TYPE")
+                elif " = " in line and (sm := _SETTING.match(line)) is not None:
+                    found.setdefault(sm.group(1), sm.group(2))
+                elif "time" in line:
+                    for k, rx in enumerate(_TIME):
+                        if k not in times and (tm := rx.search(line)) is not None:
+                            times[k] = _seconds(tm.group(1))
+                elif "printing object" in line:
+                    if (lm := _LABEL_ID.search(line)) is not None:
+                        label_ids = True
+                        obj = -1 if "stop printing" in line else index(lm.group(1), objects, object_id)
+                    elif not label_ids:  # PrusaSlicer: "; printing object NAME id:0 copy 0"
+                        name = line.split("printing object", 1)[1].strip()
+                        obj = -1 if "stop printing" in line else index(name, objects, object_id)
+                        named.add(obj)
+                    state = state_of()
+                elif not generator and ("generated" in line.lower() or "BambuStudio" in line):
+                    generator = line
+                    if "BambuStudio" in line:
+                        flags.add("bambu")
+                continue
+            if c == "G" and line[2:3] == " " and line[:2] in _MOVES:  # the hot path: most lines are moves
+                body = line[3:]
+                if ";" in body:
+                    body = body[:body.index(";")]
+                vx = vy = vz = ve = vi = vj = None
+                try:
+                    for w in body.split():
+                        k = w[0]
+                        if k == "X":
+                            vx = float(w[1:])
+                        elif k == "Y":
+                            vy = float(w[1:])
+                        elif k == "E":
+                            ve = float(w[1:])
+                        elif k == "F":
+                            feed = max(float(w[1:]), 1.0)
+                        elif k == "Z":
+                            vz = float(w[1:])
+                        elif k == "I":
+                            vi = float(w[1:])
+                        elif k == "J":
+                            vj = float(w[1:])
+                except ValueError:  # a broken word: the slow, forgiving way
+                    w = _words(line)
+                    vx, vy, vz, ve, vi, vj = (w.get(k) for k in "XYZEIJ")
+                    feed = max(w.get("F", feed), 1.0)
+                if xyz_rel:
+                    nx, ny, nz = x + (vx or 0.0), y + (vy or 0.0), z + (vz or 0.0)
+                else:
+                    nx = x if vx is None else vx
+                    ny = y if vy is None else vy
+                    nz = z if vz is None else vz
+                de = 0.0
+                if ve is not None:
+                    de = ve if e_rel else ve - e_abs
+                    e_abs = e_abs + ve if e_rel else ve
+                if _MOVES[line[:2]] and (vi is not None or vj is not None):
+                    pts = _arc(np.array([x, y, z]), np.array([nx, ny, nz]), vi or 0.0, vj or 0.0, line[1] == "2")
+                    lengths = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+                    total = float(lengths.sum())
+                    dt = (total if total > 0 else abs(de)) / feed * 60
+                    if de > 0 and total > 1e-6:
+                        ts = t + np.concatenate([[0], np.cumsum(lengths)]) / total * dt
+                        for k in range(len(lengths)):
+                            add_line((*pts[k], *pts[k + 1], de * lengths[k] / total, ts[k], ts[k + 1], feed, state))
+                    elif total > 1e-6:
+                        add_travel((x, y, z, nx, ny, nz, t, t + dt, feed, len(lines)))
+                else:
+                    total = ((nx - x) ** 2 + (ny - y) ** 2 + (nz - z) ** 2) ** 0.5
+                    dt = (total if total > 0 else abs(de)) / feed * 60
+                    if de > 0 and total > 1e-6:
+                        add_line((x, y, z, nx, ny, nz, de, t, t + dt, feed, state))
+                    elif total > 1e-6:
+                        add_travel((x, y, z, nx, ny, nz, t, t + dt, feed, len(lines)))
+                if de != 0 and not (de > 0 and total > 1e-6):  # pulled back / pushed again (also while wiping)
+                    retract_ev.append((len(lines), t, de))
+                t += dt
+                x, y, z = nx, ny, nz
+                continue
+            if c in "GM":
+                cmd = line.split(None, 1)[0].split(";", 1)[0].upper()
+            elif c in "SET":
+                cmd = line.split(None, 1)[0].upper()
             else:
-                total = ((nx - x) ** 2 + (ny - y) ** 2 + (nz - z) ** 2) ** 0.5
-                dt = (total if total > 0 else abs(de)) / feed * 60
-                if de > 0 and total > 1e-6:
-                    rows.extend((x, y, z, nx, ny, nz, de * fil_area, kind, t, t + dt))
-            t += dt
-            x, y, z = nx, ny, nz
-        elif cmd == "G90":
-            xyz_rel = False
-        elif cmd == "G91":
-            xyz_rel = True
-        elif cmd == "M82":
-            e_rel = False
-        elif cmd == "M83":
-            e_rel = True
-        elif cmd == "G92":
-            w = _words(line)
-            if "E" in w:
-                e_abs = w["E"]
-            x, y, z = w.get("X", x), w.get("Y", y), w.get("Z", z)
-        elif cmd == "G4":  # dwell
-            w = _words(line)
-            t += w.get("S", 0.0) + w.get("P", 0.0) / 1000
+                continue
+            if cmd in ("M106", "M107"):
+                w = _words(line)
+                p = int(w.get("P", 0))
+                # Marlin fan 0 is the part fan; Bambu printers call it P1 (P2 aux, P3 chamber).
+                name = "part" if p == 0 or (p == 1 and "bambu" in flags) else f"P{p}"
+                value = 0.0 if cmd == "M107" else min(max(w.get("S", 255.0) / 255, 0.0), 1.0)
+                if name == "part":
+                    part_fan = value
+                    state = state_of()
+                fan_ev.append((len(lines), t, index(name, fan_names, fan_id), value))
+            elif cmd == "SET_FAN_SPEED":
+                pr = _params(line)
+                flags.add("klipper")
+                try:
+                    fan_ev.append((len(lines), t, index(pr.get("FAN", "?"), fan_names, fan_id),
+                                   min(max(float(pr.get("SPEED", 0)), 0.0), 1.0)))
+                except ValueError:
+                    pass
+            elif cmd in ("M900", "M572", "SET_PRESSURE_ADVANCE"):
+                if cmd == "SET_PRESSURE_ADVANCE":
+                    flags.add("klipper")
+                    value = _params(line).get("ADVANCE")
+                else:
+                    if cmd == "M572":
+                        flags.add("rrf")
+                    value = _words(line).get("K" if cmd == "M900" else "S")
+                try:
+                    pa_ev.append((len(lines), t, float(value)))
+                except (TypeError, ValueError):
+                    pass
+            elif cmd == "G90":
+                xyz_rel = False
+            elif cmd == "G91":
+                xyz_rel = True
+            elif cmd == "M82":
+                e_rel = False
+            elif cmd == "M83":
+                e_rel = True
+            elif cmd == "G92":
+                w = _words(line)
+                if "E" in w:
+                    e_abs = w["E"]
+                x, y, z = w.get("X", x), w.get("Y", y), w.get("Z", z)
+            elif cmd == "G4":  # dwell
+                w = _words(line)
+                t += w.get("S", 0.0) + w.get("P", 0.0) / 1000
+            elif cmd in ("G10", "G11") and not ({"P", "L"} & set(_words(line))):  # firmware retraction
+                retract_ev.append((len(lines), t, -np.inf if cmd == "G10" else np.inf))  # length: from the settings
+            elif cmd == "M486":
+                w = _words(line)
+                if "S" in w:
+                    obj = -1 if w["S"] < 0 else index(str(int(w["S"])), objects, object_id)
+                    state = state_of()
+            elif cmd.startswith("EXCLUDE_OBJECT_"):
+                flags.add("klipper")
+                if cmd in ("EXCLUDE_OBJECT_START", "EXCLUDE_OBJECT_END"):
+                    obj = index(_params(line).get("NAME", "?"), objects, object_id) if cmd.endswith("START") else -1
+                    state = state_of()
+            elif c == "T" and cmd[1:].isdigit():
+                if int(cmd[1:]) < 255:  # Bambu's T255 / T1000 are no extruders
+                    tool = int(cmd[1:])
+                    state = state_of()
+            elif cmd in ("M620", "M621", "M1002"):
+                flags.add("bambu")
 
-    if not rows:
+    p0x, p0y, p0z, p1x, p1y, p1z, fil, t0, t1, feeds, state_of_line = lines.columns()
+    if not len(fil):
         raise ValueError("No printed lines found: is this a G-code file from a slicer?")
-    a = np.frombuffer(rows, dtype=float).reshape(-1, 10)
-    p0, p1 = a[:, 0:3], a[:, 3:6]
-    total_s = t
-    for rx in _TIME:
-        if (tm := rx.search(text)) is not None:
-            total_s = _seconds(tm.group(1))
-            break
+    table = np.array(states, dtype=float).reshape(-1, 4)  # feature, object, tool, part fan
+    feat_of = table[:, 0].astype(np.uint8)[state_of_line]
+    obj_of = table[:, 1].astype(np.int16)[state_of_line]
+    tool_of = table[:, 2].astype(np.uint8)[state_of_line]
+    fan_of = table[:, 3].astype(np.float32)[state_of_line]
+    del state_of_line
+    kinds = np.array(feature_kind, np.uint8)[feat_of]
+    named.discard(-1)
+    if label_ids and named:  # OrcaSlicer writes both label styles: keep its label ids
+        keep = [i for i in range(len(objects)) if i not in named]
+        new_id = np.full(len(objects) + 1, -1, np.int16)  # [-1] stays -1
+        new_id[keep] = np.arange(len(keep))
+        obj_of = new_id[obj_of]
+        objects = [objects[i] for i in keep]
+    found = {**{k: _text(v) for k, v in (settings or {}).items() if k not in found}, **found}
+    diameter = _number(found.get("filament_diameter"), 1.75)
+    p0 = np.column_stack([p0x, p0y, p0z])
+    del p0x, p0y, p0z
+    p1 = np.column_stack([p1x, p1y, p1z])
+    del p1x, p1y, p1z
+    volume = fil * (np.pi * diameter**2 / 4)
+    del fil
+    total_s = times[min(times)] if times else t
     scale = total_s / t if t > 0 and total_s > 0 else 1.0
+    t0 *= scale
+    t1 *= scale
+    tr = travel.columns()
+    retract = np.array(retract_ev, dtype=float).reshape(-1, 3)
+    firmware_retract = np.isinf(retract[:, 2])  # G10 / G11: the printer's own retraction length
+    retract[firmware_retract, 2] = np.copysign(_number(found.get("retraction_length"), np.nan), retract[firmware_retract, 2])
+    fan = np.array(fan_ev, dtype=float).reshape(-1, 4)
+    pa = np.array(pa_ev, dtype=float).reshape(-1, 3)
 
-    # Layers: the heights the part's own lines are printed at (support may use its own layer heights);
-    # every other line belongs to the part layer at or above it.
-    kinds = a[:, 7].astype(np.uint8)
-    z = np.round(p1[:, 2], 3)
-    part = np.isin(kinds, PART_KINDS)
-    layer_z = np.unique(z[part]) if part.any() else np.unique(z)
-    layer = np.minimum(np.searchsorted(layer_z, z - 1e-3), len(layer_z) - 1)
-    below = np.concatenate([[0.0], layer_z[:-1]])
-    lh = (layer_z - below)[layer]
-    if not part.all():  # support / skirt lines: their own height step, at most the part's
-        own = np.diff(np.concatenate([[0.0], np.unique(z)]))[np.searchsorted(np.unique(z), z)]
-        lh = np.where(part, lh, np.minimum(own, np.median(lh[part]) if part.any() else own))
-    return Toolpath(p0=p0, p1=p1, volume=a[:, 6], kind=kinds, layer=layer, layer_height=lh,
-                    t0=a[:, 8] * scale, t1=a[:, 9] * scale, layer_z=layer_z, total_s=float(total_s), slicer=slicer)
+    layer_z, layer, lh = _layers(kinds, p1[:, 2])
+    speed = feeds / 60
+    slicer = ("bambu" if "BambuStudio" in generator else "orca" if style == "FEATURE" else
+              "prusa" if style == "TYPE" and "PrusaSlicer" in generator else "cura" if style == "TYPE" else "unknown")
+    set_speed, cause = _slowdowns(features, feat_of, layer, np.linalg.norm(p1 - p0, axis=1), volume, speed, tool_of, found)
+    return Toolpath(p0=p0, p1=p1, volume=volume, kind=kinds, layer=layer, layer_height=lh, t0=t0, t1=t1,
+                    layer_z=layer_z, total_s=float(total_s), slicer=slicer, speed=speed, set_speed=set_speed, cause=cause,
+                    feature=feat_of, features=tuple(features), tool=tool_of, obj=obj_of, objects=tuple(objects),
+                    part_fan=fan_of, fans={"line": fan[:, 0].astype(np.int32), "t": fan[:, 1] * scale,
+                                           "fan": fan[:, 2].astype(np.uint8), "value": fan[:, 3].astype(np.float32)},
+                    fan_names=tuple(fan_names),
+                    pressure_advance={"line": pa[:, 0].astype(np.int32), "t": pa[:, 1] * scale, "value": pa[:, 2]},
+                    retracts={"line": retract[:, 0].astype(np.int32), "t": retract[:, 1] * scale, "mm": retract[:, 2]},
+                    travel={"p0": np.column_stack(tr[0:3]), "p1": np.column_stack(tr[3:6]), "t0": tr[6] * scale,
+                            "t1": tr[7] * scale, "speed": tr[8] / 60, "line": tr[9]},
+                    firmware=_firmware(found, flags), settings=found)
 
 
 def _arc(p0: np.ndarray, p1: np.ndarray, i: float, j: float, clockwise: bool) -> np.ndarray:
@@ -202,6 +455,203 @@ def _arc(p0: np.ndarray, p1: np.ndarray, i: float, j: float, clockwise: bool) ->
     return pts
 
 
+def _text(v) -> str:
+    """A setting from project_settings.config (a list per filament there) as the G-code block writes it."""
+    return ",".join(map(str, v)) if isinstance(v, (list, tuple)) else str(v)
+
+
+def _number(text: str | None, default: float, index: int = 0) -> float:
+    """One number from a setting ("16", "16,21" per filament → the ``index``-th, "50%" → 50)."""
+    try:
+        parts = str(text).split(",")
+        return float(parts[min(index, len(parts) - 1)].strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return default
+
+
+def _layers(kinds: np.ndarray, z1: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Layer heights, each line's layer and layer height. Layers are the heights the part's own lines
+    are printed at (support may use its own layer heights); every other line belongs to the part
+    layer at or above it."""
+    z = np.round(z1.astype(float), 3)
+    part = np.isin(kinds, PART_KINDS)
+    layer_z = np.unique(z[part]) if part.any() else np.unique(z)
+    layer = np.minimum(np.searchsorted(layer_z, z - 1e-3), len(layer_z) - 1).astype(np.int32)
+    below = np.concatenate([[0.0], layer_z[:-1]])
+    lh = (layer_z - below)[layer]
+    if not part.all():  # support / skirt lines: their own height step, at most the part's
+        heights = np.unique(z)
+        own = np.diff(np.concatenate([[0.0], heights]))[np.searchsorted(heights, z)]
+        lh = np.where(part, lh, np.minimum(own, np.median(lh[part]) if part.any() else own))
+    return layer_z, layer, lh.astype(np.float32)
+
+
+def _firmware(settings: dict, flags: set) -> str:
+    """Which firmware the file is for: Bambu printers by name or their own commands, else the
+    slicer's G-code flavour, else the commands seen."""
+    if "bambu" in flags or settings.get("printer_model", "").startswith("Bambu Lab"):
+        return "bambu"
+    flavor = settings.get("gcode_flavor", "").lower()
+    if "klipper" in flavor:
+        return "klipper"
+    if "reprapfirmware" in flavor or flavor == "rrf":
+        return "rrf"
+    if flavor:
+        return "marlin"
+    return "klipper" if "klipper" in flags else "rrf" if "rrf" in flags else "unknown"
+
+
+def _role(feature: str) -> str | None:
+    """What a feature is, in the terms the speed settings use."""
+    f = feature.lower()
+    if "overhang" in f:
+        return "overhang"
+    if "bridge" in f:
+        return "internal_bridge" if "internal" in f else "bridge"
+    if "support" in f:
+        return "support_interface" if "interface" in f else "support"
+    if f in ("outer wall", "external perimeter", "wall-outer"):
+        return "outer"
+    if "wall" in f or "perimeter" in f:
+        return "inner"
+    for role in ("gap", "ironing", "top", "bottom"):
+        if role in f:
+            return role
+    if "solid" in f or f == "skin":
+        return "solid"
+    if "infill" in f or f == "fill":
+        return "sparse"
+    if "skirt" in f or "brim" in f:
+        return "skirt"
+    return None
+
+
+# role -> speed setting, OrcaSlicer / Bambu Studio and PrusaSlicer. Bridges and overhanging walls are set
+# against what they are part of, so their own slower speed shows as the cause.
+_ORCA_SPEEDS = {
+    "outer": "outer_wall_speed", "inner": "inner_wall_speed", "overhang": "outer_wall_speed",
+    "sparse": "sparse_infill_speed", "solid": "internal_solid_infill_speed", "bottom": "internal_solid_infill_speed",
+    "top": "top_surface_speed", "bridge": "internal_solid_infill_speed", "internal_bridge": "internal_solid_infill_speed",
+    "gap": "gap_infill_speed", "support": "support_speed", "support_interface": "support_interface_speed",
+    "ironing": "ironing_speed", "skirt": "skirt_speed",
+}
+_PRUSA_SPEEDS = {
+    "outer": "external_perimeter_speed", "inner": "perimeter_speed", "overhang": "perimeter_speed",
+    "sparse": "infill_speed", "solid": "solid_infill_speed", "bottom": "solid_infill_speed",
+    "top": "top_solid_infill_speed", "bridge": "solid_infill_speed", "internal_bridge": "solid_infill_speed",
+    "gap": "gap_fill_speed", "support": "support_material_speed",
+    "support_interface": "support_material_interface_speed", "ironing": "ironing_speed", "skirt": "perimeter_speed",
+}
+# setting -> the setting a "50%" in it refers to
+_ORCA_BASE = {"small_perimeter_speed": "outer_wall_speed", "internal_bridge_speed": "bridge_speed",
+              **{f"overhang_{k}_4_speed": "outer_wall_speed" for k in range(1, 5)}}
+_PRUSA_BASE = {"solid_infill_speed": "infill_speed", "top_solid_infill_speed": "solid_infill_speed",
+               "external_perimeter_speed": "perimeter_speed", "support_material_interface_speed": "support_material_speed",
+               "small_perimeter_speed": "perimeter_speed", **{f"overhang_speed_{k}": "perimeter_speed" for k in range(4)}}
+_INFILL_ROLES = ("sparse", "solid", "bottom", "top", "bridge", "internal_bridge")
+
+
+def _speed(settings: dict, key: str, base: dict, auto: float = np.nan) -> float:
+    """A speed setting in mm/s, a percentage resolved against its base setting; 0 or missing: ``auto``."""
+    text = str(settings.get(key, "")).split(",")[0].strip()
+    value = _number(text, np.nan)
+    if text.endswith("%"):
+        return value / 100 * _speed(settings, base[key], base, auto) if key in base else np.nan
+    return value if value > 0 else auto
+
+
+def _slowdowns(features: list[str], feature: np.ndarray, layer: np.ndarray, length: np.ndarray, volume: np.ndarray,
+               speed: np.ndarray, tool: np.ndarray, settings: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Each line's set speed (its feature's speed setting; the first-layer speed on the first layer)
+    and why it is printed slower, from the slicer's settings block. Slicers slow lines for overhangs,
+    bridges and small loops at their own set speeds, cap every line at the filament's flow limit, and
+    slow a layer that would print faster than its minimum layer time by capping all its lines at one
+    speed (OrcaSlicer and Bambu Studio; PrusaSlicer slows the fastest lines first, which is the same):
+    so a layer whose fastest lines all sit at one speed below what they were set to was slowed for cooling."""
+    n = len(speed)
+    set_speed = np.full(n, np.nan, np.float32)
+    cause = np.zeros(n, np.uint8)
+    orca = "outer_wall_speed" in settings
+    if not orca and "perimeter_speed" not in settings:
+        return set_speed, cause  # no settings block (Cura, or cut off): nothing to compare with
+    s = settings
+    if orca:
+        table, base = _ORCA_SPEEDS, _ORCA_BASE
+        first = (_speed(s, "initial_layer_speed", base), _speed(s, "initial_layer_infill_speed", base))
+        bridge = (_speed(s, "bridge_speed", base), _speed(s, "internal_bridge_speed", base, _speed(s, "bridge_speed", base)))
+        overhang = [_speed(s, f"overhang_{k}_4_speed", base) for k in range(1, 5)] if s.get("enable_overhang_speed", "1") != "0" else []
+        small = _speed(s, "small_perimeter_speed", base)
+        auto, min_key, outer_kept = np.nan, "slow_down_min_speed", s.get("dont_slow_down_outer_wall", "0") == "1"
+        max_flow = [_number(s.get("filament_max_volumetric_speed"), 0, i) for i in range(int(tool.max(initial=0)) + 1)]
+    else:
+        table, base = _PRUSA_SPEEDS, _PRUSA_BASE
+        auto = _speed(s, "max_print_speed", {})  # 0 = "auto": as fast as the flow limit allows
+        fl = str(s.get("first_layer_speed", "")).strip()
+        first = (_number(fl, np.nan),) * 2 if not fl.endswith("%") else None
+        bridge = (_speed(s, "bridge_speed", base),) * 2
+        overhang = [_speed(s, f"overhang_speed_{k}", base) for k in range(4)] if s.get("enable_dynamic_overhang_speeds", "0") == "1" else []
+        small = _speed(s, "small_perimeter_speed", base)
+        min_key, outer_kept = "min_print_speed", False
+        caps = [_number(s.get("max_volumetric_speed"), 0)]
+        max_flow = [min([c for c in caps + [_number(s.get("filament_max_volumetric_speed"), 0, i)] if c > 0], default=0)
+                    for i in range(int(tool.max(initial=0)) + 1)]
+
+    roles = [_role(f) for f in features]
+    normal = np.array([_speed(s, table[r], base, auto) if r in table else np.nan for r in roles], np.float32)
+    if orca and "skirt" in roles:  # skirt_speed 0: printed at the first layer speed
+        normal[[i for i, r in enumerate(roles) if r == "skirt" and not normal[i] > 0]] = first[0]
+    if first is None:  # PrusaSlicer "50%": of each feature's own speed
+        at_first = normal * _number(fl, 100) / 100
+    else:
+        at_first = np.array([first[1] if r in _INFILL_ROLES else first[0] for r in roles], np.float32)
+        at_first = np.where(np.isfinite(normal), at_first, np.nan)  # custom G-code, prime tower: no setting
+    set_speed = np.where(layer == 0, at_first[feature], normal[feature]).astype(np.float32)
+
+    per_feature = lambda *names: np.array([r in names for r in roles])[feature]
+    wall, is_bridge, is_over = per_feature("outer", "inner"), per_feature("bridge", "internal_bridge"), per_feature("overhang")
+    bridge_speed = np.where(per_feature("internal_bridge"), bridge[1], bridge[0])
+    flow = np.asarray(max_flow, float)[np.minimum(tool, len(max_flow) - 1)]
+    area = volume / np.maximum(length, 1e-9)  # mm² of bead cross-section
+    cap = np.where(flow > 0, flow / np.maximum(area, 1e-9), np.inf)
+    near = lambda a, b: np.isfinite(b) & (np.abs(a - b) <= np.maximum(SPEED_TOL * b, 0.15))
+    slow = np.isfinite(set_speed) & (speed < set_speed * (1 - SPEED_TOL) - 0.1)
+
+    left = slow.copy()
+
+    def mark(which: np.ndarray, why: int) -> None:
+        """The first rule that fits a slowed line names its cause."""
+        cause[left & which] = why
+        left[which] = False
+
+    over_speeds = [v for v in overhang if v > 0]
+    mark(is_bridge & (near(speed, bridge_speed) | (speed >= bridge_speed)), BRIDGE)
+    if over_speeds or is_over.any():
+        on_overhang = np.zeros(n, bool)
+        for v in over_speeds + [bridge[0]]:
+            on_overhang |= near(speed, v)
+        mark((wall | is_over) & on_overhang, OVERHANG)
+    if small > 0:
+        mark(wall & near(speed, small), SMALL_PERIMETER)
+    mark(near(speed, cap), VOLUMETRIC_CAP)
+
+    # Cooling: the fastest adjustable line of the layer is slower than it was set to, and others share its speed.
+    adjustable = np.isfinite(set_speed) & ~is_bridge & ~is_over & ~(outer_kept & per_feature("outer"))
+    n_layers = int(layer.max(initial=0)) + 1
+    top = np.zeros(n_layers)
+    np.maximum.at(top, layer[adjustable], speed[adjustable])
+    v_layer = top[layer]
+    held = adjustable & near(speed, v_layer) & (speed < np.minimum(set_speed, cap) * (1 - SPEED_TOL))
+    cooled = np.zeros(n_layers, bool)
+    cooled[layer[held]] = True
+    min_speed = _number(s.get(min_key), 0)
+    mark(cooled[layer] & (near(speed, v_layer) | (min_speed > 0) & near(speed, min_speed)), LAYER_TIME)
+
+    mark(is_bridge, BRIDGE)
+    mark(is_over | wall & bool(over_speeds) & (speed >= min(over_speeds, default=np.inf) * (1 - SPEED_TOL)), OVERHANG)
+    cause[left] = UNKNOWN
+    return set_speed, cause
+
+
 def layer_times(tp: Toolpath) -> dict:
     """Per part layer: its height, layer height, the part's plastic in it (mm³) and the time from its
     start to the next layer's start (s) — how long it cools before the next one goes on. Support
@@ -217,6 +667,15 @@ def layer_times(tp: Toolpath) -> dict:
     volume = np.bincount(tp.layer[part], tp.volume[part], minlength=n)
     below = np.concatenate([[0.0], tp.layer_z[:-1]])
     return {"z": tp.layer_z, "layer_height": tp.layer_z - below, "volume": volume, "seconds": np.maximum(seconds, 1e-3)}
+
+
+def time_lost(tp: Toolpath) -> np.ndarray:
+    """Seconds each slowdown cause adds to the print (index = cause), at the feed rates: the time the
+    slowed lines take minus the time they would take at their set speed."""
+    slow = tp.cause > 0
+    length = np.linalg.norm(tp.p1[slow] - tp.p0[slow], axis=1)
+    extra = length / tp.speed[slow] - length / tp.set_speed[slow]
+    return np.bincount(tp.cause[slow], extra, minlength=len(CAUSE_NAMES))
 
 
 def bead_centres(tp: Toolpath) -> tuple[np.ndarray, np.ndarray]:

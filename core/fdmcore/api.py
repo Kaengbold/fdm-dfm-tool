@@ -1739,12 +1739,14 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
     """Read the G-code the part was sliced to (from our 3MF, in this orientation ``up``) for the
     detailed level: strength with the real walls, infill and line directions. Checks that it is this
     part (sizes, and most of the plastic inside the model; a quarter turn on the bed is found).
-    Plain G-code, or a Bambu Studio / OrcaSlicer ``.gcode.3mf`` (the G-code is inside)."""
-    from .gcode import KIND_NAMES, PART_KINDS, parse, placement
+    Plain G-code, or a Bambu Studio / OrcaSlicer ``.gcode.3mf`` (the G-code is inside, and its
+    settings next to it)."""
+    from .gcode import CAUSE_NAMES, KIND_NAMES, PART_KINDS, parse, placement, time_lost
     from .voxel import voxelize
 
     s = _require()
     p = Profile.from_dict(profile)
+    settings = None
     if isinstance(data, (bytes, bytearray)) and data[:2] == b"PK":
         import io
         import zipfile
@@ -1756,9 +1758,16 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
             if not names:
                 raise ValueError("This 3MF has no G-code inside: slice it and use “Export plate sliced file”")
             data = read_zip(z, names[0])
+            if "Metadata/project_settings.config" in z.namelist():
+                import json
+
+                try:
+                    settings = json.loads(read_zip(z, "Metadata/project_settings.config"))
+                except ValueError:
+                    pass
     if isinstance(data, (bytes, bytearray)) and data[:4] == b"GCDE":
         raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
-    tp = parse(data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else data)
+    tp = parse(data, settings)  # bytes are read a piece at a time: a big G-code is never copied as text
     rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     turned = s.mesh.triangles.reshape(-1, 3) @ rot.T
     lo, hi = turned.min(axis=0), turned.max(axis=0)
@@ -1775,10 +1784,13 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
     q, shift = placement(tp, lo - base, hi - base, inside)
     s.gcode = {"up": np.asarray(up, float) / np.linalg.norm(up), "toolpath": tp, "q": q, "shift": shift + base, "rot": rot, "printed": {}}
     vol = {KIND_NAMES[k]: round(float(tp.volume[tp.kind == k].sum()) / 1000, 2) for k in range(len(KIND_NAMES))}
-    return {"slicer": tp.slicer, "layers": int(len(tp.layer_z)), "lines": int(tp.part().sum()),
+    lost = time_lost(tp)
+    return {"slicer": tp.slicer, "firmware": tp.firmware, "layers": int(len(tp.layer_z)), "lines": int(tp.part().sum()),
             "print_time_min": round(tp.total_s / 60, 1), "plastic_cm3": vol,
             "part_grams": round(sum(vol[KIND_NAMES[k]] for k in PART_KINDS) * p.material["density_g_cm3"], 1),
-            "turned_deg": int(round(np.degrees(np.arctan2(q[1, 0], q[0, 0])))) % 360}
+            "turned_deg": int(round(np.degrees(np.arctan2(q[1, 0], q[0, 0])))) % 360,
+            # Minutes each cause of slower lines adds (only "layer_time" could be won back by better cooling).
+            "slowdown_min": {CAUSE_NAMES[c]: round(float(lost[c]) / 60, 1) for c in range(1, len(CAUSE_NAMES)) if lost[c] >= 3}}
 
 
 def _printed(model):
