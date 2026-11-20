@@ -1,0 +1,37 @@
+// English text by key (see web/i18n.js). Keys: <area>.<what>; {name} is a parameter; an object picks the
+// plural form of {count}. Keep the words plain (AGENTS.md).
+export default {
+  // "My printer isn't listed" (T-451): the first pane on message keys, the example for the rest.
+  "printer.notListed": "My printer isn't listed…",
+  "printer.notListedMore": {
+    one: "My printer isn't listed (+ {count} more)…",
+    other: "My printer isn't listed (+ about {count} more)…",
+  },
+  "printer.findIntro": "Pick it from the printers OrcaSlicer has profiles for: the bed, its height and how fast it prints come from there. Or answer three questions and start from the closest printer here.",
+  "printer.enclosed": "Is it enclosed?",
+  "printer.enclosed.none": "No, it's open",
+  "printer.enclosed.passive": "Yes, a closed box",
+  "printer.enclosed.heated": "Yes, with a heated chamber",
+  "printer.name": "Printer",
+  "printer.searchHint": "Type to search, e.g. Ender-3 V2",
+  "printer.use": "Use this printer",
+  "printer.notThere": "Not there either?",
+  "printer.bedSize": "Bed size",
+  "printer.directDrive": "Extruder on the print head (direct drive)?",
+  "printer.directDrive.yes": "Yes",
+  "printer.directDrive.no": "No, a Bowden tube",
+  "printer.startClosest": "Start from the closest",
+  "printer.listFailed": "The list of other printers didn't load: answer the three questions instead.",
+  "printer.pickFromList": "Pick a printer from the list (type part of its name).",
+  "printer.enterBed": "Enter the bed size in mm first.",
+  "printer.myPrinter": "My printer",
+  "printer.noteFromProfile": "From the OrcaSlicer profile: {from}. Assumed, please check: {assumed}. Enclosure as you said. Other values start from the {base}.",
+  "printer.noteFromAnswers": "Starts from the {base}, the closest printer here, with your bed size and enclosure. Check the height ({height} mm) and the rest before saving.",
+  "printer.fact.bed": "bed {x} × {y} × {z} mm",
+  "printer.fact.bedMoves": "the bed moves back and forth",
+  "printer.fact.bedStill": "the bed stays still",
+  "printer.fact.speed": "speed class {speed}",
+  "printer.fact.noHardened": "no hardened nozzle",
+  "printer.fact.noMultiMaterial": "no multi-material unit",
+  "printer.fact.plateUnknown": "build plate unknown",
+};

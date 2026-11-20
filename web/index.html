@@ -191,30 +191,30 @@
               <div class="row">
                 <button id="new-material">New material…</button>
                 <button id="new-printer">New printer…</button>
-                <button id="find-printer">My printer isn't listed…</button>
+                <button id="find-printer" data-i18n="printer.notListed"></button>
                 <label class="file-button">Import OrcaSlicer filament…<input id="import-orca" type="file" accept=".json" hidden /></label>
               </div>
               <div id="printer-finder" class="preset-form" hidden>
-                <p class="hint">Pick it from the printers OrcaSlicer has profiles for: the bed, its height and how fast it prints
-                  come from there. Or answer three questions and start from the closest printer here.</p>
+                <!-- Text by key (web/messages/en.js, T-454): the example for moving the rest of the page over. -->
+                <p class="hint" data-i18n="printer.findIntro"></p>
                 <div class="row">
-                  <label>Is it enclosed? <select id="pf-enclosure">
-                    <option value="none">No, it's open</option>
-                    <option value="passive">Yes, a closed box</option>
-                    <option value="heated">Yes, with a heated chamber</option></select></label>
+                  <label><span data-i18n="printer.enclosed"></span> <select id="pf-enclosure">
+                    <option value="none" data-i18n="printer.enclosed.none"></option>
+                    <option value="passive" data-i18n="printer.enclosed.passive"></option>
+                    <option value="heated" data-i18n="printer.enclosed.heated"></option></select></label>
                 </div>
                 <div class="row">
-                  <label>Printer <input id="orca-printer" list="orca-printer-list" placeholder="Type to search, e.g. Ender-3 V2" autocomplete="off" /></label>
+                  <label><span data-i18n="printer.name"></span> <input id="orca-printer" list="orca-printer-list" data-i18n-placeholder="printer.searchHint" autocomplete="off" /></label>
                   <datalist id="orca-printer-list"></datalist>
-                  <button type="button" id="orca-printer-use">Use this printer</button>
+                  <button type="button" id="orca-printer-use" data-i18n="printer.use"></button>
                 </div>
-                <p class="hint">Not there either?</p>
+                <p class="hint" data-i18n="printer.notThere"></p>
                 <div class="row">
-                  <label>Bed size <input id="pf-bed" type="number" step="1" min="50" value="220" /> mm</label>
-                  <label>Extruder on the print head (direct drive)? <select id="pf-drive">
-                    <option value="yes">Yes</option>
-                    <option value="no">No, a Bowden tube</option></select></label>
-                  <button type="button" id="pf-closest">Start from the closest</button>
+                  <label><span data-i18n="printer.bedSize"></span> <input id="pf-bed" type="number" step="1" min="50" value="220" /> mm</label>
+                  <label><span data-i18n="printer.directDrive"></span> <select id="pf-drive">
+                    <option value="yes" data-i18n="printer.directDrive.yes"></option>
+                    <option value="no" data-i18n="printer.directDrive.no"></option></select></label>
+                  <button type="button" id="pf-closest" data-i18n="printer.startClosest"></button>
                 </div>
               </div>
               <form id="preset-form" class="preset-form" hidden>
