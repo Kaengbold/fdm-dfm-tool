@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 PKG = Path(__file__).resolve().parents[1] / "core" / "fdmcore"
-LOCAL_ONLY = {"mcp_server.py", "booleans.py", "slicer_cli.py", "cli.py"}  # need packages Pyodide doesn't have, or run programs
+LOCAL_ONLY = {"mcp_server.py", "booleans.py", "slicer_cli.py", "cli.py", "local.py"}  # need packages Pyodide doesn't have, or run programs
 
 
 def file_hash(path: Path) -> str:

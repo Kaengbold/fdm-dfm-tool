@@ -4529,7 +4529,22 @@ $("tune-save").onclick = async () => {
   await setupChanged("material"); // remembered for the next visit; a loaded part is checked again with them
   renderSetup();
 };
-initPresets().catch((err) => setStatus(`Engine failed to start: ${err.message}`, true));
+initPresets().then(openFromLink).catch((err) => setStatus(`Engine failed to start: ${err.message}`, true));
+
+/** Local mode (`fdmdfm open part.stl`): the page's address names a part the same local server serves. */
+async function openFromLink() {
+  const path = new URLSearchParams(location.search).get("open");
+  if (!path) return;
+  const url = new URL(path, location.href);
+  if (url.origin !== location.origin) return setStatus("Only parts served by this page can be opened from its address.", true);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Couldn't open ${decodeURIComponent(url.pathname.split("/").pop())}: it was moved, or the local page was restarted for another part.`);
+    await openFile(decodeURIComponent(url.pathname.split("/").pop()), new Uint8Array(await res.arrayBuffer()));
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
 
 /** Multi-material checkbox follows the printer: none = off, built-in = on, optional add-on = user's choice. */
 function syncMultiMaterial() {
