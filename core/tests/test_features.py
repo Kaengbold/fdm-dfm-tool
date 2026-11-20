@@ -498,3 +498,46 @@ def test_rounds_on_an_already_rounded_part_are_finite():
     for size in (2, 4):
         for e in api.design(up, prof, {"stress_chamfer_mm": size})["edits"]:
             assert np.isfinite(np.frombuffer(e["mesh"], "<f4")).all(), e["id"]
+
+
+def _open_gap_edits(stl: bytes, name: str) -> tuple[list[dict], list[dict]]:
+    api.load(stl, name)
+    d = api.design([0, 0, 1], {})
+    return [e for e in d["edits"] if e["rule"] == "open_gap"], d["advice"]
+
+
+def _applied_volume_change(edits: list[dict]) -> float:
+    """Volume the edits change; the result must stay one closed solid."""
+    pytest.importorskip("manifold3d")
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import mesh_health
+
+    before = api._require().mesh
+    after = apply_edits(before, edits)
+    health = mesh_health(after)
+    assert health["boundary_edges"] == 0 and health["non_manifold_edges"] == 0
+    return after.volume() - before.volume()
+
+
+def test_a_gap_that_fuses_is_opened_to_one_that_prints():
+    """feature_test's 0.15 mm gap between two 13 × 10 mm walls (T-439): opened to 0.3 mm, half into each wall,
+    as a fix for the gap_fuses finding and as advice with the number."""
+    edits, advice = _open_gap_edits((SAMPLES / "feature_test.stl").read_bytes(), "feature_test")
+    assert len(edits) == 1
+    e = edits[0]
+    assert e["op"] == "cut" and e["fixes"]["rule"] == "gap_fuses" and "0.3 mm" in e["title"]
+    assert any(a["text"] == "Open this gap to 0.3 mm (now 0.15)" and a["edit_id"] == e["id"] for a in advice)
+    assert _applied_volume_change(edits) == pytest.approx(-13 * 10 * 0.15, abs=0.3)
+
+
+def test_a_flat_gap_in_height_opens_in_whole_layers():
+    """A pin's flat 10 × 10 mm top 0.3 mm under a bridged cap (flat_gap_fuses): opened to 0.4 mm, two 0.2 mm layers;
+    at 0.8 mm it already prints and gets nothing."""
+    from fdmcore.mesh import to_binary_stl
+    from test_checks import _clip
+
+    edits, advice = _open_gap_edits(to_binary_stl(_clip(0.3)), "clip")
+    assert len(edits) == 1 and edits[0]["fixes"]["rule"] == "flat_gap_fuses" and "0.4 mm" in edits[0]["title"]
+    assert any(a["text"] == "Open this gap to 0.4 mm (now 0.30)" for a in advice)
+    assert _applied_volume_change(edits) == pytest.approx(-10 * 10 * 0.1, abs=0.3)
+    assert not _open_gap_edits(to_binary_stl(_clip(0.8)), "clip")[0]

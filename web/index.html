@@ -99,6 +99,14 @@
               <span>Looks like a sculpted model (a figure, scan or sculpt): checks for holes and fine CAD detail are off.</span>
               <label><input type="checkbox" id="cad-checks"> Check holes, gaps and fine detail anyway</label>
             </div>
+            <section id="saved" class="saved" aria-labelledby="saved-title" hidden>
+              <div class="saved-head">
+                <h3 id="saved-title">Your recent projects</h3>
+                <button type="button" id="saved-clear" class="link">Delete all</button>
+              </div>
+              <ol id="saved-list" class="saved-list"></ol>
+              <p class="hint">Kept in this browser only, the newest first.</p>
+            </section>
             <div class="samples">
               <span>No file at hand? Try a sample:</span>
               <div class="sample-example"><button data-sample="hole_block">Sideways holes</button><p class="hint">Holes can sag inside. See the problem and the settings that help.</p></div>

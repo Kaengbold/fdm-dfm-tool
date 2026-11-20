@@ -1807,7 +1807,8 @@ def _upright_hinges(layers: list[Layer], profile: Profile, X: dict, mat: str) ->
                             f"Thin strip {_rect_sides(g.convex_hull)[0]:.1f} mm thick at {z0:.1f} mm joins the parts above and below: if it is "
                             f"meant to bend (a hinge), it bends across its layers and breaks. Lay the part so the strip lies flat. "
                             f"{_hinge_note(mat, X, profile.material['name'])}",
-                            bbox=_layer_bbox(g, z0 - profile.layer_height / 2, z1 + profile.layer_height / 2), height_mm=round(z1 - z0, 2)))
+                            bbox=_layer_bbox(g, z0 - profile.layer_height / 2, z1 + profile.layer_height / 2), height_mm=round(z1 - z0, 2),
+                            thickness_mm=round(_rect_sides(g.convex_hull)[0], 2), upright=True))
     return out
 
 
