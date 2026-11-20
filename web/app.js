@@ -324,7 +324,12 @@ async function openProject(bytes) {
   } catch (err) {
     return setStatus(err.message, true);
   }
-  return applyProject(p);
+  projectOpening++; // autosave waits until everything in it is set
+  try {
+    return await applyProject(p);
+  } finally {
+    projectOpening--;
+  }
 }
 
 /** Load a parsed project (from a project file or binary autosave): the part, then what was set on it. */
@@ -435,6 +440,7 @@ async function loadFile(name, bytes, faceIds = null, step = null, as = "new", ke
     state.source = { name, bytes, faceIds, body: keep.body, scale: keep.scale }; // to restore the part after a cancel
     state.keepUp = keep.up ?? null;
     if (as === "new" || !state.versions.length) {
+      startSavedProject(); // its own entry in "Your recent projects"
       state.turnOffered = false; // a new part: offer a stronger orientation again (T-368)
       state.versions = [{ label: "Original" }];
       state.version = 0;
@@ -4955,13 +4961,20 @@ $("copy-report").onclick = async () => {
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js");
 
 
-// ---------- autosave ----------
-// The open project is kept in this browser so a refresh or a closed tab can carry on ("Continue where
-// you left off?"). IndexedDB, not localStorage: a big part is several MB. The mesh is stored once as a
-// binary Blob (only rewritten when the part's bytes actually change) and the settings as a tiny JSON
-// string. Older text-only autosaves still restore. Storage blocked: no autosave, nothing breaks.
-const AUTOSAVE_KEY = "current";
-const AUTOSAVE_PART_KEY = "part";
+// ---------- saved projects (autosave) ----------
+// Every part worked on is kept in this browser (T-453): the last few show on the start screen ("Your recent
+// projects") and the newest is offered after a refresh ("Continue where you left off?"). IndexedDB, not
+// localStorage: a big part is several MB. Per project the mesh is a binary Blob under "part:<id>" (only
+// rewritten when the part's bytes change) and the settings, picture and verdict a small record under
+// "meta:<id>". Past SAVED_MAX projects or SAVED_MAX_BYTES of parts the oldest go first. "Save project"
+// still writes a file. Storage blocked: no list, nothing breaks.
+const SAVED_MAX = 10;
+const SAVED_MAX_BYTES = 150 * 2 ** 20; // several big CAD exports, far below a browser's quota
+const SAVED_SHOWN = 3; // the rest fold away under "older projects"
+const META = "meta:";
+const PART = "part:";
+const LEGACY_KEY = "current"; // the single slot used before the list
+const LEGACY_PART_KEY = "part";
 
 function openAutosaveDb() {
   return new Promise((resolve, reject) => {
@@ -5007,48 +5020,82 @@ async function autosaveWrite(op) {
   }
 }
 
+const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** The saved projects' small records, newest first (none when storage is blocked). */
+async function savedProjects() {
+  const metas = await autosaveStore("readonly", (s) => s.getAll(IDBKeyRange.bound(META, `${META}￿`)));
+  return (metas ?? []).sort((a, b) => b.time - a.time);
+}
+
+/** Move the single autosave slot of older versions into the list, once. */
+async function migrateLegacyAutosave() {
+  const old = await autosaveStore("readonly", (s) => s.get(LEGACY_KEY));
+  if (!old) return;
+  const id = newId();
+  const split = old.format === "split";
+  const part = split ? await autosaveStore("readonly", (s) => s.get(LEGACY_PART_KEY)) : null;
+  const usable = split ? Boolean(part?.stl) && (!old.partId || part.id === old.partId) : Boolean(old.text);
+  await autosaveWrite((s) => {
+    if (usable && split) {
+      s.put({ ...old, id, size: part.stl.size ?? part.stl.byteLength ?? 0 }, META + id);
+      s.put(part, PART + id);
+    } else if (usable) {
+      s.put({ id, name: old.name, time: old.time, text: old.text, size: old.text.length }, META + id);
+    }
+    s.delete(LEGACY_KEY);
+    s.delete(LEGACY_PART_KEY);
+  });
+}
+
+let projectId = null; // the saved project the open part belongs to; null: not saved (deleted while open)
+let reopenId = null; // set while a saved project opens, so it keeps its entry instead of making a copy
+let projectOpening = 0; // no autosave halfway through opening a project (it would save half its settings)
+
+/** A part loaded as new starts its own saved project; one opened from the list keeps its id. */
+function startSavedProject() {
+  projectId = reopenId ?? newId();
+  $("restore").hidden = true;
+}
+
 let autosaved = "";
 // WeakRefs so autosave bookkeeping never pins a previous part's buffers in memory.
-let autosavedPart = null; // { id, trianglesRef, bytesRef, body, scale, faceIdsRef, hasFaceIds }
+let autosavedPart = null; // { project, id, trianglesRef, bytesRef, body, scale, faceIdsRef, hasFaceIds, size }
 async function autosave() {
-  if (!state.triangles || !activeOption() || busyCount) return;
+  if (!state.triangles || !activeOption() || busyCount || projectOpening || !projectId) return;
+  const project = projectId;
   const settings = JSON.stringify(projectFields());
-  const sig = `${state.name}\0${settings}`;
+  const v = state.check ? verdict() : null;
+  const sig = `${project}\0${state.name}\0${v?.head}\0${settings}`;
   const src = state.source;
   const body = src?.body ?? 0;
   const scale = src?.scale ?? 1;
   const faceIds = state.faceRegions ?? null;
-  const sameGeom = Boolean(autosavedPart) && (
+  const known = autosavedPart?.project === project;
+  const sameGeom = known && (
     autosavedPart.trianglesRef?.deref() === state.triangles
     || (src?.bytes && autosavedPart.bytesRef?.deref() === src.bytes
       && autosavedPart.body === body && autosavedPart.scale === scale)
   );
-  const sameFaces = Boolean(autosavedPart) && (
+  const sameFaces = known && (
     (!faceIds && !autosavedPart.hasFaceIds)
     || (Boolean(faceIds) && autosavedPart.faceIdsRef?.deref() === faceIds)
   );
-  let needPart = !sameGeom || !sameFaces;
-  if (!needPart && sig === autosaved) return;
+  if (sameGeom && sameFaces && sig === autosaved) return;
   let partRecord = null;
   let nextPart = autosavedPart;
-  if (needPart) {
+  if (!sameGeom || !sameFaces) {
     const bytes = currentStlBytes();
-    const prevBytes = autosavedPart?.bytesRef?.deref();
+    const prevBytes = known ? autosavedPart.bytesRef?.deref() : null;
     if (prevBytes && sameFaces && bytesEqual(prevBytes, bytes)) {
-      needPart = false;
-      nextPart = {
-        ...autosavedPart,
-        trianglesRef: new WeakRef(state.triangles),
-        bytesRef: new WeakRef(bytes),
-        body,
-        scale,
-      };
+      nextPart = { ...autosavedPart, trianglesRef: new WeakRef(state.triangles), bytesRef: new WeakRef(bytes), body, scale };
       autosavedPart = nextPart;
       if (sig === autosaved) return;
     } else {
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const id = newId();
       partRecord = { id, name: state.name, stl: new Blob([bytes], { type: "model/stl" }), faceIds };
       nextPart = {
+        project,
         id,
         trianglesRef: new WeakRef(state.triangles),
         bytesRef: new WeakRef(bytes),
@@ -5056,53 +5103,135 @@ async function autosave() {
         scale,
         faceIdsRef: faceIds ? new WeakRef(faceIds) : null,
         hasFaceIds: Boolean(faceIds),
+        size: bytes.byteLength + (faceIds?.byteLength ?? 0),
       };
     }
   }
-  const metaRecord = { format: "split", partId: nextPart.id, settings, name: state.name, time: Date.now() };
+  let thumb = null;
+  try {
+    thumb = viewer.thumbnail({ up: activeOption().up, size: [96, 72] });
+  } catch {} // e.g. a lost GPU context: saved without a picture
+  const meta = {
+    format: "split", id: project, partId: nextPart.id, settings, name: state.name, time: Date.now(),
+    thumb, verdict: v && { kind: v.kind, head: v.head }, size: nextPart.size,
+  };
   const ok = await autosaveWrite((s) => {
-    if (partRecord) s.put(partRecord, AUTOSAVE_PART_KEY);
-    s.put(metaRecord, AUTOSAVE_KEY);
+    if (partRecord) s.put(partRecord, PART + project);
+    s.put(meta, META + project);
   });
-  if (ok) {
-    autosaved = sig;
-    autosavedPart = nextPart;
+  if (!ok) return;
+  if (project !== projectId) { // removed from the list while it was written: take it out again
+    if (!projectId) await autosaveWrite((s) => (s.delete(META + project), s.delete(PART + project)));
+    return renderSaved();
   }
+  autosaved = sig;
+  autosavedPart = nextPart;
+  await pruneSaved();
+  renderSaved();
 }
 setInterval(autosave, 60_000);
 globalThis.fdm.autosave = autosave; // for the browser test
 document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && autosave());
 
-/** At start: offer the project from last time, if there is one. */
-async function offerRestore() {
-  const saved = await autosaveStore("readonly", (s) => s.get(AUTOSAVE_KEY));
-  if (!saved) return;
-  const isSplit = saved.format === "split" && typeof saved.settings === "string";
-  if (!isSplit && !saved.text) return;
-  if (isSplit) {
-    const part = await autosaveStore("readonly", (s) => s.get(AUTOSAVE_PART_KEY));
-    if (!part?.stl || (saved.partId && part.id && part.id !== saved.partId)) return;
+/** Keep the newest SAVED_MAX projects within SAVED_MAX_BYTES; the open one always stays. */
+async function pruneSaved() {
+  let total = 0;
+  const old = (await savedProjects()).filter((m, i) => {
+    total += m.size ?? 0;
+    return m.id !== projectId && (i >= SAVED_MAX || total > SAVED_MAX_BYTES);
+  });
+  if (old.length) await autosaveWrite((s) => old.forEach((m) => (s.delete(META + m.id), s.delete(PART + m.id))));
+}
+
+/** Open a saved project from the list; it stays the same entry and moves to the top when saved again. */
+async function openSaved(id) {
+  const meta = await autosaveStore("readonly", (s) => s.get(META + id));
+  if (!meta) {
+    setStatus("This project isn't saved in this browser anymore.", true);
+    return renderSaved();
   }
-  const when = new Date(saved.time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-  const close = () => ($("restore").hidden = true);
-  const restore = async () => {
-    close();
-    if (!isSplit) return openProject(new TextEncoder().encode(saved.text));
-    const part = await autosaveStore("readonly", (s) => s.get(AUTOSAVE_PART_KEY));
+  reopenId = id;
+  projectOpening++;
+  try {
+    if (meta.text) return await openProject(new TextEncoder().encode(meta.text)); // an old text-only autosave
+    const part = await autosaveStore("readonly", (s) => s.get(PART + id));
     if (!part?.stl) return setStatus("Could not find the saved part anymore.", true);
     let fields;
     try {
-      fields = JSON.parse(saved.settings);
+      fields = JSON.parse(meta.settings);
     } catch {
-      return setStatus("The autosaved settings could not be read.", true);
+      return setStatus("The saved settings of this project could not be read.", true);
     }
     const stl = part.stl instanceof Blob ? new Uint8Array(await part.stl.arrayBuffer()) : new Uint8Array(part.stl);
-    await applyProject({ ...fields, name: saved.name || part.name || "part", stl, faceIds: part.faceIds ?? null });
+    await applyProject({ ...fields, name: meta.name || part.name || "part", stl, faceIds: part.faceIds ?? null });
+  } finally {
+    reopenId = null;
+    projectOpening--;
+    renderSaved();
+  }
+}
+
+/** Remove saved projects; the open part is no longer saved until another one is loaded. */
+async function deleteSaved(ids) {
+  if (ids.includes(projectId)) {
+    projectId = null;
+    autosavedPart = null;
+    autosaved = "";
+  }
+  await autosaveWrite((s) => ids.forEach((id) => (s.delete(META + id), s.delete(PART + id))));
+  renderSaved();
+}
+
+const savedWhen = (time) => new Date(time).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+
+/** One row: picture, name, when and the verdict. The open project is marked instead of being a button. */
+function savedItem(m) {
+  const open = m.id === projectId;
+  const name = m.name || "Your part";
+  const body = [
+    m.thumb ? el("img", { src: m.thumb, alt: "", width: 64, height: 48, decoding: "async" }) : el("span", { className: "saved-thumb" }),
+    el("span", { className: "saved-text" },
+      el("strong", { textContent: name }),
+      el("span", { className: "saved-when", textContent: open ? "Open now" : savedWhen(m.time) }),
+      m.verdict ? el("span", { className: `saved-verdict ${m.verdict.kind}`, textContent: m.verdict.head }) : ""),
+  ];
+  const card = open ? el("div", { className: "saved-open" }, ...body)
+    : el("button", { type: "button", className: "saved-open", title: `Open ${name} with everything that was set on it`,
+      onclick: () => openSaved(m.id) }, ...body);
+  const remove = el("button", { type: "button", className: "link saved-remove", textContent: "Remove",
+    onclick: () => deleteSaved([m.id]) });
+  remove.setAttribute("aria-label", `Remove ${name} from this list`);
+  return el("li", { className: open ? "saved-item current" : "saved-item" }, card, remove);
+}
+
+/** "Your recent projects" on the start screen; returns the list, newest first. */
+async function renderSaved() {
+  const list = await savedProjects();
+  $("saved").hidden = !list.length;
+  const rows = list.map(savedItem);
+  const older = rows.splice(SAVED_SHOWN);
+  const fold = older.length ? el("li", {}, el("details", { className: "saved-more" },
+    el("summary", { textContent: `${older.length} older project${older.length === 1 ? "" : "s"}` }),
+    el("ol", { className: "saved-list" }, ...older))) : "";
+  $("saved-list").replaceChildren(...rows, fold);
+  $("saved-clear").onclick = () => {
+    const what = list.length === 1 ? "the saved project" : `all ${list.length} saved projects`;
+    if (confirm(`Delete ${what} from this browser? Project files you downloaded are not affected.`)) {
+      deleteSaved(list.map((m) => m.id));
+    }
   };
-  const clear = () => (close(), autosaveWrite((s) => { s.delete(AUTOSAVE_KEY); s.delete(AUTOSAVE_PART_KEY); }));
-  $("restore").replaceChildren(`Continue where you left off? ${saved.name || "Your part"}, ${when}. `,
-    el("button", { textContent: "Open it", onclick: restore }),
-    el("button", { className: "link", textContent: "No thanks", onclick: clear }));
+  return list;
+}
+
+/** At start: list the saved projects and offer the newest one ("Continue where you left off?"). */
+async function offerRestore() {
+  await migrateLegacyAutosave();
+  const [last] = await renderSaved();
+  if (!last || state.triangles) return;
+  const close = () => ($("restore").hidden = true);
+  $("restore").replaceChildren(`Continue where you left off? ${last.name || "Your part"}, ${savedWhen(last.time)}. `,
+    el("button", { textContent: "Open it", onclick: () => (close(), openSaved(last.id)) }),
+    el("button", { className: "link", textContent: "No thanks", onclick: close }));
   $("restore").hidden = false;
 }
 offerRestore();
