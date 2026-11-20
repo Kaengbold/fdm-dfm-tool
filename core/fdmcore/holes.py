@@ -63,16 +63,19 @@ def _axis_angles(mesh: Mesh) -> list[float]:
         return []
     # Axis is perpendicular to the normal's horizontal part.
     ang = np.mod(np.arctan2(n[slanted, 1], n[slanted, 0]) + np.pi / 2, np.pi)
-    hist, edges = np.histogram(ang, bins=36, range=(0, np.pi), weights=a[slanted])
+    # One bin index for both the histogram and the averaging below: np.histogram's own edge rounding can put
+    # an angle on a bin edge in the neighbouring bin, leaving the picked bin empty (seen on Linux CI).
+    bins = np.minimum((ang * (36 / np.pi)).astype(int), 35)
+    hist = np.bincount(bins, weights=a[slanted], minlength=36)
     picks = []
     for i in np.argsort(-hist):
-        if hist[i] < 0.1 * hist.max() or len(picks) == MAX_AXES:
+        if hist[i] <= 0 or hist[i] < 0.1 * hist.max() or len(picks) == MAX_AXES:
             break
         if all(min(abs(i - j), 36 - abs(i - j)) > 1 for j in picks):
             picks.append(i)
     out = []
     for i in picks:
-        sel = (ang >= edges[i]) & (ang < edges[i + 1])
+        sel = bins == i
         out.append(float(np.average(ang[sel], weights=a[slanted][sel])))
     return out
 
