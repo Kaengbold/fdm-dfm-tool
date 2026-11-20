@@ -48,3 +48,4 @@ Sample parts in `web/samples/`. No user testimonials, no benchmarks: do not inve
 3. Rough but honest: simulations are indications.
 4. One clear next step at any moment.
 5. Show cause and effect: what a change updates.
+6. Show first what only this tool can do (decided 2026-11-15, T-431). What the slicer does better (print time, painting supports, arranging a plate, cutting, textures) stays reachable but comes after it, with a line saying the slicer can do it too.
