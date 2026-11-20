@@ -724,7 +724,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: `pip install -e "core[local]"` plus an MCP config line by hand.
   - Do: one command that needs no checkout (`uvx fdmdfm …` / `pipx install fdmdfm`), a command `fdmdfm setup` that writes the MCP entry for Claude Code / Codex / Gemini CLI after asking, and `fdmdfm open part.stl` that starts the local page with the part. No dependence on the user's install paths or slicer version (ship pinned data).
   - Done when: a fresh machine gets from nothing to a first agent call with two commands, documented.
-- [ ] **T-451 P2** [J] More printers through profile import. · files: `web/mypresets.js`, `core/fdmcore/data/presets.yaml`, `core/fdmcore/data/orca_profiles.json.gz`, `web/app.js` · owner: — · continues T-026
+- [ ] **T-451 P2** [J] More printers through profile import. · files: `web/mypresets.js`, `core/fdmcore/data/presets.yaml`, `core/fdmcore/data/orca_profiles.json.gz`, `web/app.js` · owner: Claude (`task/T-451-more-printers`) · continues T-026
   - Seen: 15 printers. Nothing says what to pick when yours is missing. Adding one means "Copy as YAML" into a pull request.
   - Do: (1) "My printer isn't listed" → pick the closest by three questions (enclosed? bed size? direct drive?) or (2) choose it from the shipped OrcaSlicer machine profiles (bed size, enclosure, nozzle read from there). Show which values are from the profile and which are assumed.
   - Done when: any printer in the shipped Orca profile set can be picked; the list says "+ about N more".
