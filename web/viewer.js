@@ -842,6 +842,8 @@ export class Viewer {
   /** One cancellable eased move, shared by finding focus and whole-part turns. */
   moveCamera(endPos, endTarget, outside = null) {
     this.cancelCameraMove();
+    // Someone asked to see a place: a folded view (phones) unfolds for it.
+    this.el.dispatchEvent(new CustomEvent("viewer-look"));
     const startTarget = this.controls.target.clone();
     const startPos = this.camera.position.clone();
     const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
