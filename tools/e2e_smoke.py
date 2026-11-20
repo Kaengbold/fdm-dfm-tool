@@ -1829,14 +1829,34 @@ def _run_suite(port: int, args) -> Run:
             run.act(lambda: click_sample(page, "hook"))
             page.evaluate("async () => { const r = await fdm.call('regions'); const flat = r.regions.filter((x) => x.kind === 'flat');"
                           " fdm.state.loads = [{ region: flat[0].id, kind: 'fixed' }, { region: flat[1].id, kind: 'force', kg: 2 }]; }")
+            # T-377: its own step in Advanced, after the design changes.
+            level = page.evaluate("() => fdm.steps.level")
+            page.click("input[name=level][value=advanced] >> xpath=..")
+            order = page.evaluate("() => fdm.steps.steps")
+            assert order.index("lighter") == order.index("extra") + 1, order
+            assert not page.locator("[data-pane=design] #run-topology").count(), "still inside Design changes"
+            page.evaluate("() => fdm.steps.go('lighter')")
             page.evaluate("() => { const k = document.getElementById('topo-keep'); k.value = '50'; k.oninput(); }")
             # Loads set directly (not by clicking faces), so the button isn't refreshed: enable it as renderLoads would.
             run.act(lambda: page.evaluate("() => { const b = document.getElementById('run-topology'); b.disabled = false; b.click(); }"), 900_000)
             text = page.locator("#topology-result").inner_text()
             assert " g instead of " in text and "CAD" in text, text
+            # Shown by default on the faded part, without changing the part; gone on other steps.
+            shown = "() => Boolean(fdm.viewer.lighter?.visible) && fdm.viewer.part.material.opacity < 1"
+            assert page.evaluate(shown), "the lighter shape isn't shown after the run"
+            assert "lighter" not in page.evaluate("() => fdm.state.name"), "the run replaced the part"
+            page.locator("#topology-result input[type=checkbox]").uncheck()
+            assert not page.evaluate(shown) and page.evaluate("() => fdm.viewer.part.material.opacity") == 1, "switch off keeps it"
+            page.locator("#topology-result input[type=checkbox]").check()
+            page.evaluate("() => fdm.steps.go('design')")
+            assert not page.evaluate(shown), "the shape stays on another step"
+            page.evaluate("() => fdm.steps.go('lighter')")
+            assert page.evaluate(shown), "the shape doesn't come back on its step"
             versions = page.evaluate("() => fdm.state.versions.length")
-            run.act(lambda: page.evaluate("() => [...document.querySelectorAll('#topology-result button')].find((b) => b.textContent === 'Show it in 3D').click()"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="Use it as a new version").click(), 300_000)
             assert page.evaluate("() => fdm.state.versions.length") == versions + 1 and "lighter_50" in page.evaluate("() => fdm.state.name")
+            assert not page.evaluate("() => Boolean(fdm.viewer.lighter)"), "the old shape stays on the new version"
+            page.click(f"input[name=level][value={level}] >> xpath=..")
             return text.splitlines()[0]
         run.step("suggest a lighter shape", lighter_shape)
 
