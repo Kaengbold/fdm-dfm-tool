@@ -966,7 +966,8 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
 - [x] **T-491 P1** [UX] The header can jump to the bottom of the page: it had no grid row, so anything added before it (e.g. a browser extension's element) pushes it below the app. · files: `web/style.css` · owner: Claude (`task/T-491-header-row`)
   - Outcome: `.top` now has a fixed grid row (`grid-area: 1 / 1 / 2 / -1`); with an element injected before it the header stays on top at 1960, 800 and 390 px (it dropped to y=962 before). Quick smoke test green.
 - [ ] **T-491 P1** [UX] The header can jump to the bottom of the page: it had no grid row, so anything added before it (e.g. a browser extension's element) pushes it below the app. · files: `web/style.css` · owner: Claude (`task/T-491-header-row`)
-- [ ] **T-492 P3** [UX] Info boxes (the text behind an ⓘ) without the coloured stripe on the left: the user prefers the plain tinted box. · files: `web/style.css` · owner: Claude (task/T-492-no-side-stripe)
+- [x] **T-492 P3** [UX] Info boxes (the text behind an ⓘ) without the coloured stripe on the left: the user prefers the plain tinted box. · files: `web/style.css` · owner: Claude (task/T-492-no-side-stripe)
+  - Outcome: `.info-text` keeps its tinted background and rounded corners, without the 3 px accent border; it now matches the other hint boxes (`.affects`, `.kind-hint`). Quick browser test 0 failures (one CSS line, so not the full run).
 
 ## Done
 
