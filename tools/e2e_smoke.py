@@ -858,11 +858,16 @@ def _run_suite(port: int, args) -> Run:
             assert page.locator("#edits input:checked").count() == 0
             fixes = page.locator("#edits > li:not(.other-ideas) .edit-for").all_inner_texts()
             assert fixes and all(t.startswith("Fixes: ") for t in fixes), f"changes without their finding: {fixes}"
+            numbers = page.locator("#cad-advice > li").all_inner_texts()
+            assert any("teardrop" in t for t in numbers), f"no CAD numbers for the sideways holes: {numbers}"
+            page.locator("#cad-advice > li button").first.click()  # highlights it on the part
+            assert page.locator("#cad-advice > li.active").count() == 1
             boxes.first.check()
             chosen = page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)")
             run.act(lambda: page.dispatch_event("#param-teardrop_angle_deg", "change"))
             assert page.evaluate("() => fdm.state.edits.filter(e => e.selected).map(e => e.id)") == chosen, "re-suggest lost ticks"
-            return f"{count} unticked suggestions ({len(fixes)} fix a finding); all, none and re-suggest ticks kept"
+            return (f"{count} unticked suggestions ({len(fixes)} fix a finding); all, none and re-suggest ticks kept; "
+                    f"{len(numbers)} CAD numbers")
         run.step("suggestions start unticked and keep user choices", suggestion_selection)
 
         def project_suggestion_ticks():
