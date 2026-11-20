@@ -959,6 +959,8 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Done when: all ledge fills of the blob (CAD checks on) apply together watertight.
   - Outcome (Claude, 2026-11-20): the wedges were fine; manifold evaluated all pieces of the changes as one lazy batch and got that wrong (the same fault cost the two-post stress chamfer 224 mm³). Evaluating after each piece (T-434, #181) gives 0 non-manifold edges for all 30 fills. Test: `test_organic_part_gets_no_ledge_fills_until_cad_checks_are_on` applies them all together.
 
+- [ ] **T-491 P1** [UX] The header can jump to the bottom of the page: it had no grid row, so anything added before it (e.g. a browser extension's element) pushes it below the app. · files: `web/style.css` · owner: Claude (`task/T-491-header-row`)
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
