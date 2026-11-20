@@ -483,7 +483,6 @@ _ADVICE_RULES = {
     "first_layer_detail": ("Make bed-side details at least {tgt:g} mm wide", lambda m, p, T, h: T["first_layer"]["detail_min_mm"], None, "mm"),
     "shallow_slope_stairs": ("Steepen this shallow slope past {tgt:g}°{now_deg}", lambda m, p, T, h: T["slopes"]["max_deg"], "slope_deg", "°"),
     "warping": ("Round sharp base corners with r {tgt:g} mm", lambda m, p, T, h: T["warping"]["fillet_radius_mm"], None, "mm"),
-    "snap_fit_upright": ("Reduce this upright snap hook to {tgt:g} mm{now1} or print it flat", lambda m, p, T, h: m.get("hook_max_mm"), "hook_mm", "mm"),
     "rib_sink_line": ("Make this rib at most {tgt:g} mm thick{now1}", lambda m, p, T, h: T["shrink_lines"]["rib_share"] * m["wall_mm"] if m.get("wall_mm") is not None else None, "rib_mm", "mm"),
     "modelled_thread": ("Model {tgt:g} mm clearance on this thread", lambda m, p, T, h: T["threads"]["clearance_mm"], "major_mm", "mm"),
     "shrinkage_size_error": ("Add {tgt:g} mm{shrink_pct} to critical dimensions{shrink_len}", lambda m, p, T, h: m.get("short_mm"), "short_mm", "mm"),
@@ -519,6 +518,8 @@ def _finding_advice(f: dict, profile, T: dict, part_height: float) -> tuple[str,
         return None
     if rule == "living_hinge":
         return _hinge_advice(m, T["flex"])
+    if rule == "snap_fit_upright":
+        return _snap_advice(m)
     spec = _ADVICE_RULES.get(rule)
     if spec is None:
         return None
@@ -560,6 +561,24 @@ def _hinge_advice(m: dict, X: dict) -> tuple[str, float | None, float, str] | No
     else:
         return None
     return text, _num(t), tgt, "mm"
+
+
+def _snap_advice(m: dict) -> tuple[str, float | None, float, str] | None:
+    """Exact CAD limits for an over-strained upright snap tab: longer beam, thinner root, or shallower hook (T-338)."""
+    y_max = m.get("hook_max_mm")
+    if y_max is None or float(y_max) <= 0:
+        return None
+    if m.get("strain_pct") is not None and m.get("strain_max_pct") is not None and m["strain_pct"] <= m["strain_max_pct"]:
+        return None
+    l_min, t_max = m.get("min_length_mm"), m.get("max_thickness_mm")
+    length, t, hook = m.get("length_mm"), m.get("thickness_mm"), m.get("hook_mm")
+    if l_min is not None and t_max is not None and length is not None and t is not None and hook is not None:
+        text = (f"Make this upright snap tab at least {l_min:.1f} mm long (now {length:.1f}), "
+                f"at most {t_max:.2f} mm thick (now {t:.2f}), or hook at most {y_max:.2f} mm (now {hook:.2f}) — or print flat")
+        return text, _num(length, 1), round(float(l_min), 1), "mm"
+    tgt = round(float(y_max), 2)
+    now = "" if hook is None else f" (now {hook:.1f})"
+    return f"Reduce this upright snap hook to {tgt:g} mm{now} or print it flat", _num(hook), tgt, "mm"
 
 
 def _num(v, digits: int = 2) -> float | None:
