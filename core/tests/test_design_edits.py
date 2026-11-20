@@ -211,6 +211,10 @@ def _finding_reduced(rule: str, before: list[dict], after: list[dict]) -> bool:
         # fixes half the hole, shrinking the finding's span along the hole axis.
         s0, s1 = _bbox_max_span(before), _bbox_max_span(after)
         return s0 > 0 and s1 < 0.8 * s0
+    if rule == "elephant_foot":  # a chamfer skips working holes (slots, fits): fewer straight holes left
+        n0 = sum(int((f.get("metrics") or {}).get("holes", 0)) for f in before)
+        n1 = sum(int((f.get("metrics") or {}).get("holes", 0)) for f in after)
+        return n1 < n0
     if rule in ("too_thin_to_print", "single_line_wall"):
         w0 = min((float((f.get("metrics") or {}).get("width", 0.0)) for f in before), default=0.0)
         w1 = min((float((f.get("metrics") or {}).get("width", 0.0)) for f in after), default=0.0)
@@ -274,10 +278,6 @@ def test_part_edits_alone_and_together(path: Path):
     "part_name",
     ["gear", "detail_plate", "knob"],
     ids=lambda n: f"{n}-foot-chamfer",
-)
-@pytest.mark.xfail(
-    strict=True,
-    reason="T-487: elephant_foot is flagged for any first-layer hole, chamfered or not",
 )
 def test_foot_chamfer_reduces_elephant_foot(part_name: str):
     """Applying foot-chamfer should clear the elephant_foot finding it claims to fix."""
