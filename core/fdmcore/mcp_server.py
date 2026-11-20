@@ -400,13 +400,11 @@ def apply_design_changes(
     keep_clear: list[dict] | None = None,
 ) -> dict:
     """Apply suggested edits (ids from suggest_design_changes, same params and keep_clear), save the modified STL and load it."""
-    from .booleans import apply_edits
-
     edits = {e["id"]: e for e in api.design(up, _profile(printer, material, nozzle), params, keep_clear)["edits"]}
     unknown = [i for i in edit_ids if i not in edits]
     if unknown:
         raise ValueError(f"Unknown edit ids: {unknown}")
-    return _save_and_load(apply_edits(api._require().mesh, [edits[i] for i in edit_ids]), output_path)
+    return _save_and_load_edits(api._require().mesh, [edits[i] for i in edit_ids], output_path)
 
 
 @server.tool()
@@ -659,12 +657,10 @@ def move_box(up: list[float], box: dict, by: list[float], printer: str = "bambu_
 def apply_blocks(up: list[float], boxes: list[dict], output_path: str) -> dict:
     """Join the "add_solid" boxes onto the part and cut the "cut_solid" ones out of it (boxes from
     place_box with the same ``up``), save the changed STL and load it as the part."""
-    from .booleans import apply_edits
-
     edits = api.volume_solid(up, boxes)
     if not edits:
         raise ValueError('No "add_solid" or "cut_solid" boxes given')
-    return _save_and_load(apply_edits(api._require().mesh, edits), output_path)
+    return _save_and_load_edits(api._require().mesh, edits, output_path)
 
 
 @server.tool()
@@ -672,11 +668,9 @@ def snap_model(path: str, point: list[float], normal: list[float], output_path: 
     """Put another model (STL / 3MF at ``path``) onto the part: its biggest flat face goes flat onto the
     part's face at ``point`` (part coordinates; ``normal`` points out of the part, e.g. that face's normal
     from list_faces), centred there and turned ``spin_deg``. Joined into one part, saved as STL and loaded."""
-    from .booleans import apply_edits
-
     src = _in(path, PARTS, "model file")
     edit = api.snap_model(src.read_bytes(), point, normal, spin_deg, src.stem)
-    return {"placed": edit["description"], **_save_and_load(apply_edits(api._require().mesh, [edit]), output_path)}
+    return {"placed": edit["description"], **_save_and_load_edits(api._require().mesh, [edit], output_path)}
 
 
 @server.tool()
@@ -826,7 +820,7 @@ def split_part(output_folder: str, joint: str = "pins", purpose: str = "fit", pr
     saved = []
     for out, piece in zip(paths, plan["pieces"]):
         edits = [{**e, "mesh": np.frombuffer(e["mesh"], "<f4").reshape(-1, 3, 3)} for e in piece["edits"]]
-        out.write_bytes(to_binary_stl(apply_edits(part, edits)))
+        out.write_bytes(to_binary_stl(apply_edits(part, edits, check=False)))  # cutting it apart is the point
         saved.append(str(out))
     if plan["pin"]["count"]:
         pin.write_bytes(to_binary_stl(Mesh(np.frombuffer(plan["pin"]["stl_triangles"], "<f4").reshape(-1, 3, 3))))
@@ -839,6 +833,18 @@ def _save_and_load(mesh, output_path: str) -> dict:
     out = _out(output_path, (".stl",), "STL path")
     out.write_bytes(to_binary_stl(mesh))
     return {"saved": str(out), **_clean(api.load(out.read_bytes(), out.name))}
+
+
+def _save_and_load_edits(part, edits: list[dict], output_path: str) -> dict:
+    """Apply ``edits`` with the after-change checks (T-434), save and load the result; ``left_out``
+    says which edits were refused and why, in words to pass on to the user."""
+    from .booleans import apply_edits
+
+    refused: list[dict] = []
+    result = _save_and_load(apply_edits(part, edits, refused), output_path)
+    if refused:
+        result["left_out"] = [f"Left out \"{r['title']}\": {r['reason']}." for r in refused]
+    return result
 
 
 # The tool for every api.METHODS entry (test_mcp fails when a new API method has none).

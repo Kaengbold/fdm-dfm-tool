@@ -2437,7 +2437,8 @@ async function tryDesigns(auto = false) {
     const edits = r.edits.filter((e) => ids.includes(e.id) && !e.clash).map((e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) }));
     if (edits.length !== ids.length) return null;
     try {
-      const soup = await applyDesignEdits(state.triangles, edits);
+      const { soup, refused } = await applyDesignEdits(state.triangles, edits);
+      if (refused.length) return null; // one change didn't pass the checks after applying it (T-434)
       return { ...(await call("strength_variant", check, stlBytes(soup))), edits, title: title ?? edits[0].title };
     } catch (err) {
       if (err instanceof Cancelled) throw err;
@@ -3646,7 +3647,12 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
   if (!chosen.length) return setStatus("Tick a change to apply it.");
   return busy("Applying design changes…", async () => {
     const beforeSize = state.size_mm ? [...state.size_mm] : null;
-    const soup = await applyDesignEdits(state.triangles, chosen);
+    const failsBefore = failCounts(state.check?.findings);
+    const { soup, refused } = await applyDesignEdits(state.triangles, chosen);
+    // Changes that failed the checks after applying them (T-434) are left out, the rest go in.
+    const leftOut = refused.map((r) => `Left out "${r.title.replace(/ \(.*\)$/, "")}": ${r.reason}.`).join(" ");
+    chosen = chosen.filter((e) => !refused.some((r) => r.id === e.id));
+    if (!chosen.length) return setStatus(`Nothing was changed. ${leftOut} Change it in your CAD instead.`);
     const name = state.name.replace(/(_dfm)?\.stl$/i, "") + "_dfm.stl";
     const step = state.step && { ...state.step, edits: [...state.step.edits, ...chosen] };
     const prev = state.versions[state.version];
@@ -3667,8 +3673,23 @@ async function applyEdits(chosen = state.edits.filter((e) => e.selected)) {
     const fmtSize = (s) => s.map((v) => Number(v.toFixed(1))).join(" × ");
     const sizeNote = sizeChanged ? ` Outer size changed (now ${fmtSize(afterSize)} mm, was ${fmtSize(beforeSize)}).` : "";
     const dropped = (state.dropCount ?? 0) > droppedBefore ? state.droppedNotice : "";
-    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back).${sizeNote} Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost ? ` ${lost}` : ""}${dropped ? ` ${dropped}` : ""}`);
+    const failsAfter = failCounts(state.check?.findings);
+    const worse = [...failsAfter].filter(([, v]) => v.count > (failsBefore.get(v.rule)?.count ?? 0)).map(([, v]) => v.title);
+    const worseNote = worse.length ? ` New after the change: ${worse.join(", ")} (Can fail). Undo goes back if that's worse.` : "";
+    setStatus(`${state.summary} — design changes applied as a new version (Undo or the Model list goes back).${sizeNote}${worseNote}${leftOut ? ` ${leftOut}` : ""} Download the ${step ? "STEP" : "STL"} to bring them back into your CAD.${lost ? ` ${lost}` : ""}${dropped ? ` ${dropped}` : ""}`);
   });
+}
+
+/** "Can fail" findings by rule: {rule, title, count}, to spot a problem a change brought in. */
+function failCounts(findings = []) {
+  const out = new Map();
+  for (const f of findings ?? []) {
+    if (f.impact !== "fails") continue;
+    const v = out.get(f.rule) ?? { rule: f.rule, title: f.title ?? f.rule, count: 0 };
+    v.count += 1;
+    out.set(f.rule, v);
+  }
+  return out;
 }
 
 // ---------- undo and model versions ----------
@@ -3824,7 +3845,7 @@ async function rebuildVersionBytes(v) {
     if (base.scale !== 1) info = await call("scale", { factor: base.scale });
     soup = new Float32Array(info.triangles.slice().buffer);
   }
-  for (const stepEdits of editSteps) soup = await applyDesignEdits(soup, stepEdits);
+  for (const stepEdits of editSteps) soup = (await applyDesignEdits(soup, stepEdits)).soup;
   return stlBytes(soup);
 }
 
@@ -4763,7 +4784,7 @@ async function showSplit(purpose = state.split?.purpose ?? "fit") {
   const plan = await call("split", { profile: profile(), joint: $("split-joint").value, purpose });
   const floats = (e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) });
   const soups = [];
-  for (const piece of plan.pieces) soups.push(await applyDesignEdits(state.triangles, piece.edits.map(floats)));
+  for (const piece of plan.pieces) soups.push((await applyDesignEdits(state.triangles, piece.edits.map(floats), { check: false })).soup); // cutting it apart is the point
   state.split = { plan, soups, purpose };
   viewer.showPieces(soups.map((triangles, i) => ({ triangles, rotation: plan.pieces[i].rotation })));
   $("split-panel").hidden = false;

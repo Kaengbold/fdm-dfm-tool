@@ -87,4 +87,15 @@ def test_organic_part_gets_no_ledge_fills_until_cad_checks_are_on():
     assert "too_thin_to_print" not in {f["rule"] for f in findings}
     assert not [e for e in api.design(up, findings=findings)["edits"] if e["id"].startswith("ledge-")]
     api.set_cad_checks(True)
-    assert [e for e in api.design(up, findings=findings)["edits"] if e["id"].startswith("ledge-")]
+    edits = api.design(up, findings=findings)["edits"]
+    ledges = [e for e in edits if e["id"].startswith("ledge-")]
+    assert len(ledges) >= 20
+    # All of them together stay watertight (T-490): evaluated as one batch, manifold left a pinched edge.
+    manifold3d = pytest.importorskip("manifold3d")  # noqa: F841 (local mode only)
+    from fdmcore.booleans import apply_edits
+    from fdmcore.mesh import mesh_health
+
+    refused: list[dict] = []
+    health = mesh_health(apply_edits(api._require().mesh, ledges, refused))
+    assert not refused, refused
+    assert health["non_manifold_edges"] == 0 and health["boundary_edges"] == 0, health
