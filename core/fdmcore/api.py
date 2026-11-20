@@ -1812,6 +1812,46 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
             "slowdown_min": {CAUSE_NAMES[c]: round(float(lost[c]) / 60, 1) for c in range(1, len(CAUSE_NAMES)) if lost[c] >= 3}}
 
 
+HOT_SPOTS = 20  # heat_model lists this many of the hottest spots
+
+
+def heat_model(up, profile: dict | None = None, fine: bool = False) -> dict:
+    """Heat network over the loaded G-code (thermal.py): how hot every spot is when the next layer
+    covers it, and how long each joint between layers stays above the glass transition. ``fine``:
+    smaller cells and more layers in full detail (slower). Per spot, as float32 bytes in the oriented
+    part's frame: ``points`` (x, y, z), ``cover_c``, ``cover_s``, ``above_tg_s`` and ``joint_c``
+    (T_int at each of ``delays_s`` after the joint formed)."""
+    from .kinematics import timing
+    from .thermal import DELAYS_S, simulate
+
+    s = _require()
+    p = Profile.from_dict(profile)
+    if s.gcode is None:
+        raise ValueError("Load the sliced G-code first (heat model)")
+    if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
+        raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
+    tp = s.gcode["toolpath"]
+    with progress.stage(0, 0.05):
+        tm = timing(tp)
+    with progress.stage(0.05, 1):
+        h = simulate(tp, tm, p, "fine" if fine else "quick")
+    pts = _gcode_to_oriented(s.gcode["rot"])(np.column_stack([h.xy, h.z]))
+    covered = np.isfinite(h.cover_c)
+    hottest = np.flatnonzero(covered)[np.argsort(-h.cover_c[covered])][:HOT_SPOTS]
+    f32 = lambda a: np.asarray(a, np.float32).tobytes()
+    return {
+        "tier": h.tier, "spots": int(len(h.layer)), "layers": int(h.layer.max()) + 1, "cell_mm": h.cell_mm,
+        "material": h.material, "tg_c": h.tg_c, "print_min": round(tm.total_s / 60, 1), "seconds": round(h.seconds, 1),
+        "cover_c": {"median": round(float(np.median(h.cover_c[covered])), 1) if covered.any() else None,
+                    "p95": round(float(np.percentile(h.cover_c[covered], 95)), 1) if covered.any() else None},
+        "hottest": [{"point": np.round(pts[i], 2), "layer": int(h.layer[i]), "cover_c": round(float(h.cover_c[i]), 1),
+                     "cover_s": round(float(h.cover_s[i]), 1)} for i in hottest],
+        "delays_s": list(DELAYS_S),
+        "points": f32(pts), "cover_c_all": f32(h.cover_c), "cover_s": f32(h.cover_s), "above_tg_s": f32(h.above_tg_s),
+        "joint_c": f32(h.joint_c),
+    }
+
+
 def _printed(model):
     """What the loaded G-code puts in each cube of ``model`` (cached per analysis grid)."""
     from .gcode import deposit
@@ -3380,6 +3420,7 @@ METHODS = {
     "load": load,
     "set_cad_checks": set_cad_checks,
     "load_gcode": load_gcode,
+    "heat_model": heat_model,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
     "tolerance": tolerance,

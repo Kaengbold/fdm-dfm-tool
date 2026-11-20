@@ -542,6 +542,15 @@ def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str =
 
 
 @server.tool()
+def heat_model(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", fine: bool = False) -> dict:
+    """Heat simulation over the G-code from load_gcode: how hot each spot still is when the next layer covers it
+    (``cover_c``; far above the plastic's softening point it sags or blobs) and how long each joint between
+    layers stays above the glass transition (bonding). ``hottest`` lists the worst spots. ``fine`` is slower
+    and more exact. Per-spot arrays come as float32 bytes."""
+    return _clean(api.heat_model(up, _profile(printer, material, nozzle), fine))
+
+
+@server.tool()
 def check_warping(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4",
                   detailed: bool = False) -> dict:
     """Warping simulation: how hard the base wants to curl off the bed (``lift_ratio``: 1 = like the longest
@@ -860,6 +869,7 @@ API_TOOLS = {
     "load": "load_part",
     "set_cad_checks": "set_cad_checks",
     "load_gcode": "load_gcode",
+    "heat_model": "heat_model",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
     "tolerance": "printer_tolerance",
