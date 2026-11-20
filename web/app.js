@@ -3184,8 +3184,8 @@ function clearEdits() {
   state.activeAdvice = null;
   state.designFor = null;
   $("edits").replaceChildren();
-  $("advice").replaceChildren();
-  $("advice-section").hidden = true;
+  $("cad-advice").replaceChildren();
+  $("cad-advice-section").hidden = true;
   $("edit-selection").hidden = true;
   $("apply-edits").hidden = true;
   viewer.showGhosts([]);
@@ -3205,8 +3205,8 @@ const designFindingsPayload = (up) => state.check?.up?.join() === up.join()
   ? state.check.findings.map(({ rule, bbox, title, detail, metrics }) => ({ rule, bbox, title, detail, metrics })) : null;
 
 function renderAdvice() {
-  const list = $("advice");
-  const sec = $("advice-section");
+  const list = $("cad-advice");
+  const sec = $("cad-advice-section");
   sec.hidden = !state.advice.length;
   if (!state.advice.length) return list.replaceChildren();
   list.replaceChildren(...state.advice.map((a) => {
@@ -3225,7 +3225,7 @@ function renderAdvice() {
     return li;
   }));
 }
-$("copy-advice").onclick = async () => {
+$("copy-cad-advice").onclick = async () => {
   if (!state.advice.length) return;
   try {
     if (!navigator.clipboard?.writeText) throw new Error();

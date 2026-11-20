@@ -442,12 +442,12 @@ summary::marker { color: var(--accent); }
 .edits small.edit-for:empty { display: none; }
 .other-ideas summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
 .other-ideas .hint { margin: 2px 0 6px; }
-.advice-head { justify-content: space-between; align-items: baseline; }
-.advice { list-style: none; padding: 0; margin: 6px 0 0; font-size: 14px; display: flex; flex-direction: column; gap: 5px; }
-.advice button { width: 100%; text-align: left; background: none; border: 1px solid var(--line); border-radius: var(--r); padding: 7px 10px; cursor: pointer; font: inherit; color: inherit; }
-.advice button:hover { border-color: var(--accent); }
-.advice li.active button { border-color: var(--now); background: #fdf6dc; box-shadow: inset 4px 0 0 var(--now); }
-.advice small { display: block; color: var(--muted); font-size: 12px; }
+.cad-advice-head { justify-content: space-between; align-items: baseline; }
+.cad-advice { list-style: none; padding: 0; margin: 6px 0 0; font-size: 14px; display: flex; flex-direction: column; gap: 5px; }
+.cad-advice button { width: 100%; text-align: left; background: none; border: 1px solid var(--line); border-radius: var(--r); padding: 7px 10px; cursor: pointer; font: inherit; color: inherit; }
+.cad-advice button:hover { border-color: var(--accent); }
+.cad-advice li.active button { border-color: var(--now); background: #fdf6dc; box-shadow: inset 4px 0 0 var(--now); }
+.cad-advice small { display: block; color: var(--muted); font-size: 12px; }
 .edit-params { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; }
 .features { list-style: none; padding: 0; margin: 0; font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
 .features li { display: flex; align-items: center; gap: 6px 8px; padding: 8px 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--r); }

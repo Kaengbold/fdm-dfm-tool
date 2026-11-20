@@ -453,6 +453,10 @@ def _fastener_spec(m: dict, T: dict) -> dict | None:
     return s if isinstance(s, dict) else None
 
 
+# The 45° the ledge-fill and chamfer edits use: advice without an edit says the same angle, not the material's
+# overhang limit (which would read as a different, riskier number next to the edits).
+_SAFE_SLOPE_DEG = 45.0
+
 # Rule -> (template, target(m, p, T, h), now_key(s), unit). Every number comes from finding metrics,
 # profile, thresholds.yaml or measured part_height; if target is None the finding gets no advice line.
 _ADVICE_RULES = {
@@ -464,15 +468,15 @@ _ADVICE_RULES = {
     "gap_fuses": ("Open this gap past {tgt:g} mm{now}", lambda m, p, T, h: T["gaps"]["fuse_below_mm"], "width", "mm"),
     "flat_gap_fuses": ("Open this flat gap to at least {tgt:g} mm{now}", lambda m, p, T, h: T["gaps"]["z_fuse_below_mm"], "gap_mm", "mm"),
     "hole_closes": ("Enlarge this hole to at least Ø{tgt:g} mm{now_d}", lambda m, p, T, h: max(T["holes"]["vertical_min_mm"] * float(p.nozzle) / 0.4, T["holes"]["vertical_min_nozzle"] * float(p.nozzle)), ("min_d", "diameter"), "mm"),
-    "sideways_hole_oval": ("Give this sideways {dia}hole a {tgt:g}° teardrop top", lambda m, p, T, h: p.material["max_overhang_deg"], None, "°"),
+    "sideways_hole_oval": ("Give this sideways {dia}hole a {tgt:g}° teardrop top", lambda m, p, T, h: PARAMS["teardrop_angle_deg"][0], None, "°"),
     "hole_starts_midair": ("Close this {hole_d}hole with a {tgt:g} mm sacrificial layer where it starts in mid-air", lambda m, p, T, h: float(p.layer_height), None, "mm"),
     "nut_trap_tight": ("Make this {fn} nut trap at least {tgt:g} mm across flats{now}", lambda m, p, T, h: (s := _fastener_spec(m, T)) and s["nut_af_mm"] + T["fasteners"]["nut_clearance_mm"], ("across_flats", "min_af"), "mm"),
     "screw_wall_thin": ("Give this {fn} screw hole at least {tgt:g} mm of wall around it{now1}", lambda m, p, T, h: (s := _fastener_spec(m, T)) and s["d"], "wall_mm", "mm"),
     "insert_wall_thin": ("Give this {opt_fn}insert hole at least {tgt:g} mm of wall around it{now1}", lambda m, p, T, h: T["fasteners"]["insert_min_wall_mm"], "wall_mm", "mm"),
-    "support_marks": ("Add a {tgt:g}° chamfer or gusset under this overhang so it prints without support", lambda m, p, T, h: p.material["max_overhang_deg"], None, "°"),
-    "trapped_support": ("Add a {tgt:g}° chamfer or arch to this enclosed roof so it prints without trapped support", lambda m, p, T, h: p.material["max_overhang_deg"], None, "°"),
+    "support_marks": ("Add a {tgt:g}° chamfer or gusset under this overhang so it prints without support", lambda m, p, T, h: _SAFE_SLOPE_DEG, None, "°"),
+    "trapped_support": ("Add a {tgt:g}° chamfer or arch to this enclosed roof so it prints without trapped support", lambda m, p, T, h: _SAFE_SLOPE_DEG, None, "°"),
     "long_bridge": ("Shorten {span_bridge} to at most {tgt:g} mm", lambda m, p, T, h: p.material["max_bridge_mm"], "span", "mm"),
-    "bridge_sag": ("Add a {tgt:g}° pointed roof across {span_what} so the top doesn't sag", lambda m, p, T, h: p.material["max_overhang_deg"], None, "°"),
+    "bridge_sag": ("Add a {tgt:g}° pointed roof across {span_what} so the top doesn't sag", lambda m, p, T, h: _SAFE_SLOPE_DEG, None, "°"),
     "shallow_relief": ("Make this surface detail at least {tgt:g} mm deep{now}", lambda m, p, T, h: max(T["relief"]["min_mm"], T["relief"]["min_layers"] * float(p.layer_height)), "depth_mm", "mm"),
     "first_layer_detail": ("Make bed-side details at least {tgt:g} mm wide", lambda m, p, T, h: T["first_layer"]["detail_min_mm"], None, "mm"),
     "shallow_slope_stairs": ("Steepen this shallow slope past {tgt:g}°{now_deg}", lambda m, p, T, h: T["slopes"]["max_deg"], "slope_deg", "°"),
