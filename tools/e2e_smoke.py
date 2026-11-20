@@ -355,6 +355,59 @@ def gemini_review(binary: str):
     (OUT / "gemini-review.md").write_text("# Gemini screenshot review\n\n" + "\n".join(notes), encoding="utf-8")
 
 
+def check_phone_content_first(run: Run) -> str:
+    """T-456 at 390 x 844 with a part loaded: one header row with the levels behind "Menu"; on each Simple step
+    the heading (Result: the verdict) and the first control show without scrolling; no control is covered by
+    the sticky buttons or the sticky 3D view; the view folds to a strip and comes back."""
+    page = run.page
+    page.set_viewport_size({"width": 390, "height": 844})
+    try:
+        assert page.locator(".levels").is_hidden() and page.locator("#menu-button").is_visible(), "levels not behind Menu"
+        header = page.locator(".top").bounding_box()["height"]
+        assert header < 60, f"header is {header:.0f} px: more than one row"
+        page.click("#menu-button")
+        assert page.locator(".levels").is_visible(), "Menu does not open"
+        page.keyboard.press("Escape")
+        assert page.locator(".levels").is_hidden(), "Escape leaves the menu open"
+        seen = []
+        for step in ("have", "result"):
+            page.evaluate(f"() => (fdm.steps.go('{step}'), window.scrollTo(0, 0))")
+            page.wait_for_timeout(200)
+            first = page.evaluate("""() => {
+              const pane = [...document.querySelectorAll('.pane')].find((p) => p.getClientRects().length);
+              const head = pane.querySelector('h2') ?? document.getElementById('verdict');
+              const control = [...pane.querySelectorAll('button, select, input:not([type=hidden])')].find((c) => c.checkVisibility());
+              const bar = document.querySelector('.foot-buttons').getBoundingClientRect().top;
+              return { pane: pane.dataset.pane, head: head.getBoundingClientRect().bottom, control: control.getBoundingClientRect().bottom, bar };
+            }""")
+            assert first["head"] <= first["bar"] and first["control"] <= first["bar"], f"{step}: content starts below the fold {first}"
+            covered = page.evaluate("""() => {
+              const panel = document.getElementById('panel');
+              const out = [];
+              for (const c of panel.querySelectorAll('button, select, summary, input:not([type=hidden])')) {
+                if (!c.checkVisibility() || c.closest('.foot-buttons')) continue; // closed <details> content still has boxes
+                const target = c.type === 'checkbox' || c.type === 'radio' ? (c.closest('label') ?? c) : c;
+                target.scrollIntoView({ block: 'center' });
+                const r = target.getBoundingClientRect();
+                if (!r.width || !r.height) continue;
+                const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                if (hit && !target.contains(hit) && !hit.contains(target)) out.push(`${c.id || c.textContent.trim().slice(0, 30)} under ${hit.id || hit.className}`);
+              }
+              return out;
+            }""")
+            assert not covered, f"{step}: covered controls {covered}"
+            seen.append(f"{step}: heading at {first['head']:.0f} px")
+        page.evaluate("() => window.scrollTo(0, 0)")
+        page.click("#view-hide")
+        strip = page.locator("main#viewer").bounding_box()["height"]
+        assert strip < 70, f"folded view is {strip:.0f} px"
+        page.click("#view-hide")  # "Show 3D view"
+        assert page.locator("main#viewer canvas").is_visible(), "the view does not come back"
+        return f"header {header:.0f} px; {'; '.join(seen)}; folded view {strip:.0f} px; nothing covered"
+    finally:
+        page.set_viewport_size({"width": 1500, "height": 950})
+
+
 def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
     """T-453: two parts worked on in a row are both under "Your recent projects" after a reload and both reopen
     as the same entries (no copies); "Delete all" empties the list."""
@@ -401,6 +454,7 @@ def run_quick(run: Run) -> None:
     finally:
         page.set_viewport_size({"width": 1500, "height": 950})
     run.step("simple flow to 3MF download", lambda: simple_flow_to_3mf(run, "hole_block"))
+    run.step("phone: content first", lambda: check_phone_content_first(run))
     run.step("levels and start guide", lambda: check_levels_and_guide(page))
 
     def open_one_finding():
@@ -2778,6 +2832,7 @@ def _run_suite(port: int, args) -> Run:
             page.evaluate("() => { delete window.simpleCompleted; delete window.simpleStrength; }")
             return " | ".join(items.all_inner_texts())
         run.step("simple: one primary and missing work on Result", simple_result)
+        run.step("phone: content first", lambda: check_phone_content_first(run))
 
         def tick_and_recheck():
             """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
