@@ -537,13 +537,6 @@
                 </div>
                 <ol id="cad-advice" class="cad-advice"></ol>
               </div>
-              <div class="sim-card topology" data-min="advanced">
-                <h3>A lighter shape</h3>
-                <p class="hint" data-info>Keeps the plastic only where your load runs through the part. It's blocky and not a finished part: use it as a guide to redesign the part in CAD. Needs the loads from "Strength analysis".</p>
-                <label>Keep <input id="topo-keep" type="range" min="20" max="80" step="5" value="40" /> <output id="topo-keep-out">40 %</output> of the plastic</label>
-                <button id="run-topology" disabled>Suggest a lighter shape</button>
-                <div id="topology-result"></div>
-              </div>
               <div class="sim-card versions">
                 <h3>Your versions</h3>
                 <p class="hint" data-info>Each time you apply changes, a new version is kept. Switch between them on the 3D view (or with Ctrl+Z) and compare.</p>
@@ -603,6 +596,17 @@
                 <span id="snap-hint" class="hint" hidden></span>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section class="pane" data-pane="lighter">
+          <h2>A lighter shape</h2>
+          <div id="blk-lighter">
+            <p class="lead" data-info>Keeps the plastic only where your load runs through the part, and shows that shape on your part.
+              It's blocky and not a finished part: use it as a guide to redesign the part in CAD. Needs the loads from "Strength analysis".</p>
+            <label class="topo-keep">Keep <input id="topo-keep" type="range" min="20" max="80" step="5" value="40" /> <output id="topo-keep-out">40 %</output> of the plastic</label>
+            <div class="actions"><button id="run-topology" class="primary" disabled>Suggest a lighter shape</button></div>
+            <div id="topology-result" aria-live="polite"></div>
           </div>
         </section>
 

@@ -164,6 +164,7 @@ const state = {
   advice: [], // exact-number CAD advice for every design fix (T-435)
   activeAdvice: null, // id of the clicked advice item, highlighted in 3D
   features: [], // detected holes/posts from the last design suggestion
+  lighter: null, // the last suggested lighter shape (T-377): the topology result plus what it was made for
   versions: [], // models to switch between and compare: {label, source, step, results: {time, grams, problems, safety}}
   version: 0,
 };
@@ -480,6 +481,8 @@ async function partLoaded(info) {
   state.triangles = new Float32Array(info.triangles.slice().buffer);
   Object.assign(state, { faceRegions: null, regionInfo: [], selectedRegion: -1, loads: [], marks: [], strength: null, loadSettings: null, overrides: {}, excludedSettings: [], fitNotes: {}, fastenerNotes: {}, fastenerSuggestions: [], gaps: [], fitSel: null, fitList: [], boxHeat: null, heatSource: null, heatPick: false, strongerShown: false });
   state.gcode = null; // a new part (or body, or scale): the old G-code doesn't belong to it
+  state.lighter = null; // made for the old part's shape and loads
+  $("topology-result").replaceChildren();
   state.runTimes = {}; // how long each simulation took on this part
   showEstimates();
   renderGcode();
@@ -1174,6 +1177,7 @@ function recolor() {
   viewer.showGhosts(shows("design") ? state.edits.filter((e) => e.selected) : []);
   viewer.showAdvice(shows("design") ? state.advice : [], state.activeAdvice);
   viewer.showFit(shows("fits") ? shownFit() : null);
+  showLighter();
   drawBoxes();
   showMarkers();
   if (strengthView()) return;
@@ -2655,8 +2659,19 @@ async function runOptimise() {
 }
 $("run-optimise").onclick = runOptimise;
 
-// ---------- topology optimisation: a suggested lighter shape (topopt.py) ----------
+// ---------- topology optimisation: a suggested lighter shape (topopt.py), its own step (T-377) ----------
 $("topo-keep").oninput = () => ($("topo-keep-out").textContent = `${$("topo-keep").value} %`);
+const loadsKey = () => JSON.stringify(state.loads);
+
+/** On its step the 3D view shows the lighter shape on the faded part (unless switched off), and says when
+ * the loads changed since it was made. */
+function showLighter() {
+  const r = state.lighter;
+  viewer.showLighter(shows("lighter") && r?.shown ? r.triangles : null);
+  const stale = $("topology-stale");
+  if (stale) stale.hidden = !r || r.loads === loadsKey();
+}
+
 $("run-topology").onclick = async () => {
   const how = await askLong("A lighter shape", "topology", [
     { value: "quick", kind: "topology", label: "Quick (coarse cubes)" },
@@ -2667,14 +2682,24 @@ $("run-topology").onclick = async () => {
   return busy(`Finding where the load runs through the part (about ${fmtSeconds(estimate(kind))})…`, async () => {
     const r = await timed(kind, () => call("topology", { up: activeOption().up, loads: state.loads, profile: profile(), keep, fine: how === "fine" }));
     const name = `${baseName()}_lighter_${Math.round(keep * 100)}.stl`;
+    state.lighter = { triangles: new Float32Array(r.triangles.slice().buffer), loads: loadsKey(), shown: true };
+    const shown = el("input", { type: "checkbox", checked: true, onchange: () => {
+      state.lighter.shown = shown.checked;
+      showLighter();
+    } });
     $("topology-result").replaceChildren(
       el("div", { className: `verdict ${r.enough ? "fine" : "borderline"}` },
         el("strong", { textContent: `About ${r.shape_g.toFixed(0)} g instead of ${r.part_g.toFixed(0)} g` }),
         el("p", { textContent: r.explanation })),
+      el("label", { className: "toggle" }, shown, " Show it on my part (your part faded around it)"),
+      el("p", { id: "topology-stale", className: "hint", hidden: true,
+        textContent: "Made for the loads before your last change: suggest it again to match them." }),
       el("div", { className: "row" },
-        el("button", { textContent: "Show it in 3D", title: "Adds the shape as a new version to compare; your part stays in the version list",
+        el("button", { textContent: "Use it as a new version", title: "Checks the shape itself as a part; your part stays in the version list",
           onclick: () => openFile(name, r.stl, "version") }),
         el("button", { textContent: "Download STL", onclick: () => download(r.stl, name, "model/stl") })));
+    showLighter();
+    setStatus(`${state.summary} — the lighter shape is shown in green on your part.`);
   });
 };
 

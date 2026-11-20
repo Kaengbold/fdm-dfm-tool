@@ -152,10 +152,32 @@ export class Viewer {
       piece.position.x = x;
       this.pieces.add(plate, piece);
     });
-    for (const o of [this.part, this.markers, this.ghosts, this.adviceLabels, this.bedGroup]) if (o) o.visible = false;
+    for (const o of [this.part, this.markers, this.ghosts, this.lighter, this.adviceLabels, this.bedGroup]) if (o) o.visible = false;
     this.scene.add(this.pieces);
     const sphere = new THREE.Box3().setFromObject(this.pieces).getBoundingSphere(new THREE.Sphere());
     this.frame({ center: sphere.center, radius: sphere.radius * 0.8 });
+  }
+
+  /** A suggested lighter shape (float32, part coordinates; T-377) drawn solid where the part lies, with the
+   * part faded around it so the plastic that could go stays in view. ``null`` puts the part back. */
+  showLighter(triangles) {
+    const show = Boolean(triangles && this.part);
+    const material = this.part?.material;
+    if (material && material.transparent !== show) {
+      Object.assign(material, { transparent: show, opacity: show ? 0.18 : 1, depthWrite: !show, needsUpdate: true });
+    }
+    // Rebuilt only for another shape or placement (showPart makes a new placement on every turn).
+    if (show && this.lighter?.userData.triangles === triangles && this.lighter.userData.placement === this.placement) return;
+    dispose(this.lighter);
+    this.lighter?.removeFromParent();
+    this.lighter = null;
+    if (!show) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(placeTriangles(triangles, this.placement.rotation, this.placement.shift).out, 3));
+    g.computeVertexNormals();
+    this.lighter = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: css("--accent"), roughness: 0.6 }));
+    this.lighter.userData = { triangles, placement: this.placement };
+    this.scene.add(this.lighter);
   }
 
   /** The part before this step's change (T-375 "Before"): plain grey, turned by ``rotation``; everything
@@ -166,7 +188,7 @@ export class Viewer {
     g.setAttribute("position", new THREE.BufferAttribute(placeTriangles(triangles, rotation).out, 3));
     g.computeVertexNormals();
     this.before = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: css("--ok"), roughness: 0.7 }));
-    this.beforeHidden = [this.part, this.markers, this.ghosts, this.adviceLabels, this.spots, this.symbols, this.zones, this.fitView, this.field?.mesh]
+    this.beforeHidden = [this.part, this.markers, this.ghosts, this.lighter, this.adviceLabels, this.spots, this.symbols, this.zones, this.fitView, this.field?.mesh]
       .filter((o) => o?.visible);
     for (const o of this.beforeHidden) o.visible = false;
     this.scene.add(this.before);
@@ -183,7 +205,7 @@ export class Viewer {
     if (!this.pieces) return;
     dispose(this.pieces);
     this.pieces = null;
-    for (const o of [this.part, this.markers, this.ghosts, this.adviceLabels, this.bedGroup]) if (o) o.visible = true;
+    for (const o of [this.part, this.markers, this.ghosts, this.lighter, this.adviceLabels, this.bedGroup]) if (o) o.visible = true;
     if (this.part) this.frame(this.part.geometry.boundingSphere);
   }
 
