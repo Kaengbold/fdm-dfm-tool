@@ -1108,7 +1108,7 @@ const VALUE_WORDS = {
   seam_slope_type: { external: "Outer wall", all: "All walls", none: "Off" },
   support_interface_pattern: { rectilinear_interlaced: "Rectilinear, crossed" },
 };
-const UNITS = { layer_height: "mm", brim_width: "mm", xy_hole_compensation: "mm", elefant_foot_compensation: "mm", support_threshold_angle: "°", bridge_speed: "mm/s" };
+const UNITS = { layer_height: "mm", brim_width: "mm", raft_layers: "layers", xy_hole_compensation: "mm", elefant_foot_compensation: "mm", support_threshold_angle: "°", bridge_speed: "mm/s" };
 function settingText(key, value) {
   const v = String(value);
   if (ON_OFF.has(key)) return v === "1" || v === "true" ? "On" : "Off";
