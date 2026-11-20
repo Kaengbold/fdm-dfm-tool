@@ -729,7 +729,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Do: find out whether Cura takes per-model settings from a 3MF or needs a project file (`research/`). If not possible: for "Cura" in the slicer choice, show the settings as a short list to type in, with Cura's names, and export the turned STL.
   - Done when: a Cura user gets the orientation and a settings list with Cura's own names.
   - Outcome: Cura does read per-model settings from a plain 3MF (`cura:` metadata on the object, Cura's ThreeMFReader + libSavitar; Gemini's first answer said no, the source says yes): the export writes walls, infill, top/bottom, supports, overhang angle, hole and first-layer expansion, ironing, bridge speed and fuzzy skin under Cura's names; layer height, support type and brim are global in Cura and named in the download hint. research/gemini_cura_3mf.md. Not tried in Cura itself (not installed): one real check belongs to T-467.
-- [ ] **T-453 P2** [J] A list of saved projects in the browser. · files: `web/app.js` (autosave: one slot `current` in IndexedDB), `web/index.html` · owner: —
+- [ ] **T-453 P2** [J] A list of saved projects in the browser. · files: `web/app.js` (autosave: one slot `current` in IndexedDB), `web/index.html` · owner: Claude (`task/T-453-saved-projects`)
   - Do: keep the last ~10 projects (name, date, small picture, verdict), opened from the start screen; "Save project" still writes a file. Limit by size, oldest out first; a clear "Delete all".
   - Done when: two parts worked on in a row can both be reopened.
 - [ ] **T-454 P3** [J] Prepare for other languages. · files: `web/index.html`, `web/app.js`, `core/fdmcore/data/rules.yaml`, engine texts in `api.py` / `checks.py` · owner: —
