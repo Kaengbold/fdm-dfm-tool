@@ -93,6 +93,14 @@ def _recheck_single(part_name: str, up: tuple[float, float, float] | None, edit_
     return case, edit, after_findings
 
 
+def _apply_all(mesh: Mesh, edits: list[dict], label: str) -> Mesh:
+    """``apply_edits`` with its after-change checks (T-434), which must keep every suggested edit."""
+    refused: list[dict] = []
+    result = apply_edits(mesh, edits, refused)
+    assert not refused, f"{label}: good edits left out: {refused}"
+    return result
+
+
 def _recheck(mesh: Mesh, up: tuple[float, float, float], name: str) -> list[dict]:
     api.load(to_binary_stl(mesh), name)
     return api.check(list(up))["findings"]
@@ -246,13 +254,13 @@ def test_part_edits_alone_and_together(path: Path):
 
     for edit in case.edits:
         label = f"{case.name}::{edit['id']} ({edit['rule']})"
-        result = apply_edits(case.mesh, [edit])
+        result = _apply_all(case.mesh, [edit], label)
         info = _assert_watertight_and_pieces(result, case.stats["pieces"], label)
         _assert_volume_moved(info["volume"], case.stats["volume"], [edit], label)
         _assert_outer_size_unchanged(result, case.bounds, [edit], label)
 
     all_label = f"{case.name}::all({len(case.edits)})"
-    combined = apply_edits(case.mesh, case.edits)
+    combined = _apply_all(case.mesh, case.edits, all_label)
     info = _assert_watertight_and_pieces(combined, case.stats["pieces"], all_label)
     _assert_volume_moved(info["volume"], case.stats["volume"], case.edits, all_label)
     _assert_outer_size_unchanged(combined, case.bounds, case.edits, all_label)
@@ -290,6 +298,39 @@ def test_foot_chamfer_reduces_elephant_foot(part_name: str):
     )
 
 
+def _box_edit(id_: str, lo, hi, op: str, title: str) -> dict:
+    """A closed box as an edit (outward-facing triangles), for deliberately bad changes."""
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    corners = np.array([[x, y, z] for z in (0, 1) for y in (0, 1) for x in (0, 1)], float)
+    faces = np.array([[0, 2, 1], [1, 2, 3], [4, 5, 6], [5, 7, 6], [0, 1, 4], [1, 5, 4],
+                      [2, 6, 3], [3, 6, 7], [0, 4, 2], [2, 4, 6], [1, 3, 5], [3, 7, 5]])
+    tris = (lo + corners * (hi - lo))[faces]
+    assert Mesh(tris).volume() > 0
+    return {"id": id_, "rule": "design_change", "title": title, "op": op, "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)]}
+
+
+def test_bad_edits_are_left_out_and_the_rest_applied():
+    """A cutter through the whole part (it would cut it in two) and an addition sticking out of it are
+    refused with a reason; the good edits still go in (T-434)."""
+    case = _load_case(PART_BY_NAME["hole_block"])
+    assert case.edits
+    lo, hi = case.bounds
+    mid = (lo + hi) / 2
+    through = _box_edit("bad-cut", [mid[0] - 0.5, lo[1] - 1, lo[2] - 1], [mid[0] + 0.5, hi[1] + 1, hi[2] + 1], "cut", "Cut a slot")
+    sticks_out = _box_edit("bad-add", [lo[0] + 1, lo[1] + 1, hi[2] - 1], [lo[0] + 3, lo[1] + 3, hi[2] + 5], "add", "Add a post")
+    refused: list[dict] = []
+    result = apply_edits(case.mesh, [through, *case.edits, sticks_out], refused)
+    reasons = {r["id"]: r["reason"] for r in refused}
+    assert set(reasons) == {"bad-cut", "bad-add"}, refused
+    assert reasons["bad-cut"] == "it would cut the part in two"
+    assert reasons["bad-add"] == "it would make the part 5.0 mm bigger in Z"
+    good = _apply_all(case.mesh, case.edits, "hole_block::good")
+    assert inspect_mesh(result)["volume"] == pytest.approx(inspect_mesh(good)["volume"], rel=1e-6)
+    # Placed by the user (a block from Advanced design changes), the post may stick out.
+    placed = apply_edits(case.mesh, [{**sticks_out, "placed_by_user": True}], refused := [])
+    assert not refused and placed.bounds()[1][2] > hi[2] + 4.9
+
+
 def test_feature_test_side_edits_apply_cleanly():
     """feature_test on its side ([0,-1,0]) exercises 8 ledge fills and a sacrificial layer."""
     case = _load_case(PART_BY_NAME["feature_test"], FEATURE_TEST_SIDE_UP)
@@ -298,11 +339,11 @@ def test_feature_test_side_edits_apply_cleanly():
 
     for edit in case.edits:
         label = f"feature_test-side::{edit['id']} ({edit['rule']})"
-        result = apply_edits(case.mesh, [edit])
+        result = _apply_all(case.mesh, [edit], label)
         info = _assert_watertight_and_pieces(result, case.stats["pieces"], label)
         _assert_volume_moved(info["volume"], case.stats["volume"], [edit], label)
 
-    combined = apply_edits(case.mesh, case.edits)
+    combined = _apply_all(case.mesh, case.edits, "feature_test-side::all")
     info = _assert_watertight_and_pieces(combined, case.stats["pieces"], "feature_test-side::all")
     _assert_volume_moved(info["volume"], case.stats["volume"], case.edits, "feature_test-side::all")
 

@@ -1053,7 +1053,7 @@ def volume_solid(up, boxes: list[dict]) -> list[dict]:
         size = " × ".join(f"{v:.0f}" for v in hi - lo)
         out.append({"id": f"solid-{i}", "rule": "design_change", "title": f"{'Add' if add else 'Cut away'} a {size} mm block",
                     "description": "Placed under Advanced design changes.", "op": "add" if add else "cut", "param": None,
-                    "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)]})
+                    "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)], "placed_by_user": True})
     return out
 
 
@@ -1079,7 +1079,7 @@ def snap_model(data: bytes, point, normal, spin_deg: float = 0.0, name: str = "o
     lo, hi = tris.reshape(-1, 3).min(axis=0), tris.reshape(-1, 3).max(axis=0)
     return {"id": "snap", "rule": "design_change", "title": f"Add {name}",
             "description": f"Its biggest flat face ({face['area_mm2']:.0f} mm²) sits on the clicked face; it is {hi[0] - lo[0]:.0f} × {hi[1] - lo[1]:.0f} × {hi[2] - lo[2]:.0f} mm.",
-            "op": "add", "param": None, "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)]}
+            "op": "add", "param": None, "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)], "placed_by_user": True}
 
 
 def _rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
