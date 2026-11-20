@@ -721,7 +721,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: there is no public address yet; a user has to run `python -m http.server`. This is the single biggest step for usability.
   - Do: enable GitHub Pages (source: GitHub Actions; the workflow exists and self-hosts the libraries). Add a web app manifest and icons so "Install app" works in Edge / Chrome (offline use is already there). Put the address in the README.
   - Done when: the address works on a clean browser; the browser smoke test can run against it (`--url`).
-- [ ] **T-450 P2** [J] Local mode for people who are not developers. · files: `core/pyproject.toml`, README.md, `agents/` · owner: —
+- [ ] **T-450 P2** [J] Local mode for people who are not developers. · files: `core/pyproject.toml`, README.md, `agents/` · owner: Claude (`task/T-450-local-mode`)
   - Seen: `pip install -e "core[local]"` plus an MCP config line by hand.
   - Do: one command that needs no checkout (`uvx fdmdfm …` / `pipx install fdmdfm`), a command `fdmdfm setup` that writes the MCP entry for Claude Code / Codex / Gemini CLI after asking, and `fdmdfm open part.stl` that starts the local page with the part. No dependence on the user's install paths or slicer version (ship pinned data).
   - Done when: a fresh machine gets from nothing to a first agent call with two commands, documented.
