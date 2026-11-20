@@ -73,7 +73,8 @@ main#viewer { grid-area: 2 / 2; }
 
 /* ---------- header ---------- */
 .top {
-  grid-column: 1 / -1;
+  /* Row pinned: auto-placed, any element put before it (browser extensions inject some) pushed it below the app. */
+  grid-area: 1 / 1 / 2 / -1;
   display: flex; align-items: center; gap: 20px;
   padding: 0 16px;
   background: var(--chrome);
