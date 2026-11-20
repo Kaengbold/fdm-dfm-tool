@@ -826,7 +826,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Every value records its source, a confidence level (`published` / `estimated` / `tuned`) and a range.
   - Done when: every constant T-473 and T-474 need has a value, a source and a confidence level.
   - Outcome: `core/fdmcore/data/thermal.yaml` (7 materials, process constants) and research/thermal_constants.md. Gemini drafted; every DOI checked with Crossref and the open papers read: 5 of Gemini's 11 DOIs were fake, those values are `estimated` now. Published: ABS WLF (Seppala 2017: 4.65 / 200.9 at 230 C), PLA c_p (Pyda 2004), Costa 2014 convection bracket and emissivity, density / Tg from datasheets. Estimated, to tune in T-477 / T-482: reptation times, WLF for all but ABS / ASA, fan h by fan %, contact conductances, melt drop by flow. Not yet loaded by any code (T-473).
-- [ ] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: —
+- [ ] **T-471 P2** [TO] G-code reader: speeds, fans, causes of slowdowns, big files. · files: `core/fdmcore/gcode.py`, `core/tests/` · owner: Claude (task/T-471-gcode-reader)
   - Do: extend `Toolpath` (don't build a second format) with:
     - speed (F) for each line, travel moves, retractions;
     - fan commands (`M106/M107 P*`, Klipper `SET_FAN_SPEED`);
