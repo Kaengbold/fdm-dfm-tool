@@ -53,7 +53,8 @@ def collect(up, profile: dict | None = None, loads: list[dict] | None = None, mo
         "reasons": picked["reasons"],
         "pictures": {"bed": render.picture("bed", up, profile), "overhangs": render.picture("overhangs", up, profile)},
         "charts": {"orientations": charts.orientations(api.orientations(profile, top=5, loads=loads), api.required_safety(p))},
-        "problems": [], "settings": r["settings"],
+        "problems": [], "advice": api.design(up, profile, findings=r["findings"])["advice"] if mode != "print" else [],
+        "settings": r["settings"],
     }
     placed = 0
     for i, f in enumerate(x for x in r["findings"] if x.get("bbox")):
@@ -103,6 +104,10 @@ def to_html(rep: dict) -> str:
         f'{pic(f.get("picture"), f["title"])}<p><b>{e(f["detail"])}</b></p><p class="muted">{e(f["why"])}</p>'
         + (f'<ul>{"".join(fix(x) for x in f["fixes"])}</ul>' if f["fixes"] else "")
         + "</div>" for f in rep["problems"]) or "<p>No problems found in this orientation.</p>"
+    advice_items = "".join(
+        f'<li>{e(a["text"])}' + (f' <span class="muted">({e(a["fixes"]["title"])})</span>' if a.get("fixes") else "") + "</li>"
+        for a in rep.get("advice", ()))
+    advice = f'<h2>Design advice for CAD</h2><ul>{advice_items}</ul>' if advice_items else ""
     settings = "".join(f'<tr><td>{e(x["label"])}</td><td><b>{e(str(x["value"]))}</b></td><td class="why">{e(x["reason"])}</td></tr>'
                        for x in rep["settings"])
     nozzles = (f'<h2>Print time per nozzle</h2>{svg("nozzle_time")}{svg("nozzle_filament")}'
@@ -117,6 +122,7 @@ def to_html(rep: dict) -> str:
 <h2>What needs support</h2>{pic("overhangs", "Seen from below")}
 <p class="muted">Seen from below. Red needs support, amber is borderline, green sits on the bed.</p>
 <h2>Problems</h2>{problems}
+{advice}
 {result(rep.get("strength"), "Strength analysis", "stress")}
 {result(rep.get("warp"), "Warping", "warp", "warping")}
 {nozzles}
@@ -155,6 +161,8 @@ def to_markdown(rep: dict, stem: str) -> tuple[str, dict[str, bytes]]:
         lines += [f"### {f['title']} ({SEVERITY.get(f['severity'], f['severity'])})", "", *pic(f.get("picture"), f["title"]),
                   f["detail"], "", f["why"], ""]
         lines += [f"- *{DOMAIN.get(x['domain'], x['domain'])}*: {x['text']}" for x in f["fixes"]] + [""]
+    if rep.get("advice"):
+        lines += ["## Design advice for CAD", "", *[f"- {a['text']}" for a in rep["advice"]], ""]
     for key, title, picture, chart in (("strength", "Strength analysis", "stress", None), ("warp", "Warping", "warp", "warping")):
         x = rep.get(key)
         if x:

@@ -75,3 +75,16 @@ def test_organic_shape_gets_no_cad_findings():
     assert api._features()
     # Every check that holds for any shape still runs with the CAD checks off.
     assert rules == {f["rule"] for f in on["findings"]} - cad_rules
+
+
+def test_organic_part_gets_no_ledge_fills_until_cad_checks_are_on():
+    """A sculpt isn't reshaped with 45° fills under every bump (T-489); the CAD switch brings them back."""
+    path = next(p for p in ORGANIC_PARTS if p.stem == "bumpy_blob_20k")
+    api.load(path.read_bytes(), path.stem)
+    up = api.orientations()["orientations"][0]["up"]
+    findings = api.check(up)["findings"]
+    # Its surface is smooth: nothing too thin to print (the old corpus blob had 0.1 mm spikes at its poles).
+    assert "too_thin_to_print" not in {f["rule"] for f in findings}
+    assert not [e for e in api.design(up, findings=findings)["edits"] if e["id"].startswith("ledge-")]
+    api.set_cad_checks(True)
+    assert [e for e in api.design(up, findings=findings)["edits"] if e["id"].startswith("ledge-")]

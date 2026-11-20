@@ -191,4 +191,7 @@ def parts(geom: BaseGeometry, min_area: float = 0.0) -> list[Polygon]:
     if geom.is_empty:
         return []
     polys = [g for g in getattr(geom, "geoms", [geom]) if isinstance(g, Polygon)]
-    return [p for p in polys if p.area > min_area]
+    if not polys:
+        return []
+    # One vectorised call: the morphological checks split a curved layer into thousands of slivers (T-458).
+    return [p for p, a in zip(polys, shapely.area(polys)) if a > min_area]
