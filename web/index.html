@@ -256,7 +256,12 @@
               <div class="pick-mode" data-min="advanced">
                 <div class="seg" role="radiogroup" aria-label="Hold or load">
                   <label><input type="radio" name="pick-mode" value="face" checked /> The whole face</label>
+                  <label><input type="radio" name="pick-mode" id="pick-edge" value="edge" /> An edge</label>
                   <label><input type="radio" name="pick-mode" id="pick-paint" value="paint" /> Paint an area</label>
+                </div>
+                <div id="edge-tools" class="paint-tools" hidden>
+                  <span id="edge-hint" class="hint" role="status">Tap next to an edge: the load spreads along it up to the next corner.</span>
+                  <label class="toggle"><input type="checkbox" id="edge-point" /> Only at the tapped point</label>
                 </div>
                 <div id="paint-tools" class="paint-tools" hidden>
                   <span class="hint">Drag over the part: an edge, a corner, part of a face.</span>
