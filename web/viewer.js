@@ -1232,3 +1232,75 @@ function placeTriangles(triangles, [r0, r1, r2], fixedShift = null) {
   for (let i = 0; i < out.length; i += 3) for (let k = 0; k < 3; k++) out[i + k] += shift[k];
   return { out, shift };
 }
+
+// ---------- edges for loads (T-371): snap a load to the edge next to a tap ----------
+const EDGE_ANGLE_DEG = 30; // faces meeting at more than this make an edge (a 32-sided hole still counts as smooth)
+const EDGE_TURN_DEG = 35; // following an edge stops where it turns more than this: at a corner
+const edgeCache = new WeakMap(); // triangles -> { segments, ends }
+
+/** Sharp edges of a part (float32 triangle soup, part coordinates) as segments, worked out once per part. */
+function sharpEdges(triangles) {
+  let edges = edgeCache.get(triangles);
+  if (edges) return edges;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(triangles, 3));
+  const segments = new THREE.EdgesGeometry(g, EDGE_ANGLE_DEG).getAttribute("position").array; // x y z x y z per segment
+  g.dispose();
+  const ends = new Map(); // endpoint -> segment indices meeting there
+  const key = (i) => `${Math.round(segments[i] * 1e3)},${Math.round(segments[i + 1] * 1e3)},${Math.round(segments[i + 2] * 1e3)}`;
+  for (let s = 0; s < segments.length / 6; s++) {
+    for (const k of [key(s * 6), key(s * 6 + 3)]) (ends.get(k) ?? ends.set(k, []).get(k)).push(s);
+  }
+  edges = { segments, ends, key };
+  edgeCache.set(triangles, edges);
+  return edges;
+}
+
+/** The edge nearest ``point`` (within ``snap`` mm), followed both ways until it turns a corner: ``line`` is its
+ * points in order, ``at`` the nearest point on it, ``length`` in mm. ``null`` when no edge is that close. */
+export function edgeAt(triangles, point, snap) {
+  const { segments, ends, key } = sharpEdges(triangles);
+  const p = new THREE.Vector3(...point);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), on = new THREE.Vector3(), line3 = new THREE.Line3(a, b);
+  let best = -1, bestDist = snap;
+  const at = new THREE.Vector3();
+  for (let s = 0; s < segments.length / 6; s++) {
+    a.fromArray(segments, s * 6);
+    b.fromArray(segments, s * 6 + 3);
+    line3.closestPointToPoint(p, true, on);
+    const d = on.distanceTo(p);
+    if (d < bestDist) {
+      [best, bestDist] = [s, d];
+      at.copy(on);
+    }
+  }
+  if (best < 0) return null;
+  const end = (s, which) => new THREE.Vector3().fromArray(segments, s * 6 + which * 3);
+  const seen = new Set([best]);
+  /** From the end ``which`` of segment ``s``, keep going while the next segment carries on straight enough. */
+  const walk = (s, which) => {
+    const points = [];
+    for (let n = 0; n < 5000; n++) {
+      const from = end(s, 1 - which), to = end(s, which);
+      const dir = to.clone().sub(from).normalize();
+      let next = null, nextWhich = 0, bestTurn = EDGE_TURN_DEG;
+      for (const t of ends.get(key(s * 6 + which * 3)) ?? []) {
+        if (seen.has(t)) continue;
+        const w = key(t * 6) === key(s * 6 + which * 3) ? 1 : 0; // the far end of t
+        const turn = THREE.MathUtils.radToDeg(dir.angleTo(end(t, w).sub(end(t, 1 - w)).normalize()));
+        if (turn < bestTurn) [next, nextWhich, bestTurn] = [t, w, turn];
+      }
+      if (next == null) break;
+      seen.add(next);
+      points.push(end(next, nextWhich));
+      [s, which] = [next, nextWhich];
+    }
+    return points;
+  };
+  const forward = walk(best, 1);
+  const backward = walk(best, 0);
+  const line = [...backward.reverse(), end(best, 0), end(best, 1), ...forward];
+  let length = 0;
+  for (let i = 1; i < line.length; i++) length += line[i].distanceTo(line[i - 1]);
+  return { line: line.map((v) => v.toArray()), at: at.toArray(), length };
+}

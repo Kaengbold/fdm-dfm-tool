@@ -325,7 +325,12 @@
               <div class="pick-mode" data-min="advanced">
                 <div class="seg" role="radiogroup" aria-label="Hold or load">
                   <label><input type="radio" name="pick-mode" value="face" checked /> The whole face</label>
+                  <label><input type="radio" name="pick-mode" id="pick-edge" value="edge" /> An edge</label>
                   <label><input type="radio" name="pick-mode" id="pick-paint" value="paint" /> Paint an area</label>
+                </div>
+                <div id="edge-tools" class="paint-tools" hidden>
+                  <span id="edge-hint" class="hint" role="status">Tap next to an edge: the load spreads along it up to the next corner.</span>
+                  <label class="toggle"><input type="checkbox" id="edge-point" /> Only at the tapped point</label>
                 </div>
                 <div id="paint-tools" class="paint-tools" hidden>
                   <span class="hint">Drag over the part: an edge, a corner, part of a face.</span>
@@ -585,7 +590,8 @@
         <section class="pane" data-pane="extra">
           <h2>Advanced design changes</h2>
           <div id="blk-extra">
-            <p class="lead" data-info>Boxes you place on the part for the slicer: supports where you want them, none where you don't, and hidden gaps that make it print solid walls inside.
+            <p class="lead" data-info>Boxes you place on the part: hidden gaps that make it print solid walls inside where it needs strength,
+              space that has to stay clear, and supports where you want them or none where you don't.
               They go into the 3MF; the strength check counts the gaps.</p>
             <div class="sim-card" id="auto-card">
               <h3>Place them for me</h3>
@@ -606,12 +612,12 @@
             <div class="sim-card" id="vol-card">
               <label class="field">What to place
                 <select id="vol-kind">
-                  <option value="support">Support here</option>
-                  <option value="blocker">No support here</option>
                   <option value="void">Hidden gap (solid walls inside)</option>
                   <option value="keep_clear">Keep clear (space that stays empty)</option>
                   <option value="add_solid">Add plastic (a block)</option>
                   <option value="cut_solid">Cut away (a block)</option>
+                  <option value="support">Support here</option>
+                  <option value="blocker">No support here</option>
                 </select></label>
               <p id="vol-kind-hint" class="hint"></p>
               <div class="row">
@@ -686,14 +692,18 @@
               <select id="dl-slicer"><option value="orca">OrcaSlicer / Bambu Studio / Cura</option><option value="prusa">PrusaSlicer</option></select></label>
             <ul id="setup-warnings" class="setup-warnings" hidden></ul>
             <label id="fine-for" class="field" hidden><input type="checkbox" id="dl-fine" checked /> <span id="fine-text"></span></label>
-            <label class="field" title="Several of this part on one plate, set out in rows; how many fit depends on the printer">Copies on the plate <input id="dl-copies" type="number" min="1" step="1" value="1" /></label>
-            <p id="copies-text" class="hint" hidden></p>
-            <ul id="copies-notes" class="hint" hidden></ul>
-            <label class="toggle" title="The slicer roughens the outside walls: a grippy, matte surface for knobs and handles that also hides layer lines. Those walls print slower"><input type="checkbox" id="dl-grip" /> Grip texture (fuzzy skin) on the outside</label>
             <label id="pause-for" class="field" hidden><input type="checkbox" id="dl-pause" checked /> <span id="pause-text"></span></label>
             <label id="pause-sliced" class="file-button" hidden title="Bambu Studio ignores the pause in the 3MF. Slice there, export the plate's sliced file (or the G-code), choose it here and print the file you get back">Add the pause to a file sliced in Bambu Studio…<input id="pause-file" type="file" accept=".gcode,.gco,.g,.3mf" hidden /></label>
             <button id="dl-3mf" class="primary big" title="Walls, infill, supports and brim are set on the part; your slicer's printer and filament profiles stay yours">Download 3MF for your slicer</button>
             <p class="hint">Opens in OrcaSlicer, Bambu Studio and PrusaSlicer, turned the right way, with the settings on the part. Cura takes most of them too; set layer height, tree supports and brim there yourself.</p>
+            <details id="dl-more" class="more-block">
+              <summary>Copies and grip texture</summary>
+              <label class="field" title="Several of this part on one plate, set out in rows; how many fit depends on the printer">Copies on the plate <input id="dl-copies" type="number" min="1" step="1" value="1" /></label>
+              <p id="copies-text" class="hint" hidden></p>
+              <ul id="copies-notes" class="hint" hidden></ul>
+              <label class="toggle" title="The slicer roughens the outside walls: a grippy, matte surface for knobs and handles that also hides layer lines. Those walls print slower"><input type="checkbox" id="dl-grip" /> Grip texture (fuzzy skin) on the outside</label>
+              <p class="hint">Your slicer can do both too; set here, they're already in the 3MF.</p>
+            </details>
             <div id="after-dl" class="sim-card after-dl" hidden>
               <h3>Next, in your slicer</h3>
               <ol>
@@ -705,8 +715,9 @@
               <button type="button" id="failed-after-dl" class="ghost small">It printed badly?</button>
               <button type="button" id="after-dl-close" class="ghost small">Got it</button>
             </div>
-            <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, joined with pins or a dovetail; shown on the bed first">Too big: cut it into pieces that fit</button>
             <button id="dl-split-support" hidden title="Cut where the part is narrowest so each piece prints its own best way, with much less support">Less support: print it in two pieces</button>
+            <button id="dl-split" hidden title="Cut flat into pieces that fit the bed, joined with pins or a dovetail; shown on the bed first">Too big: cut it into pieces that fit</button>
+            <p id="dl-split-note" class="hint" hidden>Your slicer can cut too; here the pieces get pins or a dovetail to join them.</p>
             <div id="split-panel" class="split-panel" hidden>
               <label class="field">Join the pieces with
                 <select id="split-joint"><option value="pins">pins (printed separately, glued in)</option><option value="dovetail">a dovetail (slide together, glue)</option></select></label>

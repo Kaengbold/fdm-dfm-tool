@@ -37,6 +37,7 @@ RULE_IMPACT = {
     "exceeds_build_volume": "fails",
     "small_bed_contact": "fails",
     "tipping_risk": "fails",
+    "print_may_fail": "fails",
     "too_thin_to_print": "fails",
     "hole_closes": "fails",
     "gap_fuses": "fails",

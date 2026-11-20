@@ -687,6 +687,10 @@ def _run_suite(port: int, args) -> Run:
             assert page.locator("#findings").is_visible(), "Show all does not open the full findings"
             page.click("#result-all > summary")
             page.click("#result-options > summary")
+            # T-431: copies and grip texture wait in their own fold below the download (the slicer does them too).
+            for selector in ("#dl-copies", "#dl-grip"):
+                assert page.locator(selector).is_hidden(), f"{selector} not folded away"
+            page.click("#dl-more > summary")
             for selector in ("#dl-copies", "#dl-grip", "#dl-report", "#dl-share", "#settings-fold > summary"):
                 assert page.locator(selector).is_visible(), f"More options lost {selector}"
             page.click("#result-options > summary")
@@ -1353,6 +1357,44 @@ def _run_suite(port: int, args) -> Run:
             assert headline in ("Plenty of reserve", "Enough", "Marginal", "Likely to break"), text
             return f"loads: {loads} | {text.splitlines()[0]}"
         run.step("strength with a load on a painted area", spot_load)
+
+        def edge_load():
+            """T-371: the load snaps to the edge next to the tap and spreads along it; or sits at one point on it."""
+            # A spot near a corner of a triangle on a loaded-able face: on flat faces those corners lie on its edges.
+            x, y = page.evaluate("""() => {
+              const v = fdm.viewer, s = fdm.state, held = s.loads[0].region, pos = v.part.geometry.getAttribute('position');
+              const rect = v.renderer.domElement.getBoundingClientRect();
+              for (let f = 0; f < pos.count / 3; f++) {
+                if (s.faceRegions[f] === held) continue;
+                const [a, b, c] = [0, 1, 2].map((k) => new v.camera.position.constructor().fromBufferAttribute(pos, f * 3 + k));
+                const q = a.multiplyScalar(0.9).add(b.multiplyScalar(0.05)).add(c.multiplyScalar(0.05)).project(v.camera);
+                const [x, y] = [rect.left + ((q.x + 1) / 2) * rect.width, rect.top + ((1 - q.y) / 2) * rect.height];
+                const el = document.elementFromPoint(x, y), hit = v.pick({ clientX: x, clientY: y });
+                if (el && el.tagName === 'CANVAS' && hit === f) return [x, y];
+              }
+              return [0, 0];
+            }""")
+            page.evaluate("() => { fdm.state.loads = fdm.state.loads.filter((l) => l.kind === 'fixed'); }")
+            page.mouse.click(x, y)
+            page.wait_for_selector("#pick-panel:not([hidden])")
+            page.click("label:has(#pick-edge)")
+            hint = page.locator("#edge-hint").inner_text()
+            spots = page.evaluate("() => fdm.state.paint.length")
+            assert hint.startswith("Along ") and spots > 1, (hint, spots)
+            assert page.evaluate("() => fdm.viewer.spots.children.at(-1).count") == spots, "edge spots not shown"
+            page.locator("#edge-point").check()
+            assert page.evaluate("() => fdm.state.paint.length") == 1, "one point on the edge expected"
+            page.locator("#edge-point").uncheck()
+            page.fill("#kg", "3")
+            page.click("#as-load")
+            page.evaluate("() => { const r = document.querySelector('[name=pick-mode][value=face]'); r.checked = true; r.dispatchEvent(new Event('change')); }")
+            loads = page.locator("#loads li").all_inner_texts()
+            assert any("mm edge)" in l for l in loads), loads
+            run.act(lambda: page.click("#run-strength"), 300_000)
+            headline = page.locator("#strength-result .verdict strong").first.inner_text()
+            assert headline in ("Plenty of reserve", "Enough", "Marginal", "Likely to break"), headline
+            return f"{hint} | {headline}"
+        run.step("strength with a load along an edge", edge_load)
 
         def compact_strength():
             page.set_viewport_size({"width": 1440, "height": 900})
@@ -2392,13 +2434,21 @@ def _run_suite(port: int, args) -> Run:
         run.step("less support: split into two pieces", split_for_support)
 
         def grip_texture():
-            # A part named "knob": the grip suggestion, the box ticked, fuzzy skin in the 3MF (T-340).
+            # A part named "knob": the grip suggestion (T-340), turned on with one click on its finding (T-431),
+            # fuzzy skin in the 3MF.
             import io
             import zipfile
 
             run.act(lambda: page.set_input_files("#file", str(ROOT / "core" / "tests" / "corpus" / "knob.stl")), 300_000)
             assert any("Grip texture" in t for t in findings(page)), findings(page)
-            assert page.evaluate("() => document.getElementById('dl-grip').checked"), "grip box not ticked for a knob"
+            assert not page.evaluate("() => document.getElementById('dl-grip').checked"), "grip texture on before it was asked for"
+            page.evaluate("() => fdm.steps.go('problems')")
+            fix = page.locator("#findings .grip-fix").first
+            fix.evaluate("b => { for (let d = b.closest('details'); d; d = d.parentElement.closest('details')) d.open = true; }")
+            assert fix.inner_text() == "Turn on grip texture", fix.inner_text()
+            fix.click()
+            assert page.evaluate("() => document.getElementById('dl-grip').checked"), "the finding's button didn't turn it on"
+            assert fix.get_attribute("aria-pressed") == "true" and "turn it off" in fix.inner_text()
             page.evaluate("() => fdm.steps.go('download')")
             with page.expect_download(timeout=300_000) as dl:
                 page.evaluate("() => document.getElementById('dl-3mf').click()")
@@ -2406,7 +2456,7 @@ def _run_suite(port: int, args) -> Run:
             assert 'key="fuzzy_skin" value="external"' in conf, "no fuzzy skin in the 3MF"
             run.act(lambda: click_sample(page, "test_block"))
             assert not page.evaluate("() => document.getElementById('dl-grip').checked"), "grip box kept for another part"
-            return "suggested for knob.stl, fuzzy skin in the 3MF, off for the next part"
+            return "suggested for knob.stl, one click on the finding, fuzzy skin in the 3MF, off for the next part"
         run.step("grip texture on a knob", grip_texture)
 
         def printer_tolerance():
@@ -2430,6 +2480,9 @@ def _run_suite(port: int, args) -> Run:
 
             run.act(lambda: click_sample(page, "test_block"))
             page.evaluate("() => fdm.steps.go('download')")
+            assert page.evaluate("() => !!(document.getElementById('dl-3mf').compareDocumentPosition(document.getElementById('dl-more'))"
+                                 " & Node.DOCUMENT_POSITION_FOLLOWING)"), "copies sit above the download"
+            page.evaluate("() => (document.getElementById('dl-more').open = true)")
             page.fill("#dl-copies", "4")
             page.dispatch_event("#dl-copies", "change")
             page.wait_for_function("() => document.getElementById('copies-text').textContent.includes('4 copies')", timeout=60_000)

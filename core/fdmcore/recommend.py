@@ -172,7 +172,53 @@ def shape_plan(profile: Profile, stats: dict, findings: list[dict]) -> tuple[dic
     return plan, reasons
 
 
-def recommend_settings(profile: Profile, findings: list[dict], stats: dict | None = None) -> list[dict]:
+_SEV = {"info": 0, "warn": 1, "problem": 2}
+
+
+def print_risk(profile: Profile, findings: list[dict], height_mm: float, warp_verdict: str | None = None) -> dict:
+    """How likely the whole print fails on the bed: comes loose at the corners, tips over or splits (T-391).
+    Adds up the signs the check found (warping, a small base, a tall narrow part, a shrinking plastic on an
+    open printer) and the warping simulation's verdict when it ran (``warp_verdict``), into ``level`` low /
+    medium / high with plain ``reasons``, and what holds it down: ``hold`` no_brim / brim_ears / outer_only / raft.
+    A raft only as the last resort: a tiny base that also warps or tips, or a part the simulation says will
+    lift in a shrinking plastic on an open printer."""
+    R = load_data("thresholds")["print_risk"]
+    worst: dict[str, int] = {}
+    for f in findings:
+        worst[f["rule"]] = max(worst.get(f["rule"], -1), _SEV.get(f.get("severity", "info"), 0))
+    mat, open_printer = profile.material, profile.enclosure == "none"
+    score, reasons = 0, []
+    warps = worst.get("warping", -1) >= 1 or warp_verdict in ("might lift", "likely to lift")
+    if warp_verdict == "likely to lift" or worst.get("warping", -1) >= 2:
+        score += 2
+        reasons.append("the corners will likely lift off the bed" + (" (warping simulation)" if warp_verdict == "likely to lift" else ""))
+    elif warps:
+        score += 1
+        reasons.append("the corners might lift off the bed")
+    tiny = worst.get("small_bed_contact", -1) >= 1
+    if tiny:
+        score += 1
+        reasons.append(f"little of it touches the bed ({part_fact(findings, 'small_bed_contact')})")
+    tips = "tipping_risk" in worst
+    if tips:
+        score += 1
+        reasons.append(f"it is tall on a narrow base ({part_fact(findings, 'tipping_risk')})")
+    if mat.get("warp_risk") == "high" and open_printer and height_mm > R["split_height_mm"]:
+        score += 1
+        reasons.append(f"{mat['name']} {height_mm:.0f} mm tall on an open printer can split between layers as it cools")
+    if (tiny and (tips or warps)) or (warp_verdict == "likely to lift" and mat.get("warp_risk") == "high" and open_printer):
+        hold = "raft"
+    elif "small_bed_contact" in worst or tips:  # a brim for any small base, even one only noted
+        hold = "outer_only"
+    elif "warping" in worst or warps:
+        hold = "brim_ears"
+    else:
+        hold = "no_brim"
+    return {"level": "low" if score == 0 else "medium" if score == 1 else "high", "score": score, "reasons": reasons, "hold": hold}
+
+
+def recommend_settings(profile: Profile, findings: list[dict], stats: dict | None = None, risk: dict | None = None) -> list[dict]:
+    """``risk``: print_risk for this part; left out, it is worked out from the findings alone."""
     rules = {f["rule"] for f in findings}
     stats = stats or {}
     mat = profile.material
@@ -216,15 +262,21 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         put("enable_support", 0, "Supports", f"Only {overhang:,.0f} mm² overhang, little enough to print without" if overhang >= 1
             else "Nothing hangs in the air in this orientation")
 
-    if rules & {"small_bed_contact", "tipping_risk"}:
+    risk = risk or print_risk(profile, findings, stats.get("height_mm", 0.0))
+    if risk["hold"] == "raft":
+        put("raft_layers", T["print_risk"]["raft_layers"], "Raft",
+            "A few layers of plastic under the part hold it down where a brim isn't enough: " + "; ".join(risk["reasons"])
+            + ". It leaves a rough underside: cut it off after printing")
+        put("brim_type", "no_brim", "Brim", "The raft holds the part instead")
+    elif risk["hold"] == "outer_only":
         width = T["warping"]["brim_width_mm"] if "warping" in rules or mat["warp_risk"] == "high" else 5
         put("brim_type", "outer_only", "Brim", f"Holds the part down: {part_fact(findings, 'small_bed_contact', 'tipping_risk')}")
         put("brim_width", width, "Brim width", "Wide enough to stop corners lifting")
-    elif "warping" in rules:
+    elif risk["hold"] == "brim_ears":
         # Only the corners lift: ears at the sharp corners hold them with far less brim to cut off
         # (OrcaSlicer wiki, Brim: Mouse ears). PrusaSlicer has none and gets an outer brim instead.
-        put("brim_type", "brim_ears", "Brim", f"Ears at the corners, where warping starts ({part_fact(findings, 'warping')});"
-            " less to cut off than a full brim")
+        fact = part_fact(findings, "warping") or "the warping simulation"
+        put("brim_type", "brim_ears", "Brim", f"Ears at the corners, where warping starts ({fact}); less to cut off than a full brim")
         put("brim_width", T["warping"]["brim_width_mm"], "Brim width", "Wide enough to stop corners lifting")
     else:
         put("brim_type", "no_brim", "Brim", "Enough bed contact without one")
@@ -253,9 +305,12 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
             f"Gives small layers time to cool: {part_fact(findings, 'small_layers_cooling', 'tall_thin_feature')}")
     # The first layer is squashed onto the bed and bulges out; pulling it in a little keeps bottom
     # edges straight. Most printer profiles ship 0.1-0.2 mm; harmless when the profile already has it.
-    put("elefant_foot_compensation", T["first_layer"]["elephant_foot_compensation_mm"], "Elephant foot compensation",
-        "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
-        else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight")
+    if risk["hold"] == "raft":  # the part's first layer lies on the raft, not squashed onto the bed
+        put("elefant_foot_compensation", 0, "Elephant foot compensation", "Not needed on a raft: the part isn't squashed onto the bed")
+    else:
+        put("elefant_foot_compensation", T["first_layer"]["elephant_foot_compensation_mm"], "Elephant foot compensation",
+            "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
+            else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight")
     if stats.get("top_flat_mm2", 0) >= T["ironing"]["min_top_area_mm2"] and goal in ("balanced", "strength"):
         put("ironing_type", "topmost", "Ironing", f"The {stats['top_flat_mm2']:,.0f} mm² flat top comes out smooth: the nozzle passes"
             " over it once more with almost no plastic (adds a few minutes)")

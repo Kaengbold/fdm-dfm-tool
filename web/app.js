@@ -2,7 +2,7 @@ import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
 import { MATERIAL_FIELDS, PRINTER_FIELDS, fromAnswers, fromOrcaFilament, fromOrcaPrinter, fromPrintProfile, loadMine, saveMine, loadPrintProfile, savePrintProfile, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
-import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor } from "./viewer.js";
+import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor, edgeAt } from "./viewer.js";
 import { Steps, STEP_NAMES } from "./steps.js";
 import { projectInReport, reportHtml, formatSafety, strengthBand } from "./report.js";
 import { readProject, writeProject } from "./project.js";
@@ -514,8 +514,10 @@ async function partLoaded(info) {
   state.check = null;
   $("dl-copies").value = "1"; // a new part starts with one on the plate
   state.copies = 1;
+  setGrip(false); // and smooth walls: grip texture is offered on its finding (T-431)
   renderPauses();
   $("dl-split").hidden = true;
+  $("dl-split-note").hidden = true;
   closeSplit();
   renderOptions();
   $("view-empty").hidden = true;
@@ -676,10 +678,7 @@ async function runCheck() {
     // Same test as the support setting on the 3MF (recommend.py): an overhang, or a bridge too long to span.
     const needsSupport = result.stats.needs_support || result.findings.some((f) => f.rule === "long_bridge");
     $("dl-split-support").hidden = !$("dl-split").hidden || !needsSupport;
-    if (state.gripFor !== state.name) { // a new part: ticked when it is something held (grip_texture); then the user's choice
-      state.gripFor = state.name;
-      $("dl-grip").checked = result.findings.some((f) => f.rule === "grip_texture");
-    }
+    $("dl-split-note").hidden = $("dl-split").hidden;
     closeSplit(); // the pieces were for the orientation and part before
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
@@ -793,11 +792,35 @@ function findingPicture(f) {
     style: "align-self:flex-start;border-radius:var(--r)" });
 }
 
+/** A slicer fix the 3MF can carry, one click on its finding instead of a standing control (T-431): today the
+ * grip texture (fuzzy skin) for a part that is held. Stays in step with the box under "Copies and grip texture". */
+function fixAction(f) {
+  if (f.rule !== "grip_texture") return "";
+  const b = el("button", { type: "button", className: "small grip-fix", onclick: () => {
+    setGrip(!$("dl-grip").checked);
+    setStatus($("dl-grip").checked ? "Grip texture is on: the 3MF asks the slicer for fuzzy skin on the outside walls."
+      : "Grip texture is off: the outside walls print smooth.");
+  } });
+  syncGrip(b);
+  return b;
+}
+function syncGrip(b) {
+  const on = $("dl-grip").checked;
+  b.textContent = on ? "Grip texture is on · turn it off" : "Turn on grip texture";
+  b.setAttribute("aria-pressed", String(on));
+}
+function setGrip(on) {
+  $("dl-grip").checked = on;
+  document.querySelectorAll(".grip-fix").forEach(syncGrip);
+}
+$("dl-grip").addEventListener("change", () => document.querySelectorAll(".grip-fix").forEach(syncGrip));
+
 function findingCard(findings, items) {
   const first = items[0].f;
   const worst = items.reduce((a, b) => (SEVERITY_RANK[b.f.severity] < SEVERITY_RANK[a.f.severity] ? b : a)).f.severity;
   const fixes = first.fixes.map((fx) =>
-    el("li", {}, el("span", { className: `chip ${fx.domain}`, textContent: DOMAIN_LABEL[fx.domain] }), " ", fx.text),
+    el("li", {}, el("span", { className: `chip ${fx.domain}`, textContent: DOMAIN_LABEL[fx.domain] }), " ", fx.text,
+      fx.domain === "slicer" ? fixAction(first) : ""),
   );
   if (first.hidden_fixes?.length) {
     const hiddenLabels = first.hidden_fixes.map((d) => DOMAIN_LABEL[d]).join(" / ");
@@ -912,7 +935,8 @@ function renderVerdict() {
         title: "Show this place on the part" },
         el("img", { src: picture, alt: "", width: 88, height: 66, decoding: "async" }),
         el("strong", { textContent: f.title })),
-      fix ? el("p", { className: "hint result-fix", textContent: `Fix: ${fix.text}` }) : "");
+      fix ? el("p", { className: "hint result-fix", textContent: `Fix: ${fix.text}` }) : "",
+      fixAction(f));
     card.dataset.rule = f.rule;
     return card;
   }));
@@ -1089,7 +1113,7 @@ const VALUE_WORDS = {
   seam_slope_type: { external: "Outer wall", all: "All walls", none: "Off" },
   support_interface_pattern: { rectilinear_interlaced: "Rectilinear, crossed" },
 };
-const UNITS = { layer_height: "mm", brim_width: "mm", xy_hole_compensation: "mm", elefant_foot_compensation: "mm", support_threshold_angle: "°", bridge_speed: "mm/s" };
+const UNITS = { layer_height: "mm", brim_width: "mm", raft_layers: "layers", xy_hole_compensation: "mm", elefant_foot_compensation: "mm", support_threshold_angle: "°", bridge_speed: "mm/s" };
 function settingText(key, value) {
   const v = String(value);
   if (ON_OFF.has(key)) return v === "1" || v === "true" ? "On" : "Off";
@@ -1196,7 +1220,7 @@ function recolor() {
   if (strengthView()) return;
   if (shows("printing") && $("show-temp").checked && state.check?.face_temp) return viewer.colorByHeat(state.check.face_temp);
   const roles = new Map([...state.marks.map((m) => [m.region, m.kind]), ...state.loads.filter((l) => !l.point).map((l) => [l.region, l.kind])]);
-  const spot = painting() && state.paint.length > 0;
+  const spot = spreading() && state.paint.length > 0;
   const regions = shows("strength") || shows("design") || shows("fits") || viewStep() === "orient";
   const counts = [0, 0, 0, 0];
   viewer.colorByClass(option.face_classes, (f) => {
@@ -1227,7 +1251,7 @@ function recolor() {
 /** Spots and painted areas on the part: the loads on them, and the area being painted now. */
 function showPainted() {
   const spots = shows("strength") ? state.loads.filter((l) => l.point || l.points).map((l) => ({ point: l.point, points: l.points, radius: l.radius, color: REGION_COLORS[l.kind] })) : [];
-  if (painting() && state.paint.length) spots.push({ points: state.paint, radius: brushRadius(), color: REGION_COLORS.selected });
+  if (spreading() && state.paint.length) spots.push({ points: state.paint, radius: pickRadius(), color: REGION_COLORS.selected });
   viewer.showSpots(spots);
 }
 
@@ -1296,6 +1320,7 @@ $("viewer").addEventListener("pointerup", async (e) => {
   state.pickedPoint = hit.point;
   state.pickedOnce = true;
   state.paint = [hit.point];
+  if (pickMode() === "edge") snapEdge(hit.point);
   hoverTip.hidden = true;
   const info = state.regionInfo[state.selectedRegion];
   $("pick-info").textContent = info.hole_diameter
@@ -1316,20 +1341,27 @@ $("viewer").addEventListener("pointerup", async (e) => {
 const where = (l) => (l.points ? `area ${l.points.length} ${l.point.map((v) => v.toFixed(1)).join(",")}`
   : l.point ? `spot ${l.point.map((v) => v.toFixed(1)).join(",")}` : `face ${l.region}`);
 
-/** The tapped face, or the area painted with the brush. A painted load keeps all its spots
- * (``points``, part coordinates) and, as ``point``, the one in its middle for the lock or arrow. */
+/** The tapped face, the area painted with the brush, or the edge next to the tap. A painted or edge load keeps
+ * all its spots (``points``, part coordinates) and, as ``point``, the one in its middle for the lock or arrow;
+ * ``edge_mm`` says how long the edge is (0: one point on it), for the load's name. */
 function target() {
-  if (!painting() || !state.paint.length) return { region: state.selectedRegion };
+  if (!spreading() || !state.paint.length) return { region: state.selectedRegion };
   const pts = state.paint;
   const mean = [0, 1, 2].map((k) => pts.reduce((s, p) => s + p[k], 0) / pts.length);
   const point = pts.reduce((a, p) => (Math.hypot(...p.map((v, k) => v - mean[k])) < Math.hypot(...a.map((v, k) => v - mean[k])) ? p : a));
-  return { points: pts.map((p) => p.map((v) => +v.toFixed(2))), radius: brushRadius(), point, normal: state.regionInfo[state.selectedRegion]?.normal };
+  const edge = pickMode() === "edge" && state.edge ? { edge_mm: $("edge-point").checked ? 0 : Math.round(state.edge.length) } : {};
+  return { points: pts.map((p) => p.map((v) => +v.toFixed(2))), radius: pickRadius(), point, normal: state.regionInfo[state.selectedRegion]?.normal, ...edge };
 }
 
 // ---------- the brush (T-370): paint where it's held or loaded, instead of a whole face ----------
 state.paint = []; // part coordinates of the painted spots
-const painting = () => document.querySelector("[name=pick-mode]:checked")?.value === "paint" && !$("pick-panel").hidden && shows("strength");
+const pickMode = () => document.querySelector("[name=pick-mode]:checked")?.value ?? "face";
+const painting = () => pickMode() === "paint" && !$("pick-panel").hidden && shows("strength");
+/** Painting, or an edge: the load is a set of spots, not a whole face. */
+const spreading = () => ["paint", "edge"].includes(pickMode()) && !$("pick-panel").hidden && shows("strength");
 const brushRadius = () => Number($("brush-size").value) / 2;
+const EDGE_RADIUS_MM = 1.5; // a narrow band along the edge (the strength grid takes at least 1.5 cubes anyway)
+const pickRadius = () => (pickMode() === "edge" ? EDGE_RADIUS_MM : brushRadius());
 const stroke = { on: false, done: false };
 
 /** Add a spot under the pointer unless the brush already covered it (a stroke stays a few hundred spots at most). */
@@ -1362,14 +1394,56 @@ for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
 }
 for (const radio of document.querySelectorAll("[name=pick-mode]")) {
   radio.onchange = () => {
-    const paint = radio.value === "paint";
-    $("paint-tools").hidden = !paint;
-    document.body.classList.toggle("painting", paint);
-    state.paint = paint && state.pickedPoint ? [state.pickedPoint] : [];
+    const mode = radio.value;
+    $("paint-tools").hidden = mode !== "paint";
+    $("edge-tools").hidden = mode !== "edge";
+    document.body.classList.toggle("painting", mode === "paint");
+    if (mode === "edge") snapEdge(state.pickedPoint);
+    else state.paint = mode === "paint" && state.pickedPoint ? [state.pickedPoint] : [];
     previewPick();
     recolor();
   };
 }
+
+// ---------- an edge (T-371): the load snaps to the edge next to the tap ----------
+/** Spots every ``step`` mm along a line of points (part coordinates), both ends included. */
+function alongLine(line, step) {
+  const out = [line[0]];
+  let left = step;
+  for (let i = 1; i < line.length; i++) {
+    const [a, b] = [line[i - 1], line[i]];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    let at = left;
+    for (; at < len; at += step) out.push(a.map((v, k) => v + ((b[k] - v) * at) / len));
+    left = at - len;
+  }
+  out.push(line.at(-1));
+  return out;
+}
+
+/** "An edge": the load spreads along the edge next to ``point`` up to the next corner, or sits at one point
+ * on it ("Only at the tapped point"); the hint says which, or that no edge is near. */
+function snapEdge(point) {
+  state.edge = null;
+  state.paint = [];
+  if (!point || !state.triangles) return;
+  const near = Math.max(3, viewer.part.geometry.boundingSphere.radius * 0.1); // mm from the tap
+  const edge = edgeAt(state.triangles, point, near);
+  if (!edge) {
+    $("edge-hint").textContent = "No edge near the tap: tap closer to one, or choose another way.";
+    return;
+  }
+  state.edge = edge;
+  const one = $("edge-point").checked;
+  state.paint = one ? [edge.at] : alongLine(edge.line, Math.max(1, edge.length / 400)); // the brush's 400-spot cap
+  $("edge-hint").textContent = one ? "At one point on the edge, next to where you tapped."
+    : `Along ${Math.round(edge.length)} mm of edge, up to the next corner.`;
+}
+$("edge-point").onchange = () => {
+  snapEdge(state.pickedPoint);
+  previewPick();
+  recolor();
+};
 $("brush-size").oninput = () => {
   $("brush-size-out").textContent = `Ø${$("brush-size").value} mm`;
   showPainted();
@@ -1694,7 +1768,7 @@ function loadEditor(l) {
 }
 
 const HOLD_TEXT = { clamped: "Held: clamped or glued", resting: "Held: resting (only pushes back)", screw: "Held: screw or bolt" };
-const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.points ? " (painted area)" : l.point ? " (at a spot)" : "");
+const loadText = (l) => (l.kind === "fixed" ? HOLD_TEXT[l.hold ?? "clamped"] : `Load: ${multiCase() ? `case ${l.case}, ` : ""}${l.kg} kg ${dirLabel(l)}`) + (l.edge_mm ? ` (along a ${l.edge_mm} mm edge)` : l.edge_mm === 0 ? " (a point on an edge)" : l.points ? " (painted area)" : l.point ? " (at a spot)" : "");
 
 // The 3D view looks like a passive preview: show a pointer and a hint over the part until the first click.
 const hoverTip = document.body.appendChild(el("div", { className: "hover-tip", hidden: true,
@@ -2923,8 +2997,8 @@ function renderZones() {
 
 // ---------- advanced design changes (boxes placed on the part) ----------
 const VOLUME_HINT = {
-  support: "The slicer prints supports inside the box, even with its automatic supports off. For an overhang it misses or a spot you want held.",
-  blocker: "No supports inside the box: keeps marks off a surface that should stay clean. Overhangs in it print in the air.",
+  support: "The slicer prints supports inside the box, even with its automatic supports off. For an overhang it misses or a spot you want held. Your slicer's paint-on supports do this too.",
+  blocker: "No supports inside the box: keeps marks off a surface that should stay clean. Overhangs in it print in the air. Your slicer's paint-on supports do this too.",
   void: "A thin hidden gap inside the part. The slicer prints walls all round it, so the plastic around it comes out solid: a stronger spot without more infill everywhere. Click a spot for a pin hole up through the part, or two spots for a slot.",
   keep_clear: "Space that has to stay empty: a screw head, a cable, a part that moves. Only for you (not in the 3MF): it tells you if the part reaches into it, and design suggestions that would fill it are left unticked.",
   add_solid: "A block of plastic added to the model: a foot, a pad, a rib, more meat round a hole. Place it, size it, then apply it as a new version of the model.",

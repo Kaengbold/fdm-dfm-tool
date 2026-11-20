@@ -75,6 +75,30 @@ rules:
     sources:
     - Prusa Knowledge Base — Skirt and Brim (brim for tall objects with a small base) — https://help.prusa3d.com/article/skirt-and-brim_133969
     - OrcaSlicer Wiki — Brim — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_brim
+  print_may_fail:
+    title: The print may fail on the bed
+    why: Several things add up on this part (corners that lift, little contact with the bed, a tall narrow shape, a
+      shrinking plastic on an open printer). Each alone is often fine; together the part tends to come loose or fall
+      over partway through, and the whole print is lost.
+    fixes:
+    - domain: geometry
+      text: Turn the part so a wider, flatter side lies on the bed, or round the sharp corners of the base.
+    - domain: slicer
+      text: A brim holds the edges down. Where the base is tiny and the part also warps or tips, print it on a raft (a
+        few layers of plastic under the part, cut off after printing).
+      settings:
+        raft_layers: '3'
+    - domain: process
+      text: Clean the bed with soap and water, use glue stick for PETG and ABS, keep drafts away, and close the
+        enclosure for ABS, ASA and PC.
+    tags:
+    - bed adhesion
+    - warping
+    - stability
+    sources:
+    - Prusa Knowledge Base — Warping — https://help.prusa3d.com/en/article/warping_2011/
+    - All3DP — 3D Printing Raft: When Should You Use It? — https://all3dp.com/2/3d-printing-raft-when-should-you-use-it/
+    - Prusa Knowledge Base — Layer separation and splitting — https://help.prusa3d.com/article/layer-separation-and-splitting-fdm_1806
   tipping_risk:
     title: Tall part can tip over
     why: The part is tall and top-heavy over a narrow base on the bed. Nozzle pressure and bed motion can knock it loose
