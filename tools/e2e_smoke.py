@@ -355,6 +355,43 @@ def gemini_review(binary: str):
     (OUT / "gemini-review.md").write_text("# Gemini screenshot review\n\n" + "\n".join(notes), encoding="utf-8")
 
 
+def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
+    """T-453: two parts worked on in a row are both under "Your recent projects" after a reload and both reopen
+    as the same entries (no copies); "Delete all" empties the list."""
+    page = run.page
+    count = "() => document.querySelectorAll('#saved-list .saved-item').length"
+    first = page.evaluate("() => fdm.state.name")
+    page.evaluate("() => fdm.autosave()")
+    page.evaluate("() => fdm.steps.go('part')")
+    run.act(lambda: click_sample(page, other), 300_000)
+    second = page.evaluate("() => fdm.state.name")
+    assert second != first, (first, second)
+    page.evaluate("() => fdm.autosave()")
+    page.reload()
+    run.booted()
+    page.wait_for_selector("#restore:not([hidden])", timeout=60_000)
+    assert second in page.locator("#restore").inner_text(), "the newest project isn't the one offered"
+    page.evaluate("() => fdm.steps.go('part')")
+    names = page.locator("#saved-list .saved-item strong").all_inner_texts()
+    assert second in names and first in names and names.index(second) < names.index(first), names
+    saved = page.evaluate(count)
+    for name in (first, second):
+        run.act(lambda name=name: page.locator("#saved-list button.saved-open", has_text=name).first.click(), 300_000)
+        page.wait_for_function("() => document.getElementById('status').textContent.includes('opened the project')", timeout=300_000)
+        assert page.evaluate("() => fdm.state.name") == name
+        assert page.locator("#restore").is_hidden(), "the offer stays up after opening a project"
+        page.evaluate("() => fdm.autosave()")
+        page.wait_for_function(f"() => document.querySelector('#saved-list .saved-item.current strong')?.textContent === {name!r}")
+        assert page.evaluate(count) == saved, "reopening made a copy"
+    page.evaluate("() => fdm.steps.go('part')")
+    page.once("dialog", lambda d: d.accept())
+    page.click("#saved-clear")
+    page.wait_for_selector("#saved", state="hidden")
+    page.evaluate("() => fdm.autosave()")  # deleted while open: not saved again until a new part
+    assert page.locator("#saved").is_hidden(), "the open project came back after Delete all"
+    return f"{saved} saved; reopened {first} and {second}; Delete all emptied the list"
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): phone start screen, Simple flow to 3MF, level switch, one finding."""
     page = run.page
@@ -371,6 +408,7 @@ def run_quick(run: Run) -> None:
         return check_finding_views(page, limit=1)
 
     run.step("open one finding", open_one_finding)
+    run.step("saved projects: two parts in a row", lambda: check_saved_projects(run))
 
 
 def run_extra_parts(run: Run, parts: list[Path]) -> None:
@@ -2812,6 +2850,7 @@ def _run_suite(port: int, args) -> Run:
 
             run.step(f"finding views {sample.stem}", finding_views)
 
+        run.step("saved projects: two parts in a row", lambda: check_saved_projects(run))
         run_extra_parts(run, args.parts)
         browser.close()
     return run

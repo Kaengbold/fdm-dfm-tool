@@ -47,6 +47,10 @@ gaps:
   # ceiling is bridged right over the plastic below, sags and fuses below this; 0.4–0.6 mm works for short bridges
   # like chain links [sourced_F mistake #29, Maker's Muse print-in-place hinges].
   z_fuse_below_mm: 0.4
+  # Opening a gap that fuses: 0.3 mm between two upright faces moves freely after printing (the clearance gauges
+  # print 0.2 snug, 0.3 free) [Maker's Muse clearance gauge https://www.youtube.com/watch?v=TYuLVN3YHw8; Prusa KB
+  # "Modeling with 3D printing in mind"]. A gap in height opens to z_fuse_below_mm, in whole layers.
+  open_to_mm: 0.3
   z_min_area_mm2: 4               # smaller facing patches: a speck, not a joint
 
 ironing:
@@ -288,6 +292,7 @@ flex:                             # parts that bend on purpose, and thick blocks
   hinge_max_mm: 1.2               # a web this thin between two thicker pieces is a living hinge (0.4–0.6 mm typical) [facfox living hinges]
   hinge_gap_mm: [0.5, 10.0]       # ... when the pieces it joins are this far apart
   hinge_min_long_mm: 4.0          # ... and the web is at least this long along the fold
+  hinge_thick_mm: [0.4, 0.6]      # a living hinge this thick bends well and still prints: two or three layers [facfox living hinges]
   hinge_good: [tpu_95a, petg]     # survive many bends; PLA lasts ~150–200 folds [Balderrama-Armendariz, SFF 2016]
   hinge_bad: [pla, pla_plus, pa_cf]
   snap_mm: [0.8, 3.5]             # thickness of a snap-fit tab
