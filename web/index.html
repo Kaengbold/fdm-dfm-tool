@@ -522,6 +522,13 @@
               <div class="actions">
                 <button id="apply-edits" class="primary" hidden>Apply selected changes</button>
               </div>
+              <div id="cad-advice-section" hidden>
+                <div class="cad-advice-head">
+                  <h3>Numbers for CAD <small class="hint">click to show where</small></h3>
+                  <button type="button" id="copy-cad-advice" class="small">Copy the list</button>
+                </div>
+                <ol id="cad-advice" class="cad-advice"></ol>
+              </div>
               <div class="sim-card topology" data-min="advanced">
                 <h3>A lighter shape</h3>
                 <p class="hint" data-info>Keeps the plastic only where your load runs through the part. It's blocky and not a finished part: use it as a guide to redesign the part in CAD. Needs the loads from "Strength analysis".</p>

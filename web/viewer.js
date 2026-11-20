@@ -51,6 +51,8 @@ export class Viewer {
     this.scene.add(this.bedGroup);
     this.markers = new THREE.Group();
     this.scene.add(this.markers);
+    this.adviceLabels = new THREE.Group();
+    this.scene.add(this.adviceLabels);
 
     this.camera = new THREE.PerspectiveCamera(40, 1, 0.1, 5000);
     this.camera.position.set(150, -200, 150);
@@ -150,7 +152,7 @@ export class Viewer {
       piece.position.x = x;
       this.pieces.add(plate, piece);
     });
-    for (const o of [this.part, this.markers, this.ghosts, this.bedGroup]) if (o) o.visible = false;
+    for (const o of [this.part, this.markers, this.ghosts, this.adviceLabels, this.bedGroup]) if (o) o.visible = false;
     this.scene.add(this.pieces);
     const sphere = new THREE.Box3().setFromObject(this.pieces).getBoundingSphere(new THREE.Sphere());
     this.frame({ center: sphere.center, radius: sphere.radius * 0.8 });
@@ -164,7 +166,7 @@ export class Viewer {
     g.setAttribute("position", new THREE.BufferAttribute(placeTriangles(triangles, rotation).out, 3));
     g.computeVertexNormals();
     this.before = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: css("--ok"), roughness: 0.7 }));
-    this.beforeHidden = [this.part, this.markers, this.ghosts, this.spots, this.symbols, this.zones, this.fitView, this.field?.mesh]
+    this.beforeHidden = [this.part, this.markers, this.ghosts, this.adviceLabels, this.spots, this.symbols, this.zones, this.fitView, this.field?.mesh]
       .filter((o) => o?.visible);
     for (const o of this.beforeHidden) o.visible = false;
     this.scene.add(this.before);
@@ -181,7 +183,7 @@ export class Viewer {
     if (!this.pieces) return;
     dispose(this.pieces);
     this.pieces = null;
-    for (const o of [this.part, this.markers, this.ghosts, this.bedGroup]) if (o) o.visible = true;
+    for (const o of [this.part, this.markers, this.ghosts, this.adviceLabels, this.bedGroup]) if (o) o.visible = true;
     if (this.part) this.frame(this.part.geometry.boundingSphere);
   }
 
@@ -1024,6 +1026,53 @@ export class Viewer {
     box.expandByScalar(this.part.geometry.boundingSphere.radius * 0.35); // some of the part around it, to see where it is
     const now = this.camera.position.clone().sub(this.controls.target).normalize();
     this.focusFinding({ bbox: [box.min.toArray(), box.max.toArray()] }, this.clearView(points, now, slack));
+  }
+
+  /** Small number labels on the part for each CAD advice item (T-435), reusing ``iconSprite``. */
+  showAdvice(items, activeId = null) {
+    empty(this.adviceLabels);
+    if (!items?.length || !this.placement || !this.part) return;
+    const radius = this.part.geometry.boundingSphere.radius || 20;
+    const base = Math.max(2.5, 0.055 * radius);
+    const dotR = Math.max(0.4, 0.012 * radius);
+    const placed = [];
+    for (const a of items) {
+      const pts = a.points?.length ? a.points : a.point ? [a.point] : [];
+      if (!pts.length) continue;
+      const active = a.id === activeId;
+      const num = Number.isInteger(a.target) ? String(a.target) : String(Number(a.target.toFixed(2)));
+      const prefix = a.unit === "mm" && a.text.includes("Ø") ? "Ø" : a.unit === "mm" && /\br\s+\d/.test(a.text) ? "r " : "";
+      const label = `${prefix}${num}${a.unit === "°" ? "°" : ` ${a.unit}`}`;
+      for (const raw of pts) {
+        const p = new THREE.Vector3(...this.toShown(raw));
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(active ? dotR * 1.4 : dotR, 12, 8),
+          new THREE.MeshBasicMaterial({ color: css(active ? "--now" : "--accent"), depthTest: false }),
+        );
+        dot.position.copy(p);
+        dot.renderOrder = active ? 11 : 7;
+        this.adviceLabels.add(dot);
+        let lift = base * 0.75;
+        for (const prev of placed) if (prev.distanceTo(p) < base) lift += base * 0.85;
+        placed.push(p);
+        const tag = iconSprite(label, active ? base * 1.15 : base * 0.85, active ? css("--now").getStyle() : "#1f2328");
+        tag.position.copy(p).add(new THREE.Vector3(0, 0, lift));
+        tag.material.depthTest = false;
+        tag.renderOrder = active ? 12 : 8;
+        this.adviceLabels.add(tag);
+      }
+    }
+  }
+
+  /** Turn the camera to look at a CAD advice point (or group of points) from an unblocked angle. */
+  focusAdvice(item) {
+    const raw = item?.points?.length ? item.points : item?.point ? [item.point] : [];
+    if (!raw.length || !this.placement || !this.part) return;
+    const pts = raw.map((pt) => new THREE.Vector3(...this.toShown(pt)));
+    const pad = Math.max(4, 0.14 * this.part.geometry.boundingSphere.radius);
+    const box = new THREE.Box3().setFromPoints(pts).expandByScalar(pad);
+    const now = this.camera.position.clone().sub(this.controls.target).normalize();
+    this.focusFinding({ bbox: [box.min.toArray(), box.max.toArray()] }, this.clearView(pts, now, 2));
   }
 
   /** Bounds of an edit (print frame), up to VIEW_SAMPLES of its points, and how far in front of them the
