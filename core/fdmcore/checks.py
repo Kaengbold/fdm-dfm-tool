@@ -263,11 +263,45 @@ def _infill_core_area(g, shell_mm: float, cells: int) -> tuple[float, float]:
     nx, ny = max(1, int(np.ceil((x1 - x0) / step))), max(1, int(np.ceil((y1 - y0) / step)))
     hx, hy = (x1 - x0) / nx, (y1 - y0) / ny
     x, y = np.meshgrid(x0 + (np.arange(nx) + 0.5) * hx, y0 + (np.arange(ny) + 0.5) * hy)
+    shapely.prepare(g)
     inside = shapely.contains_xy(g, x, y)
     if not inside.any():
         return 0.0, 0.0
-    distances = shapely.distance(g.boundary, shapely.points(x[inside], y[inside]))
+    distances = _grid_depths(g.boundary, x, y, inside, shell_mm, with_max=True)
     return min(float(np.count_nonzero(distances > shell_mm) * hx * hy), g.area), 2.0 * float(distances.max())
+
+
+def _grid_depths(boundary, X, Y, inside, threshold: float, with_max: bool = False, block: int = 4) -> np.ndarray:
+    """Distance from the grid points ``inside`` to ``boundary``, good for comparing with ``threshold``
+    (either way, > or >=) and, ``with_max``, exact at the maximum: the same answers as measuring every
+    point, at a fraction of the cost on a curved part (T-458: every layer differs, nothing repeats, and
+    each distance runs over hundreds of outline corners).
+    The distance to the outline changes by at most the distance moved, so one exact distance at the
+    centre of each ``block``×``block`` group of points bounds the others. Only points that the bounds
+    leave undecided (within reach of the threshold, or possibly the deepest) are measured exactly; the
+    rest get the bound on their side of the threshold."""
+    rows, cols = np.nonzero(inside)
+    xs, ys = X[0], Y[:, 0]
+    starts_x, starts_y = np.arange(0, len(xs), block), np.arange(0, len(ys), block)
+    cx = np.add.reduceat(xs, starts_x) / np.diff(np.r_[starts_x, len(xs)])
+    cy = np.add.reduceat(ys, starts_y) / np.diff(np.r_[starts_y, len(ys)])
+    br, bc = rows // block, cols // block
+    used = np.zeros((len(cy), len(cx)), bool)
+    used[br, bc] = True
+    ur, uc = np.nonzero(used)
+    centre = np.zeros(used.shape)
+    centre[ur, uc] = shapely.distance(boundary, shapely.points(cx[uc], cy[ur]))
+    q = centre[br, bc]
+    reach = np.hypot(xs[cols] - cx[bc], ys[rows] - cy[br])
+    lo, hi = q - reach, q + reach
+    eps = 1e-9 * (1.0 + abs(threshold))  # ties are measured: either comparison stays exact
+    exact = (lo <= threshold + eps) & (hi >= threshold - eps)
+    if with_max:
+        exact |= hi >= lo.max()
+    d = np.where(lo > threshold, lo, hi)
+    if exact.any():
+        d[exact] = shapely.distance(boundary, shapely.points(xs[cols[exact]], ys[rows[exact]]))
+    return d
 
 
 def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict, wall_layers: list | None = None) -> dict:
@@ -496,12 +530,16 @@ def _layer_features(g, lw, vanish, rough, single, G, H, P, F) -> list[tuple]:
     """(kind, piece, metrics) for one layer: thin features, narrow gaps, round and hexagonal holes, slender islands."""
     out = []
     # Positive features by width: vanish < rough < single-wall (morphological openings).
+    smallest = max(lw * 1.5, 0.5)
     too_thin = _safe_diff(g, _opening(g, vanish / 2))
     below_rough = _safe_diff(g, _opening(g, rough / 2))
-    thin = _safe_diff(below_rough, too_thin.buffer(0.01))
-    wall = _safe_diff(_safe_diff(g, _opening(g, single / 2)), below_rough.buffer(0.01))
+    below_single = _safe_diff(g, _opening(g, single / 2))
+    # A piece of a shape is no bigger than the shape: when all of it is below the smallest piece kept,
+    # nothing in it can be reported, so skip cutting it (most layers of a curved part, T-458).
+    thin = _safe_diff(below_rough, too_thin.buffer(0.01)) if below_rough.area > smallest else Polygon()
+    wall = _safe_diff(below_single, below_rough.buffer(0.01)) if below_single.area > smallest else Polygon()
     for kind, geom in (("too_thin", too_thin), ("rough", thin), ("single_wall", wall)):
-        out += [(kind, piece, {"width": _strip_width(piece)}) for piece in parts(geom, max(lw * 1.5, 0.5))]
+        out += [(kind, piece, {"width": _strip_width(piece)}) for piece in parts(geom, smallest)]
     # Negative features: slots/clearances that a closing with radius r fills are narrower than 2r.
     for piece in parts(_safe_diff(_closing(g, G["fuse_below_mm"] / 2), g), 0.05):
         if _strip_width(piece) > 0.02:
@@ -623,9 +661,11 @@ def _thick_core(g, r: float, cells: float = 4.0) -> tuple[float, tuple | None]:
     h = r / cells
     x0, y0, x1, y1 = g.bounds
     X, Y = np.meshgrid(np.arange(x0 + h / 2, x1, h), np.arange(y0 + h / 2, y1, h))
+    shapely.prepare(g)
     inside = shapely.contains_xy(g, X, Y)
     deep = np.zeros_like(inside)
-    deep[inside] = shapely.distance(g.boundary, shapely.points(X[inside], Y[inside])) >= r
+    if inside.any():
+        deep[inside] = _grid_depths(g.boundary, X, Y, inside, r) >= r
     if not deep.any():
         return 0.0, None
     # Grow the deep cells back by r (a disc of cells): together they are the opening.
@@ -1040,20 +1080,24 @@ def vase_findings(layers: list[Layer], tracker: Tracker, profile: Profile, T: di
 
 def _join(pairs: np.ndarray, n: int) -> np.ndarray:
     """Connected groups of ``n`` items linked by ``pairs``: the smallest index in each group, per item
-    (plain numpy, so the check needs no scipy in the browser)."""
+    (plain numpy, so the check needs no scipy in the browser). Each round hangs every group's root
+    under the smallest root it touches and then points every item straight at its root, so a big
+    connected surface takes a few rounds, not one per step across it (T-458: hundreds on a round part)."""
     label = np.arange(n)
     if not len(pairs):
         return label
     a, b = pairs[:, 0], pairs[:, 1]
     while True:
-        low = np.minimum(label[a], label[b])
-        new = label.copy()
-        np.minimum.at(new, a, low)
-        np.minimum.at(new, b, low)
-        new = new[new]  # jump to the group's lowest label
-        if np.array_equal(new, label):
+        la, lb = label[a], label[b]
+        differ = la != lb
+        if not differ.any():
             return label
-        label = new
+        np.minimum.at(label, np.maximum(la, lb)[differ], np.minimum(la, lb)[differ])
+        while True:
+            jumped = label[label]
+            if np.array_equal(jumped, label):
+                break
+            label = jumped
 
 
 def coarse_surfaces(mesh: Mesh, T: dict | None = None) -> list[dict]:
@@ -1101,12 +1145,18 @@ def coarse_surfaces(mesh: Mesh, T: dict | None = None) -> list[dict]:
     in_curve[arc.ravel()] = True
     out = []
     centres = t.mean(axis=1)
-    for g in np.unique(group[arc[:, 0]]):
+    row_group = group[arc[:, 0]]
+    groups = np.unique(row_group)
+    # Most curves of a finely meshed part fail the limits: test them all at once (a round part has thousands).
+    count = np.bincount(group[in_curve], minlength=k)[groups]
+    order = np.lexsort((error, row_group))
+    first = np.searchsorted(row_group[order], groups)
+    n_rows = np.diff(np.r_[first, len(order)])
+    median = (error[order[first + (n_rows - 1) // 2]] + error[order[first + n_rows // 2]]) / 2
+    for g in groups[(count >= F["min_strips"]) & (median >= F["error_mm"])]:
         strips = np.flatnonzero(in_curve & (group == g))
-        rows = group[arc[:, 0]] == g
+        rows = row_group == g
         err = float(np.median(error[rows]))
-        if len(strips) < F["min_strips"] or err < F["error_mm"]:
-            continue
         tri = np.isin(inv, strips)
         pts = t[tri].reshape(-1, 3)
         out.append({"bbox": [pts.min(axis=0).round(2).tolist(), pts.max(axis=0).round(2).tolist()], "strips": int(len(strips)),
