@@ -8,7 +8,9 @@ A second part, a plate with a Ø6 mm hole, checks the hole helpers: polyholes (f
 and PrusaSlicer don't have them) and elephant-foot compensation (a smaller first layer; not
 per object in PrusaSlicer). A third, a 40 × 20 × 10 mm block at 10 % infill with a zone (modifier
 volume) at 100 % over one half, checks that each slicer fills the zone (T-150; the file layout
-differs per slicer, see export3mf.py).
+differs per slicer, see export3mf.py). A 40 mm flat block checks ironing, brim ears (not PrusaSlicer:
+it has none) and the raft. Not measured (no clear trace in the G-code): precise outer wall, scarf seam,
+"make overhangs printable".
 
     python tools/slicer_check.py            # all slicers found in the default install folders
     python tools/slicer_check.py --keep     # keep the G-code in e2e-output/slicer-check
@@ -315,6 +317,44 @@ def measure_fuzz(gcode: Path) -> float:
     return round(float(np.std(r[np.abs(r - np.median(r)) < 1])), 3)
 
 
+def flat_block(layout: str, settings: dict) -> bytes:
+    """40 × 40 × 10 mm block with sharp corners and a flat top, exported with ``settings`` (ironing, brim, raft)."""
+    from fdmcore.additions import extrude
+    from shapely.geometry import box
+
+    api.load(to_binary_stl(Mesh(extrude(box(0, 0, 40, 40), 0, 10))), "flat_block")
+    return api.export([0, 0, 1], {}, settings, slicer=layout)
+
+
+def measure_first_layers(gcode: Path) -> dict:
+    """Which features appear (ironing?), the brim's length on the first layer (mm: ears are much shorter than a
+    full brim) and the height of the first layer with the part's own outer wall (a raft lifts it)."""
+    x = y = z = 0.0
+    first, kind, brim, wall_z = None, None, 0.0, None
+    features: set[str] = set()
+    for line in gcode.read_text(errors="replace").splitlines():
+        if (m := LAYER.match(line)) is not None:
+            z = float(m.group(2))
+            first = z if first is None else first
+            continue
+        if m := FEATURE.match(line):
+            name = m.group(2).lower()
+            features.add(name)
+            kind = "brim" if "brim" in name else "outer" if OUTER.match(line) else None
+            continue
+        if not line.startswith(("G1", "G2", "G3")):
+            continue
+        w = dict((t[0], float(t[1:])) for t in line.split(";")[0].split()[1:] if t[0] in "XYE" and len(t) > 1)
+        nx, ny = w.get("X", x), w.get("Y", y)
+        if w.get("E", 0) > 0 and ("X" in w or "Y" in w):
+            if kind == "brim" and z == first:
+                brim += float(np.hypot(nx - x, ny - y))
+            elif kind == "outer" and wall_z is None:
+                wall_z = z
+        x, y = nx, ny
+    return {"ironing": any("ironing" in f for f in features), "brim_mm": round(brim), "wall_z": wall_z}
+
+
 def copies_block(layout: str, n: int) -> bytes:
     """20 mm cube, ``n`` copies on the plate."""
     from fdmcore.additions import extrude
@@ -422,6 +462,23 @@ def main():
             fuzz[grip] = measure_fuzz(slice_with(name, cfg, model, work / f"{name}_grip_{int(grip)}"))
         # Fuzzy skin roughens the outer wall: its points stray several times further from round.
         checks["fuzzy_skin"] = (fuzz[False], fuzz[True], fuzz[True] > 0.05 and fuzz[True] > 3 * fuzz[False])
+        # T-151 / T-152 / T-391: ironing on the flat top, brim ears instead of a full brim, a raft under the part.
+        flat = {}
+        for label, settings in {"plain": {"brim_type": "no_brim"}, "ironing": {"ironing_type": "topmost", "brim_type": "no_brim"},
+                                "outer": {"brim_type": "outer_only", "brim_width": "8"}, "ears": {"brim_type": "brim_ears", "brim_width": "8"},
+                                "raft": {"raft_layers": "3", "brim_type": "no_brim"}}.items():
+            model = work / f"{name}_flat_{label}.3mf"
+            model.write_bytes(flat_block(layout, settings))
+            flat[label] = measure_first_layers(slice_with(name, cfg, model, work / f"{name}_flat_{label}"))
+        checks["ironing_type"] = (flat["plain"]["ironing"], flat["ironing"]["ironing"], not flat["plain"]["ironing"] and flat["ironing"]["ironing"])
+        ears, full = flat["ears"]["brim_mm"], flat["outer"]["brim_mm"]
+        if name == "orca":
+            checks["brim_ears"] = (full, ears, 0 < ears < 0.6 * full)
+        elif name == "bambu":  # its ears are a painting tool (1.10+), no brim type: it drops the key and prints no brim (T-493)
+            print(f"note {name}: brim ears from the 3MF give a {ears} mm brim (full brim {full} mm): see T-493")
+        # PrusaSlicer has no mouse ears: the export gives it an outer brim (export3mf.prusa_settings)
+        lift = (flat["plain"]["wall_z"], flat["raft"]["wall_z"])
+        checks["raft_layers"] = (*lift, None not in lift and lift[1] - lift[0] >= 0.5)  # three raft layers and the gap lift the part
         for key, (va, vb, applied) in checks.items():
             ok &= applied
             print(f"{'PASS' if applied else 'FAIL'} {name} {key}: A={va} B={vb}")

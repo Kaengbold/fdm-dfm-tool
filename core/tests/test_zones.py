@@ -138,3 +138,17 @@ def test_strength_proposes_zones_where_the_stress_is():
     assert zones[0]["walls"] == r["walls"] + 2 and zones[0]["infill"] >= max(0.4, r["infill"])
     stronger = api.strength([0, 0, 1], loads, {}, zones=zones)
     assert stronger["safety_factor"] > r["safety_factor"]
+
+
+def test_lightest_settings_put_the_zones_where_your_strength_check_found_the_stress():
+    """T-290: after a strength check for the same orientation, loads and material, "Find the lightest settings" places
+    its zones from that result (the same places "Stronger in one area" offers); otherwise from a light print."""
+    loads = cantilever()
+    assert api.optimise_strength([0, 0, 1], loads, {"material": "pla"}, zones=True)["zoned"]["zones_from"] == "light print"
+    r = api.strength([0, 0, 1], loads, {"material": "pla"})
+    z = api.optimise_strength([0, 0, 1], loads, {"material": "pla"}, zones=True)["zoned"]
+    assert z["zones_from"] == "strength result" and "where your strength check found the stress" in z["explanation"]
+    boxes = lambda zs: [(tuple(np.round(q["lo"], 2)), tuple(np.round(q["hi"], 2))) for q in zs]  # noqa: E731
+    assert boxes(z["zones"]) == boxes(r["stress_zones"])
+    # Another material (or orientation, or loads) than the check: its stress doesn't apply.
+    assert api.optimise_strength([0, 0, 1], loads, {"material": "petg"}, zones=True)["zoned"]["zones_from"] == "light print"
