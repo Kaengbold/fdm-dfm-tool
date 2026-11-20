@@ -52,6 +52,7 @@ PRUSA_KEYS = {
     "support_on_build_plate_only": "support_material_buildplate_only",
     "brim_type": "brim_type",
     "brim_width": "brim_width",
+    "raft_layers": "raft_layers",
     "wall_generator": "perimeter_generator",
     "bridge_speed": "bridge_speed",
     "fuzzy_skin": "fuzzy_skin",  # none | external | all in both
@@ -87,7 +88,7 @@ CURA_KEYS = {
     "xy_contour_compensation": "xy_offset",
 }
 CURA_GLOBAL = {"layer_height": "Layer Height", "support_type": "Support Structure", "brim_type": "Build Plate Adhesion Type",
-               "brim_width": "Brim Width", "slow_down_for_layer_cooling": "Minimum Layer Time"}
+               "brim_width": "Brim Width", "raft_layers": "Build Plate Adhesion Type (Raft)", "slow_down_for_layer_cooling": "Minimum Layer Time"}
 CURA_PATTERNS = {"gyroid", "grid", "lightning"}
 
 

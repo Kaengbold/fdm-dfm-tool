@@ -119,6 +119,12 @@ necks:
   area_ratio: 0.3                 # a layer with < 30 % of the area above and below is a weak neck
   window_mm: 10.0
 
+print_risk:
+  # The whole print coming loose, tipping or splitting (T-391): each sign the check finds adds a point, a strong one
+  # two; two points or more is a high risk and gets its own finding.
+  split_height_mm: 50             # ABS / ASA / PC taller than this split between layers on an open printer [Prusa KB layer separation and splitting]
+  raft_layers: 3                  # a raft, only as the last resort: a tiny base that also warps or tips [All3DP raft guide; Prusa KB warping]
+
 stability:
   tip_aspect: 4.0                 # height / base width [problem_bed_adhesion_moisture_heat_creep_ringing]
   min_bed_contact_mm2: 150        # [problem_bed_adhesion_moisture_heat_creep_ringing]

@@ -687,6 +687,10 @@ def _run_suite(port: int, args) -> Run:
             assert page.locator("#findings").is_visible(), "Show all does not open the full findings"
             page.click("#result-all > summary")
             page.click("#result-options > summary")
+            # T-431: copies and grip texture wait in their own fold below the download (the slicer does them too).
+            for selector in ("#dl-copies", "#dl-grip"):
+                assert page.locator(selector).is_hidden(), f"{selector} not folded away"
+            page.click("#dl-more > summary")
             for selector in ("#dl-copies", "#dl-grip", "#dl-report", "#dl-share", "#settings-fold > summary"):
                 assert page.locator(selector).is_visible(), f"More options lost {selector}"
             page.click("#result-options > summary")
@@ -2409,13 +2413,21 @@ def _run_suite(port: int, args) -> Run:
         run.step("less support: split into two pieces", split_for_support)
 
         def grip_texture():
-            # A part named "knob": the grip suggestion, the box ticked, fuzzy skin in the 3MF (T-340).
+            # A part named "knob": the grip suggestion (T-340), turned on with one click on its finding (T-431),
+            # fuzzy skin in the 3MF.
             import io
             import zipfile
 
             run.act(lambda: page.set_input_files("#file", str(ROOT / "core" / "tests" / "corpus" / "knob.stl")), 300_000)
             assert any("Grip texture" in t for t in findings(page)), findings(page)
-            assert page.evaluate("() => document.getElementById('dl-grip').checked"), "grip box not ticked for a knob"
+            assert not page.evaluate("() => document.getElementById('dl-grip').checked"), "grip texture on before it was asked for"
+            page.evaluate("() => fdm.steps.go('problems')")
+            fix = page.locator("#findings .grip-fix").first
+            fix.evaluate("b => { for (let d = b.closest('details'); d; d = d.parentElement.closest('details')) d.open = true; }")
+            assert fix.inner_text() == "Turn on grip texture", fix.inner_text()
+            fix.click()
+            assert page.evaluate("() => document.getElementById('dl-grip').checked"), "the finding's button didn't turn it on"
+            assert fix.get_attribute("aria-pressed") == "true" and "turn it off" in fix.inner_text()
             page.evaluate("() => fdm.steps.go('download')")
             with page.expect_download(timeout=300_000) as dl:
                 page.evaluate("() => document.getElementById('dl-3mf').click()")
@@ -2423,7 +2435,7 @@ def _run_suite(port: int, args) -> Run:
             assert 'key="fuzzy_skin" value="external"' in conf, "no fuzzy skin in the 3MF"
             run.act(lambda: click_sample(page, "test_block"))
             assert not page.evaluate("() => document.getElementById('dl-grip').checked"), "grip box kept for another part"
-            return "suggested for knob.stl, fuzzy skin in the 3MF, off for the next part"
+            return "suggested for knob.stl, one click on the finding, fuzzy skin in the 3MF, off for the next part"
         run.step("grip texture on a knob", grip_texture)
 
         def printer_tolerance():
@@ -2447,6 +2459,9 @@ def _run_suite(port: int, args) -> Run:
 
             run.act(lambda: click_sample(page, "test_block"))
             page.evaluate("() => fdm.steps.go('download')")
+            assert page.evaluate("() => !!(document.getElementById('dl-3mf').compareDocumentPosition(document.getElementById('dl-more'))"
+                                 " & Node.DOCUMENT_POSITION_FOLLOWING)"), "copies sit above the download"
+            page.evaluate("() => (document.getElementById('dl-more').open = true)")
             page.fill("#dl-copies", "4")
             page.dispatch_event("#dl-copies", "change")
             page.wait_for_function("() => document.getElementById('copies-text').textContent.includes('4 copies')", timeout=60_000)
