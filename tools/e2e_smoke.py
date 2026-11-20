@@ -2103,6 +2103,7 @@ def _run_suite(port: int, args) -> Run:
         def my_presets():
             # T-446: "Tune to my printer" from the start screen, without the "New material" form: the results are
             # saved as the user's own PETG for this printer and chosen.
+            material = page.evaluate("() => document.getElementById('material').value")
             run.act(lambda: page.select_option("#material", "petg"), 300_000)
             page.evaluate("() => document.getElementById('tune-start').click()")
             page.wait_for_selector("#tune[open]")
@@ -2156,6 +2157,7 @@ def _run_suite(port: int, args) -> Run:
             names = page.locator("#material option").all_inner_texts()
             assert any(n.startswith("My PETG on my ") for n in names) and "Test PETG" in names, names
             page.select_option("#printer", "bambu_p1s")  # the later steps use the built-in printer
+            page.select_option("#material", material)  # and the material from before (the tuned one is remembered)
             return f"{warned[0][:60]} | materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
         run.step("my presets + calibration + Orca import", my_presets)
 
