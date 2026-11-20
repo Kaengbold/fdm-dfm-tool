@@ -169,7 +169,7 @@ def set_expert(values: dict[str, float]) -> dict:
     return expert_settings()
 
 
-CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge")
+CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "all")
 # What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
 CALIBRATION_HOW = {
     "layer_strength": "A 98 mm dog-bone: thin in the middle, wide with a hole at each end. Print one lying flat and one "
@@ -183,6 +183,9 @@ CALIBRATION_HOW = {
                 "the steepest one that's still clean is how far this material can lean out.",
     "bridge": "Bridges 10 … 50 mm long between pillars, printed without support: "
               "the longest one that doesn't sag is how far it can bridge.",
+    "all": "Every test on one plate (about 170 × 175 mm): the warping bars, two dog-bones (one lies flat, one stands on "
+           "its end: give it a brim), the fit gauge with its peg, the overhang blocks and the bridges. Each piece has its "
+           "size written on it (the fit holes: 6 mm plus the number). Print it without support, then read each test as below.",
 }
 FIT_GAUGE_GAPS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)  # hole sizes of the fit gauge: 6 mm + these
 # Layer strength dog-bone (T-387), the shape of tensile test bars (ASTM D638 / ISO 527): the middle is the weakest
@@ -194,62 +197,144 @@ FIT_GAUGE_GAPS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)  # hole sizes of the fit gauge: 
 DOGBONE = {"end_w": 34.0, "end_l": 22.0, "hole_d": 6.0, "mid_w": 3.0, "mid_l": 30.0, "round": 12.0, "thick": 4.0}
 OVERHANG_TEST_DEG = (40, 45, 50, 55, 60, 65, 70)  # from vertical
 BRIDGE_TEST_MM = (10, 20, 30, 40, 50)
+WARPING_TEST_MM = (40, 80, 120, 160)
+
+
+LABEL_MM = 0.6  # raised numbers: three 0.2 mm layers, readable and quick to print
+# Seven-segment digits drawn from rectangles (no buffers or fonts: Pyodide's GEOS stays happy, T-268).
+_SEGMENTS = {"0": "abcdef", "1": "bc", "2": "abdeg", "3": "abcdg", "4": "bcfg", "5": "acdfg", "6": "acdefg",
+             "7": "abc", "8": "abcdefg", "9": "abcdfg"}
+
+
+def _label(text: str, x: float, y: float, top: float, height: float, sideways: bool = False) -> np.ndarray:
+    """Raised digits (and '.') ``height`` mm tall, lower left at (x, y), standing ``LABEL_MM`` on a face at ``top``
+    (sunk a little into it, so the slicer joins them). ``sideways``: read along y (turned 90°)."""
+    from shapely.geometry import box as sbox
+    from shapely.ops import unary_union
+
+    from .additions import extrude
+
+    h, t = height, height / 5
+    w = 0.6 * h
+    seg = {"a": (0, h - t, w, h), "b": (w - t, h / 2, w, h), "c": (w - t, 0, w, h / 2), "d": (0, 0, w, t),
+           "e": (0, 0, t, h / 2), "f": (0, h / 2, t, h), "g": (0, h / 2 - t / 2, w, h / 2 + t / 2)}
+    boxes, at = [], 0.0
+    for ch in text:
+        if ch == ".":
+            boxes.append(sbox(at, 0, at + t, t))
+            at += 2 * t
+            continue
+        boxes += [sbox(at + x0, y0, at + x1, y1) for x0, y0, x1, y1 in (seg[s] for s in _SEGMENTS[ch])]
+        at += w + t
+    shape = unary_union(boxes)
+    tris = np.concatenate([extrude(p, top - 0.2, top + LABEL_MM) for p in getattr(shape, "geoms", [shape])])
+    if sideways:  # (u, v) -> (-v, u): reads along +y; a rotation, so the winding stays outward
+        tris = np.stack([height - tris[..., 1], tris[..., 0], tris[..., 2]], axis=-1)
+    return tris + [x, y, 0]
+
+
+def _lying(profile_xz, y0: float, depth: float) -> np.ndarray:
+    """A profile drawn in x/z, extruded along y from y0 (extrude works in x/y, then turned up)."""
+    from .additions import extrude
+
+    tris = extrude(profile_xz, y0, y0 + depth)[:, :, [0, 2, 1]]  # (x, z, y) -> (x, y, z)
+    return tris[:, ::-1]  # swapping two axes mirrors: flip the winding back
+
+
+def _gap_text(gap: float) -> str:
+    return "0" if gap == 0 else f"{gap:.1f}"[1:]  # ".1" … ".5": the hole is 6 mm plus this
+
+
+def _fit_test() -> list[np.ndarray]:
+    """A strip with holes 6.0 … 6.5 mm, each with its extra size written above it, and a 6 mm peg."""
+    from shapely.geometry import Point, Polygon, box as sbox
+
+    from .additions import extrude
+
+    strip = sbox(0, 0, 10 * len(FIT_GAUGE_GAPS) + 4, 18).difference(Polygon([(0, 0), (4, 0), (0, 4)]))  # notch: the 6.0 end
+    for i, gap in enumerate(FIT_GAUGE_GAPS):
+        strip = strip.difference(Point(7 + 10 * i, 6).buffer((6 + gap) / 2, 64))
+    labels = [_label(_gap_text(g), 7 + 10 * i - 2.2, 11.5, 5, 4.5) for i, g in enumerate(FIT_GAUGE_GAPS)]
+    return [extrude(strip, 0, 5), extrude(Point(0, 0).buffer(3, 64), 0, 12) + [30, 25, 0], *labels]
+
+
+def _overhang_test(pitch: float = 12) -> list[np.ndarray]:
+    """Blocks leaning 40° … 70°, each with its angle on top."""
+    from shapely.geometry import Polygon
+
+    out = []
+    for i, a in enumerate(OVERHANG_TEST_DEG):
+        out.append(_lying(Polygon([(0, 0), (8, 0), (8 + 15 * np.tan(np.radians(a)), 15), (0, 15)]), i * pitch, 8))
+        out.append(_label(str(a), 1.0, i * pitch + 1.5, 15, 5))
+    return out
+
+
+def _bridge_test(pitch: float = 14) -> list[np.ndarray]:
+    """Bridges 10 … 50 mm between pillars, each with its length on the left pillar (not on the bridge: no extra weight)."""
+    from shapely.geometry import box as sbox
+
+    out = []
+    for i, span in enumerate(BRIDGE_TEST_MM):
+        out.append(_lying(sbox(0, 0, 5, 10).union(sbox(5 + span, 0, 10 + span, 10)).union(sbox(0, 10, 10 + span, 11.2)), i * pitch, 8))
+        out.append(_label(str(span), 0.5, i * pitch + 1.2, 11.2, 4, sideways=True))
+    return out
+
+
+def _dogbone() -> np.ndarray:
+    """The layer strength dog-bone, lying flat."""
+    from shapely.geometry import Point, Polygon
+
+    from .additions import extrude
+
+    d = DOGBONE
+    length = 2 * (d["end_l"] + d["round"]) + d["mid_l"]
+    w, half, r, e = d["end_w"], d["mid_w"] / 2, d["round"], d["end_l"]
+    # Top edge, then mirrored: the inside corners where the middle meets the ends are quarter rounds (no
+    # corner for a crack to start at). Drawn point by point: a shrinking buffer can kill Pyodide's GEOS (T-268).
+    a = np.linspace(0, np.pi / 2, 16)
+    top = [(0, w / 2), (e, w / 2), *zip(e + r - r * np.cos(a), half + r - r * np.sin(a)),
+           *zip(length - e - r + r * np.sin(a), half + r - r * np.cos(a)), (length - e, w / 2), (length, w / 2)]
+    bone = Polygon([(x, w / 2 + y) for x, y in top] + [(x, w / 2 - y) for x, y in reversed(top)])
+    for x in (d["end_l"] / 2, length - d["end_l"] / 2):
+        bone = bone.difference(Point(x, w / 2).buffer(d["hole_d"] / 2, 64))
+    return extrude(bone, 0, d["thick"])
+
+
+def _warping_test(pitch: float = 20) -> list[np.ndarray]:
+    """Bars 40 … 160 mm long, each with its length written at one end."""
+    out = []
+    f = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]])
+    for i, length in enumerate(WARPING_TEST_MM):
+        v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * [length, 10, 3]
+        out += [v[f] + [0, i * pitch, 0], _label(str(length), 2, i * pitch + 2, 3, 6)]
+    return out
+
+
+def _all_tests() -> list[np.ndarray]:
+    """Every test on one 170 × 175 mm plate (fits a 180 mm bed): warping bars at the front, the dog-bones and the
+    fit gauge in the middle, overhang and bridge blocks at the back, the second dog-bone standing on its end."""
+    bone = _dogbone()
+    standing = bone[..., [1, 2, 0]]  # (x, y, z) -> (y, z, x): stood on its end; a cyclic swap keeps the winding
+    return [*_warping_test(16),
+            bone + [0, 64, 0], *(t + [104, 64, 0] for t in _fit_test()),
+            *(t + [0, 104, 0] for t in _overhang_test(10)), *(t + [56, 104, 0] for t in _bridge_test(10)),
+            standing + [124, 110, 0]]
 
 
 def calibration_part(kind: str) -> dict:
     """Test print for measuring the user's own material on their printer, as STL bytes, with ``how``
     (``CALIBRATION_HOW``: what to print and measure). Upright / flat break weight is the layer strength
     factor, the longest flat warping bar the warping length, the fit holes the fit gaps, the steepest
-    clean block the max overhang, the longest straight bridge the max bridge."""
-    from shapely.geometry import Point, Polygon, box as sbox
-
-    from .additions import extrude
+    clean block the max overhang, the longest straight bridge the max bridge. Each piece has its size
+    written on it; ``all`` puts every test on one plate (T-388)."""
     from .mesh import to_binary_stl
 
-    def lying(profile_xz, y0, depth):
-        """A profile drawn in x/z, extruded along y from y0 (extrude works in x/y, then turned up)."""
-        tris = extrude(profile_xz, y0, y0 + depth)[:, :, [0, 2, 1]]  # (x, z, y) -> (x, y, z)
-        return tris[:, ::-1]  # swapping two axes mirrors: flip the winding back
-
-    if kind == "fit":
-        strip = sbox(0, 0, 10 * len(FIT_GAUGE_GAPS) + 4, 12).difference(Polygon([(0, 0), (4, 0), (0, 4)]))  # notch: the 6.0 end
-        for i, gap in enumerate(FIT_GAUGE_GAPS):
-            strip = strip.difference(Point(7 + 10 * i, 6).buffer((6 + gap) / 2, 64))
-        peg = extrude(Point(0, 0).buffer(3, 64), 0, 12) + [30, 25, 0]
-        return {"stl": to_binary_stl(Mesh(np.concatenate([extrude(strip, 0, 5), peg]))), "name": "fit_test.stl", "how": CALIBRATION_HOW[kind]}
-    if kind == "overhang":
-        tris = [lying(Polygon([(0, 0), (8, 0), (8 + 15 * np.tan(np.radians(a)), 15), (0, 15)]), i * 12, 8)
-                for i, a in enumerate(OVERHANG_TEST_DEG)]
-        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "overhang_test.stl", "how": CALIBRATION_HOW[kind]}
-    if kind == "bridge":
-        tris = []
-        for i, span in enumerate(BRIDGE_TEST_MM):
-            shape = sbox(0, 0, 5, 10).union(sbox(5 + span, 0, 10 + span, 10)).union(sbox(0, 10, 10 + span, 11.2))
-            tris.append(lying(shape, i * 14, 8))
-        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "bridge_test.stl", "how": CALIBRATION_HOW[kind]}
-
-    if kind == "layer_strength":
-        d = DOGBONE
-        length = 2 * (d["end_l"] + d["round"]) + d["mid_l"]
-        w, half, r, e = d["end_w"], d["mid_w"] / 2, d["round"], d["end_l"]
-        # Top edge, then mirrored: the inside corners where the middle meets the ends are quarter rounds (no
-        # corner for a crack to start at). Drawn point by point: a shrinking buffer can kill Pyodide's GEOS (T-268).
-        a = np.linspace(0, np.pi / 2, 16)
-        top = [(0, w / 2), (e, w / 2), *zip(e + r - r * np.cos(a), half + r - r * np.sin(a)),
-               *zip(length - e - r + r * np.sin(a), half + r - r * np.cos(a)), (length - e, w / 2), (length, w / 2)]
-        bone = Polygon([(x, w / 2 + y) for x, y in top] + [(x, w / 2 - y) for x, y in reversed(top)])
-        for x in (d["end_l"] / 2, length - d["end_l"] / 2):
-            bone = bone.difference(Point(x, w / 2).buffer(d["hole_d"] / 2, 64))
-        return {"stl": to_binary_stl(Mesh(extrude(bone, 0, d["thick"]))), "name": "layer_strength_test.stl", "how": CALIBRATION_HOW[kind]}
-    if kind == "warping":
-        tris = []
-        for i, length in enumerate((40, 80, 120, 160)):
-            v = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float) * [length, 10, 3]
-            v += [0, i * 20, 0]
-            f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]
-            tris.append(v[np.array(f)])
-        return {"stl": to_binary_stl(Mesh(np.concatenate(tris))), "name": "warping_test.stl", "how": CALIBRATION_HOW[kind]}
-    raise ValueError(f"kind must be one of {CALIBRATION}")
+    build = {"fit": _fit_test, "overhang": _overhang_test, "bridge": _bridge_test, "layer_strength": lambda: [_dogbone()],
+             "warping": _warping_test, "all": _all_tests}
+    if kind not in build:
+        raise ValueError(f"kind must be one of {CALIBRATION}")
+    name = {"all": "all_tests.stl"}.get(kind, f"{kind}_test.stl")
+    return {"stl": to_binary_stl(Mesh(np.concatenate(build[kind]()))), "name": name, "how": CALIBRATION_HOW[kind]}
 
 
 def load(data: bytes, name: str = "part", face_ids: list[int] | None = None) -> dict:
