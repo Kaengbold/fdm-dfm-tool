@@ -521,6 +521,7 @@ function showKind(info) {
 }
 $("cad-checks").onchange = async (e) => {
   await call("set_cad_checks", { on: e.target.checked });
+  state.designFor = null; // some design changes (ledge fills) are for CAD parts only: suggest again
   if (state.faceRegions) { // hole names on the faces come from the detected features
     state.regionInfo = (await call("regions")).regions;
   }

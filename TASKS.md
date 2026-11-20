@@ -925,10 +925,15 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Do: flatten the tip to a whole layer (or a small flat of ≥ 1 line width), or have `gap_fuses` ignore slits that close within one layer.
   - Done when: the strict xfail `test_teardrop_introduces_no_gap_fuses[feature_test-teardrop-61]` passes.
 
-- [ ] **T-489 P2** [G] "Too thin to print" on the top of a round part: the suggested thickening doesn't help. · files: `core/fdmcore/checks.py` (`too_thin_to_print`), `core/fdmcore/additions.py` (`thicken_walls`) · owner: Claude (`task/T-489-dome-top-thin`)
+- [x] **T-489 P2** [G] "Too thin to print" on the top of a round part: the suggested thickening doesn't help. · files: `core/fdmcore/checks.py` (`too_thin_to_print`), `core/fdmcore/additions.py` (`thicken_walls`) · owner: Claude (`task/T-489-dome-top-thin`)
   - Seen (`test_design_edits.py` after T-462 + T-463 merged): `bumpy_blob_20k` (organic, 80 mm tall) gets "About 0.17 mm thin at 74.3–74.8 mm … it won't print" near its top; after applying the suggested thickening it says 0.15 mm. The top of a dome is a thin sliver in the last layers, not a thin wall.
   - Do: find out whether the check should flag a dome's last layers at all (likely not: the slicer just closes them with top layers), and if so why the thickening makes it thinner. Organic parts may need no geometry edit here.
   - Done when: the strict xfail `test_part_edits_alone_and_together[bumpy_blob_20k]` passes.
+  - Outcome: the check was right: the corpus blob had real 0.1–0.2 mm star-shaped fins at its poles (the generator's bumps didn't fade where the rings shrink to ~1 mm), so no thickening could fix them. `tools/make_corpus.py` now fades the bumps towards the poles (× sin of the polar angle); both blobs regenerated, no `too_thin_to_print` any more. The smooth blob then got 30 ledge fills, which on a sculpt would reshape it (and together pinch the mesh, T-490): ledge fills now follow the CAD-checks switch (`api.CAD_ONLY_EDITS`), and the app re-suggests design changes when the switch is flipped. New test `test_organic_part_gets_no_ledge_fills_until_cad_checks_are_on`.
+- [ ] **T-490 P3** [G] Many ledge fills applied together can pinch the mesh on a curved part. · files: `core/fdmcore/additions.py` (`ledge_chamfers`), `core/fdmcore/booleans.py` · owner: —
+  - Seen (T-489): the smooth `bumpy_blob_20k` with the CAD checks switched on gets 30 ledge fills; each applies cleanly alone, all 30 together leave 1 non-manifold edge (`test_design_edits._assert_watertight_and_pieces`): neighbouring wedges touch edge on edge.
+  - Do: merge or space the wedges of one ledge level so they overlap or keep apart, or apply them as one union first; organic parts don't get ledge fills by default any more, so CAD parts with many small ledges are the case to test.
+  - Done when: all ledge fills of the blob (CAD checks on) apply together watertight.
 
 ## Done
 
