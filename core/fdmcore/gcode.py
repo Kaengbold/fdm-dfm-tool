@@ -59,7 +59,10 @@ class Toolpath:
     fans: dict  # every fan command: {"line", "t", "fan" (index into fan_names), "value" 0..1}
     fan_names: tuple  # "part", "P2", "P3", Klipper fan names
     pressure_advance: dict  # {"line", "t", "value"}: M900 K / SET_PRESSURE_ADVANCE / M572
-    retracts: dict  # {"line", "t", "mm"}: filament pulled back (< 0) or pushed again (> 0)
+    retracts: dict  # {"line", "t", "mm", "speed" mm/s, "moving"}: filament pulled back (< 0) or pushed again
+    # (> 0); "moving": during a travel move (a wipe), so the nozzle doesn't stop for it
+    dwells: dict  # {"line", "t", "s"}: G4 pauses
+    motion: dict  # {"line", "t", "key" (index into MOTION_KEYS), "value"}: acceleration, jerk and speed limits
     travel: dict  # moves without plastic: {"p0", "p1", "t0", "t1", "speed", "line"}
     firmware: str  # marlin / klipper / rrf / bambu
     settings: dict  # the slicer's settings block, key -> text
@@ -74,6 +77,20 @@ NOT_SLOWED, OVERHANG, BRIDGE, SMALL_PERIMETER, VOLUMETRIC_CAP, LAYER_TIME, UNKNO
 CAUSE_NAMES = ("", "overhang", "bridge", "small_perimeter", "volumetric_cap", "layer_time", "unknown")
 SPEED_TOL = 0.02  # a speed "matches" a setting within 2 % (slicers round F to 0.1 mm/min … 1 mm/s)
 CHUNK_BYTES = 4 << 20  # big files are read this much at a time
+
+# Motion limits the G-code sets (mm/s, mm/s², mm), for the print timing (kinematics.py).
+MOTION_KEYS = ("accel", "travel_accel", "jerk_x", "jerk_y", "junction_deviation", "square_corner_velocity",
+               "accel_to_decel", "minimum_cruise_ratio", "max_accel_x", "max_accel_y", "max_accel_z",
+               "max_speed_x", "max_speed_y", "max_speed_z")
+_MOTION_WORDS = {  # command -> {word: key or keys}
+    "M204": {"S": ("accel", "travel_accel"), "P": "accel", "T": "travel_accel"},  # Marlin, Bambu
+    "M205": {"X": "jerk_x", "Y": "jerk_y", "J": "junction_deviation"},
+    "M566": {"X": "jerk_x", "Y": "jerk_y"},  # RepRapFirmware, mm/min
+    "M201": {"X": "max_accel_x", "Y": "max_accel_y", "Z": "max_accel_z"},
+    "M203": {"X": "max_speed_x", "Y": "max_speed_y", "Z": "max_speed_z"},
+}
+_KLIPPER_LIMITS = {"ACCEL": ("accel", "travel_accel"), "SQUARE_CORNER_VELOCITY": "square_corner_velocity",
+                   "ACCEL_TO_DECEL": "accel_to_decel", "MINIMUM_CRUISE_RATIO": "minimum_cruise_ratio"}
 
 
 def kind_of(feature: str) -> int:
@@ -190,7 +207,7 @@ def parse(source, settings: dict | None = None) -> Toolpath:
     feed = 1800.0  # mm/min
     t = 0.0
     lines, travel = _Columns(_LINE_COLS), _Columns(_TRAVEL_COLS)
-    fan_ev, pa_ev, retract_ev = [], [], []
+    fan_ev, pa_ev, retract_ev, dwell_ev, motion_ev = [], [], [], [], []
     features, feature_id, feature_kind = ["(none)"], {"(none)": 0}, [OTHER]
     objects, object_id, label_ids, named = [], {}, False, set()  # named: objects from PrusaSlicer-style labels
     fan_names, fan_id = ["part"], {"part": 0}
@@ -308,7 +325,7 @@ def parse(source, settings: dict | None = None) -> Toolpath:
                     elif total > 1e-6:
                         add_travel((x, y, z, nx, ny, nz, t, t + dt, feed, len(lines)))
                 if de != 0 and not (de > 0 and total > 1e-6):  # pulled back / pushed again (also while wiping)
-                    retract_ev.append((len(lines), t, de))
+                    retract_ev.append((len(lines), t, de, feed / 60, total > 1e-6))
                 t += dt
                 x, y, z = nx, ny, nz
                 continue
@@ -363,9 +380,26 @@ def parse(source, settings: dict | None = None) -> Toolpath:
                 x, y, z = w.get("X", x), w.get("Y", y), w.get("Z", z)
             elif cmd == "G4":  # dwell
                 w = _words(line)
-                t += w.get("S", 0.0) + w.get("P", 0.0) / 1000
+                seconds = w.get("S", 0.0) + w.get("P", 0.0) / 1000
+                dwell_ev.append((len(lines), t, seconds))
+                t += seconds
             elif cmd in ("G10", "G11") and not ({"P", "L"} & set(_words(line))):  # firmware retraction
-                retract_ev.append((len(lines), t, -np.inf if cmd == "G10" else np.inf))  # length: from the settings
+                retract_ev.append((len(lines), t, -np.inf if cmd == "G10" else np.inf, np.nan, 0))  # length, speed: settings
+            elif cmd in _MOTION_WORDS or cmd == "SET_VELOCITY_LIMIT":
+                if cmd == "SET_VELOCITY_LIMIT":
+                    flags.add("klipper")
+                    found_words = _params(line)
+                elif cmd == "M203" and "rrf" in flags:  # RepRapFirmware gives speeds in mm/min
+                    continue
+                else:
+                    found_words = _words(line)
+                for word, key in _MOTION_WORDS.get(cmd, _KLIPPER_LIMITS).items():
+                    try:
+                        value = float(found_words[word]) / (60 if cmd == "M566" else 1)
+                    except (KeyError, ValueError):
+                        continue
+                    for k in key if isinstance(key, tuple) else (key,):
+                        motion_ev.append((len(lines), t, MOTION_KEYS.index(k), value))
             elif cmd == "M486":
                 w = _words(line)
                 if "S" in w:
@@ -413,9 +447,13 @@ def parse(source, settings: dict | None = None) -> Toolpath:
     t0 *= scale
     t1 *= scale
     tr = travel.columns()
-    retract = np.array(retract_ev, dtype=float).reshape(-1, 3)
-    firmware_retract = np.isinf(retract[:, 2])  # G10 / G11: the printer's own retraction length
+    retract = np.array(retract_ev, dtype=float).reshape(-1, 5)
+    firmware_retract = np.isinf(retract[:, 2])  # G10 / G11: the printer's own retraction length and speed
+    retract[firmware_retract, 3] = np.where(retract[firmware_retract, 2] < 0, _number(found.get("retraction_speed"), np.nan),
+                                            _number(found.get("deretraction_speed"), np.nan) or _number(found.get("retraction_speed"), np.nan))
     retract[firmware_retract, 2] = np.copysign(_number(found.get("retraction_length"), np.nan), retract[firmware_retract, 2])
+    dwell = np.array(dwell_ev, dtype=float).reshape(-1, 3)
+    motion = np.array(motion_ev, dtype=float).reshape(-1, 4)
     fan = np.array(fan_ev, dtype=float).reshape(-1, 4)
     pa = np.array(pa_ev, dtype=float).reshape(-1, 3)
 
@@ -431,7 +469,11 @@ def parse(source, settings: dict | None = None) -> Toolpath:
                                            "fan": fan[:, 2].astype(np.uint8), "value": fan[:, 3].astype(np.float32)},
                     fan_names=tuple(fan_names),
                     pressure_advance={"line": pa[:, 0].astype(np.int32), "t": pa[:, 1] * scale, "value": pa[:, 2]},
-                    retracts={"line": retract[:, 0].astype(np.int32), "t": retract[:, 1] * scale, "mm": retract[:, 2]},
+                    retracts={"line": retract[:, 0].astype(np.int32), "t": retract[:, 1] * scale, "mm": retract[:, 2],
+                              "speed": retract[:, 3], "moving": retract[:, 4] > 0},
+                    dwells={"line": dwell[:, 0].astype(np.int32), "t": dwell[:, 1] * scale, "s": dwell[:, 2]},
+                    motion={"line": motion[:, 0].astype(np.int32), "t": motion[:, 1] * scale,
+                            "key": motion[:, 2].astype(np.uint8), "value": motion[:, 3]},
                     travel={"p0": np.column_stack(tr[0:3]), "p1": np.column_stack(tr[3:6]), "t0": tr[6] * scale,
                             "t1": tr[7] * scale, "speed": tr[8] / 60, "line": tr[9]},
                     firmware=_firmware(found, flags), settings=found)

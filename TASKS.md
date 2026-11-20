@@ -847,9 +847,13 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     Fixtures from OrcaSlicer 2.5, PrusaSlicer 2.8 and Bambu Studio 1.8 (`tools/make_gcode_fixtures.py`): every slowed line gets a cause, none `unknown`.
     Big files are read 4 MB at a time: 200 MB (5.9 M lines) peaks at 619 MB, ~40 s native; 21 MB takes 7.5 s in Pyodide. The test limit is 120 bytes a line + 8 MB.
     `load_gcode` reports `firmware` and `slowdown_min` per cause. Engine tests 650 passed, full browser test 0 failures.
-- [ ] **T-472 P2** [TO] Print timing: when each line is printed and where the nozzle is. · files: `core/fdmcore/kinematics.py` (new) · owner: Claude (task/T-472-print-timing)
+- [x] **T-472 P2** [TO] Print timing: when each line is printed and where the nozzle is. · files: `core/fdmcore/kinematics.py` (new) · owner: Claude (task/T-472-print-timing)
   - Do: a numpy model of speeding up and slowing down (trapezoid), with look-ahead. It covers Marlin jerk / junction deviation and Klipper `square_corner_velocity` / `minimum_cruise_ratio`; Bambu is approximated and checked against the slicer's own estimate. Output: start and end time of each line and the nozzle position over time, which T-473 needs for the fan and nozzle heat.
   - Done when: total time is within ~5–10 % of the slicer's estimate on the fixtures, and within a few % against real print times once T-477 has them.
+  - Outcome: `kinematics.timing(tp)` plans every move like the firmware: trapezoid speed profiles, look-ahead as running minimums (no Python loop), corners by Marlin jerk / junction deviation / Klipper square_corner_velocity + minimum_cruise_ratio.
+    The limits are the G-code's own commands (M204/M205/M201/M203/M566, SET_VELOCITY_LIMIT; now recorded by `gcode.parse`), else the machine settings. Retractions and G4 pauses stop the nozzle and take their time. `nozzle_at(tp, tm, times)` gives the nozzle position.
+    Against the slicers' own estimates on the T-471 fixtures: OrcaSlicer −6 % (201 vs 214 s), PrusaSlicer −2 %, Bambu Studio +1 %. Feed rates alone are 20–30 % too fast.
+    It plans in pieces of 200 k moves, cut where the nozzle stops: 600 k lines take 0.3 s natively and in Pyodide, peak 89 MB. Engine tests 665 passed (no web/api change). Real print times: T-477.
 - [ ] **T-473 P2** [TO] Heat model (tier A), in the browser and locally. · files: `core/fdmcore/thermal.py` (new), `web/worker.js` (`NEEDS_SCIPY`), `tools/make_manifest.py` · owner: —
   - Do (numpy + `scipy.sparse`):
     - **Grid:** draw each layer's lines onto a 0.5–1 mm grid; islands = connected areas; columns = islands linked from layer to layer.
