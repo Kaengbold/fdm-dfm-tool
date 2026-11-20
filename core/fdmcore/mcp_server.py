@@ -518,7 +518,8 @@ def set_custom_presets(printers: dict | None = None, materials: dict | None = No
 @server.tool()
 def calibration_part(kind: str, output_path: str) -> dict:
     """Save a test print as STL for measuring the user's own material on their printer. ``kind``:
-    "layer_strength", "warping", "fit", "overhang" or "bridge"; ``how`` says what to print and measure.
+    "layer_strength", "warping", "fit", "overhang", "bridge" or "all" (every test on one plate);
+    each piece has its size written on it. ``how`` says what to print and measure.
     The measured numbers go into a custom material (set_custom_presets)."""
     r = api.calibration_part(kind)
     out = _out(output_path, (".stl",), "STL path")

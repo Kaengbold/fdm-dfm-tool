@@ -1732,7 +1732,7 @@ def _flex_findings(layers: list[Layer], profile: Profile, T: dict) -> list[dict]
     X = T["flex"]
     mat = profile.material.get("based_on", profile.material_id)
     out = _flat_hinges(layers, profile, X, mat) + _upright_hinges(layers, profile, X, mat)
-    out += _upright_snaps(layers, profile, X, mat) + _thick_blocks(layers, profile, X)
+    out += _upright_snaps(layers, profile, T["snap_fits"], mat) + _thick_blocks(layers, profile, X)
     return out
 
 
@@ -1813,10 +1813,40 @@ def _upright_hinges(layers: list[Layer], profile: Profile, X: dict, mat: str) ->
     return out
 
 
-def _upright_snaps(layers: list[Layer], profile: Profile, X: dict, mat: str) -> list[dict]:
+def snap_fit_strain(length_mm: float, thickness_mm: float, hook_mm: float, mat: str,
+                    S: dict, upright: bool = True) -> dict:
+    """Straight rectangular cantilever snap-fit bending strain and CAD limits (T-338).
+
+    Strain: ε = 1.5 · t · y / L² [Bayer MaterialScience, Snap-Fit Joints for Plastics, p. 11–12].
+    When ``mat`` is in ``S['allowable_strain_pct']``, also returns the allowable strain (scaled by
+    ``S['across_layers']`` when ``upright``) and the single-dimension limits ``min_length_mm``,
+    ``max_thickness_mm``, ``hook_max_mm`` (holding the other two dimensions fixed).
+    """
+    if length_mm <= 0 or thickness_mm <= 0 or hook_mm <= 0:
+        return {"strain_pct": 0.0}
+    strain_pct = 150.0 * thickness_mm * hook_mm / (length_mm ** 2)
+    out: dict[str, float] = {"strain_pct": round(strain_pct, 2)}
+    flat_pct = S["allowable_strain_pct"].get(mat)
+    if flat_pct is None:
+        return out
+    allow_pct = flat_pct * (S["across_layers"] if upright else 1.0)
+    eps, eps_flat = allow_pct / 100.0, flat_pct / 100.0
+    out.update(
+        strain_max_pct=round(allow_pct, 2),
+        strain_max_flat_pct=round(flat_pct, 2),
+        hook_max_mm=round(eps * length_mm ** 2 / (1.5 * thickness_mm), 2),
+        hook_max_flat_mm=round(eps_flat * length_mm ** 2 / (1.5 * thickness_mm), 2),
+        min_length_mm=round(float(np.sqrt(1.5 * thickness_mm * hook_mm / eps)), 1),
+        max_thickness_mm=round(eps * length_mm ** 2 / (1.5 * hook_mm), 2),
+    )
+    return out
+
+
+def _upright_snaps(layers: list[Layer], profile: Profile, S: dict, mat: str) -> list[dict]:
     """Thin tabs that rise from the part, end free and get thicker at the tip (a hook): snap fits that
-    bend across their layers. Says how deep a hook the tab takes, flat and as printed."""
-    lo, hi = X["snap_mm"]
+    bend across their layers. Reports bending strain and, for materials with a sourced limit, how much
+    strain the material allows upright and flat."""
+    lo, hi = S["thickness_mm"]
     chains, done = [], []
     for i, layer in enumerate(layers):
         live = []
@@ -1845,21 +1875,26 @@ def _upright_snaps(layers: list[Layer], profile: Profile, X: dict, mat: str) -> 
             continue  # not free at the top
         cut = max(1, int(0.7 * len(ws)))
         stem, hook = float(np.median(ws[:cut])), float(ws[cut:].max() - np.median(ws[:cut]))
-        length = layers[e].z - layers[s].z
-        if not lo <= stem <= hi or length < X["snap_min_aspect"] * stem or hook < X["hook_min_mm"]:
+        length = layers[e].z - layers[s].z + layers[e].dz
+        if not lo <= stem <= hi or length < S["min_aspect"] * stem or hook < S["hook_min_mm"]:
             continue
-        eps = X["snap_strain_pct"].get(mat, 1.5) / 100
-        flat = 0.67 * eps * length ** 2 / stem
-        upright = flat * X["across_layers"]
-        sev = "problem" if hook > upright else "warn"
+        calc = snap_fit_strain(length, stem, hook, mat, S, upright=True)
+        name = profile.material["name"]
+        if "strain_max_pct" in calc:
+            sev = "problem" if calc["strain_pct"] > calc["strain_max_pct"] else "warn"
+            note = (f"bends {calc['strain_pct']:.1f} % across its layers — {name} allows about "
+                    f"{calc['strain_max_pct']:g} % here ({calc['strain_max_flat_pct']:g} % lying flat; "
+                    f"max hook {calc['hook_max_mm']:.1f} mm upright, {calc['hook_max_flat_mm']:.1f} mm flat)")
+        else:
+            sev = "warn"
+            note = (f"bends {calc['strain_pct']:.1f} % across its layers — print it lying flat if possible "
+                    f"(no verified strain limit for {name})")
         x0, y0, x1, y1 = c["piece"].bounds
         bx = layers[s].geom.intersection(c["piece"].buffer(stem + 3.0)).bounds or (x0, y0, x1, y1)
         out.append(_finding("snap_fit_upright", sev,
-                            f"Snap-fit tab {length:.0f} mm tall, {stem:.1f} mm thick, hook {hook:.1f} mm, standing upright: it bends across its "
-                            f"layers and takes a hook of only about {upright:.1f} mm in {profile.material['name']}. Lying flat it would take about {flat:.1f} mm",
+                            f"Snap-fit tab {length:.0f} mm tall, {stem:.1f} mm thick, hook {hook:.1f} mm, standing upright: {note}",
                             bbox=[[min(x0, bx[0]), min(y0, bx[1]), layers[s].z], [max(x1, bx[2]), max(y1, bx[3]), layers[e].z]],
-                            length_mm=round(length, 1), thickness_mm=round(stem, 2), hook_mm=round(hook, 2),
-                            hook_max_mm=round(upright, 2), hook_max_flat_mm=round(flat, 2)))
+                            length_mm=round(length, 1), thickness_mm=round(stem, 2), hook_mm=round(hook, 2), **calc))
     return out
 
 
