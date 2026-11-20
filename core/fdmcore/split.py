@@ -1,4 +1,5 @@
-"""Split a part that is too big for the printer into pieces that fit, with alignment pins (T-321).
+"""Split a part that is too big for the printer into pieces that fit, with alignment pins (T-321); or one
+that fits into two that need much less support (support_cut) or that each print their strong way (strength_cut).
 
 The cut is flat, across one of the part's own axes (where CAD parts are usually flat), placed so
 every piece fits the bed and, when a strength check ran, away from the weak spot. Each piece is the
@@ -230,6 +231,71 @@ def support_cut(mesh: Mesh, settings, profile=None) -> dict | None:
     if best is None or best["pieces_mm3"] > SUPPORT_CUT_SAVING * whole:
         return None
     return {**best, "whole_mm3": whole}
+
+
+STRENGTH_CUT_GAIN = 1.25  # the two pieces, each printed its strong way, must hold at least this much more
+SQUARE_UPS = np.vstack([np.eye(3), -np.eye(3)])
+
+
+def strength_cut(mesh: Mesh, cases, profile, shells) -> dict | None:
+    """A flat cut across one of the part's axes after which each piece, printed its own strongest square way,
+    holds at least ``STRENGTH_CUT_GAIN`` × what the whole part holds in its strongest way (T-347): a part loaded
+    in two directions (an L-bracket) is weak across the layers whichever way it lies, but each leg alone is
+    strong when its layers run along its own load. The glued joint counts like a layer boundary (glue on a
+    printed face holds about as well as the layers do), so the cut goes where little load crosses it.
+
+    One isotropic solve per load case gives the stresses (strength.orientation_safety: anisotropy shifts the
+    load paths only a little); the build direction only changes how they are judged. Returns the axis, the cut,
+    each piece's up, and the safety of the whole part, the pieces and the joint; None when no cut helps enough."""
+    from .strength import Material, _solve, element_scale, element_stress, failure_indices, material_for
+
+    mat = material_for(profile)
+    iso = Material(mat.e_xy, mat.e_xy, mat.nu_xy, mat.nu_xy)
+    c = iso.stiffness_print_frame()
+    model = cases[0].model
+    centers = model.grid.centers(model.elems)
+    h = model.grid.h
+    fi_up = np.zeros((len(SQUARE_UPS), len(model.elems)))  # worst over the cases, per build direction and cube
+    fi_glue = np.zeros((3, len(model.elems)))  # a glued face across each axis, judged like a layer boundary
+    ignore = np.zeros(len(model.elems), dtype=bool)
+    for case in cases:
+        scale = element_scale(case.model, None, shells, profile)
+        u, _ = _solve(case, c, scale, mat.e_xy)
+        stress = element_stress(case.model, c, scale, u)
+        for j, up in enumerate(SQUARE_UPS):
+            fl, fp = failure_indices(stress, up, mat, scale)
+            fi_up[j] = np.maximum(fi_up[j], np.maximum(fl, fp))
+        for k in range(3):
+            fi_glue[k] = np.maximum(fi_glue[k], failure_indices(stress, np.eye(3)[k], mat, np.ones(len(scale)))[0])
+        ignore |= case.ignore
+    ok = ~ignore
+
+    def safety(fi, sel) -> float:
+        worst = fi[sel & ok].max(initial=0)
+        return float(1 / worst) if worst > 0 else float("inf")
+
+    whole = max(safety(fi_up[j], np.ones(len(ok), bool)) for j in range(len(SQUARE_UPS)))
+    pts = mesh.triangles.reshape(-1, 3)
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    best = None
+    for k in range(3):
+        for at in lo[k] + (hi[k] - lo[k]) * np.linspace(0.15, 0.85, CUT_POSITIONS):
+            geom = _section(mesh, k, at)
+            if geom.is_empty or len(getattr(geom, "geoms", [geom])) > 1:  # one face to glue, not two loose bits
+                continue
+            below = centers[:, k] < at
+            pieces = []
+            for side in (below, ~below):
+                j = max(range(len(SQUARE_UPS)), key=lambda j: safety(fi_up[j], side))
+                pieces.append((safety(fi_up[j], side), SQUARE_UPS[j].tolist()))
+            joint = safety(fi_glue[k], np.abs(centers[:, k] - at) <= h)
+            held = min(pieces[0][0], pieces[1][0], joint)
+            if best is None or held > best["safety"]:
+                best = {"axis": k, "cut": float(at), "ups": [pieces[0][1], pieces[1][1]], "safety": held,
+                        "pieces_safety": [pieces[0][0], pieces[1][0]], "joint_safety": joint}
+    if best is None or not best["safety"] >= STRENGTH_CUT_GAIN * whole:
+        return None
+    return {**best, "whole_safety": whole}
 
 
 def split_plan(mesh: Mesh, bed, weak_spot=None, fit_gap_mm: float | None = None, joint: str = "pins",
