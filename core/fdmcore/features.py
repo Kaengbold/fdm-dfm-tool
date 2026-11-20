@@ -284,7 +284,8 @@ def _annotate_growth(edits: list[dict], mesh: Mesh) -> list[dict]:
 
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
                  weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None,
-                 hot_spots=None, fasteners: dict | None = None, strength_verdict: str | None = None) -> list[dict]:
+                 hot_spots=None, fasteners: dict | None = None, strength_verdict: str | None = None,
+                 findings: list[dict] | None = None, to_print=None) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
     ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner
     and thickens the weak stretch — only when ``strength_verdict`` is not ``"fine"`` (a part that is already
@@ -372,6 +373,8 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             [to_part(p) for p in w["pieces"]], op="add", param="wall_lines",
             advice={"text": f"Make this wall {w['target']:.2f} mm = {n_lines} lines (now {w['width']:.2f})",
                     "now": round(float(w["width"]), 2), "target": round(float(w["target"]), 2), "unit": "mm"}))
+    if findings and to_print is not None:
+        edits += _foot_fillet_edits(mesh, edits, findings, profile, up, to_print, part_lo, part_hi)
     return _annotate_growth(edits, mesh)
 
 
@@ -386,6 +389,7 @@ EDIT_FIXES = {
     "pause_to_insert": ("pause_to_insert",),
     "single_line_wall": ("single_line_wall", "too_thin_to_print"),
     "tall_boss": ("tall_thin_feature", "weak_upright_pin"),
+    "foot_fillet": ("weak_upright_pin", "tall_thin_feature", "snap_fit_upright", "thin_neck"),
 }
 ASKED_FOR = {"fit_size", "fastener", "press_fit_fins", "split"}  # sizes the user typed in: their own request
 FROM_STRENGTH = {"stress_at_inside_corner", "thin_neck"}  # from the weak spot of the last strength check
@@ -610,7 +614,7 @@ def design_advice(mesh: Mesh, edits: list[dict], findings: list[dict], profile, 
         if len(pts):
             p = np.asarray(to_print(pts.astype(float)))
             box = (p.min(axis=0) - NEAR_MM, p.max(axis=0) + NEAR_MM)
-        if e.get("source") == "finding":
+        if e.get("source") == "finding" and e["rule"] != "foot_fillet":
             covered.append((EDIT_FIXES.get(e["rule"], ()), box))
         elif e.get("source") == "request":
             covered.append((_REQUEST_COVERS, box))
@@ -641,6 +645,8 @@ def design_advice(mesh: Mesh, edits: list[dict], findings: list[dict], profile, 
             "unit": unit, "point": clamp(pt), "fixes": {"rule": rule, "title": f.get("title", rule)},
             "edit_id": None,
         })
+    if up is not None:
+        advice += _foot_fillet_advice(mesh, edits, findings, profile, to_print, up, clamp)
     return _group_advice(advice)
 
 
@@ -1406,22 +1412,10 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
             if heat[corner].max() > 0:
                 others.append((heat[corner].max(), corner))
         corners += [c for _, c in sorted(others, key=lambda o: -o[0])[:MAX_STRESS_CORNERS - 1]]
-    pieces, rounds, profiles = [], 0, {}
-    for k in [k for c in corners for k in c][:MAX_FILLET_PIECES]:
-        e = edges[k]
-        mid = (e["a"] + e["b"]) / 2
-        half = (e["b"] - e["a"]) / 2
-        inset = -(e["n1"] + e["n2"]) * 0.15  # reach a little into the part, so the union joins it
-        rounded = up is None or _round_prints(e, up, max_overhang_deg)
-        d = size * ROUND_SAME_PLASTIC if rounded else size
-        ends = [mid + e["t1"] * d - e["n1"] * 0.15, mid + e["t2"] * d - e["n2"] * 0.15]
-        profile = [mid + inset, ends[0], *_round_arc(e, mid, d), ends[1]] if rounded else [mid + inset, *ends]
-        pieces.append(_prism(profile, half))
-        rounds += rounded
-        profiles[k] = (profile, mid)
-    pieces += _corner_pieces(edges, profiles)
+    pieces, corners_geom, rounds, every = _fillet_pieces(
+        edges, [k for c in corners for k in c], size, up, max_overhang_deg, scale_round=True)
+    pieces += corners_geom
     r_mm = size * ROUND_SAME_PLASTIC
-    every = len(profiles)  # edges; the corner pieces follow their edges
     shape = (f"{r_mm:.1f} mm round" if rounds == every else f"{size:.1f} mm 45° chamfer" if not rounds
              else f"{r_mm:.1f} mm round / {size:.1f} mm chamfer")
     shape = shape[0].upper() + shape[1:]
@@ -1444,6 +1438,168 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
     return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how, pieces, op="add", param="stress_chamfer_mm",
                   advice={"text": advice_text, "now": None,
                           "target": round(float(r_mm if rounds else size), 1), "unit": "mm", "point": spot.tolist()})]
+
+
+def _fillet_pieces(edges: list[dict], ks: list[int], size: float, up, max_overhang_deg: float,
+                   scale_round: bool = True) -> tuple[list[np.ndarray], list[np.ndarray], int, int]:
+    """Straight edge prisms and ``_corner_pieces`` sweeps for concave edges ``ks``; returns
+    ``(edge_pieces, corner_pieces, round_count, edge_count)``."""
+    pieces, rounds, profiles = [], 0, {}
+    for k in ks[:MAX_FILLET_PIECES]:
+        e = edges[k]
+        mid, half = (e["a"] + e["b"]) / 2, (e["b"] - e["a"]) / 2
+        inset = -(e["n1"] + e["n2"]) * 0.15  # reach a little into the part, so the union joins it
+        rounded = up is None or _round_prints(e, up, max_overhang_deg)
+        d = size * ROUND_SAME_PLASTIC if (rounded and scale_round) else size
+        ends = [mid + e["t1"] * d - e["n1"] * 0.15, mid + e["t2"] * d - e["n2"] * 0.15]
+        profile = [mid + inset, ends[0], *_round_arc(e, mid, d), ends[1]] if rounded else [mid + inset, *ends]
+        pieces.append(_prism(profile, half))
+        rounds += int(rounded)
+        profiles[k] = (profile, mid)
+    return pieces, _corner_pieces(edges, profiles), rounds, len(profiles)
+
+
+_FOOT_FILLET_NOUNS = {
+    "weak_upright_pin": "pin",
+    "tall_thin_feature": "pin",
+    "snap_fit_upright": "snap tab",
+    "thin_neck": "neck",
+}
+_FOOT_XY_TOL_MM = 1.0
+_FOOT_Z_TOL_MM = 1.5
+
+
+def _foot_fillet_text(noun: str, place: str, r: float, rounds: int, total: int) -> tuple[str, str, str]:
+    """Plain-language ``(advice, edit_title, edit_description)`` for a load-bearing inside corner."""
+    if rounds == total:
+        return (f"Round the inside corner at the {place} of this {noun} with r {r:.1f} mm",
+                f"{r:.1f} mm round at the {place} of the {noun}",
+                f"Rounds the sharp inside corner at the {place} of this {noun} (r {r:.1f} mm) to spread stress "
+                "without changing the rest of the part.")
+    if not rounds:
+        return (f"Add a {r:.1f} mm 45° chamfer at the {place} of this {noun} (prints without support)",
+                f"{r:.1f} mm 45° chamfer at the {place} of the {noun}",
+                f"Adds a {r:.1f} mm 45° chamfer at the sharp inside corner at the {place} of this {noun}: a round "
+                "here would face down and overhang, while a 45° chamfer prints without support.")
+    return (f"Round the inside corner at the {place} of this {noun} with r {r:.1f} mm "
+            f"(or {r:.1f} mm 45° chamfer where it overhangs, prints without support)",
+            f"{r:.1f} mm round / 45° chamfer at the {place} of the {noun}",
+            f"Rounds the inside corner at the {place} of this {noun} (r {r:.1f} mm); where a round would overhang, "
+            f"uses a {r:.1f} mm 45° chamfer instead, which prints without support.")
+
+
+def _existing_fillet_boxes(edits: list[dict], to_print) -> tuple[list, list]:
+    """Print-frame boxes of edits that already reinforce a corner: (all_boxes, ledge_top_boxes)."""
+    all_boxes, ledge_tops = [], []
+    for e in edits:
+        if e.get("source") == "other" or not e.get("pieces"):
+            continue
+        if e["rule"] not in ("stress_at_inside_corner", "tall_boss", "foot_fillet", "support_marks"):
+            continue
+        pts = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3)
+        off = 0
+        for n_tris in e["pieces"]:
+            chunk = pts[off:off + 3 * int(n_tris)]
+            off += 3 * int(n_tris)
+            if not len(chunk):
+                continue
+            p = np.asarray(to_print(chunk.astype(float)))
+            lo, hi = p.min(axis=0), p.max(axis=0)
+            if e["rule"] == "support_marks":  # ledge fill only covers the overhanging ceiling edge, not a foot below it
+                ledge_tops.append((np.array([lo[0] - NEAR_MM, lo[1] - NEAR_MM, hi[2] - NEAR_MM]),
+                                   np.array([hi[0] + NEAR_MM, hi[1] + NEAR_MM, hi[2] + NEAR_MM])))
+            else:
+                all_boxes.append((lo - NEAR_MM, hi + NEAR_MM))
+    return all_boxes, ledge_tops
+
+
+def _foot_edge_groups(mesh: Mesh, edits: list[dict], findings: list[dict], to_print, up,
+                      max_overhang_deg: float) -> list[dict]:
+    """Sharp concave inside-corner groups at the foot of load-bearing findings (and top of a thin neck),
+    skipping corners already reinforced by strength chamfers, boss ribs, foot fillets or ledge fills."""
+    load_findings = [f for f in findings if f["rule"] in _FOOT_FILLET_NOUNS and f.get("bbox")]
+    if not load_findings:
+        return []
+    edges = concave_edges(mesh)
+    if not edges:
+        return []
+    a_p = np.asarray(to_print(np.array([e["a"] for e in edges])), float)
+    b_p = np.asarray(to_print(np.array([e["b"] for e in edges])), float)
+    m_p = 0.5 * (a_p + b_p)
+    d_p = b_p - a_p
+    not_vert = np.abs(d_p[:, 2]) / np.maximum(np.linalg.norm(d_p, axis=1), 1e-12) < 0.7
+    all_boxes, ledge_tops = _existing_fillet_boxes(edits, to_print)
+    claimed: set[int] = set()
+    groups = []
+    for f in load_findings:
+        lo_f, hi_f = np.asarray(f["bbox"][0], float), np.asarray(f["bbox"][1], float)
+        in_xy = (not_vert & np.all(a_p[:, :2] >= lo_f[:2] - _FOOT_XY_TOL_MM, axis=1)
+                 & np.all(a_p[:, :2] <= hi_f[:2] + _FOOT_XY_TOL_MM, axis=1)
+                 & np.all(b_p[:, :2] >= lo_f[:2] - _FOOT_XY_TOL_MM, axis=1)
+                 & np.all(b_p[:, :2] <= hi_f[:2] + _FOOT_XY_TOL_MM, axis=1))
+        targets = [(lo_f[2], "foot")] + ([(hi_f[2], "top")] if f["rule"] == "thin_neck" else [])
+        for z_target, place in targets:
+            dz = np.abs(m_p[:, 2] - z_target)
+            cand = np.flatnonzero(in_xy & (dz <= _FOOT_Z_TOL_MM))
+            if not len(cand):
+                continue
+            ks = [int(k) for k in cand[dz[cand] <= dz[cand].min() + 0.5] if int(k) not in claimed]
+            if not ks:
+                continue
+            pts_p = np.vstack([a_p[ks], b_p[ks]])
+            ebox = [pts_p.min(axis=0).tolist(), pts_p.max(axis=0).tolist()]
+            if any(_overlaps(b, ebox) for b in all_boxes):
+                continue
+            rounds = sum(int(_round_prints(edges[k], up, max_overhang_deg)) for k in ks)
+            if rounds < len(ks) and any(_overlaps(b, ebox) for b in ledge_tops):
+                continue
+            claimed.update(ks)
+            pt = np.mean([(edges[k]["a"] + edges[k]["b"]) / 2 for k in ks], axis=0)
+            groups.append({"finding": f, "noun": _FOOT_FILLET_NOUNS[f["rule"]], "place": place,
+                           "edges": edges, "ks": ks, "rounds": rounds, "point": pt})
+    return groups
+
+
+def _foot_fillet_edits(mesh: Mesh, edits: list[dict], findings: list[dict], profile, up, to_print,
+                       part_lo: np.ndarray, part_hi: np.ndarray) -> list[dict]:
+    """Clean mesh edits for load-bearing foot inside corners without a strength run: emitted only for
+    vertex-disjoint straight edges (where no coplanar ``_corner_pieces`` junctions occur) that stay
+    inside the part's bounding box."""
+    r = float(load_data("thresholds")["fillets"]["foot_radius_mm"])
+    max_oh = float(profile.material["max_overhang_deg"])
+    out = []
+    for g in _foot_edge_groups(mesh, edits, findings, to_print, up, max_oh):
+        edges, ks = g["edges"], g["ks"]
+        if len({v for k in ks for v in (edges[k]["va"], edges[k]["vb"])}) != 2 * len(ks):
+            continue  # shared vertices / corner turns stay advice-only so mesh booleans stay manifold
+        pieces, corners_geom, rounds, total = _fillet_pieces(edges, ks, r, up, max_oh, scale_round=False)
+        if corners_geom or not pieces or not all(np.isfinite(q).all() for q in pieces):
+            continue
+        pts = np.concatenate(pieces).reshape(-1, 3)
+        if not (np.all(pts >= part_lo) and np.all(pts <= part_hi)):
+            continue
+        advice_text, title, desc = _foot_fillet_text(g["noun"], g["place"], r, rounds, total)
+        out.append(_edit(f"foot-fillet-{len(out)}", "foot_fillet", title, desc, pieces, op="add",
+                         advice={"text": advice_text, "now": None, "target": round(r, 1),
+                                 "unit": "mm", "point": g["point"].tolist()}))
+    return out
+
+
+def _foot_fillet_advice(mesh: Mesh, edits: list[dict], findings: list[dict], profile, to_print,
+                        up, clamp) -> list[dict]:
+    """Exact-number CAD advice for load-bearing foot inside corners that have no edit yet."""
+    r = float(load_data("thresholds")["fillets"]["foot_radius_mm"])
+    max_oh = float(profile.material["max_overhang_deg"])
+    out = []
+    for i, g in enumerate(_foot_edge_groups(mesh, edits, findings, to_print, up, max_oh)):
+        f = g["finding"]
+        advice_text, _, _ = _foot_fillet_text(g["noun"], g["place"], r, g["rounds"], len(g["ks"]))
+        out.append({
+            "id": f"advice-foot-fillet-{i}", "rule": "foot_fillet", "text": advice_text, "now": None,
+            "target": round(r, 1), "unit": "mm", "point": clamp(g["point"]),
+            "fixes": {"rule": f["rule"], "title": f.get("title", f["rule"])}, "edit_id": None,
+        })
+    return out
 
 
 CORNER_STEPS = 6  # pieces of a corner piece's turn
