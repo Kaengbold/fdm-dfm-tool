@@ -2410,7 +2410,7 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     from_print = _part_frame_map(s.mesh, rotation)
     edits = design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
                          gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
-                         strength_verdict=s.strength_verdict)
+                         strength_verdict=s.strength_verdict, findings=findings, to_print=to_print)
     if not s.cad_checks:  # an organic shape (T-408), until the user turns the CAD checks back on
         edits = [e for e in edits if not e["id"].startswith(CAD_ONLY_EDITS)]
     edits = link_to_findings(edits, findings, to_print)
