@@ -370,6 +370,23 @@ button.saved-open:hover:not(:disabled) { background: var(--accent-soft); }
 .extra { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .sim-card { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--panel); }
 .sim-card h3 { margin: 0; }
+/* Shaking and knocks (T-373): what each check simulates, as two small looping pictures. */
+.dynamics { display: flex; flex-direction: column; gap: 8px; }
+.dynamics[open] > :not(summary) { margin-top: 0; }
+.dyn-demo { display: flex; gap: 12px; flex-wrap: wrap; }
+.dyn-demo figure { margin: 0; flex: 1 1 140px; max-width: 220px; color: var(--muted); }
+.dyn-demo svg { display: block; width: 100%; height: auto; }
+.dyn-demo figcaption { font-size: 13px; }
+.dyn-demo .wall { fill: var(--line-strong); }
+.dyn-demo .part { fill: var(--accent); }
+.dyn-demo .weight { fill: currentColor; }
+.dyn-demo .shake { transform-origin: 12px 38px; animation: dyn-shake 1.6s ease-in-out infinite; }
+.dyn-demo .drop { animation: dyn-drop 2.4s ease-in infinite; }
+.dyn-demo .bump { transform-origin: 12px 54px; animation: dyn-bump 2.4s ease-out infinite; }
+@keyframes dyn-shake { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(4deg); } 75% { transform: rotate(-4deg); } }
+@keyframes dyn-drop { 0%, 20% { transform: translateY(0); opacity: 1; } 55% { transform: translateY(30px); } 58%, 90% { transform: translateY(30px); opacity: 1; } 100% { transform: translateY(30px); opacity: 0; } }
+@keyframes dyn-bump { 0%, 54% { transform: rotate(0); } 62% { transform: rotate(6deg); } 72% { transform: rotate(-2deg); } 82%, 100% { transform: rotate(0); } }
+@media (prefers-reduced-motion: reduce) { .dyn-demo .shake, .dyn-demo .drop, .dyn-demo .bump { animation: none; } .dyn-demo .drop { transform: translateY(30px); } }
 .fastener-suggestions { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .fastener-suggestions:empty { display: none; }
 .fastener-suggestions .sim-card p { margin: 0; font-size: 14px; }
