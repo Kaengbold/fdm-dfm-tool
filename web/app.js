@@ -2673,6 +2673,7 @@ function optionCard(o, now, boxes, group) {
       el("span", { className: "gain", textContent: o.safety_factor == null ? "re-check after"
         : `${formatSafety(o.safety_factor)}${now && o.kind !== "load" ? ` (${o.safety_factor >= now ? "+" : ""}${Math.round((o.safety_factor / now - 1) * 100)} %)` : ""}` })),
     el("p", { className: "hint", textContent: o.why + (o.cost ? ` Cost: ${o.cost}.` : "") }),
+    o.kind === "split" ? el("div", { className: "row" }, el("button", { textContent: "Show me", onclick: () => applyOption(o) })) :
     o.kind === "design" ? el("div", { className: "row" },
       el("button", { textContent: "Show me", onclick: () => applyOption(o) }),
       o.edit ? el("button", { textContent: "Test it", onclick: () => testDesignEdit(o.edit),
@@ -3285,6 +3286,10 @@ async function applyOption(o, recheck = true) {
   } else if (o.material) {
     $("material").value = o.material;
     $("material").dispatchEvent(new Event("change"));
+  } else if (o.kind === "split") {
+    // Two pieces, each printed its strong way (T-347): shown on the bed in Download, where the pieces are saved.
+    steps.go("download");
+    await busy("Cutting it so each piece prints its strong way…", () => showSplit("strength"));
   } else if (o.kind === "design") {
     // Open Design changes (an Advanced step) with the change lit up on the part.
     if (!steps.steps.includes("design")) setLevel("advanced");
@@ -5068,7 +5073,7 @@ $("pause-file").onchange = async (e) => {
 // A part too big for the printer: the pieces that fit (split.py), each the part with the rest cut away
 // (and pin holes or a dovetail), shown on the bed the way they print; then the pieces and pins as STLs.
 async function showSplit(purpose = state.split?.purpose ?? "fit") {
-  const plan = await call("split", { profile: profile(), joint: $("split-joint").value, purpose });
+  const plan = await call("split", { profile: profile(), joint: $("split-joint").value, purpose, loads: purpose === "strength" ? state.loads : null });
   const floats = (e) => ({ ...e, mesh: new Float32Array(e.mesh.slice().buffer) });
   const soups = [];
   for (const piece of plan.pieces) soups.push((await applyDesignEdits(state.triangles, piece.edits.map(floats), { check: false })).soup); // cutting it apart is the point
