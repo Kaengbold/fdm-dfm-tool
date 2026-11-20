@@ -9,6 +9,8 @@ One part per call, JSON on stdout (files where a command makes one), so an agent
     fdmdfm chart part.stl --kind nozzles -o time.svg
     fdmdfm export part.stl -o part.3mf
     fdmdfm render part.stl --view overhangs -o under.png
+    fdmdfm open part.stl            (the app in your browser, served from this computer)
+    fdmdfm setup                    (adds the MCP server to your AI agents, asking first)
 
 Without ``--up`` every command uses the best orientation (as ``orient`` ranks it first). Errors go to
 stderr as one line with exit code 1, so a script can tell them apart from results.
@@ -180,6 +182,12 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--zones", help="stronger zones (from optimise --zones-too) as JSON or a .json file")
     sub = ap.add_subparsers(dest="command", required=True)
     sub.add_parser("presets", help="printers, materials and nozzles")
+    p = sub.add_parser("open", help="open the app in your browser, served from this computer (with a part, if given)")
+    p.add_argument("part", nargs="?", help="STL, 3MF, STEP or project file to open")
+    p.add_argument("--port", type=int, default=8771)
+    p.add_argument("--no-browser", action="store_true", help="only print the address")
+    p = sub.add_parser("setup", help="add the MCP server to Claude Code, Codex and Gemini CLI (asks first)")
+    p.add_argument("--yes", action="store_true", help="don't ask, do every step")
     for name, fn, text in [
         ("orient", cmd_orient, "rank print orientations"),
         ("check", cmd_check, "printability findings, print time, recommended settings"),
@@ -236,6 +244,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     a = build_parser().parse_args(argv)
+    if a.command in ("open", "setup"):  # interactive: plain text, not JSON
+        from . import local
+
+        return local.cmd_open(a.part, a.port, not a.no_browser) if a.command == "open" else local.cmd_setup(a.yes)
     try:
         if a.command == "presets":
             out = api.get_presets()

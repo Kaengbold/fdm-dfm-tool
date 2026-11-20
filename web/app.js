@@ -1260,7 +1260,7 @@ function showPainted() {
 /** Boxes and dots on the part: the weakest spot with a strength result, the first corners to lift
  * with the warp shape, else the problem boxes (not over a design preview or the load setup). */
 function showMarkers() {
-  if (shows("sims") && state.showSwing && state.swing) return viewer.showFindings([]);
+  if (shows("strength") && state.showSwing && state.swing) return viewer.showFindings([]);
   const r = state.strength;
   if (shows("strength") && state.showHeat && r) {
     viewer.showFindings([]);
@@ -2137,7 +2137,7 @@ async function offerTurn() {
   $("strength-result").prepend(box);
 }
 
-// ---------- strength: shaking and knocks (optional, Advanced) ----------
+// ---------- strength: shaking and knocks (optional, Advanced; in the third stage of Strength analysis, T-373) ----------
 /** Why "Run these checks" can't run yet: the loads first, then at least one ticked check. */
 function dynamicsWhy() {
   offWhy($("run-dynamics"), !readyForStrength() ? "Set where it is held and a load in Strength analysis first."
@@ -2158,6 +2158,7 @@ $("run-dynamics").onclick = async () => {
       mounted_kg: $("dyn-shake").checked ? Number($("dyn-kg").value) || 0 : 0,
       drop_mm: $("dyn-drop").checked ? Number($("dyn-mm").value) || 0 : 0,
     }));
+    $("dynamics").open = true;
     state.swing = r.vertex_disp ? r : null; // only the shaking check has a swing to show
     state.showSwing = Boolean(state.swing);
     if (state.showSwing) state.showBoxHeat = false;
@@ -2173,7 +2174,7 @@ $("run-dynamics").onclick = async () => {
     );
     recolor();
     setStatus(state.summary);
-  }, ["sims"]);
+  }, ["strength"]);
 };
 
 // ---------- heat inside an electronics box ----------
@@ -2259,7 +2260,7 @@ const view = { field: "fi", stretch: false, bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
-  if (shows("sims") && state.showSwing && state.swing) return swingView();
+  if (shows("strength") && state.showSwing && state.swing) return swingView();
   stopSwing();
   if (shows("printing") && state.showWarp && state.warp) return warpView();
   if (shows("sims") && state.showBoxHeat && state.boxHeat) return boxHeatView();
@@ -3466,12 +3467,6 @@ $("polyholes").onchange = () => {
   state.overrides.hole_to_polyhole = $("polyholes").checked ? "1" : "0";
   renderSettings();
 };
-$("open-fit-test").onclick = () => {
-  $("my-presets").open = true;
-  $("new-material").click();
-  steps.reveal($("calibration"));
-  $("calibration").querySelector("[data-calibration=fit]").scrollIntoView({ block: "center" });
-};
 
 // ---------- feature confirm ("is this a hole?") ----------
 const shown = (f) => f.type === "hole" || f.full_circle; // partial bosses are rounded edges: not worth a line
@@ -4428,43 +4423,132 @@ $("copy-yaml").onclick = async () => {
   await navigator.clipboard.writeText(toYaml(state.presets, loadMine()));
   setStatus("Copied — paste it into a pull request for core/fdmcore/data/presets.yaml (with sources).");
 };
-document.querySelectorAll("[data-calibration]").forEach((b) => (b.onclick = async () => {
-  const part = await call("calibration_part", { kind: b.dataset.calibration });
-  download(part.stl, part.name, "model/stl");
-}));
-$("cal-z").onclick = () => {
-  const flat = Number($("cal-flat").value), upright = Number($("cal-upright").value);
-  if (!(flat > 0 && upright > 0)) return setStatus("Enter both weights first.", true);
-  $("preset-fields").querySelector("[name=z_strength]").value = zFactor(flat, upright).toFixed(2);
-};
-// Fit / overhang / bridge test results go straight into the form fields they measure.
+document.querySelectorAll("[data-calibration]").forEach((b) => (b.onclick = () =>
+  busy("Making the test print…", async () => {
+    const part = await call("calibration_part", { kind: b.dataset.calibration });
+    download(part.stl, part.name, "model/stl");
+    setStatus(`Downloaded ${part.name}: print it with your usual settings for this material.`);
+  })));
+
+// ---------- "Tune to my printer" (T-446): the test prints and what they showed, saved as the user's own material ----------
 const options = (id, values, label) => $(id).append(...values.map((v) => el("option", { value: v, textContent: label(v) })));
 options("cal-fit-snug", [0, 0.1, 0.2, 0.3, 0.4, 0.5], (g) => `Ø${(6 + g).toFixed(1)} mm`);
 options("cal-fit-slide", [0, 0.1, 0.2, 0.3, 0.4, 0.5], (g) => `Ø${(6 + g).toFixed(1)} mm`);
 options("cal-overhang", [40, 45, 50, 55, 60, 65, 70], (a) => `${a}°`);
 options("cal-bridge", [10, 20, 30, 40, 50], (l) => `${l} mm`);
-const setField = (name, value) => ($("preset-fields").querySelector(`[name=${name}]`).value = value);
-$("cal-fit-use").onclick = () => {
-  const snug = $("cal-fit-snug").value, slide = $("cal-fit-slide").value;
-  if (snug === "" && slide === "") return setStatus("Pick the holes first.", true);
-  if (snug !== "") setField("fit_snug", snug);
-  if (slide !== "") setField("fit_sliding", slide);
+
+/** What the results go into: the chosen material if it is the user's own, else a new one named for this
+ * material and printer ("My PLA on my Bambu Lab P1S"), so the built-in one stays as it is. */
+function tuneTarget() {
+  const mine = loadMine();
+  const id = $("material").value;
+  const mat = state.presets.materials[id];
+  const printer = state.presets.printers[$("printer").value];
+  const key = Object.keys(mine.materials).find((k) => (k.startsWith("my_") ? k : `my_${k}`) === id) ?? null;
+  const spec = key ? mine.materials[key] : { based_on: id, name: `My ${mat.name} on my ${printer.name}` };
+  return { mine, key, spec, mat, printer, base: state.presets.materials[spec.based_on] ?? mat };
+}
+
+/** The results filled in, as material form values (``mypresets.toSpec``); only the tests that were done. */
+function tuneResults() {
+  const num = (id) => ($(id).value === "" ? null : Number($(id).value));
+  const out = {};
+  const [flat, upright] = [num("cal-flat"), num("cal-upright")];
+  if (flat != null || upright != null) {
+    if (!(flat > 0 && upright > 0)) throw new Error("Layer strength: enter both break weights.");
+    out.z_strength = zFactor(flat, upright).toFixed(2);
+  }
+  if ($("cal-warp").value) out.warp_length = warpLength(Number($("cal-warp").value));
+  if ($("cal-fit-snug").value !== "") out.fit_snug = $("cal-fit-snug").value;
+  if ($("cal-fit-slide").value !== "") out.fit_sliding = $("cal-fit-slide").value;
+  if ($("cal-overhang").value) out.max_overhang_deg = $("cal-overhang").value;
+  if ($("cal-bridge").value) out.max_bridge_mm = $("cal-bridge").value;
+  for (const [what, model, meas, key] of [["Hole", "cal-hole-model", "cal-hole-meas", "hole_error_mm"],
+    ["Outside", "cal-outer-model", "cal-outer-meas", "outer_error_mm"]]) {
+    const [m, x] = [num(model), num(meas)];
+    if (m == null && x == null) continue;
+    if (!(m > 0 && x > 0)) throw new Error(`${what} size: enter the modelled and the measured size.`);
+    out[key] = (x - m).toFixed(2);
+  }
+  return out;
+}
+
+const TUNED = [ // what a test sets: name, spec key, the value in words (material spec, enclosure)
+  ["Layer strength", "z_strength_factor", (m, enc) => m.z_strength_factor?.[enc] != null && `×${m.z_strength_factor[enc]} of the strength along the layers`],
+  ["Warping", "warp_length_mm", (m, enc) => m.warp_length_mm?.[enc] != null && `flat up to about ${m.warp_length_mm[enc]} mm long`],
+  ["Fits", "fit_gap_mm", (m) => ["snug", "sliding"].filter((k) => m.fit_gap_mm?.[k] != null).map((k) => `${m.fit_gap_mm[k]} mm ${k}`).join(", ")],
+  ["Overhangs", "max_overhang_deg", (m) => m.max_overhang_deg != null && `clean up to ${m.max_overhang_deg}°`],
+  ["Bridges", "max_bridge_mm", (m) => m.max_bridge_mm != null && `up to ${m.max_bridge_mm} mm`],
+  ["Sizes", "hole_error_mm", (m) => m.hole_error_mm != null && `holes come out ${m.hole_error_mm > 0 ? "+" : ""}${m.hole_error_mm} mm`],
+];
+
+/** For which material and printer, and per test whether the checks use your result or the typical value. */
+function renderTune() {
+  const t = tuneTarget();
+  $("tune-for").textContent = t.key
+    ? `For ${t.mat.name} on your ${t.printer.name}: your results update it.`
+    : `For ${t.mat.name} on your ${t.printer.name}. Your results are saved as "${t.spec.name}" and chosen for your parts; ${t.mat.name} itself stays as it is.`;
+  const enc = t.printer.enclosure;
+  $("tune-values").replaceChildren(...TUNED.map(([name, key, words]) => {
+    const yours = t.key && t.spec[key] != null;
+    const value = words(yours ? t.mat : t.base, enc);
+    return el("li", { className: yours ? "yours" : "" }, el("strong", { textContent: `${name}: ` }),
+      yours ? `measured on your printer${value ? ` (${value})` : ""}` : `typical for ${t.base.name}${value ? ` (${value})` : ""}`);
+  }));
+}
+
+function openTune(test) {
+  $("tune-error").hidden = true;
+  renderTune();
+  $("tune").showModal();
+  if (test) $("tune").querySelector(`.tune-test:has([data-calibration=${test}])`)?.scrollIntoView({ block: "start" });
+}
+document.querySelectorAll("[data-open-tune]").forEach((b) => (b.onclick = () => openTune(b.dataset.openTune)));
+$("tune-close").onclick = $("tune-cancel").onclick = () => $("tune").close();
+
+$("tune-save").onclick = async () => {
+  const fail = (text) => Object.assign($("tune-error"), { textContent: text, hidden: false });
+  let results;
+  try {
+    results = tuneResults();
+  } catch (err) {
+    return fail(err.message);
+  }
+  if (!Object.keys(results).length) return fail("Fill in at least one result first.");
+  const { mine, key, spec } = tuneTarget();
+  const before = structuredClone(mine);
+  const id = key ?? `mat_${Date.now().toString(36)}`;
+  const add = toSpec("materials", { based_on: spec.based_on, name: spec.name, ...results });
+  const fits = spec.fit_gap_mm || add.fit_gap_mm ? { fit_gap_mm: { ...spec.fit_gap_mm, ...add.fit_gap_mm } } : {};
+  mine.materials[id] = { ...spec, ...add, ...fits };
+  try {
+    await applyMine(mine, { material: id.startsWith("my_") ? id : `my_${id}` });
+  } catch (err) {
+    await applyMine(before);
+    return fail(`Not saved: ${err.message}`);
+  }
+  saveMine(mine);
+  $("tune").close();
+  setStatus(`Saved your results in "${spec.name}". It's chosen for your parts now.`);
+  await setupChanged("material"); // remembered for the next visit; a loaded part is checked again with them
+  renderSetup();
 };
-$("cal-size-use").onclick = () => {
-  const err = (a, b) => ($(a).value && $(b).value ? (Number($(b).value) - Number($(a).value)).toFixed(2) : "");
-  const hole = err("cal-hole-model", "cal-hole-meas"), outer = err("cal-outer-model", "cal-outer-meas");
-  if (hole === "" && outer === "") return setStatus("Enter a modelled and a measured size first.", true);
-  if (hole !== "") setField("hole_error_mm", hole);
-  if (outer !== "") setField("outer_error_mm", outer);
-};
-$("cal-overhang-use").onclick = () => $("cal-overhang").value ? setField("max_overhang_deg", $("cal-overhang").value) : setStatus("Pick the steepest clean block first.", true);
-$("cal-bridge-use").onclick = () => $("cal-bridge").value ? setField("max_bridge_mm", $("cal-bridge").value) : setStatus("Pick the longest bridge first.", true);
-$("cal-warp-use").onclick = () => {
-  const longest = Number($("cal-warp").value);
-  if (!longest) return setStatus("Pick the longest bar that stayed flat.", true);
-  $("preset-fields").querySelector("[name=warp_length]").value = warpLength(longest);
-};
-initPresets().catch((err) => setStatus(`Engine failed to start: ${err.message}`, true));
+initPresets().then(openFromLink).catch((err) => setStatus(`Engine failed to start: ${err.message}`, true));
+
+/** Local mode (`fdmdfm open part.stl`): the page's address names a part the same local server serves. */
+async function openFromLink() {
+  const path = new URLSearchParams(location.search).get("open");
+  if (!path) return;
+  const url = new URL(path, location.href);
+  if (url.origin !== location.origin) return setStatus("Only parts served by this page can be opened from its address.", true);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Couldn't open ${decodeURIComponent(url.pathname.split("/").pop())}: it was moved, or the local page was restarted for another part.`);
+    await openFile(decodeURIComponent(url.pathname.split("/").pop()), new Uint8Array(await res.arrayBuffer()));
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
 
 /** Multi-material checkbox follows the printer: none = off, built-in = on, optional add-on = user's choice. */
 function syncMultiMaterial() {
