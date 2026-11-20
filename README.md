@@ -54,6 +54,24 @@ deploys `web/` and the engine on every push to `main`.
 
 ## Use it from an AI agent (local mode)
 
+Two commands, no download of this repository. You need [uv](https://docs.astral.sh/uv/) (or pipx) and your
+agent (Claude Code, Codex or Gemini CLI):
+
+```sh
+uv tool install "fdmdfm[local] @ git+https://github.com/Kaengbold/fdm-dfm-tool"
+fdmdfm setup
+```
+
+`fdmdfm setup` finds your agents and asks before each change: it adds the MCP server to Claude Code, Codex and
+Gemini CLI, and copies the guide for Claude Code. Restart the agent and ask it to check a part. With pipx
+instead of uv: `pipx install "fdmdfm[local] @ git+https://github.com/Kaengbold/fdm-dfm-tool"`.
+
+`fdmdfm open part.stl` opens the app in your browser with the part, served from your computer (at
+<http://127.0.0.1:8771/web/>; keep the window open while you use it, Ctrl+C stops it). Everything the tool
+needs comes with it: the printer and material data and the slicer profiles, whatever you have installed.
+
+From a checkout (for developers), or to set the agents up by hand:
+
 ```sh
 pip install -e "core[local]"
 claude mcp add fdm-dfm -- python -m fdmcore.mcp_server

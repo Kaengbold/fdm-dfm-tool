@@ -2189,6 +2189,20 @@ def _run_suite(port: int, args) -> Run:
             return f"{warned[0][:60]} | materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
         run.step("my presets + calibration + Orca import", my_presets)
 
+        def open_from_link():
+            # T-450: `fdmdfm open part.stl` starts the page with ?open=<the part on the same server>.
+            other = browser.new_page()
+            other_run = Run(other)
+            try:
+                other.goto(f"http://127.0.0.1:{port}/web/?open=/web/samples/hook.stl")
+                other.wait_for_function("() => window.fdm && fdm.state.name === 'hook.stl' && document.querySelectorAll('#options > li').length > 0",
+                                        timeout=300_000)
+                assert not other_run.console, other_run.console
+                return other.inner_text("#status")[:80]
+            finally:
+                other.close()
+        run.step("open a part from the page's address (fdmdfm open)", open_from_link)
+
         def offline():
             # The reload above ran under the service worker, so the engine and libraries are cached now.
             run.act(lambda: click_sample(page, "l_bracket"))
