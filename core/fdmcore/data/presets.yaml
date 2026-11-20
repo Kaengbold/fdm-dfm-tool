@@ -228,7 +228,7 @@ materials:
     abrasive: false
     hygroscopic: low
     max_flow_mm3s: 15
-    z_strength_factor: {none: 0.6, passive: 0.6, heated: 0.6}  # verify: tougher than PLA, layer bond similar
+    z_strength_factor: {none: 0.6, passive: 0.6, heated: 0.6}  # eSUN PLA+ TDS: 31.2 MPa across the layers vs 53.34 along them (GB/T 1040) = 0.58
     tensile_xy_mpa: 50
     modulus_xy_mpa: 2600
     density_g_cm3: 1.24
@@ -290,7 +290,7 @@ materials:
     max_flow_mm3s: 3         # flexible filament jams when pushed fast
     z_strength_factor: {none: 0.85, passive: 0.85, heated: 0.85}  # layers bond very well
     tensile_xy_mpa: 30       # Polymaker PolyFlex TPU95 29 MPa, Bambu TPU 95A HF 22 MPa (TDS)
-    modulus_xy_mpa: 60       # verify: data sheets give stress at 100 % stretch, not this; the strength check is not meant for TPU
+    modulus_xy_mpa: 30       # Polymaker PolyFlex TPU95 TDS: Young's modulus 29 ± 2.8 MPa (ISO 527), 33.6 MPa in V5.5 (ISO 37); not the 9.4 MPa at 100 % stretch. The strength check is not meant for TPU
     density_g_cm3: 1.21
     shrinkage_pct: 0.5
     nozzle_temp_c: 240
