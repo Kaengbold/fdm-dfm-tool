@@ -33,5 +33,5 @@ package-dir = { "fdmcore" = "core/fdmcore", "fdmdfm_web" = "web", "fdmdfm_agents
 
 [tool.setuptools.package-data]
 fdmcore = ["data/*.yaml", "data/*.json", "data/*.json.gz", "manifest.json"]
-fdmdfm_web = ["*.html", "*.js", "*.css", "fonts/*", "img/**/*", "samples/*"]
+fdmdfm_web = ["*.html", "*.js", "*.css", "fonts/*", "img/**/*", "messages/*", "samples/*"]
 fdmdfm_agents = ["*.md", "fdm-check/*"]
