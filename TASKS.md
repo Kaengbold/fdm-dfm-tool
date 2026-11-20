@@ -701,7 +701,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### I. From the printed part back into the tool
 
-- [ ] **T-446 P2** [I] Calibration as its own flow. · files: `web/index.html` (`#calibration`, now inside the "My printers & materials" form), `web/app.js`, see T-388 (one combined test print), T-170 · owner: —
+- [ ] **T-446 P2** [I] Calibration as its own flow. · files: `web/index.html` (`#calibration`, now inside the "My printers & materials" form), `web/app.js`, see T-388 (one combined test print), T-170 · owner: Claude (`task/T-446-calibration-flow`)
   - Seen: the test prints (layer strength, warping, fit, overhang, bridge) and their forms are hidden inside the form for a new material. Nobody finds them, and they are what makes the numbers fit the user's printer.
   - Do: a tool "Tune to my printer" (toolbox, T-418): what it improves, the test print(s) to download, then a short form per result. Show in every result which numbers are measured and which are typical ("Fits: measured on your printer", "Strength: typical PLA"). Works without making a new material first (it creates "My PLA on my P1S").
   - Done when: a user can go from the start screen to a saved calibration without opening "New material…".
