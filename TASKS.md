@@ -983,7 +983,6 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
 
 - [x] **T-491 P1** [UX] The header can jump to the bottom of the page: it had no grid row, so anything added before it (e.g. a browser extension's element) pushes it below the app. · files: `web/style.css` · owner: Claude (`task/T-491-header-row`)
   - Outcome: `.top` now has a fixed grid row (`grid-area: 1 / 1 / 2 / -1`); with an element injected before it the header stays on top at 1960, 800 and 390 px (it dropped to y=962 before). Quick smoke test green.
-- [ ] **T-491 P1** [UX] The header can jump to the bottom of the page: it had no grid row, so anything added before it (e.g. a browser extension's element) pushes it below the app. · files: `web/style.css` · owner: Claude (`task/T-491-header-row`)
 - [x] **T-492 P3** [UX] Info boxes (the text behind an ⓘ) without the coloured stripe on the left: the user prefers the plain tinted box. · files: `web/style.css` · owner: Claude (task/T-492-no-side-stripe)
   - Outcome: `.info-text` keeps its tinted background and rounded corners, without the 3 px accent border; it now matches the other hint boxes (`.affects`, `.kind-hint`). Quick browser test 0 failures (one CSS line, so not the full run).
 
@@ -1011,8 +1010,8 @@ Rules for every [UI] task:
 
 ### Phase 0: triage on today's UI
 
-- [ ] **T-500 P1** [UI] Quick triage: header on top, phone layout out, Expert off. · plan: §1.1, §1.2, §1.3 · files: `web/style.css`, `web/index.html`, `web/app.js`, `web/steps.js`, `tools/e2e_smoke.py`, `PRODUCT.md` · owner: —
-  - Do: give the header its own grid row (this finishes T-491; coordinate with its owner), delete every `@media (max-width: …)` rule and phone-only markup/JS, drop the phone passes in `e2e_smoke.py`, hide the level switch and remove the Expert scroll page, rewrite PRODUCT.md "Operating Context" as desktop only.
+- [~] **T-500 P1** [UI] Quick triage: header on top, phone layout out, Expert off. · plan: §1.1, §1.2, §1.3 · files: `web/style.css`, `web/index.html`, `web/app.js`, `web/steps.js`, `tools/e2e_smoke.py`, `PRODUCT.md` · owner: Claude (`task/T-500-triage`)
+  - Do: keep the header in its own grid row (done in T-491), delete every `@media (max-width: …)` rule and phone-only markup/JS, drop the phone passes in `e2e_smoke.py`, hide the level switch and remove the Expert scroll page, rewrite PRODUCT.md "Operating Context" as desktop only.
   - Done when: header stays on top even with an element injected before it; no `max-width` media query left; e2e passes at 1280×720.
 
 ### Phase 1: design system and style mockups (owner approval gate)
