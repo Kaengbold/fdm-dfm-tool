@@ -33,6 +33,7 @@
  "slicer.py",
  "split.py",
  "strength.py",
+ "thermal.py",
  "topopt.py",
  "voxel.py",
  "warp.py"
