@@ -506,8 +506,10 @@ async function partLoaded(info) {
   state.check = null;
   $("dl-copies").value = "1"; // a new part starts with one on the plate
   state.copies = 1;
+  setGrip(false); // and smooth walls: grip texture is offered on its finding (T-431)
   renderPauses();
   $("dl-split").hidden = true;
+  $("dl-split-note").hidden = true;
   closeSplit();
   renderOptions();
   $("view-empty").hidden = true;
@@ -668,10 +670,7 @@ async function runCheck() {
     // Same test as the support setting on the 3MF (recommend.py): an overhang, or a bridge too long to span.
     const needsSupport = result.stats.needs_support || result.findings.some((f) => f.rule === "long_bridge");
     $("dl-split-support").hidden = !$("dl-split").hidden || !needsSupport;
-    if (state.gripFor !== state.name) { // a new part: ticked when it is something held (grip_texture); then the user's choice
-      state.gripFor = state.name;
-      $("dl-grip").checked = result.findings.some((f) => f.rule === "grip_texture");
-    }
+    $("dl-split-note").hidden = $("dl-split").hidden;
     closeSplit(); // the pieces were for the orientation and part before
     $("design-block").hidden = mode() === "print";
     setStatus(state.summary);
@@ -785,11 +784,35 @@ function findingPicture(f) {
     style: "align-self:flex-start;border-radius:var(--r)" });
 }
 
+/** A slicer fix the 3MF can carry, one click on its finding instead of a standing control (T-431): today the
+ * grip texture (fuzzy skin) for a part that is held. Stays in step with the box under "Copies and grip texture". */
+function fixAction(f) {
+  if (f.rule !== "grip_texture") return "";
+  const b = el("button", { type: "button", className: "small grip-fix", onclick: () => {
+    setGrip(!$("dl-grip").checked);
+    setStatus($("dl-grip").checked ? "Grip texture is on: the 3MF asks the slicer for fuzzy skin on the outside walls."
+      : "Grip texture is off: the outside walls print smooth.");
+  } });
+  syncGrip(b);
+  return b;
+}
+function syncGrip(b) {
+  const on = $("dl-grip").checked;
+  b.textContent = on ? "Grip texture is on · turn it off" : "Turn on grip texture";
+  b.setAttribute("aria-pressed", String(on));
+}
+function setGrip(on) {
+  $("dl-grip").checked = on;
+  document.querySelectorAll(".grip-fix").forEach(syncGrip);
+}
+$("dl-grip").addEventListener("change", () => document.querySelectorAll(".grip-fix").forEach(syncGrip));
+
 function findingCard(findings, items) {
   const first = items[0].f;
   const worst = items.reduce((a, b) => (SEVERITY_RANK[b.f.severity] < SEVERITY_RANK[a.f.severity] ? b : a)).f.severity;
   const fixes = first.fixes.map((fx) =>
-    el("li", {}, el("span", { className: `chip ${fx.domain}`, textContent: DOMAIN_LABEL[fx.domain] }), " ", fx.text),
+    el("li", {}, el("span", { className: `chip ${fx.domain}`, textContent: DOMAIN_LABEL[fx.domain] }), " ", fx.text,
+      fx.domain === "slicer" ? fixAction(first) : ""),
   );
   if (first.hidden_fixes?.length) {
     const hiddenLabels = first.hidden_fixes.map((d) => DOMAIN_LABEL[d]).join(" / ");
@@ -904,7 +927,8 @@ function renderVerdict() {
         title: "Show this place on the part" },
         el("img", { src: picture, alt: "", width: 88, height: 66, decoding: "async" }),
         el("strong", { textContent: f.title })),
-      fix ? el("p", { className: "hint result-fix", textContent: `Fix: ${fix.text}` }) : "");
+      fix ? el("p", { className: "hint result-fix", textContent: `Fix: ${fix.text}` }) : "",
+      fixAction(f));
     card.dataset.rule = f.rule;
     return card;
   }));
@@ -2885,8 +2909,8 @@ function renderZones() {
 
 // ---------- advanced design changes (boxes placed on the part) ----------
 const VOLUME_HINT = {
-  support: "The slicer prints supports inside the box, even with its automatic supports off. For an overhang it misses or a spot you want held.",
-  blocker: "No supports inside the box: keeps marks off a surface that should stay clean. Overhangs in it print in the air.",
+  support: "The slicer prints supports inside the box, even with its automatic supports off. For an overhang it misses or a spot you want held. Your slicer's paint-on supports do this too.",
+  blocker: "No supports inside the box: keeps marks off a surface that should stay clean. Overhangs in it print in the air. Your slicer's paint-on supports do this too.",
   void: "A thin hidden gap inside the part. The slicer prints walls all round it, so the plastic around it comes out solid: a stronger spot without more infill everywhere. Click a spot for a pin hole up through the part, or two spots for a slot.",
   keep_clear: "Space that has to stay empty: a screw head, a cable, a part that moves. Only for you (not in the 3MF): it tells you if the part reaches into it, and design suggestions that would fill it are left unticked.",
   add_solid: "A block of plastic added to the model: a foot, a pad, a rib, more meat round a hole. Place it, size it, then apply it as a new version of the model.",
