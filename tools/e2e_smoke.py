@@ -1416,6 +1416,12 @@ def _run_suite(port: int, args) -> Run:
         run.step("strength result fits at 1440 x 900", compact_strength)
 
         def shaking():
+            # T-373: an optional fold in the third stage of Strength analysis, with the two pictures of what it simulates.
+            page.evaluate("() => fdm.steps.go('strength')")
+            page.click(".sa-stage[data-stage=extra] .sa-head")
+            page.click("#dynamics > summary", position={"x": 12, "y": 12})  # on its title, not the info button
+            assert page.evaluate("() => document.getElementById('dynamics').open"), "the fold did not open"
+            assert page.locator(".dyn-demo svg").count() == 2 and page.locator(".dyn-demo svg").first.is_visible()
             page.check("#dyn-shake")
             run.act(lambda: page.click("#run-dynamics"), 300_000)
             text = page.locator("#dynamics-result").inner_text()

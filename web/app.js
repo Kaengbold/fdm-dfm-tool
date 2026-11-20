@@ -1253,7 +1253,7 @@ function showPainted() {
 /** Boxes and dots on the part: the weakest spot with a strength result, the first corners to lift
  * with the warp shape, else the problem boxes (not over a design preview or the load setup). */
 function showMarkers() {
-  if (shows("sims") && state.showSwing && state.swing) return viewer.showFindings([]);
+  if (shows("strength") && state.showSwing && state.swing) return viewer.showFindings([]);
   const r = state.strength;
   if (shows("strength") && state.showHeat && r) {
     viewer.showFindings([]);
@@ -2130,7 +2130,7 @@ async function offerTurn() {
   $("strength-result").prepend(box);
 }
 
-// ---------- strength: shaking and knocks (optional, Advanced) ----------
+// ---------- strength: shaking and knocks (optional, Advanced; in the third stage of Strength analysis, T-373) ----------
 /** Why "Run these checks" can't run yet: the loads first, then at least one ticked check. */
 function dynamicsWhy() {
   offWhy($("run-dynamics"), !readyForStrength() ? "Set where it is held and a load in Strength analysis first."
@@ -2151,6 +2151,7 @@ $("run-dynamics").onclick = async () => {
       mounted_kg: $("dyn-shake").checked ? Number($("dyn-kg").value) || 0 : 0,
       drop_mm: $("dyn-drop").checked ? Number($("dyn-mm").value) || 0 : 0,
     }));
+    $("dynamics").open = true;
     state.swing = r.vertex_disp ? r : null; // only the shaking check has a swing to show
     state.showSwing = Boolean(state.swing);
     if (state.showSwing) state.showBoxHeat = false;
@@ -2166,7 +2167,7 @@ $("run-dynamics").onclick = async () => {
     );
     recolor();
     setStatus(state.summary);
-  }, ["sims"]);
+  }, ["strength"]);
 };
 
 // ---------- heat inside an electronics box ----------
@@ -2252,7 +2253,7 @@ const view = { field: "fi", stretch: false, bend: 0, axis: "", cut: 0.5 };
 
 /** Show the FEA colours when they're switched on; returns false (and restores the part) otherwise. */
 function strengthView() {
-  if (shows("sims") && state.showSwing && state.swing) return swingView();
+  if (shows("strength") && state.showSwing && state.swing) return swingView();
   stopSwing();
   if (shows("printing") && state.showWarp && state.warp) return warpView();
   if (shows("sims") && state.showBoxHeat && state.boxHeat) return boxHeatView();
