@@ -142,4 +142,4 @@ print time/filament are rough. Use it to make better decisions, not to sign off 
 ## License
 
 [AGPL-3.0-or-later](LICENSE). Uses three.js (MIT), Pyodide (MPL-2.0), shapely (BSD),
-manifold-3d (Apache-2.0), occt-import-js and replicad-opencascadejs / OpenCascade (LGPL-2.1). The Atkinson Hyperlegible font (SIL OFL 1.1, Braille Institute) ships in `web/fonts/`. OrcaSlicer's printer / process / filament profiles (AGPL-3.0, from its source at the version named inside) ship flattened in `core/fdmcore/data/orca_profiles.json.gz`.
+manifold-3d (Apache-2.0), occt-import-js and replicad-opencascadejs / OpenCascade (LGPL-2.1). The Atkinson Hyperlegible font (SIL OFL 1.1, Braille Institute) ships in `web/fonts/`. OrcaSlicer's printer / process / filament profiles (AGPL-3.0, from its source at the version named inside) ship flattened in `core/fdmcore/data/orca_profiles.json.gz`. The beds, heights and nozzles of the other printers OrcaSlicer has profiles for (same licence and version) are in `core/fdmcore/data/orca_printers.json`, for "My printer isn't listed".
