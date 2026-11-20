@@ -100,7 +100,9 @@ def bumpy_blob(n: int = 100):
     lon = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
     lat = np.linspace(0.0, np.pi, n + 2)[1:-1]
     az, po = np.meshgrid(lon, lat)
-    r = 30.0 * (1.0 + 0.15 * np.sin(7.0 * az) * np.sin(5.0 * po) + 0.05 * np.sin(23.0 * az + 11.0 * po))
+    # The bumps fade out towards the poles (× sin(po)): there the rings shrink to ~1 mm and an
+    # undamped ripple turned them into 0.1 mm star-shaped fins, real "too thin to print" spikes (T-489).
+    r = 30.0 * (1.0 + np.sin(po) * (0.15 * np.sin(7.0 * az) * np.sin(5.0 * po) + 0.05 * np.sin(23.0 * az + 11.0 * po)))
     rings = r[..., None] * np.stack([np.sin(po) * np.cos(az), np.sin(po) * np.sin(az), np.cos(po)], axis=-1)
     # Single north/south pole vertices keep the surface strictly closed and watertight.
     verts = np.vstack([[[0.0, 0.0, 30.0]], rings.reshape(-1, 3), [[0.0, 0.0, -30.0]]])
