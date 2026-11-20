@@ -511,10 +511,23 @@ body:not([data-level="simple"]) .settings-fold > summary { display: none; }
 .preset-form { border: 1px solid var(--line); border-radius: var(--r); padding: 9px 11px; margin: 6px 0; }
 .preset-form label { display: flex; justify-content: space-between; gap: 8px; margin: 3px 0; }
 .preset-form input[type=number], .preset-form input[type=text], .preset-form select { width: 9em; }
-.calibration h3 { margin: 10px 0 4px; }
-.calibration .row label { display: inline-flex; gap: 5px; align-items: center; }
-.calibration input[type=number] { width: 4.5em; }
-.calibration .hint { margin: 8px 0 4px; }
+/* "Tune to my printer" (T-446): the test prints, one short form per test, and what the checks use now. */
+.tune h3 { margin: 18px 0 6px; font-size: 16px; }
+.tune h3 small, .tune h4 small { font-weight: 400; color: var(--muted); font-size: 13px; }
+.tune-for { padding: 8px 12px; background: var(--soft); border-radius: var(--r); font-size: 14px; }
+.tune-tests { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.tune-test { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.tune-test h4 { margin: 0; font-size: 15px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.tune-test h4 .link { font-size: 13px; font-weight: 400; }
+.tune-test .hint { margin: 4px 0 8px; }
+.tune-test .row { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+.tune-test .row label { display: inline-flex; gap: 5px; align-items: center; font-size: 14px; }
+.tune-test input[type=number] { width: 5em; }
+.tune-values { margin: 0; padding-left: 18px; font-size: 14px; }
+.tune-values li.yours { color: var(--good); }
+.tune .foot-buttons { position: sticky; bottom: -20px; margin: 14px -24px -20px; padding: 12px 24px; background: var(--panel); border-top: 1px solid var(--line); }
+.start-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.tune-invite { margin: 4px 0 8px; }
 .file-button { border: 1px solid var(--line-strong); border-radius: var(--r); padding: 6px 12px; cursor: pointer; background: var(--panel); font-size: 14px; }
 .my-list { list-style: none; padding: 0; margin: 6px 0; }
 .my-list li { display: flex; gap: 6px; align-items: center; }

@@ -722,7 +722,7 @@ def fit_size(feature: dict, partner_mm: float, fit: str, up, profile=None, warp_
     note = (" Using the gaps from your fit test print." if measured.get(fit) is not None
             else f" Your measured {'hole' if hole else 'outer size'} error ({err:+.2f} mm) is corrected by the "
                  f"{'hole' if hole else 'outer size'} compensation in the 3MF: keep it on when you slice." if err
-            else " Printers differ by a tenth or two: the fit test print, or a hole you measured (My materials), gives your printer's numbers.")
+            else " Printers differ by a tenth or two: the fit test print, or a hole you measured (“Tune to my printer”), gives your printer's numbers.")
     return size, what + why + note
 
 
@@ -2148,7 +2148,7 @@ def gap_size(pair: dict, partner_mm: float, fit: str, up, profile=None, warp_mm:
     if warp_mm > 0.02:
         why += f" The warping simulation shows the gap closing by about {warp_mm:.2f} mm as the part curls (rough): added."
     note = (" Using the gaps from your fit test print." if measured.get(fit) is not None
-            else " Printers differ by a tenth or two: the fit test print (My materials) gives your printer's numbers.")
+            else " Printers differ by a tenth or two: the fit test print (“Tune to my printer”) gives your printer's numbers.")
     return size, what + why + note
 
 

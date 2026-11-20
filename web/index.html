@@ -122,7 +122,10 @@
                 <button data-sample="feature_test" title="Something for every check and design change, to try them all">Feature test</button>
               </details>
             </div>
-            <button type="button" id="failed-start" class="ghost">A print went wrong?</button>
+            <div class="start-tools">
+              <button type="button" id="failed-start" class="ghost">A print went wrong?</button>
+              <button type="button" id="tune-start" class="ghost" data-open-tune>Tune to my printer</button>
+            </div>
           </div>
         </section>
 
@@ -180,6 +183,8 @@
               <p id="mode-note" class="note"></p>
             </div>
 
+            <p class="hint tune-invite" data-min="basic">The checks use typical values for each material.
+              <button type="button" class="link" data-open-tune>Tune them to your printer</button> with one test print.</p>
             <details id="my-presets" class="more-block" data-min="basic">
               <summary>My printers &amp; materials</summary>
               <p class="hint" data-info>Add your own printer or filament, starting from a similar one. Saved in this browser only.</p>
@@ -190,57 +195,8 @@
               </div>
               <form id="preset-form" class="preset-form" hidden>
                 <div id="preset-fields"></div>
-                <div id="calibration" class="calibration" hidden>
-                  <h3>Measure it on your printer</h3>
-                  <p class="hint"><button type="button" data-calibration="all">All tests on one plate (STL)</button>
-                    <span data-calibration-how="all"></span></p>
-                  <p class="hint"><button type="button" data-calibration="layer_strength">Layer strength test (STL)</button>
-                    <span data-calibration-how="layer_strength"></span></p>
-                  <div class="row">
-                    <label>Flat broke at <input id="cal-flat" type="number" step="0.1" min="0" /> kg</label>
-                    <label>Standing at <input id="cal-upright" type="number" step="0.1" min="0" /> kg</label>
-                    <button type="button" id="cal-z">Use</button>
-                  </div>
-                  <p class="hint"><button type="button" data-calibration="warping">Warping test (STL)</button>
-                    <span data-calibration-how="warping"></span></p>
-                  <div class="row">
-                    <label>Longest bar that stayed flat
-                      <select id="cal-warp"><option value="">pick one</option><option value="40">40 mm</option><option value="80">80 mm</option><option value="120">120 mm</option><option value="160">160 mm (all)</option></select></label>
-                    <button type="button" id="cal-warp-use">Use</button>
-                  </div>
-                  <p class="hint"><button type="button" data-calibration="fit">Fit test (STL)</button>
-                    <span data-calibration-how="fit"></span></p>
-                  <div class="row">
-                    <label>Pushes in snugly at <select id="cal-fit-snug"><option value="">pick one</option></select></label>
-                    <label>Slides and turns at <select id="cal-fit-slide"><option value="">pick one</option></select></label>
-                    <button type="button" id="cal-fit-use">Use</button>
-                  </div>
-                  <p class="hint">Measured a print? A hole and an outside size with calipers (any part, or the fit test): the 3MF then
-                    corrects holes and outlines for this printer and filament.</p>
-                  <div class="row">
-                    <label>Hole modelled Ø <input id="cal-hole-model" type="number" step="0.01" min="0" /></label>
-                    <label>measured <input id="cal-hole-meas" type="number" step="0.01" min="0" /></label>
-                    <label>Outside modelled <input id="cal-outer-model" type="number" step="0.01" min="0" /></label>
-                    <label>measured <input id="cal-outer-meas" type="number" step="0.01" min="0" /></label>
-                    <button type="button" id="cal-size-use">Use</button>
-                  </div>
-                  <p class="hint"><button type="button" data-calibration="overhang">Overhang test (STL)</button>
-                    <span data-calibration-how="overhang"></span></p>
-                  <div class="row">
-                    <label>Steepest one that's still clean <select id="cal-overhang"><option value="">pick one</option></select></label>
-                    <button type="button" id="cal-overhang-use">Use</button>
-                  </div>
-                  <p class="hint"><button type="button" data-calibration="bridge">Bridge test (STL)</button>
-                    <span data-calibration-how="bridge"></span></p>
-                  <div class="row">
-                    <label>Longest one that doesn't sag <select id="cal-bridge"><option value="">pick one</option></select></label>
-                    <button type="button" id="cal-bridge-use">Use</button>
-                  </div>
-                  <p class="hint">More free test prints from the community:
-                    <a href="https://www.printables.com/model/32321-tolerance-test-prusa-performance-level" target="_blank" rel="noopener">tolerance test</a> (fits down to 0.1 mm),
-                    <a href="https://www.printables.com/model/578061-stringing-bridging-test" target="_blank" rel="noopener">stringing and bridging test</a>,
-                    <a href="https://teachingtechyt.github.io/calibration.html" target="_blank" rel="noopener">Teaching Tech calibration guide</a> (first layer, temperature, retraction).</p>
-                </div>
+                <p id="calibration" class="hint" hidden>The values marked "from the test" come from test prints:
+                  <button type="button" class="link" data-open-tune>Tune to my printer</button> walks you through them.</p>
                 <div class="row">
                   <button class="primary">Save</button>
                   <button type="button" id="preset-cancel">Cancel</button>
@@ -504,7 +460,7 @@
               <p id="tol-text" class="hint"></p>
               <div class="row">
                 <button id="tol-use" hidden></button>
-                <button id="open-fit-test">Fit test print</button>
+                <button id="open-fit-test" data-open-tune>Fit test print</button>
               </div>
               <label class="field sub" title="Grows every hole by this much per side in the slicer: for parts you can't change. One exact fit is better sized in the model (above).">Hole compensation <span><input id="hole-comp" type="number" step="0.01" min="0" max="0.5" /> mm</span></label>
               <label class="toggle" title="OrcaSlicer only"><input id="polyholes" type="checkbox" /> Polyholes: rounder small holes</label>
@@ -740,6 +696,77 @@
       <p>What went wrong? Pick what looks closest.</p>
       <div id="failed-symptoms" class="failed-symptoms"></div>
       <div id="failed-result" aria-live="polite"></div>
+    </dialog>
+    <dialog id="tune" class="expert tune" aria-labelledby="tune-title">
+      <div class="expert-head"><h2 id="tune-title">Tune to my printer</h2><button type="button" id="tune-close" class="ghost">Close</button></div>
+      <p>The checks start from typical values for each material. Print the tests once and tell what you see: fits, overhangs,
+        bridges, warping and layer strength then match your printer and filament.</p>
+      <p id="tune-for" class="tune-for"></p>
+      <h3>1. Print the tests</h3>
+      <p><button type="button" class="primary" data-calibration="all">Download all tests on one plate (STL)</button></p>
+      <p class="hint" data-calibration-how="all"></p>
+      <h3>2. Tell what you see <small>fill in only what you tested</small></h3>
+      <div class="tune-tests">
+            <section class="tune-test">
+              <h4>Layer strength <button type="button" class="link" data-calibration="layer_strength">this test alone (STL)</button></h4>
+              <p class="hint" data-calibration-how="layer_strength"></p>
+              <div class="row">
+                <label>Flat broke at <input id="cal-flat" type="number" step="0.1" min="0" /> kg</label>
+                <label>Standing at <input id="cal-upright" type="number" step="0.1" min="0" /> kg</label>
+              </div>
+            </section>
+            <section class="tune-test">
+              <h4>Warping <button type="button" class="link" data-calibration="warping">this test alone (STL)</button></h4>
+              <p class="hint" data-calibration-how="warping"></p>
+              <div class="row">
+                <label>Longest bar that stayed flat
+                  <select id="cal-warp"><option value="">not tested</option><option value="40">40 mm</option><option value="80">80 mm</option><option value="120">120 mm</option><option value="160">160 mm (all)</option></select></label>
+              </div>
+            </section>
+            <section class="tune-test">
+              <h4>Fits <button type="button" class="link" data-calibration="fit">this test alone (STL)</button></h4>
+              <p class="hint" data-calibration-how="fit"></p>
+              <div class="row">
+                <label>Pushes in snugly at <select id="cal-fit-snug"><option value="">not tested</option></select></label>
+                <label>Slides and turns at <select id="cal-fit-slide"><option value="">not tested</option></select></label>
+              </div>
+            </section>
+            <section class="tune-test">
+              <h4>Overhangs <button type="button" class="link" data-calibration="overhang">this test alone (STL)</button></h4>
+              <p class="hint" data-calibration-how="overhang"></p>
+              <div class="row">
+                <label>Steepest one that's still clean <select id="cal-overhang"><option value="">not tested</option></select></label>
+              </div>
+            </section>
+            <section class="tune-test">
+              <h4>Bridges <button type="button" class="link" data-calibration="bridge">this test alone (STL)</button></h4>
+              <p class="hint" data-calibration-how="bridge"></p>
+              <div class="row">
+                <label>Longest one that doesn't sag <select id="cal-bridge"><option value="">not tested</option></select></label>
+              </div>
+            </section>
+            <section class="tune-test">
+              <h4>Sizes <small>any print, measured with calipers</small></h4>
+              <p class="hint">A hole and an outside size: the 3MF then corrects holes and outlines for this printer and filament.</p>
+              <div class="row">
+                <label>Hole modelled Ø <input id="cal-hole-model" type="number" step="0.01" min="0" /></label>
+                <label>measured <input id="cal-hole-meas" type="number" step="0.01" min="0" /></label>
+                <label>Outside modelled <input id="cal-outer-model" type="number" step="0.01" min="0" /></label>
+                <label>measured <input id="cal-outer-meas" type="number" step="0.01" min="0" /></label>
+              </div>
+            </section>
+      </div>
+      <h3>What the checks use now</h3>
+      <ul id="tune-values" class="tune-values"></ul>
+      <p class="hint">More free test prints from the community:
+        <a href="https://www.printables.com/model/32321-tolerance-test-prusa-performance-level" target="_blank" rel="noopener">tolerance test</a> (fits down to 0.1 mm),
+        <a href="https://www.printables.com/model/578061-stringing-bridging-test" target="_blank" rel="noopener">stringing and bridging test</a>,
+        <a href="https://teachingtechyt.github.io/calibration.html" target="_blank" rel="noopener">Teaching Tech calibration guide</a> (first layer, temperature, retraction).</p>
+      <p id="tune-error" class="status error" role="alert" hidden></p>
+      <div class="foot-buttons">
+        <button type="button" id="tune-cancel" class="ghost">Cancel</button>
+        <button type="button" id="tune-save" class="primary">Save my results</button>
+      </div>
     </dialog>
     <dialog id="long-run" class="guide long-run">
       <h2 id="long-title">This takes a while</h2>
