@@ -753,7 +753,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### L. Big and broken parts
 
-- [ ] **T-458 P1** [L] Curved parts are slow even when small. · files: `core/fdmcore/orientation.py` (`candidate_directions`), `core/fdmcore/api.py` (`orientations`, the sliced refinement), `core/fdmcore/slicer.py`, `core/fdmcore/checks.py` · owner: — · continues T-004
+- [ ] **T-458 P1** [L] Curved parts are slow even when small. · files: `core/fdmcore/orientation.py` (`candidate_directions`), `core/fdmcore/api.py` (`orientations`, the sliced refinement), `core/fdmcore/slicer.py`, `core/fdmcore/checks.py` · owner: Claude (`task/T-458-curved-speed`) · continues T-004
   - Seen (browser, one core): the blob with 80,000 triangles: load + orient + check 53 s; 320,000: 46 s; 980,000: 77 s. The flat-sided samples take 2–3 s. So it is the curved surface (many candidate directions, many-cornered outlines), not the triangle count.
   - Do: profile the 80,000 blob in Pyodide (`node tools/pyodide_check.mjs part.stl`). Likely: cap and cluster candidate directions for organic parts (T-408 gives the kind), simplify layer outlines before the checks, check fewer finalists in full. Show progress with what is being done.
   - Done when: the 80,000 blob is under 15 s in Pyodide with the same pick; numbers in this line.
