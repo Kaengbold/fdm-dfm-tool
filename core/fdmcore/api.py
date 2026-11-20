@@ -28,7 +28,7 @@ from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
-from .recommend import goal_plan, grip_settings, recommend_settings
+from .recommend import goal_plan, grip_settings, print_risk, recommend_settings
 from .service import required_safety
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
@@ -1412,6 +1412,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     curl = warp.curl(r)
     ratio = float(np.sqrt(curl / ref)) if ref else None
     verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
+    s.warp.update(verdict=verdict, setup=(p.material_id, p.enclosure))  # check() rates the print risk with it (T-391)
     # Shape for the view: the part's own movement without the rigid shift and tilt it gets off the bed.
     pos = (model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h) @ turn  # part frame
     u = _without_rigid_motion(pos, r["u"] @ turn)
@@ -1467,6 +1468,14 @@ def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
     a[2::3, 3], a[2::3, 4] = x[:, 1], -x[:, 0]
     coef = np.linalg.lstsq(a, u.ravel(), rcond=None)[0]
     return u - (a @ coef).reshape(-1, 3)
+
+
+def _warp_verdict(s: Session, up, p: Profile) -> str | None:
+    """The last warping simulation's verdict, if it ran for this orientation, material and enclosure."""
+    w = s.warp
+    if not w or "verdict" not in w or w["setup"] != (p.material_id, p.enclosure):
+        return None
+    return w["verdict"] if np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999 else None
 
 
 def _warp_story(r: dict, p: Profile) -> str:
@@ -2712,6 +2721,12 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
     elif fit["turned_deg"]:
         result["findings"].append({"rule": "turned_to_fit", "severity": "info", "bbox": None, "metrics": fit,
                                    "detail": f"Turned {fit['turned_deg']:.0f}° on the bed so it fits the {p.printer['name']}"})
+    height = float(np.ptp(oriented.triangles[..., 2])) if len(oriented.triangles) else 0.0
+    risk = print_risk(p, result["findings"], height, _warp_verdict(s, up, p))
+    if risk["level"] == "high":
+        result["findings"].append({"rule": "print_may_fail", "severity": "warn", "bbox": None,
+                                   "metrics": {"score": risk["score"], "hold": risk["hold"]},
+                                   "detail": "The print may come loose or fall over on the bed: " + "; ".join(risk["reasons"])})
     for f in result["findings"]:  # findings built here, outside run_checks, need one too
         f.setdefault("impact", RULE_IMPACT.get(f["rule"], "info"))
     findings = [explain_finding(f, mode) for f in result["findings"]]
@@ -2722,7 +2737,8 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         "mode": mode,
         "findings": findings,
         "stats": result["stats"],
-        "settings": recommend_settings(p, result["findings"], result["stats"]) if mode != "design" else [],
+        "settings": recommend_settings(p, result["findings"], result["stats"], risk) if mode != "design" else [],
+        "print_risk": risk,
         "z_strength_factor": result["z_strength_factor"],
         "face_temp": _face_temp(oriented, result["stats"]["layer_heat"], spots),
         "kind": s.kind,
