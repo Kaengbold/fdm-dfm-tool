@@ -851,10 +851,12 @@ rules:
     - strength
     - snap-fit
     sources:
-    - Core77 — How to design snap fit components (allowable strain; halve it for cantilevers along the build
-      direction) — https://www.core77.com/posts/65318/how-to-design-snap-fit-components
-    - Hackaday — 3D printing snapping parts without breakage (PLA ~8 %, PETG ~24 % elongation; design to a fraction)
-      — https://hackaday.com/tag/snap-fit
+    - Bayer MaterialScience — Snap-Fit Joints for Plastics (ε = 1.5 · t · y / L², ~70 % of yield strain for amorphous
+      plastics, PC 4 %) — http://fab.cba.mit.edu/classes/S62.12/people/vernelle.noel/Plastic_Snap_fit_design.pdf
+    - Core77 / Fictiv — How to Design Snap Fit Components (reduce allowable strain by 50 % for Z-axis cantilevers)
+      — https://www.core77.com/posts/65318/how-to-design-snap-fit-components
+    - Loftsmith — Snap Fit Design for 3D Printing (PLA ~2 %, PETG 3–4 %, halve across layers)
+      — https://loftsmith.com/guides/snap-fit-3d-printing
   thick_solid_block:
     title: Thick solid block
     why: This section is a thick solid block. The slicer fills the inside with hollow infill, so adding more infill

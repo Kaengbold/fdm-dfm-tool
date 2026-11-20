@@ -71,10 +71,26 @@ def test_measured_gaps_from_the_fit_test_print_are_used():
 def test_calibration_prints():
     from fdmcore.mesh import load_stl
 
-    for kind, size in (("fit", (64, 28, 12)), ("overhang", (49.2, 80, 15)), ("bridge", (60, 64, 11.2))):
+    for kind, size in (("fit", (64, 28, 12)), ("overhang", (49.2, 80, 15.6)), ("bridge", (60, 64, 11.8))):
         m = load_stl(api.calibration_part(kind)["stl"])
         lo, hi = m.bounds()
         assert np.allclose(hi - lo, size, atol=0.2) and m.volume() > 0, kind
+
+
+def test_all_test_prints_on_one_plate_with_their_sizes_written_on():
+    """T-388: one plate with every test fits the smallest bed (180 mm) and holds each test print (the dog-bone
+    twice: flat and standing); each piece has raised numbers on it."""
+    from fdmcore.mesh import load_stl
+
+    plate = load_stl(api.calibration_part("all")["stl"])
+    lo, hi = plate.bounds()
+    assert np.all(lo >= -1e-6) and np.all(hi[:2] <= 180) and hi[2] == pytest.approx(98)
+    one = {k: load_stl(api.calibration_part(k)["stl"]).volume() for k in ("layer_strength", "warping", "fit", "overhang", "bridge")}
+    # The plate packs the warping bars and the overhang / bridge blocks closer; their volumes stay the same.
+    assert plate.volume() == pytest.approx(sum(one.values()) + one["layer_strength"], rel=1e-3)
+    bars = load_stl(api.calibration_part("warping")["stl"])
+    top = bars.triangles[:, :, 2].min(axis=1) > 3.0  # raised numbers above the 3 mm bars
+    assert top.any() and bars.triangles[top][:, :, 2].max() == pytest.approx(3.6)
 
 
 def slotted_block():

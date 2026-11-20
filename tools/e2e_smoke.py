@@ -355,6 +355,59 @@ def gemini_review(binary: str):
     (OUT / "gemini-review.md").write_text("# Gemini screenshot review\n\n" + "\n".join(notes), encoding="utf-8")
 
 
+def check_phone_content_first(run: Run) -> str:
+    """T-456 at 390 x 844 with a part loaded: one header row with the levels behind "Menu"; on each Simple step
+    the heading (Result: the verdict) and the first control show without scrolling; no control is covered by
+    the sticky buttons or the sticky 3D view; the view folds to a strip and comes back."""
+    page = run.page
+    page.set_viewport_size({"width": 390, "height": 844})
+    try:
+        assert page.locator(".levels").is_hidden() and page.locator("#menu-button").is_visible(), "levels not behind Menu"
+        header = page.locator(".top").bounding_box()["height"]
+        assert header < 60, f"header is {header:.0f} px: more than one row"
+        page.click("#menu-button")
+        assert page.locator(".levels").is_visible(), "Menu does not open"
+        page.keyboard.press("Escape")
+        assert page.locator(".levels").is_hidden(), "Escape leaves the menu open"
+        seen = []
+        for step in ("have", "result"):
+            page.evaluate(f"() => (fdm.steps.go('{step}'), window.scrollTo(0, 0))")
+            page.wait_for_timeout(200)
+            first = page.evaluate("""() => {
+              const pane = [...document.querySelectorAll('.pane')].find((p) => p.getClientRects().length);
+              const head = pane.querySelector('h2') ?? document.getElementById('verdict');
+              const control = [...pane.querySelectorAll('button, select, input:not([type=hidden])')].find((c) => c.checkVisibility());
+              const bar = document.querySelector('.foot-buttons').getBoundingClientRect().top;
+              return { pane: pane.dataset.pane, head: head.getBoundingClientRect().bottom, control: control.getBoundingClientRect().bottom, bar };
+            }""")
+            assert first["head"] <= first["bar"] and first["control"] <= first["bar"], f"{step}: content starts below the fold {first}"
+            covered = page.evaluate("""() => {
+              const panel = document.getElementById('panel');
+              const out = [];
+              for (const c of panel.querySelectorAll('button, select, summary, input:not([type=hidden])')) {
+                if (!c.checkVisibility() || c.closest('.foot-buttons')) continue; // closed <details> content still has boxes
+                const target = c.type === 'checkbox' || c.type === 'radio' ? (c.closest('label') ?? c) : c;
+                target.scrollIntoView({ block: 'center' });
+                const r = target.getBoundingClientRect();
+                if (!r.width || !r.height) continue;
+                const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                if (hit && !target.contains(hit) && !hit.contains(target)) out.push(`${c.id || c.textContent.trim().slice(0, 30)} under ${hit.id || hit.className}`);
+              }
+              return out;
+            }""")
+            assert not covered, f"{step}: covered controls {covered}"
+            seen.append(f"{step}: heading at {first['head']:.0f} px")
+        page.evaluate("() => window.scrollTo(0, 0)")
+        page.click("#view-hide")
+        strip = page.locator("main#viewer").bounding_box()["height"]
+        assert strip < 70, f"folded view is {strip:.0f} px"
+        page.click("#view-hide")  # "Show 3D view"
+        assert page.locator("main#viewer canvas").is_visible(), "the view does not come back"
+        return f"header {header:.0f} px; {'; '.join(seen)}; folded view {strip:.0f} px; nothing covered"
+    finally:
+        page.set_viewport_size({"width": 1500, "height": 950})
+
+
 def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
     """T-453: two parts worked on in a row are both under "Your recent projects" after a reload and both reopen
     as the same entries (no copies); "Delete all" empties the list."""
@@ -401,6 +454,7 @@ def run_quick(run: Run) -> None:
     finally:
         page.set_viewport_size({"width": 1500, "height": 950})
     run.step("simple flow to 3MF download", lambda: simple_flow_to_3mf(run, "hole_block"))
+    run.step("phone: content first", lambda: check_phone_content_first(run))
     run.step("levels and start guide", lambda: check_levels_and_guide(page))
 
     def open_one_finding():
@@ -1833,14 +1887,34 @@ def _run_suite(port: int, args) -> Run:
             run.act(lambda: click_sample(page, "hook"))
             page.evaluate("async () => { const r = await fdm.call('regions'); const flat = r.regions.filter((x) => x.kind === 'flat');"
                           " fdm.state.loads = [{ region: flat[0].id, kind: 'fixed' }, { region: flat[1].id, kind: 'force', kg: 2 }]; }")
+            # T-377: its own step in Advanced, after the design changes.
+            level = page.evaluate("() => fdm.steps.level")
+            page.click("input[name=level][value=advanced] >> xpath=..")
+            order = page.evaluate("() => fdm.steps.steps")
+            assert order.index("lighter") == order.index("extra") + 1, order
+            assert not page.locator("[data-pane=design] #run-topology").count(), "still inside Design changes"
+            page.evaluate("() => fdm.steps.go('lighter')")
             page.evaluate("() => { const k = document.getElementById('topo-keep'); k.value = '50'; k.oninput(); }")
             # Loads set directly (not by clicking faces), so the button isn't refreshed: enable it as renderLoads would.
             run.act(lambda: page.evaluate("() => { const b = document.getElementById('run-topology'); b.disabled = false; b.click(); }"), 900_000)
             text = page.locator("#topology-result").inner_text()
             assert " g instead of " in text and "CAD" in text, text
+            # Shown by default on the faded part, without changing the part; gone on other steps.
+            shown = "() => Boolean(fdm.viewer.lighter?.visible) && fdm.viewer.part.material.opacity < 1"
+            assert page.evaluate(shown), "the lighter shape isn't shown after the run"
+            assert "lighter" not in page.evaluate("() => fdm.state.name"), "the run replaced the part"
+            page.locator("#topology-result input[type=checkbox]").uncheck()
+            assert not page.evaluate(shown) and page.evaluate("() => fdm.viewer.part.material.opacity") == 1, "switch off keeps it"
+            page.locator("#topology-result input[type=checkbox]").check()
+            page.evaluate("() => fdm.steps.go('design')")
+            assert not page.evaluate(shown), "the shape stays on another step"
+            page.evaluate("() => fdm.steps.go('lighter')")
+            assert page.evaluate(shown), "the shape doesn't come back on its step"
             versions = page.evaluate("() => fdm.state.versions.length")
-            run.act(lambda: page.evaluate("() => [...document.querySelectorAll('#topology-result button')].find((b) => b.textContent === 'Show it in 3D').click()"), 300_000)
+            run.act(lambda: page.get_by_role("button", name="Use it as a new version").click(), 300_000)
             assert page.evaluate("() => fdm.state.versions.length") == versions + 1 and "lighter_50" in page.evaluate("() => fdm.state.name")
+            assert not page.evaluate("() => Boolean(fdm.viewer.lighter)"), "the old shape stays on the new version"
+            page.click(f"input[name=level][value={level}] >> xpath=..")
             return text.splitlines()[0]
         run.step("suggest a lighter shape", lighter_shape)
 
@@ -2773,6 +2847,7 @@ def _run_suite(port: int, args) -> Run:
             page.evaluate("() => { delete window.simpleCompleted; delete window.simpleStrength; }")
             return " | ".join(items.all_inner_texts())
         run.step("simple: one primary and missing work on Result", simple_result)
+        run.step("phone: content first", lambda: check_phone_content_first(run))
 
         def tick_and_recheck():
             """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""

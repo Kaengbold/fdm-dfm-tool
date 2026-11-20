@@ -295,16 +295,35 @@ flex:                             # parts that bend on purpose, and thick blocks
   hinge_thick_mm: [0.4, 0.6]      # a living hinge this thick bends well and still prints: two or three layers [facfox living hinges]
   hinge_good: [tpu_95a, petg]     # survive many bends; PLA lasts ~150–200 folds [Balderrama-Armendariz, SFF 2016]
   hinge_bad: [pla, pla_plus, pa_cf]
-  snap_mm: [0.8, 3.5]             # thickness of a snap-fit tab
-  snap_min_aspect: 4.0            # tab length >= this × its thickness
-  hook_min_mm: 0.3                # the tip sticks out at least this much: a hook
-  # Strain a tab may bend to, flat (along the lines), %: ~10–15 % of elongation at break (Hackaday:
-  # PLA ~8 %, PETG ~24 %); across the layers about half [Core77 snap-fit guide]. Estimates: verify.
-  snap_strain_pct: {pla: 1.0, pla_plus: 1.2, petg: 2.5, abs: 2.0, asa: 2.0, pc: 2.5, pa_cf: 1.0, tpu_95a: 10.0}
-  across_layers: 0.5
   thick_mm: 16.0                  # sections thicker than this all round are solid blocks
   thick_min_cm3: 15.0             # ... reported when this much of the part is that thick
   thick_min_share: 0.25           # ... and at least this share of it
+
+snap_fits:                        # cantilever snap-fit strain limits (T-338)
+  # Straight rectangular cantilever bending strain: ε = 1.5 · t · y / L² [Bayer MaterialScience, Snap-Fit Joints
+  # for Plastics, p. 11–12, http://fab.cba.mit.edu/classes/S62.12/people/vernelle.noel/Plastic_Snap_fit_design.pdf;
+  # Loftsmith, Snap Fit Design for 3D Printing, https://loftsmith.com/guides/snap-fit-3d-printing].
+  # Across layers (upright tab in Z): halve allowable strain [Core77 / Fictiv, How to Design Snap Fit Components,
+  # https://www.core77.com/posts/65318/how-to-design-snap-fit-components,
+  # https://www.fictiv.com/articles/how-to-design-snap-fit-components: "reduce the allowable stress/strain by 50%
+  # for Z axis cantilevers"; Loftsmith: "halve those if the arm bends across its layers"].
+  # Flat (along-layer) allowable strain (%) per material (amorphous: ~70% of horizontal yield strain, Bayer p. 11):
+  #   pla:  2.0 % — Loftsmith ("about 2% in PLA"); matches 70% × Prusament PLA yield 2.9% (https://prusament.com/materials/pla/)
+  #   petg: 3.5 % — Loftsmith ("3–4% in PETG", worked example 3.5%); matches 70% × Prusament PETG yield 5.1%
+  #         (https://storage.googleapis.com/prusa3d-content-prod-14e8-wordpress-prusament-prod/2023/10/9f8d2165-tds_prusament-petg_n_en.pdf)
+  #   abs:  1.5 % — 70% × Stratasys FDM ABS-M30 XZ yield 2.1% (Table 5, p. 10,
+  #         https://www.stratasys.com/contentassets/5460e85552cf40a097148d125e8be84f/mds_fdm_abs-m30_0925a.pdf)
+  #   asa:  2.4 % — 70% × Prusament ASA yield 3.4%
+  #         (https://storage.googleapis.com/prusa3d-content-prod-14e8-wordpress-prusament-prod/2024/05/bc8551ef-tds_prusament-asa_2024_en.pdf)
+  #   pc:   4.0 % — Bayer Table 2 (Makrolon PC: 4%); matches 70% × Prusament PC Blend yield 5.8%
+  #         (https://prusament.com/wp-content/uploads/2022/10/PCBlend_Prusament_TDS_2022_16_EN.pdf)
+  # Omitted (no standard sourced limit): pla_plus (brand-specific blends), pa_cf (varies by PA grade/moisture and
+  # fiber loading), tpu_95a (elastomer, omitted by Bayer Table 2).
+  thickness_mm: [0.8, 3.5]        # thickness of a snap-fit tab
+  min_aspect: 4.0                 # tab length >= this × its thickness
+  hook_min_mm: 0.3                # the tip sticks out at least this much: a hook
+  allowable_strain_pct: {pla: 2.0, petg: 3.5, abs: 1.5, asa: 2.4, pc: 4.0}
+  across_layers: 0.5              # multiplier when the cantilever stands upright and bends across layer lines
 drop:
   # A load dropping onto the part: impact factor 1 + sqrt(1 + 2h/d) [Hibbeler, Mechanics of Materials, impact
   # loading], where d is how far everything gives under the load held still. Not only the part gives: the mount
@@ -403,5 +422,15 @@ wall_advice:
   uneven_ratio: 4.0
   uneven_thin_share: 0.15
   uneven_min_height_mm: 4.0
+
+fillets:
+  # Inside-corner round at the foot of a load-bearing feature (pin, neck, snap tab): 1-3 mm reduces
+  # notch stress concentration; where a round would hang over, use a 45 deg chamfer of the same leg
+  # so it prints without support [rules.yaml stress_at_inside_corner: Printed Solid, Stress Concentrations
+  # https://www.printedsolid.com/blogs/news/37036739-3d-printing-design-tips-part-1-stress-concentrations;
+  # Rahix, Design for 3D-Printing https://blog.rahix.de/design-for-3d-printing/;
+  # ETASR (2025) https://etasr.com/index.php/ETASR/article/download/11111/5430/62291].
+  foot_radius_mm: 1.0
+
 
 
