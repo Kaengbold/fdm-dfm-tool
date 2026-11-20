@@ -3216,7 +3216,8 @@ function renderAdvice() {
     btn.onclick = () => {
       state.activeAdvice = a.id;
       list.querySelectorAll("li").forEach((n, i) => n.classList.toggle("active", state.advice[i]?.id === a.id));
-      const edit = a.edit_id ? state.edits.find((e) => e.id === a.edit_id) : null;
+      const edit = (a.edit_ids ? a.edit_ids.length === 1 : Boolean(a.edit_id))
+        ? state.edits.find((e) => e.id === a.edit_id) : null;
       showSelectedGhosts(edit);
       viewer.focusAdvice(a);
     };
@@ -3226,8 +3227,13 @@ function renderAdvice() {
 }
 $("copy-advice").onclick = async () => {
   if (!state.advice.length) return;
-  await navigator.clipboard.writeText(state.advice.map((a) => a.text).join("\n"));
-  setStatus("Copied the list of CAD numbers.");
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error();
+    await navigator.clipboard.writeText(state.advice.map((a) => a.text).join("\n"));
+    setStatus("Copied the list of CAD numbers.");
+  } catch {
+    setStatus("Couldn't copy to clipboard — select the list and copy it by hand.");
+  }
 };
 
 /** Choices belong to this model version; keep them even when a re-check rebuilds the list. */

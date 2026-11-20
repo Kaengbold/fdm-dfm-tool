@@ -2313,7 +2313,7 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
     if findings is None:
-        findings = check(up, profile, mode="both")["findings"]
+        findings = check(up, profile)["findings"]
     rotation, _ = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
     to_print = _print_frame_map(s.mesh, rotation)
     from_print = _part_frame_map(s.mesh, rotation)
@@ -2321,9 +2321,10 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
                          gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
                          strength_verdict=s.strength_verdict)
     edits = link_to_findings(edits, findings, to_print)
-    advice = design_advice(s.mesh, edits, findings, p, params, to_print, from_print)
+    feats = _features()
+    advice = design_advice(s.mesh, edits, findings, p, to_print, from_print, features=feats, up=up)
     return {
-        "features": _features(),
+        "features": feats,
         "edits": _keep_clear_clash(edits, up, keep_clear),
         "advice": advice,
         "params": edit_params(params),
