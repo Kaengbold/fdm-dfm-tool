@@ -2189,6 +2189,27 @@ def _run_suite(port: int, args) -> Run:
             return f"{warned[0][:60]} | materials now: {names[-3:]}; calibrated z factor {mat['z_strength_factor']['none']}, warp length {mat['warp_length_mm']['none']} mm"
         run.step("my presets + calibration + Orca import", my_presets)
 
+        def printer_not_listed():
+            # T-451: "My printer isn't listed" in the printer list opens the picker; a printer from OrcaSlicer's
+            # profiles fills the form with its bed and says what is assumed; saved, it is selected.
+            more = page.locator("#printer option[value=__more]")
+            page.wait_for_function(r"() => /more\)…$/.test(document.querySelector('#printer option[value=__more]').textContent)")
+            label = more.inner_text()
+            page.select_option("#printer", "__more")
+            assert page.input_value("#printer") == "bambu_p1s" and page.locator("#printer-finder").is_visible()
+            page.fill("#orca-printer", "Creality Ender-3 V2")
+            page.click("#orca-printer-use")
+            note = page.inner_text("#preset-note")
+            assert "From the OrcaSlicer profile: bed 220 × 220 × 250 mm" in note and "Assumed" in note, note
+            page.click("#preset-form button.primary")  # no part loaded: saving starts no engine work to wait for
+            page.wait_for_function("() => document.getElementById('printer').value.startsWith('my_')")
+            chosen = page.input_value("#printer")
+            printer = page.evaluate(f"() => fdm.state.presets.printers['{chosen}']")
+            assert chosen.startswith("my_") and printer["bed"] == [220, 220, 250] and printer["name"] == "Creality Ender-3 V2", printer
+            page.select_option("#printer", "bambu_p1s")  # the later steps use the built-in printer
+            return f"{label} | saved {printer['name']} ({printer['bed']}, {printer['speed']})"
+        run.step("printer not listed: pick it from OrcaSlicer's profiles", printer_not_listed)
+
         def open_from_link():
             # T-450: `fdmdfm open part.stl` starts the page with ?open=<the part on the same server>.
             other = browser.new_page()

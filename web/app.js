@@ -1,11 +1,16 @@
 import { applyEdits as applyDesignEdits, stlBytes } from "./geometry.js";
 import { readStep } from "./step.js";
 import { stepWithEdits } from "./stepwrite.js";
-import { MATERIAL_FIELDS, PRINTER_FIELDS, fromOrcaFilament, fromPrintProfile, loadMine, saveMine, loadPrintProfile, savePrintProfile, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
+import { MATERIAL_FIELDS, PRINTER_FIELDS, fromAnswers, fromOrcaFilament, fromOrcaPrinter, fromPrintProfile, loadMine, saveMine, loadPrintProfile, savePrintProfile, toForm, toSpec, toYaml, warpLength, zFactor } from "./mypresets.js";
 import { REGION_COLORS, Viewer, FIELD_BANDS, fieldColor, edgeAt } from "./viewer.js";
 import { Steps, STEP_NAMES } from "./steps.js";
 import { projectInReport, reportHtml, formatSafety, strengthBand } from "./report.js";
 import { readProject, writeProject } from "./project.js";
+
+// The printers OrcaSlicer has profiles for (tools/orca_printers.py), loaded once when first needed.
+const MORE_PRINTERS = "__more";
+let orcaPrinterList = null;
+let currentPrinter = null; // the printer shown before "My printer isn't listed…" was picked: it stays selected
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...children) => {
@@ -4266,8 +4271,14 @@ async function applyMine(mine, select = {}) {
   const keep = { printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value, ...select };
   const has = (table, id) => id && id in p[table];
   fill("printer", Object.entries(p.printers).map(([k, v]) => [k, v.name]), has("printers", keep.printer) ? keep.printer : "bambu_p1s");
+  $("printer").append(el("option", { value: MORE_PRINTERS, textContent: "My printer isn't listed…" }));
+  orcaPrinters().then((list) => {
+    const more = $("printer").querySelector(`option[value="${MORE_PRINTERS}"]`);
+    if (more && list.length) more.textContent = `My printer isn't listed (+ about ${Math.floor(list.length / 10) * 10} more)…`;
+  }).catch(() => {});
   fill("material", Object.entries(p.materials).map(([k, v]) => [k, v.name]), has("materials", keep.material) ? keep.material : "pla");
   fill("nozzle", Object.keys(p.nozzles).map((k) => [k, `${k} mm`]), has("nozzles", keep.nozzle) ? keep.nozzle : "0.4");
+  currentPrinter = $("printer").value;
   viewer.setBed(p.printers[$("printer").value].bed);
   syncMultiMaterial();
   renderMine(mine);
@@ -4295,7 +4306,53 @@ function renderMine(mine) {
   $("copy-yaml").hidden = !rows.length;
 }
 
-function openPresetForm(table, id = null, values = null) {
+function orcaPrinters() {
+  orcaPrinterList ??= fetch("../core/fdmcore/data/orca_printers.json")
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Printer list unavailable"))))
+    .then((d) => d.printers)
+    .catch((err) => {
+      orcaPrinterList = null; // try again next time
+      throw err;
+    });
+  return orcaPrinterList;
+}
+
+async function openPrinterFinder() {
+  $("my-presets").open = true;
+  $("preset-form").hidden = true;
+  $("printer-finder").hidden = false;
+  $("printer-finder").scrollIntoView({ block: "center" });
+  try {
+    const list = await orcaPrinters();
+    if (!$("orca-printer-list").children.length) $("orca-printer-list").append(...list.map((p) => el("option", { value: p.name })));
+  } catch {
+    setStatus("The list of other printers didn't load: answer the three questions instead.", true);
+  }
+  $("orca-printer").focus();
+}
+
+function builtinPrinters() {
+  return Object.fromEntries(Object.entries(state.presets.printers).filter(([k]) => !k.startsWith("my_")));
+}
+
+$("find-printer").onclick = openPrinterFinder;
+$("orca-printer-use").onclick = async () => {
+  const wanted = $("orca-printer").value.trim().toLowerCase();
+  const entry = (await orcaPrinters().catch(() => [])).find((p) => p.name.toLowerCase() === wanted);
+  if (!entry) return setStatus("Pick a printer from the list (type part of its name).", true);
+  const { values, note } = fromOrcaPrinter(entry, builtinPrinters(), $("pf-enclosure").value);
+  $("printer-finder").hidden = true;
+  openPresetForm("printers", null, values, note);
+};
+$("pf-closest").onclick = () => {
+  const side = Number($("pf-bed").value);
+  if (!(side >= 50)) return setStatus("Enter the bed size in mm first.", true);
+  const { values, note } = fromAnswers(builtinPrinters(), { enclosure: $("pf-enclosure").value, side, directDrive: $("pf-drive").value === "yes" });
+  $("printer-finder").hidden = true;
+  openPresetForm("printers", null, values, note);
+};
+
+function openPresetForm(table, id = null, values = null, note = "") {
   const builtins = Object.fromEntries(Object.entries(state.presets[table]).filter(([k]) => !k.startsWith("my_")));
   const current = id ? state.presets[table][id.startsWith("my_") ? id : `my_${id}`] : null;
   const base = values?.based_on ?? current?.based_on ?? (table === "materials" ? $("material").value : $("printer").value);
@@ -4317,6 +4374,9 @@ function openPresetForm(table, id = null, values = null) {
   basedOn.querySelector("select").onchange = (e) =>
     openPresetForm(table, id, { ...toForm(table, builtins[e.target.value]), based_on: e.target.value, name: formValues().name });
   $("calibration").hidden = table !== "materials";
+  $("preset-note").textContent = note;
+  $("preset-note").hidden = !note;
+  $("printer-finder").hidden = true;
   $("preset-form").hidden = false;
   $("my-presets").open = true;
 }
@@ -4470,6 +4530,7 @@ $("nozzle-block").ontoggle = (e) => e.target.open && state.triangles && compareN
 /** Printer, material, nozzle or multi-material changed: remember it and find the orientations again; a
  * strength result shown before is worked out again for the new setup (``recheck: false``: the caller does). */
 async function setupChanged(id, recheck = true) {
+  currentPrinter = $("printer").value;
   store.set("fdm-setup", JSON.stringify({ printer: $("printer").value, material: $("material").value, nozzle: $("nozzle").value }));
   viewer.setBed(state.presets.printers[$("printer").value].bed);
   syncMultiMaterial();
@@ -4481,7 +4542,12 @@ async function setupChanged(id, recheck = true) {
   await findOrientations();
   if (recheck && hadStrength && readyForStrength()) await runStrength();
 }
-for (const id of ["printer", "material", "nozzle", "multi-material"]) $(id).onchange = () => setupChanged(id);
+for (const id of ["material", "nozzle", "multi-material"]) $(id).onchange = () => setupChanged(id);
+$("printer").onchange = () => {
+  if ($("printer").value !== MORE_PRINTERS) return setupChanged("printer");
+  $("printer").value = currentPrinter ?? "bambu_p1s";
+  openPrinterFinder();
+};
 const GOAL_NOTES = {
   balanced: "Balanced: standard walls & infill for everyday printing.",
   strength: "Strength: 4 walls, 25% infill; weak spots and thin walls are treated as high-priority problems.",
