@@ -664,7 +664,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Seen: the tool warns about living hinges printed the wrong way and gaps that fuse; it offers no geometry for either.
   - Do: for a gap under the fuse limit: advice with the number (T-435) and, for flat-sided gaps, an edit that opens it to the material's printable gap (reuse `_gap_edits`). For a living hinge: thickness and length advice per material (PP / PETG / PLA differ; source needed), and "lay it flat" as the orientation fix. Print-in-place pins: clearance per side and a 45° underside. Don't generate whole hinges: out of scope.
   - Done when: `feature_test`'s 0.15 mm gap offers "open to 0.3 mm" as advice and as an edit that passes T-434.
-- [ ] **T-440 P2** [G] Inside-corner fillets and print-friendly chamfers without a strength run. · files: `core/fdmcore/features.py` (`concave_edges`, `_stress_chamfers`, `_round_prints`) · owner: —
+- [ ] **T-440 P2** [G] Inside-corner fillets and print-friendly chamfers without a strength run. · files: `core/fdmcore/features.py` (`concave_edges`, `_stress_chamfers`, `_round_prints`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-440-corner-fillets`)
   - Seen: inside corners are only treated after a strength check, at the weak spot. Bottom edges get a 45° chamfer only as "elephant foot".
   - Do: with a load-bearing finding (`thin_neck`, `weak_upright_pin`, a snap) offer a fillet at the sharp inside corner at its foot; where a rounded edge on the underside would overhang, suggest a chamfer instead of a fillet ("prints without support"). As advice first (T-435); as an edit where `_corner_pieces` is proven.
   - Done when: `tall_pin` and `dumbbell` (a neck) offer a foot fillet without running strength.
