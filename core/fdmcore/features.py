@@ -555,6 +555,9 @@ _GROUP_RE = re.compile(
 )
 
 
+_GROUP_OF_RE = re.compile(r"^(.+?) of this ([a-z]+(?: [a-z]+)?) ((?:with|\().+)$")
+
+
 def _group_text(text: str, n: int) -> str:
     """Turn a repeated single-feature line into one counted line ('4 bed corners: round with r 3.0 mm')."""
     m = _GROUP_RE.match(text)
@@ -562,6 +565,10 @@ def _group_text(text: str, n: int) -> str:
         verb, noun, rest = m.group(1).lower(), m.group(2), m.group(3)
         plural = noun + ("es" if noun.endswith(("s", "x", "ch", "sh")) else "s")
         return f"{n} {plural}: {verb} {rest}"
+    m = _GROUP_OF_RE.match(text)  # 'Round the inside corner at the foot of this pin with r 1.0 mm'
+    if m:
+        noun = m.group(2)
+        return f"{n} {noun}s: {m.group(1)[0].lower()}{m.group(1)[1:]} {m.group(3)}"
     return f"{n}× {text}"
 
 
@@ -1555,7 +1562,10 @@ def _foot_edge_groups(mesh: Mesh, edits: list[dict], findings: list[dict], to_pr
                 continue
             claimed.update(ks)
             pt = np.mean([(edges[k]["a"] + edges[k]["b"]) / 2 for k in ks], axis=0)
-            groups.append({"finding": f, "noun": _FOOT_FILLET_NOUNS[f["rule"]], "place": place,
+            noun = _FOOT_FILLET_NOUNS[f["rule"]]
+            if noun == "pin" and np.max(hi_f[:2] - lo_f[:2]) > 3 * max(np.min(hi_f[:2] - lo_f[:2]), 1e-6):
+                noun = "wall"  # the pin checks also flag thin upright fins
+            groups.append({"finding": f, "noun": noun, "place": place,
                            "edges": edges, "ks": ks, "rounds": rounds, "point": pt})
     return groups
 
