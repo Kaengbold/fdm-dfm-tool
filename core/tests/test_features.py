@@ -293,7 +293,8 @@ def test_loose_pieces_after_edits_are_dropped():
     part = Mesh(extrude(box(0, 0, 20, 20), 0, 10))
     joined, loose = extrude(box(18, 5, 25, 15), 0, 5), extrude(box(30, 5, 32, 7), 0, 2)
     pieces = np.concatenate([joined, loose]).astype("<f4")
-    edit = {"id": "test", "op": "add", "mesh": pieces.tobytes(), "pieces": [len(joined), len(loose)]}
+    edit = {"id": "test", "op": "add", "mesh": pieces.tobytes(), "pieces": [len(joined), len(loose)],
+            "grows_mm": [12.0, 0.0, 0.0]}  # as _annotate_growth says: it reaches past the part (T-434 checks it)
     out = apply_edits(part, [edit])
     assert abs(out.volume()) == pytest.approx(20 * 20 * 10 + 5 * 10 * 5)
     assert out.triangles[..., 0].max() == pytest.approx(25)
