@@ -947,6 +947,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - **Confidence label:** "rough, not tuned to your printer" or "tuned".
   - G-code option (T-481): printed lines coloured by speed change, with markers where the fan changes.
   - Plain language. The new API calls appear as MCP tools automatically (T-261).
+  - Also (from T-481): an opt-in "Optimize my G-code directly" button: `api.optimize_gcode` with the loaded G-code, download the result, or show its `problems` when it is refused. The original always stays available.
   - Done when: e2e smoke covers the assess view with a sample G-code; a hobbyist can tell from the screen what changed and why.
 - [x] **T-479 P2** [TO] Option A (default): settings for the user's own slicer. · files: `core/fdmcore/export3mf.py`, `core/fdmcore/recommend.py`, `tools/slicer_check.py` · owner: Claude (task/T-479-slicer-height-ranges)
   - Do: turn the optimizer's fixes into things the slicer applies: height-range modifiers (fan, minimum layer time, speed), an added cooling tower object, or several copies at once. Export them in the 3MF; check with `slicer_check.py` that Orca, Bambu Studio and PrusaSlicer apply them. Don't switch off the layer-time slowdown in exports.
@@ -984,13 +985,21 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
       - Bambu fixture, guessed weights (pin weighs ~1): 40 → 30 too hot, 0 too cold. The rest can't be fixed without weak bonds.
       Pyodide: 21 s for a 7.5 min print.
     - **Not done:** slowing other islands before the hot one (all adjustable lines of a layer slow together), vibration (VFA) bands, kick-start. The real-print confirmation is T-477.
-- [ ] **T-481 P2** [TO] Option B (opt-in): change the user's G-code directly. · files: `core/fdmcore/gcode_rewrite.py` (new), `core/fdmcore/api.py`, `web/app.js` · owner: Claude (task/T-481-gcode-rewrite)
+- [x] **T-481 P2** [TO] Option B (opt-in): change the user's G-code directly. · files: `core/fdmcore/gcode_rewrite.py` (new), `core/fdmcore/api.py`, `web/app.js` · owner: Claude (task/T-481-gcode-rewrite)
   - Do: the user picks "Optimize my G-code directly", loads their file, and downloads the result; the original always stays available.
     - Change only speed (F) and add fan commands. Never change positions, extrusion (E) or temperatures. Split a line where the speed must change partway.
     - Re-emit adaptive pressure advance for the new speed (or keep changes within ±X % if there's no PA table). Recompute `M73`. Use each firmware's fan commands (Marlin / Klipper / Bambu). The header names the changes and the time before → after.
     - **Check before download:** same E per layer, same paths, same bounding box, speeds within machine limits, flow under the cap, no outer walls in vibration bands, and a re-simulation no worse anywhere. If a check fails, don't offer the file and say why.
     - Plain `.gcode` first; `.gcode.3mf` repack (plate gcode, md5, `slice_info.config`) once tested on a real printer.
   - Done when: an optimized pin-pair G-code passes all checks and prints; a broken rewrite is refused.
+  - Outcome: new `gcode_rewrite.py`, `api.optimize_gcode(up, data, …)` and MCP `optimize_gcode_file`.
+    - **What changes:** only feed rates (the modal F is put back for the lines after a changed one), the part fan (`M106 S…`, `M106 P1 S…` on Bambu), and cooling park moves (retract, travel beside the part, `G4`, back, unretract; relative or absolute E). Positions, E and temperatures stay. The plan changes whole layers, so no line needs splitting.
+    - **Around it:** `M73` progress is recomputed (the start G-code is left alone, minutes-left scaled from the slicer's own). A header goes after the slicer's header block. The parser now records each line's source text line (`Toolpath.src`).
+    - **Pressure advance:** with adaptive pressure advance (no table to redo it), speed changes stay within ±25 %.
+    - **Check before handing it out** (`gcode_rewrite.check`): read back; same paths, plastic per layer and bounding box; speeds within the machine's X/Y limits and the filament's flow cap; then a heat simulation of the new file, where no spot may end up outside its window that wasn't before. Otherwise `ok: false` with the reasons, and no file.
+    - The flow cap is also enforced in the optimizer now (`gcode.flow_cap`): undoing a slowdown never needs more plastic per second than the filament melts. The first try failed the check because of this.
+    - **Results:** OrcaSlicer fixture: pin 40 spots too hot → 0, 4.7 → 5.7 min, 1,107 lines' speed, 19 parks, all checks pass. A tampered E, a moved path or a speed above the limit is refused. Pyodide: 16 s.
+    - **Not done:** vibration-band check (no VFA data yet); `.gcode.3mf` repack (waits for a real-printer test); printing the result (T-477). The "Optimize my G-code directly" button belongs to the new UI (moved to T-478).
 - [ ] **T-482 P2** [TO] Tuning prints the user can do. · files: `tools/` or `core/fdmcore/` (test part), `web/app.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: —
   - Do: two printable tests, no lab gear: a **sag test** (pins at falling layer times → the "too hot" limit) and a **snap test** (thin tower at stepped fan speeds, broken by hand → the "too cold" limit). The user enters the result; it is stored with their presets and in the project file, and the confidence changes from "rough" to "tuned".
   - Done when: entering a result changes the window and the confidence label.

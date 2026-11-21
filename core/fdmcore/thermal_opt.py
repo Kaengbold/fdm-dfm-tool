@@ -21,7 +21,7 @@ chosen with a simple cooling law fitted to two runs of it, then checked with a f
 
 Never touched: overhang, bridge, small-perimeter, flow-cap and unexplained slowdowns, layers 0–1, travel,
 ironing and wipes, anything that isn't the part (supports, prime towers), and no line goes faster than its
-feature's speed setting. The total speed-up is capped (``max_speedup``).
+feature's speed setting or the filament's flow cap. The total speed-up is capped (``max_speedup``).
 
 The plan comes twice: for the G-code (fan and speeds per layer, for T-481) and for the user's own slicer
 (speeds per height range and no fan changes, as export(cooling=...) writes them, T-479), each checked with
@@ -35,7 +35,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from . import progress
-from .gcode import BRIDGE, LAYER_TIME, NOT_SLOWED, OVERHANG, PART_KINDS, SMALL_PERIMETER, UNKNOWN, VOLUMETRIC_CAP, Toolpath
+from .gcode import BRIDGE, LAYER_TIME, NOT_SLOWED, OVERHANG, PART_KINDS, SMALL_PERIMETER, UNKNOWN, VOLUMETRIC_CAP, Toolpath, flow_cap
 from .kinematics import timing
 from .profile import Profile, load_data
 from .thermal import Heat, _interp, constants, simulate, window
@@ -94,7 +94,9 @@ def apply(tp: Toolpath, plan: Plan) -> Toolpath:
         lines = ok & (tp.layer == k)
         speed[lines] = np.minimum(speed[lines] * plan.slow[k], tp.set_speed[lines])
         cause[lines & (cause == NOT_SLOWED)] = LAYER_TIME  # slowed for layer cooling, by the plan
-    speed = np.where(length > 0, speed, tp.speed)
+    # Never more plastic per second than the filament's flow cap (the slicer held the set speed under it too).
+    most = np.maximum(tp.speed, flow_cap(tp) * length / np.maximum(tp.volume, 1e-9))
+    speed = np.where(length > 0, np.minimum(speed, most), tp.speed)
 
     # Part fan per line: the plan's value for layer k from the start of layer k - 1 (whose spots cool until k
     # covers them; a few spin-ups early) to the end of k; elsewhere the slicer's. Commands where it changes.
@@ -118,7 +120,7 @@ def apply(tp: Toolpath, plan: Plan) -> Toolpath:
     order = np.argsort(fans["line"], kind="stable")
     fans = {key: np.asarray(v)[order].astype(np.asarray(tp.fans[key]).dtype if len(tp.fans[key]) else np.asarray(v).dtype)
             for key, v in fans.items()}
-    travel, dwells = _parks(tp, plan, first)
+    travel, dwells = _parks(tp, plan)
     return replace(tp, speed=speed.astype(np.float32), cause=cause, part_fan=fan.astype(np.float32), fans=fans,
                    travel=travel, dwells=dwells)
 
@@ -126,12 +128,13 @@ def apply(tp: Toolpath, plan: Plan) -> Toolpath:
 PARK_MM = 20.0  # a park move goes this far past the part (in x), so the nozzle's heat doesn't reach it
 
 
-def _parks(tp: Toolpath, plan: Plan, first: np.ndarray) -> tuple[dict, dict]:
-    """Travel and pause events with the plan's park moves: just before layer k's first line, from wherever
-    the nozzle is to beside the part, a pause, and back (kinematics.timing puts a pause at the move after it)."""
+def park_moves(tp: Toolpath, plan: Plan) -> list[dict]:
+    """The plan's park moves: just before layer k's first line (``line``), from where the nozzle is (``here``)
+    to beside the part (``away``), wait ``seconds``, and back."""
+    first = np.searchsorted(tp.layer, np.arange(len(plan.park) + 1))
     ks = [k for k in np.flatnonzero(plan.park > 0) if first[k] < len(tp.t0)]
     if not ks:
-        return tp.travel, tp.dwells
+        return []
     tr = tp.travel
     # Beside the part (its own lines, not a purge line at the bed's edge), where the nozzle already went.
     part = np.isin(tp.kind, PART_KINDS)
@@ -139,20 +142,33 @@ def _parks(tp: Toolpath, plan: Plan, first: np.ndarray) -> tuple[dict, dict]:
     lo, hi = float(xs.min()), float(xs.max())
     p_lo, p_hi = float(tp.p0[part, 0].min()), float(tp.p0[part, 0].max())
     park_x = p_hi + PARK_MM if p_hi + PARK_MM <= hi else p_lo - PARK_MM if p_lo - PARK_MM >= lo else (hi if hi - p_hi > p_lo - lo else lo)
-    speed = float(np.median(tr["speed"])) if len(tr["speed"]) else 150.0
     starts = np.concatenate([tp.t0, tr["t0"]])
     ends = np.concatenate([tp.p1, tr["p1"]])
-    add = {key: [] for key in ("p0", "p1", "t0", "t1", "speed", "line")}
-    pauses = {"line": [], "t": [], "s": []}
+    out = []
     for k in ks:
         tf = float(tp.t0[first[k]])
         before = np.flatnonzero(starts < tf)
         here = ends[before[np.argmax(starts[before])]] if len(before) else tp.p0[first[k]]
-        away = np.array([park_x, here[1], here[2]], np.float32)
-        for a, b, t in ((here, away, tf - 2e-6), (away, here, tf - 1e-6)):
+        out.append({"layer": int(k), "line": int(first[k]), "here": np.asarray(here, float),
+                    "away": np.array([park_x, here[1], here[2]], float), "seconds": float(plan.park[k])})
+    return out
+
+
+def _parks(tp: Toolpath, plan: Plan) -> tuple[dict, dict]:
+    """Travel and pause events with the plan's park moves (kinematics.timing puts a pause at the move after it)."""
+    moves = park_moves(tp, plan)
+    if not moves:
+        return tp.travel, tp.dwells
+    tr = tp.travel
+    speed = float(np.median(tr["speed"])) if len(tr["speed"]) else 150.0
+    add = {key: [] for key in ("p0", "p1", "t0", "t1", "speed", "line")}
+    pauses = {"line": [], "t": [], "s": []}
+    for m in moves:
+        tf = float(tp.t0[m["line"]])
+        for a, b, t in ((m["here"], m["away"], tf - 2e-6), (m["away"], m["here"], tf - 1e-6)):
             add["p0"].append(a), add["p1"].append(b), add["t0"].append(t), add["t1"].append(t)
-            add["speed"].append(speed), add["line"].append(int(first[k]))
-        pauses["line"].append(int(first[k])), pauses["t"].append(tf - 1.5e-6), pauses["s"].append(float(plan.park[k]))
+            add["speed"].append(speed), add["line"].append(m["line"])
+        pauses["line"].append(m["line"]), pauses["t"].append(tf - 1.5e-6), pauses["s"].append(m["seconds"])
     travel = {key: np.concatenate([np.asarray(tr[key]), np.asarray(add[key], dtype=np.asarray(tr[key]).dtype if len(tr[key]) else None)])
               for key in add}
     travel.update({key: tr[key] for key in tr if key not in add})
@@ -412,6 +428,7 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
         "gcode": {"print_s": round(t_g, 1), **_score(gheat, gwin, weight), "plan": _plan_rows(tp, gplan)},
         "slicer": {"print_s": round(t_s, 1), **_score(sheat, swin, weight), "cooling": slicer_plan(tp, splan)},
         "heat": {"before": base, "gcode": gheat, "slicer": sheat}, "windows": {"before": win0, "gcode": gwin, "slicer": swin},
+        "plans": {"gcode": gplan, "slicer": splan},
     }
 
 
