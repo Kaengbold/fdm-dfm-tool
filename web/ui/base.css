@@ -1,5 +1,5 @@
 /* Base stylesheet of the new UI (T-510, plan §1.5, §1.6). Load after ../tokens.css. It holds the reset, text defaults,
-   focus ring and the screen layouts; components (T-511) bring their own CSS next to their module in web/ui/.
+   focus ring and the screen layouts; the components (T-511, one module each in web/ui/) share web/ui/components.css.
    Desktop only (≥ 1280 × 720): no max-width media queries. Spacing only through the --s-* tokens (lint: test_css_tokens.py). */
 
 *, *::before, *::after { box-sizing: border-box; }
