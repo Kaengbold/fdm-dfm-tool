@@ -110,6 +110,7 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
         "length": float(t.max() - t.min()),
         "full_circle": coverage > 0.9,
         "fit_error": float(resid.max() / radius),
+        "coverage": float(coverage),
     }
 
 
@@ -401,13 +402,15 @@ _REQUEST_COVERS = ("small_hole_undersized", "hole_closes", "sideways_hole_oval",
 
 
 def link_to_findings(edits: list[dict], findings: list[dict], to_print) -> list[dict]:
-    """Say what each edit is for, in ``source``: "finding" (with ``fixes``: the finding's ``rule`` and ``title``),
-    "request" (a size the user asked for), "strength" (the strength check's weak spot) or "other" (no
-    finding asks for it: shown folded as "Other ideas"; ``why_other`` says why when there's more to say). ``findings`` as check returns
-    them (print frame); ``to_print`` maps part-frame points (n × 3) to that frame."""
+    """Say what each edit is for, in ``source``: "finding" (with ``fixes``: the finding's ``rule``, ``title``
+    and ``finding_id``), "request" (a size the user asked for), "strength" (the strength check's weak spot)
+    or "other" (no finding asks for it: shown folded as "Other ideas"; ``why_other`` says why when there's
+    more to say). ``findings`` as check returns them (print frame); ``to_print`` maps part-frame points
+    (n × 3) to that frame."""
     T = load_data("thresholds")["first_layer"]
     for e in edits:
         e["fixes"] = None
+        e["finding_id"] = None
         if e["rule"] in ASKED_FOR:
             e["source"] = "request"
             continue
@@ -418,18 +421,24 @@ def link_to_findings(edits: list[dict], findings: list[dict], to_print) -> list[
         e["why_other"] = None
         wanted = EDIT_FIXES.get(e["rule"], ())
         pts = np.frombuffer(e["mesh"], "<f4").reshape(-1, 3)
-        box = None
+        raw_box = box = None
         if len(pts):
             p = np.asarray(to_print(pts.astype(float)))
-            box = (p.min(axis=0) - NEAR_MM, p.max(axis=0) + NEAR_MM)
-        match = next((f for f in findings if f["rule"] in wanted and _overlaps(box, f.get("bbox"))), None)
-        if match is None:
+            lo_p, hi_p = p.min(axis=0), p.max(axis=0)
+            raw_box = (lo_p, hi_p)
+            box = (lo_p - NEAR_MM, hi_p + NEAR_MM)
+        candidates = [f for f in findings if f["rule"] in wanted and _overlaps(box, f.get("bbox"))]
+        if not candidates:
             continue
+        same_rule = [f for f in candidates if f["rule"] == candidates[0]["rule"]]
+        match = max(same_rule, key=lambda f: _overlap_score(raw_box, box, f.get("bbox")))
         if e["rule"] == "elephant_foot" and T["elephant_foot_compensation_mm"] >= T["elephant_foot_mm"][1]:
             e["why_other"] = "Your slicer's elephant foot compensation (set in the 3MF) already takes up the bulge."
             continue
+        fid = match.get("finding_id")
         e["source"] = "finding"
-        e["fixes"] = {"rule": match["rule"], "title": match.get("title", match["rule"])}
+        e["finding_id"] = fid
+        e["fixes"] = {"rule": match["rule"], "title": match.get("title", match["rule"]), "finding_id": fid}
         e.pop("why_other")
         if e["rule"] == "elephant_foot":
             lo, hi = T["elephant_foot_mm"]
@@ -437,6 +446,26 @@ def link_to_findings(edits: list[dict], findings: list[dict], to_print) -> list[
                                  f"{T['elephant_foot_compensation_mm']:g} mm, but the bulge can reach {hi:g} mm: the chamfer takes "
                                  "the rest, where holes and edges at the bed must be exact.")
     return edits
+
+
+def _box_iou(a, b) -> float:
+    lo = np.maximum(a[0], b[0])
+    hi = np.minimum(a[1], b[1])
+    inter = float(np.prod(np.maximum(0.0, hi - lo)))
+    if inter <= 0.0:
+        return 0.0
+    va = float(np.prod(np.maximum(1e-6, a[1] - a[0])))
+    vb = float(np.prod(np.maximum(1e-6, b[1] - b[0])))
+    return inter / max(va + vb - inter, 1e-9)
+
+
+def _overlap_score(raw_box, padded_box, bbox) -> tuple[int, float, float, float]:
+    """Rank overlapping candidate findings so crossing/nearby features link to their own instance."""
+    if not bbox or raw_box is None or padded_box is None:
+        return (0, 0.0, 0.0, 0.0)
+    fbox = (np.asarray(bbox[0], float), np.asarray(bbox[1], float))
+    dist = float(np.linalg.norm((raw_box[0] + raw_box[1]) * 0.5 - (fbox[0] + fbox[1]) * 0.5))
+    return (1, _box_iou(raw_box, fbox), _box_iou(padded_box, fbox), -dist)
 
 
 def _overlaps(box, bbox) -> bool:
@@ -622,6 +651,14 @@ def _group_advice(items: list[dict]) -> list[dict]:
         first["points"] = [g["point"] for g in grp]
         first["count"] = len(grp)
         first["edit_ids"] = [g["edit_id"] for g in grp if g["edit_id"]]
+        fids: list[str] = []
+        for g in grp:
+            fx = g.get("fixes")
+            fid = fx.get("finding_id") if isinstance(fx, dict) else None
+            if fid and fid not in fids:
+                fids.append(fid)
+        if len(fids) > 1 and isinstance(first.get("fixes"), dict):
+            first["fixes"] = {**first["fixes"], "finding_ids": fids}
         if len(grp) > 1:
             first["text"] = _group_text(first["text"], len(grp))
         out.append(first)
@@ -686,9 +723,10 @@ def design_advice(mesh: Mesh, edits: list[dict], findings: list[dict], profile, 
         text, now, target, unit = built
         bbox = f.get("bbox")
         pt = from_print((np.asarray(bbox[0], float) + np.asarray(bbox[1], float)) / 2) if bbox else centre
+        fid = f.get("finding_id")
         advice.append({
             "id": f"advice-{rule}-{i}", "rule": rule, "text": text, "now": now, "target": target,
-            "unit": unit, "point": clamp(pt), "fixes": {"rule": rule, "title": f.get("title", rule)},
+            "unit": unit, "point": clamp(pt), "fixes": {"rule": rule, "title": f.get("title", rule), "finding_id": fid},
             "edit_id": None,
         })
     if up is not None:
@@ -1642,11 +1680,13 @@ def _foot_fillet_advice(mesh: Mesh, edits: list[dict], findings: list[dict], pro
     out = []
     for i, g in enumerate(_foot_edge_groups(mesh, edits, findings, to_print, up, max_oh)):
         f = g["finding"]
+        fid = f.get("finding_id")
         advice_text, _, _ = _foot_fillet_text(g["noun"], g["place"], r, g["rounds"], len(g["ks"]))
         out.append({
             "id": f"advice-foot-fillet-{i}", "rule": "foot_fillet", "text": advice_text, "now": None,
             "target": round(r, 1), "unit": "mm", "point": clamp(g["point"]),
-            "fixes": {"rule": f["rule"], "title": f.get("title", f["rule"])}, "edit_id": None,
+            "fixes": {"rule": f["rule"], "title": f.get("title", f["rule"]), "finding_id": fid},
+            "edit_id": None,
         })
     return out
 
@@ -1980,34 +2020,14 @@ def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
     """Sharp inside edges: two faces meeting at more than ``min_angle_deg`` with the second face in
     front of the first one's plane. Each: end points a, b; face normals n1, n2; t1, t2 the directions
     along each face away from the edge."""
-    tris = mesh.triangles
-    normals, _ = mesh.normals_and_areas()
-    verts, inv = np.unique(np.round(tris.reshape(-1, 3), 4), axis=0, return_inverse=True)
-    ids = inv.reshape(-1, 3)
-    # Faces sharing an edge, vectorised (a Python loop over every half-edge is slow on big parts).
-    # Sorting is stable, so equal edges keep face order; like a slicer's edge map, the 1st and 2nd
-    # face on an edge pair up, then the 3rd and 4th (a non-manifold edge).
-    edges = np.sort(np.stack([ids[:, [0, 1]], ids[:, [1, 2]], ids[:, [2, 0]]], axis=1).reshape(-1, 2), axis=1)
-    order = np.lexsort((edges[:, 1], edges[:, 0]))
-    e = edges[order]
-    pos = np.arange(len(e))
-    new = np.r_[True, np.any(e[1:] != e[:-1], axis=1)]
-    run_start = np.maximum.accumulate(np.where(new, pos, 0))
-    k = np.flatnonzero(~new & ((pos - run_start) % 2 == 1))
-    second, first = order[k], order[k - 1]
-    by_second = np.argsort(second)  # the order the edges complete in, face by face
-    second, first = second[by_second], first[by_second]
-    f1, f2 = first // 3, second // 3
-    a, b = edges[second, 0], edges[second, 1]
+    from .regions import sharp_edge_segments
 
-    centroids = tris.mean(axis=1)
-    n1, n2 = normals[f1], normals[f2]
-    pa = verts[a]
-    keep = ((a != b)  # a != b: drops sliver triangles (common after a boolean) whose corners round to one point
-            & (np.einsum("ij,ij->i", n1, n2) <= np.cos(np.radians(min_angle_deg)))
-            & (np.einsum("ij,ij->i", centroids[f2] - pa, n1) > 1e-6))  # second face behind the first: a convex edge
-    a, b, f1, f2, n1, n2, pa = a[keep], b[keep], f1[keep], f2[keep], n1[keep], n2[keep], pa[keep]
-    pb = verts[b]
+    verts, a, b, f1, f2, n1, n2, keep = sharp_edge_segments(mesh, min_angle_deg)
+    a, b, f1, f2, n1, n2 = a[keep], b[keep], f1[keep], f2[keep], n1[keep], n2[keep]
+    if len(a) == 0:
+        return []
+    centroids = mesh.triangles.mean(axis=1)
+    pa, pb = verts[a], verts[b]
     d = (pb - pa) / np.linalg.norm(pb - pa, axis=1, keepdims=True)
     t1, t2 = np.cross(n1, d), np.cross(n2, d)
     t1 *= np.where(np.einsum("ij,ij->i", centroids[f1] - pa, t1) > 0, 1.0, -1.0)[:, None]

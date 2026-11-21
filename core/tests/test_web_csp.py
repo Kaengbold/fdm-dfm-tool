@@ -32,9 +32,10 @@ def test_no_eval_on_the_page_and_the_step_worker_checks_its_files():
     html = PAGE.read_text(encoding="utf-8")
     assert "'unsafe-eval'" not in re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', html).group(1)
     sys.path.insert(0, str(PAGE.parents[1] / "tools"))
-    from vendor import HASHES
+    from vendor import HASHES, MUON3D_DIR
 
     for worker, wasm in (("step-worker.js", "npm/occt-import-js@0.0.23/dist/occt-import-js.wasm"),
-                         ("stepwrite-worker.js", "npm/replicad-opencascadejs@1.1.0/dist/replicad_single.wasm")):
+                         ("stepwrite-worker.js", "npm/replicad-opencascadejs@1.1.0/dist/replicad_single.wasm"),
+                         ("slicer-worker.js", f"{MUON3D_DIR}/engine-st.wasm")):
         text = (PAGE.parent / worker).read_text(encoding="utf-8")
         assert "sha256-" + base64.b64encode(bytes.fromhex(HASHES[wasm])).decode() in text, worker

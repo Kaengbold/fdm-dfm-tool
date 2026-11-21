@@ -135,6 +135,15 @@ materials:
   # My materials (imports it from an Orca .json).
   # uv_resistance: how it lasts in sunlight. ASA is made for outdoor use (it replaces ABS there); PLA and ABS
   # turn brittle / yellow; PETG, PC, nylon and TPU are in between. General polymer knowledge, approximate (G-3).
+  # Environment fields (T-520): water, abrasion, oil_fuel, solvent, skin (good | fair | poor | null), and
+  # food_notes (plain-language string | null). Unknown or brand-dependent values stay null rather than guessed.
+  # Primary sources:
+  # - Prusament chemical resistance study: https://prusament.com/chemical-resistance-of-3d-printing-materials/
+  # - Prusa food-safe FDM guide: https://help.prusa3d.com/article/food-safe-fdm-printing_112313
+  # - Prusament product pages: PLA, PETG, ASA, PC Blend, PA11 CF, TPU 95A (prusament.com/materials/...)
+  # - Prusa ABS KB: https://help.prusa3d.com/article/abs_2058
+  # - Bambu Lab ASA-CF / PAHT-CF guide: https://wiki.bambulab.com/en/filament/asacf_pahtcf
+  # - CNC Kitchen PA6-CF vs PA12-CF moisture test: https://www.cnckitchen.com/blog/carbon-fiber-nylon-in-3d-printing-pa6-vs-pa12-tested
   pla:
     name: PLA
     max_overhang_deg: 55
@@ -156,6 +165,12 @@ materials:
     softening_c: 45       # Orca's temperature_vitrification
     heat_limit_c: 60      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: poor     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: fair             # Prusament chem study: slight tensile drop in water immersion
+    food_notes: "Not food-safe straight off the printer: layer gaps hold bacteria. Even with a food-contact certified PLA spool, use a food-safe coating or liner, and keep it out of hot water or dishwashers."
+    abrasion: null          # unverified across standard PLA datasheets
+    oil_fuel: null          # fuels unverified on standard PLA
+    solvent: poor           # Prusament chem study: loses strength in IPA (>24 h), collapses in acetone
+    skin: null              # standard hobby spools are not ISO 10993 skin-contact certified
   petg:
     name: PETG
     max_overhang_deg: 45
@@ -176,6 +191,12 @@ materials:
     softening_c: 70       # Orca's temperature_vitrification
     heat_limit_c: 80      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: good             # Prusament chem study (toughness unchanged in water) & Prusament PETG (low water absorption)
+    food_notes: "Not food-safe straight off the printer: layer gaps hold bacteria. PETG handles warm washes better than PLA, but still needs a food-contact certified spool plus a food-safe coating or liner."
+    abrasion: null          # unverified across standard PETG datasheets
+    oil_fuel: null          # oil/fuel immersion unverified on standard PETG
+    solvent: fair           # Prusament chem study: brief ethanol/IPA OK; drops after 7-day IPA soak, damaged by acetone
+    skin: null              # standard hobby spools are not ISO 10993 skin-contact certified
   abs:
     name: ABS
     max_overhang_deg: 40
@@ -196,6 +217,12 @@ materials:
     softening_c: 110       # Orca's temperature_vitrification
     heat_limit_c: 105      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: poor     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: null             # not in Prusament's immersion test; left unknown until a primary TDS is cited
+    food_notes: "Not for food or drinks: ABS contains styrene and layer gaps trap bacteria. Use a food-contact certified material with a food-safe coating or liner instead."
+    abrasion: null          # unverified across standard ABS datasheets
+    oil_fuel: null          # oil/fuel immersion unverified on unfilled ABS
+    solvent: poor           # Prusa ABS KB & Prusament chem study: dissolves rapidly in acetone
+    skin: null              # standard hobby spools are not ISO 10993 skin-contact certified
   pa_cf:
     name: PA-CF (carbon fibre nylon)
     fibre: carbon            # chopped fibre filled: stiffer, not stronger (rules.yaml fibre_filled)
@@ -217,6 +244,12 @@ materials:
     softening_c: 108       # Orca's temperature_vitrification
     heat_limit_c: 120      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: fair             # CNC Kitchen PA6 vs PA12 & Bambu PAHT-CF guide: PA6-CF softens heavily when wet, PA12/PA11 less so
+    food_notes: "Do not use with food or drinks: carbon-fibre nylon is not food-contact grade and loose surface fibres can shed."
+    abrasion: good          # Prusament PA11 CF: abrasion resistant, low coefficient of friction
+    oil_fuel: good          # Prusament PA11 CF: resists motor oils, diesel, benzene
+    solvent: good           # Prusament PA11 CF: resists acetone, methanol, ethanol, toluene, NaOH; Prusament chem study: PA excellent
+    skin: poor              # Bambu ASA-CF/PAHT-CF guide: microscopic surface barbs; wear gloves when handling or sanding
 
   # Added in T-026 (typical TDS values: Polymaker, eSUN, Prusament; rough, for estimates only).
   pla_plus:
@@ -239,6 +272,12 @@ materials:
     softening_c: 45       # Orca's temperature_vitrification
     heat_limit_c: 60      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: poor     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: null             # proprietary PLA+ modifiers vary by brand
+    food_notes: "Not food-safe straight off the printer: layer gaps hold bacteria, and PLA+ blends add unlisted modifiers. Use a food-contact certified spool with a food-safe coating or liner instead."
+    abrasion: null          # proprietary blends vary by brand
+    oil_fuel: null          # proprietary blends vary by brand
+    solvent: null           # proprietary blends vary by brand
+    skin: null              # proprietary blends vary by brand; not ISO 10993 certified
   asa:
     name: ASA
     max_overhang_deg: 45
@@ -259,6 +298,12 @@ materials:
     softening_c: 110       # Orca's temperature_vitrification
     heat_limit_c: 100      # Polymaker PolyLite ASA: glass transition 97.8 °C, HDT 100 °C at 1.8 MPa
     uv_resistance: good     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: good             # Prusament chem study: resistant to water even during prolonged immersion
+    food_notes: "Not for food or drinks: ASA contains styrene and layer gaps trap bacteria. Use a food-contact certified material with a food-safe coating or liner instead."
+    abrasion: good          # Prusament ASA: high impact and wear resistance
+    oil_fuel: null          # oil/fuel immersion unverified across generic ASA datasheets
+    solvent: poor           # Prusament chem study & Prusament ASA: drops in ethanol/IPA, collapses in acetone
+    skin: null              # standard hobby spools are not ISO 10993 skin-contact certified
   pc:
     name: PC (polycarbonate)
     max_overhang_deg: 40
@@ -279,6 +324,12 @@ materials:
     softening_c: 120       # Orca's temperature_vitrification
     heat_limit_c: 145      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: good             # Prusament chem study: PC Blend tensile & impact strength stable in room-temp water
+    food_notes: "Not for food or drinks: standard PC filaments are not food-contact certified and layer gaps trap bacteria. Use a certified material with a food-safe coating or liner instead."
+    abrasion: null          # unverified across standard PC filament datasheets
+    oil_fuel: null          # oil/fuel immersion unverified (stress-cracking risk under load)
+    solvent: fair           # Prusament chem study: stable in ethanol/IPA/acids/bleach, drops sharply in acetone
+    skin: null              # standard desktop PC blends are not ISO 10993 skin-contact certified
   tpu_95a:
     name: TPU 95A (flexible)
     max_overhang_deg: 40
@@ -299,14 +350,22 @@ materials:
     softening_c: 30       # Orca's temperature_vitrification
     heat_limit_c: 70      # loses most stiffness here (glass transition; approx., see note above materials)
     uv_resistance: fair     # outdoors in sunlight: good | fair | poor (see note above materials)
+    water: fair             # Prusament TPU 95A: ether-diol resists hydrolysis well, while most ester-diol TPUs are less resistant
+    food_notes: "Not food-safe straight off the printer: layer gaps hold bacteria, standard TPU spools are not food-contact certified, and rigid food-safe coatings crack when it flexes."
+    abrasion: good          # Prusament TPU 95A: extreme wear resistance
+    oil_fuel: fair          # Prusament TPU 95A: great resistance mostly to oil and grease; fuel resistance varies by grade
+    solvent: null           # solvent immersion varies by TPU formulation; left unknown without a verified datasheet
+    skin: null              # standard uncertified TPU spools are not ISO 10993 tested (additives vary by brand)
 
 # speed: share of the 0.4 mm speeds in each nozzle's own slicer profile (OrcaSlicer's Bambu "Standard"
-# process profiles, 2.x: outer wall 120 vs 200 mm/s, infill 100 vs 270 mm/s for 0.2, 0.6 and 0.8 mm).
+# process profiles, 2.x: outer wall 120 vs 200 mm/s, infill 100 vs 270 mm/s for 0.2, 0.6 and 0.8 mm;
+# 1.0 mm uses the same +0.02 mm line width and 0.5× layer height convention, matching OrcaSlicer's Voron 1.0 mm profile).
 nozzles:
   "0.2": {line_width: 0.22, layer_height: 0.1, speed: {outer_wall: 0.6, infill: 0.37}}
   "0.4": {line_width: 0.45, layer_height: 0.2}
   "0.6": {line_width: 0.62, layer_height: 0.3, speed: {outer_wall: 0.6, infill: 0.37}}
   "0.8": {line_width: 0.82, layer_height: 0.4, speed: {outer_wall: 0.6, infill: 0.37}}
+  "1.0": {line_width: 1.02, layer_height: 0.5, speed: {outer_wall: 0.6, infill: 0.37}}
 
 speeds:  # mm/s, typical defaults
   fast: {outer_wall: 200, infill: 270}

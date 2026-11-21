@@ -169,8 +169,36 @@ def check_print(
 
 @server.tool()
 def list_faces() -> list[dict]:
-    """Faces (regions) of the part with id, flat/curved, area, normal and centroid — use ids for loads."""
+    """Faces (regions) of the part with id, kind (flat / cylinder / hole / curved), area_mm2,
+    normal, centroid and hole_diameter (on holes) — use ids for loads."""
     return api.regions()["regions"]
+
+
+@server.tool()
+def list_edges(radius_mm: float = 2.0) -> dict:
+    """Sharp outer feature edges (``feature_edges``) and inside corners (``concave_edges``) of the part.
+    Each entry has ``id``, ``closed``, ``length_mm``, ``midpoint``, ``normal``, ``regions``, ``points``
+    (sampled along the polyline) and ``radius`` mm. Pass ``{"points": e["points"], "radius": e["radius"],
+    "kind": "fixed" | "force", ...}`` (or ``{"edge": e["id"], "edge_kind": "feature" | "concave", ...}``)
+    directly to check_strength."""
+    import numpy as np
+
+    from .regions import EDGE_BAND_RADIUS, sample_polyline, unpack_polylines
+
+    r = api.regions()
+    rad = float(radius_mm) if radius_mm > 0 else EDGE_BAND_RADIUS
+
+    def pack(group: dict) -> list[dict]:
+        lines = unpack_polylines(group)
+        return [
+            {**meta, "points": np.round(sample_polyline(pts, 0.75 * rad), 3).tolist(), "radius": rad}
+            for meta, pts in zip(group["meta"], lines)
+        ]
+
+    return {
+        "feature_edges": pack(r["feature_edges"]),
+        "concave_edges": pack(r["concave_edges"]),
+    }
 
 
 @server.tool()
@@ -196,8 +224,9 @@ def check_strength(
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
-    (default 3) — for an edge, a corner or part of a big face — or on an area: "points": [[x, y, z], …] with
-    "radius" (everything within it of any point, like the web app's brush).
+    (default 3) — for an edge, a corner or part of a big face — on an area/edge band: "points": [[x, y, z], …] with
+    "radius" (everything within it of any point, like the web app's brush or list_edges), or directly on a
+    list_edges entry: "edge": id, "edge_kind": "feature" | "concave" (with optional "radius").
     ``zones``: stronger areas (add_zone, or optimise_strength's ``zoned``) printed with their own walls / infill.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
     return _clean(api.strength(up, loads, _profile(printer, material, nozzle, use_temp_c=use_temp_c, constant_load=constant_load),
@@ -239,11 +268,14 @@ def detailed_strength(
     gcode_path: str | None = None,
     settings: dict[str, str] | None = None,
     fine: bool = False,
+    heat: bool = False,
 ) -> dict:
     """Strength from the real sliced print: the plastic really in each spot (walls, solid layers, infill)
     and which way the printed lines run — lines pulled apart sideways are a third way to break ('lines').
     Uses ``gcode_path`` (sliced from our 3MF in this orientation), or slices with the installed OrcaSlicer
-    (our recommended settings, or ``settings`` overrides; tens of seconds). loads as in check_strength."""
+    (our recommended settings, or ``settings`` overrides; tens of seconds). loads as in check_strength.
+    ``heat``: the layers' strength follows how well they fused in the heat simulation (slower); ``heat`` in
+    the result compares the safety with the same print bonded as usual."""
     prof = _profile(printer, material, nozzle)
     if gcode_path:
         text = _in(gcode_path, GCODE, "G-code file").read_text(errors="replace")
@@ -251,7 +283,7 @@ def detailed_strength(
     else:
         sliced = _slice(up, printer, material, nozzle, settings, keep_gcode=True)
         text = sliced["orcaslicer"].pop("gcode")
-    out = {"gcode": api.load_gcode(text, up, prof), **_clean(api.strength(up, loads, prof, fine=fine, detailed=True))}
+    out = {"gcode": api.load_gcode(text, up, prof), **_clean(api.strength(up, loads, prof, fine=fine, detailed=True, heat=heat))}
     if sliced:
         out["slicer_settings"] = sliced["settings"]
     return out
@@ -535,6 +567,36 @@ def check_orientation(up: list[float], printer: str = "bambu_p1s", material: str
 
 
 @server.tool()
+def optimize_print(
+    goal: str = "balanced",
+    loads: list[dict] | None = None,
+    depth: str = "extended",
+    printer: str = "bambu_p1s",
+    nozzle: str = "0.4",
+    use_temp_c: float | None = None,
+    constant_load: bool = False,
+    owned: list[str] | None = None,
+    materials: list[str] | None = None,
+    nozzles: list[str] | None = None,
+    touches: list[str] | None = None,
+    constraints: dict | None = None,
+    change: str = "slicer",
+) -> dict:
+    """The best 2–4 ways to print the loaded part for a goal (strong / balanced / fast / light / quality):
+    orientation, material, nozzle, layer height, walls, top/bottom and infill, each checked for strength at its
+    own pose. Safety targets: strong ×5, balanced ×3, fast ×2, light ×1.5 (×3 at least for a load that stays on);
+    quality and no loads skip strength. ``loads`` as for check_strength. ``depth`` fast / extended / complete
+    (extended can take a few minutes). ``owned``: materials the user has; ``materials`` / ``nozzles``: the only
+    ones to consider; ``touches``: water, food, outdoors, abrasion, oil_fuel, solvent, skin. ``constraints``:
+    hard limits (material, nozzle, layer_height, walls, top, bottom, infill, up). ``change``: slicer / design /
+    both. Returns ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the
+    target, ``ways_out``."""
+    profile = {"printer": printer, "nozzle": nozzle, "use_temp_c": use_temp_c, "constant_load": constant_load}
+    return _clean(api.optimize(goal, loads, depth, profile, owned, materials, nozzles, {"temp_c": use_temp_c, "touches": touches or []},
+                               constraints, change))
+
+
+@server.tool()
 def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> list[dict]:
     """The same part with every nozzle size: print time, filament, problems that come with the bigger
     nozzles (``new``) and the detail each one can't print."""
@@ -543,14 +605,25 @@ def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str =
 
 @server.tool()
 def heat_model(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", fine: bool = False,
-               goal: str = "balanced", intents: list[dict] | None = None) -> dict:
+               goal: str = "balanced", intents: list[dict] | None = None, loads: list[dict] | None = None) -> dict:
     """Heat simulation over the G-code from load_gcode: how hot each spot still is when the next layer covers it
     and how well each joint between layers bonds. ``findings``: spots that stay too hot (sag, blobs), joints too
     cold to bond well, and slowdowns for cooling that aren't needed. ``goal`` (balanced / strength / speed /
     material) moves the limits; ``intents`` = [{"kind": "cosmetic" | "dimension_critical" | "load_bearing",
-    "point": [x, y, z], "radius": mm}] tightens them where they are. ``hottest`` lists the worst spots;
-    ``fine`` is slower and more exact."""
-    return _clean(api.heat_model(up, _profile(printer, material, nozzle, goal), fine, intents))
+    "point": [x, y, z], "radius": mm}] tightens them where they are. ``loads`` (as for check_strength) say
+    where the layers must bond well; without them that is guessed from the shape (``guessed``, see
+    spot_importance). ``hottest`` lists the worst spots; ``fine`` is slower and more exact."""
+    return _clean(api.heat_model(up, _profile(printer, material, nozzle, goal), fine, intents, loads))
+
+
+@server.tool()
+def spot_importance(up: list[float], loads: list[dict] | None = None, printer: str = "bambu_p1s", material: str = "pla",
+                    nozzle: str = "0.4", goal: str = "balanced", intents: list[dict] | None = None) -> dict:
+    """How much each spot of the part matters for bonding between layers (weight 0.2–1), which heat_model uses
+    to be strict where it counts. From ``loads`` (as for check_strength) when given, else guessed from the shape
+    (``guessed``: pins, ribs and their roots, sharp inside corners, screw holes, outer walls). ``areas`` lists the
+    important spots with the reason in plain words; per-spot arrays come as bytes."""
+    return _clean(api.importance(up, loads, _profile(printer, material, nozzle, goal), intents))
 
 
 @server.tool()
@@ -873,6 +946,7 @@ API_TOOLS = {
     "set_cad_checks": "set_cad_checks",
     "load_gcode": "load_gcode",
     "heat_model": "heat_model",
+    "importance": "spot_importance",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
     "tolerance": "printer_tolerance",
@@ -912,6 +986,7 @@ API_TOOLS = {
     "stronger_orientation": "stronger_orientation",
     "design": "suggest_design_changes",
     "compare_nozzles": "compare_nozzles",
+    "optimize": "optimize_print",
     "topology": "suggest_lighter_shape",
 }
 # Only for the web app: it keeps the engine's state while restarting its worker (Cancel). The MCP

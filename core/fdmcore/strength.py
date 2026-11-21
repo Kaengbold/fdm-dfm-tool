@@ -25,6 +25,7 @@ Results are indications — "fine / borderline / likely to break" and why.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import numpy as np
 
@@ -43,6 +44,30 @@ SINGULAR_RINGS = 2
 NEAR_SUPPORT_VOXELS = 4  # weakest spot this close to a held face: say the clamp may spread the load
 E_Z_RATIO = 0.85  # layer-direction stiffness vs. in-plane (stiffness drops far less than strength)
 INFILL_EXPONENT = 1.5  # Gibson–Ashby-style scaling for stiffness and strength of sparse infill
+# Interlayer bonding factor vs. layer_height / nozzle_diameter (r), relative to standard 0.5 × nozzle = 1.0.
+# Capped at 1.0 (no bonus beyond standard datasheet calibration without material-specific test data):
+# - Very thin layers (r < 0.5) carry less thermal mass and add more layer interfaces, giving slightly
+#   lower or equal upright strength (Chacón et al. 2017, doi:10.1016/j.matdes.2017.03.065; CNC Kitchen 2019,
+#   https://www.cnckitchen.com/blog/the-influence-of-layer-height-on-the-strength-of-fdm-3d-prints;
+#   Shokrollahi et al. 2026, doi:10.1108/RPJ-01-2026-0029).
+# - Optimal window around 0.50–0.60 × nozzle stays capped at 1.0.
+# - Above ~0.70 × nozzle, beads round out and wetted bond width shrinks sharply:
+#   Kuznetsov et al. 2018 (doi:10.3390/polym10030313, Table 1 normalized to h/D = 0.50:
+#   0.58 -> 0.99, 0.67 -> 0.78, 0.75 -> 0.51–0.76, 0.85 -> 0.40–0.50, 1.00 -> 0.34–0.36)
+#   and CNC Kitchen 2019 (0.75 -> ~0.50).
+LAYER_BOND_CAP = 1.0
+LAYER_BOND_CURVE: tuple[tuple[float, float], ...] = (
+    (0.15, 0.90),
+    (0.25, 0.94),
+    (0.40, 0.98),
+    (0.50, 1.00),
+    (0.60, 1.00),
+    (0.70, 0.90),
+    (0.75, 0.65),
+    (0.85, 0.45),
+    (1.00, 0.35),
+    (1.20, 0.25),
+)
 # Resting faces and screw holes: springs along the surface normal that only push (released where the
 # part pulls away, re-solved), much stiffer than the part next to them, plus a little friction sideways
 # (which also keeps a part that only rests from sliding away in the solve).
@@ -106,6 +131,7 @@ class Printed:
     lines: np.ndarray  # (E, 3) main line direction, part frame
     aligned: np.ndarray  # (E,) 1 = all lines one way (walls), 0 = crossing (grid infill, alternating solid layers)
     first_s: np.ndarray  # (E,) when the cube was first printed (s since start)
+    bond: np.ndarray | None = None  # (E,) layer bond against a usual print, from the heat model (T-476); None: usual
 
 
 def printed_from(dep: dict, model: Model, inside: np.ndarray) -> Printed:
@@ -205,10 +231,18 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
                 contact_nodes.append(nodes)
                 contact_normals.append(_node_normals(model, nodes, mesh.triangles[sel], normals[sel]))
         else:
-            n = (normals[sel] * mesh.normals_and_areas()[1][sel, None]).sum(axis=0)
-            n /= np.linalg.norm(n)
             d = load.get("direction", "push")
-            vec = {"push": -n, "pull": n, "down": np.array([0.0, 0.0, -1.0])}.get(d) if isinstance(d, str) else np.asarray(d, float)
+            if isinstance(d, str) and d in ("push", "pull"):
+                n = (normals[sel] * mesh.normals_and_areas()[1][sel, None]).sum(axis=0)
+                norm = float(np.linalg.norm(n))
+                if norm <= 1e-12:
+                    raise ValueError(f"{_where(load)} has no single outward direction; pass an explicit direction vector")
+                n = n / norm
+                vec = -n if d == "push" else n
+            elif isinstance(d, str) and d == "down":
+                vec = np.array([0.0, 0.0, -1.0])
+            else:
+                vec = np.asarray(d, float)
             vec = vec / np.linalg.norm(vec)
             forces[nodes] += vec * float(load["kg"]) * G / len(nodes)
     contact = None
@@ -294,9 +328,21 @@ def _load_faces(mesh: Mesh, region: np.ndarray, load: dict, h: float) -> np.ndar
     (at least ~1.5 voxels, so a small spot still reaches the grid)."""
     if on_spots(load):
         r = _radius(load, h)
-        sel = np.zeros(len(mesh.triangles), dtype=bool)
-        for p in _spots(load):
-            sel |= _distance_to_triangles(mesh.triangles, p) <= r
+        pts = _spots(load)
+        t = mesh.triangles
+        lo, hi = pts.min(axis=0) - r, pts.max(axis=0) + r
+        cand = np.flatnonzero(
+            (t[:, :, 0].max(axis=1) >= lo[0]) & (t[:, :, 0].min(axis=1) <= hi[0])
+            & (t[:, :, 1].max(axis=1) >= lo[1]) & (t[:, :, 1].min(axis=1) <= hi[1])
+            & (t[:, :, 2].max(axis=1) >= lo[2]) & (t[:, :, 2].min(axis=1) <= hi[2])
+        )
+        sel = np.zeros(len(t), dtype=bool)
+        if len(cand):
+            sub = t[cand]
+            hit = np.zeros(len(cand), dtype=bool)
+            for p in pts:
+                hit |= _distance_to_triangles(sub, p) <= r
+            sel[cand] = hit
         if not sel.any():
             raise ValueError(f"No surface within {r:.1f} mm of {_where(load).lower()}")
         return sel
@@ -317,7 +363,11 @@ def _spots(load: dict) -> np.ndarray:
 
 
 def _distance_to_points(xyz: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """Distance from each of ``xyz`` to the nearest of ``points`` (a stroke has a few hundred at most)."""
+    """Distance from each of ``xyz`` to the nearest of ``points``."""
+    if len(points) > 16:
+        from scipy.spatial import cKDTree
+
+        return cKDTree(points).query(xyz)[0]
     best = np.full(len(xyz), np.inf)
     for p in points:
         best = np.minimum(best, np.linalg.norm(xyz - p, axis=1))
@@ -354,14 +404,31 @@ def _where(load: dict) -> str:
     return f"The spot at {np.round(spots[0], 1).tolist()}" if len(spots) == 1 else f"The painted area at {np.round(spots.mean(axis=0), 1).tolist()}"
 
 
+def layer_bond_factor(layer_height: float, nozzle: float | str) -> float:
+    """Interlayer bond multiplier vs. standard 0.5 × nozzle layer height (``LAYER_BOND_CURVE``).
+
+    Rises slightly from very thin layers to the 0.5–0.6 × nozzle window, stays capped at
+    ``LAYER_BOND_CAP`` (1.0, no unsupported bonus), and drops sharply above ~0.7 × nozzle
+    where rounded beads lose contact width (Kuznetsov et al. 2018; CNC Kitchen 2019).
+    """
+    if isinstance(layer_height, bool) or isinstance(nozzle, bool):
+        raise ValueError("layer_height and nozzle must be positive numbers")
+    lh, d = float(layer_height), float(nozzle)
+    if not (math.isfinite(lh) and math.isfinite(d) and lh > 0 and d > 0):
+        raise ValueError(f"layer_height and nozzle must be positive numbers, got {layer_height!r}, {nozzle!r}")
+    xs, ks = zip(*LAYER_BOND_CURVE)
+    return float(min(LAYER_BOND_CAP, float(np.interp(lh / d, xs, ks))))
+
+
 def material_for(profile: Profile) -> Material:
     m = profile.material
     k = heat_factor(profile)
+    bond = layer_bond_factor(profile.layer_height, profile.nozzle)
     return Material(
         e_xy=m["modulus_xy_mpa"] * k,
         e_z=m["modulus_xy_mpa"] * E_Z_RATIO * k,
         strength_xy=m["tensile_xy_mpa"] * k,
-        strength_z=m["tensile_xy_mpa"] * profile.z_strength_factor * k,
+        strength_z=m["tensile_xy_mpa"] * profile.z_strength_factor * bond * k,
     )
 
 
@@ -522,7 +589,7 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
     scale = element_scale(case.model, up, shells, profile) if printed is None else printed.scale
     u, info = _solve(case, c, scale, mat.e_xy)
     stress = element_stress(case.model, c, scale, u)
-    fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
+    fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale, None if printed is None else printed.bond)
     fi_lines = None if printed is None else lines_index(stress, np.asarray(up, float), mat, printed)
     out = _summary(case, fi_layer, fi_plane, u, info, fi_lines)
     out["verdict"] = verdict(out["safety_factor"], required_safety(profile))
@@ -596,10 +663,11 @@ def orientation_safety(case: LoadCase, ups: np.ndarray, profile: Profile, shells
     return np.array(out)
 
 
-def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np.ndarray):
+def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np.ndarray, bond: np.ndarray | None = None):
     """(layer, in-plane) failure index per element; ≥ 1 means expected to break.
 
-    Layer: tension across layers and shear along them vs. interlayer strength.
+    Layer: tension across layers and shear along them vs. interlayer strength, times ``bond`` per
+    element where the heat model says the layers fused better or worse than usual.
     In-plane: von Mises vs. in-plane strength. Sparse infill is weaker by ``scale``.
     """
     up = up / np.linalg.norm(up)
@@ -609,10 +677,28 @@ def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np
     shear = np.linalg.norm(traction - normal[:, None] * up, axis=1)
     allow = np.maximum(scale, 1e-3)
     fi_layer = np.hypot(np.maximum(normal, 0) / mat.strength_z, shear / mat.strength_z) / allow
+    if bond is not None:
+        fi_layer = fi_layer / bond
     sx, sy, sz, syz, sxz, sxy = stress.T
     vm = np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (syz**2 + sxz**2 + sxy**2))
     fi_plane = vm / mat.strength_xy / allow
     return fi_layer, fi_plane
+
+
+def layer_index(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells()) -> np.ndarray:
+    """Per cube, the largest share of the layer bond's strength any load case uses (the "Layer" index of
+    ``failure_indices``): where the layers must hold, so the heat window can ask for a better bond there
+    (importance.py). Cubes right at loads and supports are capped at the highest value elsewhere: their
+    stress only grows as the grid gets finer, and it shouldn't outrank a real weak spot."""
+    mat = material_for(profile)
+    c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
+    out = np.zeros(len(cases[0].model.elems))
+    for case in cases:
+        scale = element_scale(case.model, up, shells, profile)
+        u, _ = _solve(case, c, scale, mat.e_xy)
+        fl = failure_indices(element_stress(case.model, c, scale, u), np.asarray(up, float), mat, scale)[0]
+        out = np.maximum(out, np.minimum(fl, fl[~case.ignore].max(initial=0)))
+    return out
 
 
 def lines_index(stress: np.ndarray, up: np.ndarray, mat: Material, printed: Printed) -> np.ndarray:
