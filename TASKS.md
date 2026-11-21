@@ -1181,8 +1181,12 @@ Rules for every [UI] task:
 
 ### Phase 5: optimize and choose
 
-- [~] **T-550 P1** [UI] Analyse step. · plan: §10.1 · files: `web/steps/analyse.js`, `web/worker.js` · owner: Claude (`task/T-550-analyse`)
+- [x] **T-550 P1** [UI] Analyse step. · plan: §10.1 · files: `web/steps/analyse.js`, `web/worker.js` · owner: Claude (`task/T-550-analyse`)
   - Do: Fast / Extended (default) / Complete cards with this part's time estimate (Complete disabled with "Allow" link if design can't change; hidden for Quality); stage list, elapsed, estimate, Cancel, **Stop & show best so far**, "Search ended early" + Continue.
+  - Outcome: `web/steps/analyse.js`: summary line, Fast / Extended / Complete cards with this part's browser estimate (`api.estimate_runtime`), Complete off with Allow when only slicer settings may change and hidden for Quality; Start runs `api.optimize` with the T-543 args, progress card on the stage (optimizer stages mapped to the plan's six, elapsed vs estimate, Cancel restarts the engine with the part); the result keeps its input revisions, a change marks it stale and Next waits (`optimized` flag cleared). "Stop & show best so far" and "Search ended early" need partial results from the engine → T-552. e2e `new UI: analyse`.
+- [ ] **T-552 P2** [UI] Partial optimizer results: Stop & show best so far, time budget. · plan: §10.1, §1.7 · files: `core/fdmcore/optimizer.py`, `core/fdmcore/api.py`, `web/worker.js`, `web/steps/analyse.js` · owner: —
+  - Do: the worker can't answer a second call while optimize runs, so stream the best valid options so far with the progress messages (e.g. `progress.report(..., partial=…)` posted by the worker); Stop keeps the latest partial result and cancels; a time budget ends the search early with "Search ended early" + Continue (never "impossible").
+  - Done when: stopping a long Extended run shows its best options so far; a budgeted run says it ended early.
 - [~] **T-551 P1** [UI] Options step. · plan: §11, §10.2 (infeasible), §16.2 · files: `web/steps/options.js` · owner: Claude (`task/T-551-options`)
   - Do: full-width mode with a 3D strip on top; 2–4 aligned columns (pros/cons at the top, the rows from §11); hover pin + click-to-edit; "Your choices" bar with chips, conflicts, Keep all; Re-optimize with my choices; infeasible banner with ways out; a below-target option can be used/exported after a clear warning.
   - Done when: e2e pins PLA, re-optimizes, and every new column uses PLA.
