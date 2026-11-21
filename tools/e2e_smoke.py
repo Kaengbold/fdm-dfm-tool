@@ -480,6 +480,56 @@ def check_new_ui(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_gizmo(browser, port: int) -> str:
+    """The new UI's direction gizmo (T-542): Push in / ±Z by one click (a second click flips the sign), a ring drag
+    snaps to 15° with the angle shown, arrow keys nudge, Esc cancels."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="L-bracket").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        # The upright's inner face of the bracket: x = -25, facing +x.
+        page.evaluate("""() => { window.cancelled = false;
+          window.g = fdmUI.services.openGizmo([-25, 0, 25], [1, 0, 0], { onCancel: () => { window.cancelled = true; } }); }""")
+        dirs = lambda: page.evaluate("() => window.g.direction().map((x) => Math.round(x * 1000) / 1000)")
+        assert dirs() == [-1, 0, 0], "Push in should point into the face"
+        page.get_by_role("button", name="+Z").click()
+        assert dirs() == [0, 0, 1]
+        page.get_by_role("button", name="+Z").click()
+        assert dirs() == [0, 0, -1], "second click should flip to -Z"
+        page.get_by_role("button", name="Push in").click()
+        pts = page.evaluate("""async () => {
+          const THREE = await import('three');
+          const ring = window.g._debug.rings[0].holder, st = fdmUI.services.stage;
+          ring.updateMatrixWorld(true);
+          const r = st.canvas.getBoundingClientRect();
+          return [60, 70, 81].map((deg) => { const a = deg * Math.PI / 180;
+            const v = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).applyMatrix4(ring.matrixWorld).project(st.camera);
+            return [(v.x + 1) / 2 * r.width + r.left, (1 - v.y) / 2 * r.height + r.top]; });
+        }""")
+        page.mouse.move(*pts[0])
+        page.mouse.down()
+        page.mouse.move(*pts[1], steps=3)
+        page.mouse.move(*pts[2], steps=3)
+        label = page.locator(".gizmo-angle").inner_text()
+        tilts = page.evaluate("() => window.g._debug.tilts")
+        page.mouse.up()
+        assert label == "15°" and tilts == [15, 0], (label, tilts)
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate("() => window.g._debug.tilts") == [15, 15]
+        page.keyboard.press("Escape")
+        assert page.locator(".gizmo-row").count() == 0 and page.evaluate("() => window.cancelled"), "Esc didn't cancel"
+        assert not errors, errors
+        return f"push into the face, ±Z flips, ring drag snapped to {label}, arrow key nudged 15°, Esc cancelled"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -525,6 +575,7 @@ def _run_suite(port: int, args) -> Run:
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
         run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
+        run.step("new UI: direction gizmo", lambda: check_new_ui_gizmo(browser, port))
         if args.quick:
             run_quick(run)
             run_extra_parts(run, args.parts)

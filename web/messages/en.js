@@ -162,4 +162,9 @@ export default {
   "camera.top": "Top",
   "camera.front": "Front",
   "camera.fit": "Fit",
+
+  // Direction gizmo (T-542).
+  "gizmo.title": "Direction",
+  "gizmo.push": "Push in",
+  "gizmo.pull": "Pull out",
 };

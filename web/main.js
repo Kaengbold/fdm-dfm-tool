@@ -7,6 +7,7 @@ import { Stage, cameraBar, thumbnail } from "./viewport/stage.js";
 import { t } from "./i18n.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
+import { openGizmo } from "./viewport/gizmo.js";
 
 try {
   if (localStorage.getItem("fdm-theme") === "dark") document.documentElement.dataset.theme = "dark";
@@ -43,6 +44,10 @@ const services = {
     app.go(last.state.step);
   },
   cameraBar: () => cameraBar(services.stage, { title: t("camera.title"), iso: t("camera.iso"), top: t("camera.top"), front: t("camera.front"), fit: t("camera.fit") }),
+  // Direction gizmo for a load at ``point`` with face ``normal`` (part coordinates). The Loads step (T-543) uses it;
+  // until then it is the dev hook for trying it out.
+  openGizmo: (point, normal, options = {}) => openGizmo(services.stage, { point, normal, ...options,
+    labels: { push: t("gizmo.push"), pull: t("gizmo.pull"), title: t("gizmo.title") } }),
   loadPart: (name, bytes) => loadPart({ name, bytes, store, go: app.go, services, rerender: () => services.rerender() }),
 };
 const app = startShell(document.getElementById("app"), { store, saving, services });
