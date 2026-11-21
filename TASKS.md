@@ -1000,7 +1000,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - The flow cap is also enforced in the optimizer now (`gcode.flow_cap`): undoing a slowdown never needs more plastic per second than the filament melts. The first try failed the check because of this.
     - **Results:** OrcaSlicer fixture: pin 40 spots too hot → 0, 4.7 → 5.7 min, 1,107 lines' speed, 19 parks, all checks pass. A tampered E, a moved path or a speed above the limit is refused. Pyodide: 16 s.
     - **Not done:** vibration-band check (no VFA data yet); `.gcode.3mf` repack (waits for a real-printer test); printing the result (T-477). The "Optimize my G-code directly" button belongs to the new UI (moved to T-478).
-- [ ] **T-482 P2** [TO] Tuning prints the user can do. · files: `tools/` or `core/fdmcore/` (test part), `web/app.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: —
+- [ ] **T-482 P2** [TO] Tuning prints the user can do. · files: `tools/` or `core/fdmcore/` (test part), `web/app.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: Claude (task/T-482-tuning-prints)
   - Do: two printable tests, no lab gear: a **sag test** (pins at falling layer times → the "too hot" limit) and a **snap test** (thin tower at stepped fan speeds, broken by hand → the "too cold" limit). The user enters the result; it is stored with their presets and in the project file, and the confidence changes from "rough" to "tuned".
   - Done when: entering a result changes the window and the confidence label.
 - [ ] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: —
