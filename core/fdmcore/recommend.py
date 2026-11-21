@@ -224,6 +224,16 @@ def bambu(printer: dict) -> bool:
     return str(printer.get("name", "")).startswith("Bambu Lab")
 
 
+def _finding_ids(findings: list[dict], *rules: str) -> list[str]:
+    """Stable finding_ids in ``findings`` whose rule is in ``rules`` (deduplicated, order preserved)."""
+    seen: list[str] = []
+    for f in findings:
+        fid = f.get("finding_id")
+        if f.get("rule") in rules and fid and fid not in seen:
+            seen.append(fid)
+    return seen
+
+
 def recommend_settings(profile: Profile, findings: list[dict], stats: dict | None = None, risk: dict | None = None) -> list[dict]:
     """``risk``: print_risk for this part; left out, it is worked out from the findings alone."""
     rules = {f["rule"] for f in findings}
@@ -238,17 +248,23 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
              "top_shell_layers": str(base["top"]), "bottom_shell_layers": str(base["bottom"])}
     out: list[dict] = []
 
-    def put(key, value, label, reason):
-        out.append({"key": key, "value": str(value), "label": label, "reason": reason, "usual": usual.get(key)})
+    def put(key, value, label, reason, fixes: tuple[str, ...] = ()):
+        ids = _finding_ids(findings, *fixes) if fixes else []
+        out.append({"key": key, "value": str(value), "label": label, "reason": reason, "usual": usual.get(key),
+                    "finding_id": ids[0] if ids else None, "finding_ids": ids})
 
     goal = profile.goal
     # Values that come from the goal alone say so; values this part asked for name its measured fact.
     from_goal = f"From your goal {GOAL_NAMES.get(goal, goal)}; nothing on this part asks for more"
+    lh_fixes = ("fine_detail_rough", "shallow_slope_stairs") if (plan["layer_height"] < base["layer_height"] or "fine_layers" in plan) else ()
     put("layer_height", plan["layer_height"], "Layer height",
-        shape_reasons.get("layer_height", f"From your goal {GOAL_NAMES.get(goal, goal)} for a {profile.nozzle} mm nozzle; nothing on this part asks for finer layers"))
+        shape_reasons.get("layer_height", f"From your goal {GOAL_NAMES.get(goal, goal)} for a {profile.nozzle} mm nozzle; nothing on this part asks for finer layers"),
+        fixes=lh_fixes)
 
     walls, infill = plan["walls"], plan["infill"]
-    put("wall_loops", walls, "Walls", shape_reasons.get("walls", from_goal))
+    weak_walls = shape_reasons.get("walls", "").startswith("Raised to 4 for a weak spot")
+    put("wall_loops", walls, "Walls", shape_reasons.get("walls", from_goal),
+        fixes=("weak_upright_pin", "thin_neck", "single_line_wall") if weak_walls else ())
     put("sparse_infill_density", f"{infill}%", "Infill", shape_reasons.get("infill", from_goal))
     put("sparse_infill_pattern", plan["pattern"], "Infill pattern", PATTERN_REASON[plan["pattern"]])
     put("top_shell_layers", plan["top"], "Top layers", shape_reasons.get("top", from_goal))
@@ -256,29 +272,33 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
 
     overhang = stats.get("support_area_mm2", 0)
     if stats.get("needs_support") or "long_bridge" in rules:
+        sup_fixes = ("long_bridge", "support_marks")
         put("enable_support", 1, "Supports", f"{overhang:,.0f} mm² hang in the air in this orientation" if overhang >= 1
-            else f"Holds up a long bridge: {part_fact(findings, 'long_bridge')}")
-        put("support_type", "tree(auto)", "Support type", "Tree supports use less material and break off easily")
+            else f"Holds up a long bridge: {part_fact(findings, 'long_bridge')}", fixes=sup_fixes)
+        put("support_type", "tree(auto)", "Support type", "Tree supports use less material and break off easily", fixes=sup_fixes)
         # Orca's threshold is measured from the horizontal; ours from vertical.
         put("support_threshold_angle", round(90 - mat["max_overhang_deg"]), "Support threshold",
-            f"{mat['name']} handles overhangs up to about {mat['max_overhang_deg']}° from vertical")
+            f"{mat['name']} handles overhangs up to about {mat['max_overhang_deg']}° from vertical", fixes=sup_fixes)
         if profile.multi_material:
             put("support_interface_pattern", "rectilinear_interlaced", "Support interface",
-                "Dense interface; print it in a material that doesn't bond to the part (e.g. PETG for PLA) for clean undersides")
+                "Dense interface; print it in a material that doesn't bond to the part (e.g. PETG for PLA) for clean undersides",
+                fixes=sup_fixes)
     else:
         put("enable_support", 0, "Supports", f"Only {overhang:,.0f} mm² overhang, little enough to print without" if overhang >= 1
             else "Nothing hangs in the air in this orientation")
 
     risk = risk or print_risk(profile, findings, stats.get("height_mm", 0.0))
     if risk["hold"] == "raft":
+        raft_fixes = ("print_may_fail", "small_bed_contact", "tipping_risk", "warping")
         put("raft_layers", T["print_risk"]["raft_layers"], "Raft",
             "A few layers of plastic under the part hold it down where a brim isn't enough: " + "; ".join(risk["reasons"])
-            + ". It leaves a rough underside: cut it off after printing")
+            + ". It leaves a rough underside: cut it off after printing", fixes=raft_fixes)
         put("brim_type", "no_brim", "Brim", "The raft holds the part instead")
     elif risk["hold"] == "outer_only":
         width = T["warping"]["brim_width_mm"] if "warping" in rules or mat["warp_risk"] == "high" else 5
-        put("brim_type", "outer_only", "Brim", f"Holds the part down: {part_fact(findings, 'small_bed_contact', 'tipping_risk')}")
-        put("brim_width", width, "Brim width", "Wide enough to stop corners lifting")
+        brim_fixes = ("small_bed_contact", "tipping_risk", "warping")
+        put("brim_type", "outer_only", "Brim", f"Holds the part down: {part_fact(findings, 'small_bed_contact', 'tipping_risk')}", fixes=brim_fixes)
+        put("brim_width", width, "Brim width", "Wide enough to stop corners lifting", fixes=brim_fixes)
     elif risk["hold"] == "brim_ears":
         # Only the corners lift: ears at the sharp corners hold them with far less brim to cut off
         # (OrcaSlicer wiki, Brim: Mouse ears). PrusaSlicer has none and gets an outer brim instead (export3mf);
@@ -286,35 +306,41 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         fact = part_fact(findings, "warping") or "the warping simulation"
         if bambu(profile.printer):
             put("brim_type", "outer_only", "Brim", f"Holds the corners down, where warping starts ({fact}). A full brim: "
-                "Bambu Studio has no brim ears setting (you can paint ears there by hand instead)")
+                "Bambu Studio has no brim ears setting (you can paint ears there by hand instead)", fixes=("warping",))
         else:
-            put("brim_type", "brim_ears", "Brim", f"Ears at the corners, where warping starts ({fact}); less to cut off than a full brim")
-        put("brim_width", T["warping"]["brim_width_mm"], "Brim width", "Wide enough to stop corners lifting")
+            put("brim_type", "brim_ears", "Brim", f"Ears at the corners, where warping starts ({fact}); less to cut off than a full brim",
+                fixes=("warping",))
+        put("brim_width", T["warping"]["brim_width_mm"], "Brim width", "Wide enough to stop corners lifting", fixes=("warping",))
     else:
         put("brim_type", "no_brim", "Brim", "Enough bed contact without one")
 
     if stats.get("uneven_wall_share", 0) >= T["shape_settings"]["uneven_wall_share"]:
         put("wall_generator", "arachne", "Wall generator",
             f"About {stats['uneven_wall_share']:.0%} of this part's wall samples, around {stats['uneven_wall_mm']:.2f} mm wide, "
-            f"fall between whole {profile.line_width:.2f} mm lines; Arachne varies line width to fill them")
+            f"fall between whole {profile.line_width:.2f} mm lines; Arachne varies line width to fill them",
+            fixes=("wall_line_mismatch", "too_thin_to_print", "fine_detail_rough", "single_line_wall"))
     elif rules & {"too_thin_to_print", "fine_detail_rough", "single_line_wall"}:
         put("wall_generator", "arachne", "Wall generator", "Arachne varies line width so thin details still print: "
-            + part_fact(findings, "too_thin_to_print", "fine_detail_rough", "single_line_wall"))
+            + part_fact(findings, "too_thin_to_print", "fine_detail_rough", "single_line_wall"),
+            fixes=("too_thin_to_print", "fine_detail_rough", "single_line_wall"))
     # Measured on the user's own prints (My materials): corrects every hole / outline, measured beats the default.
     hole_err, outer_err = mat.get("hole_error_mm"), mat.get("outer_error_mm")
     if hole_err is not None and abs(hole_err) >= T["holes"]["measured_min_mm"]:
         put("xy_hole_compensation", round(-hole_err / 2, 3), "Hole compensation",
-            f"Your prints make holes {abs(hole_err):.2f} mm {'smaller' if hole_err < 0 else 'bigger'} than modelled (you measured it): this corrects them")
+            f"Your prints make holes {abs(hole_err):.2f} mm {'smaller' if hole_err < 0 else 'bigger'} than modelled (you measured it): this corrects them",
+            fixes=("small_hole_undersized", "hole_closes"))
     if outer_err is not None and abs(outer_err) >= T["holes"]["measured_min_mm"]:
         put("xy_contour_compensation", round(-outer_err / 2, 3), "Outer size compensation",
             f"Your prints come out {abs(outer_err):.2f} mm {'bigger' if outer_err > 0 else 'smaller'} outside than modelled (you measured it): this corrects it")
     if "small_hole_undersized" in rules and not any(s["key"] == "xy_hole_compensation" for s in out):
         put("xy_hole_compensation", T["holes"]["xy_hole_compensation_mm"], "Hole compensation",
-            f"Opens up small holes: {part_fact(findings, 'small_hole_undersized')}")
-        put("hole_to_polyhole", 1, "Polyholes", "Prints round holes as polygons with fewer, longer sides: they come out much closer to size (OrcaSlicer only: Bambu Studio and PrusaSlicer ignore it)")
+            f"Opens up small holes: {part_fact(findings, 'small_hole_undersized')}", fixes=("small_hole_undersized",))
+        put("hole_to_polyhole", 1, "Polyholes", "Prints round holes as polygons with fewer, longer sides: they come out much closer to size (OrcaSlicer only: Bambu Studio and PrusaSlicer ignore it)",
+            fixes=("small_hole_undersized",))
     if rules & {"small_layers_cooling", "tall_thin_feature"}:
         put("slow_down_for_layer_cooling", 1, "Slow down small layers",
-            f"Gives small layers time to cool: {part_fact(findings, 'small_layers_cooling', 'tall_thin_feature')}")
+            f"Gives small layers time to cool: {part_fact(findings, 'small_layers_cooling', 'tall_thin_feature')}",
+            fixes=("small_layers_cooling", "tall_thin_feature"))
     # The first layer is squashed onto the bed and bulges out; pulling it in a little keeps bottom
     # edges straight. Most printer profiles ship 0.1-0.2 mm; harmless when the profile already has it.
     if risk["hold"] == "raft":  # the part's first layer lies on the raft, not squashed onto the bed
@@ -322,7 +348,8 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
     else:
         put("elefant_foot_compensation", T["first_layer"]["elephant_foot_compensation_mm"], "Elephant foot compensation",
             "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
-            else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight")
+            else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight",
+            fixes=("elephant_foot", "first_layer_detail"))
     if stats.get("top_flat_mm2", 0) >= T["ironing"]["min_top_area_mm2"] and goal in ("balanced", "strength"):
         put("ironing_type", "topmost", "Ironing", f"The {stats['top_flat_mm2']:,.0f} mm² flat top comes out smooth: the nozzle passes"
             " over it once more with almost no plastic (adds a few minutes)")
@@ -331,7 +358,9 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
             " blends the start and end of each loop instead of leaving a line of blobs (OrcaSlicer / Bambu Studio)")
     if rules & {"gap_fuses", "shrinkage_size_error"}:
         put("precise_outer_wall", 1, "Precise wall", "Keeps the outer wall from bulging outwards, so outside sizes and gaps come"
-            f" out closer to the model ({part_fact(findings, 'gap_fuses', 'shrinkage_size_error')}; OrcaSlicer only, other slicers ignore it)")
+            f" out closer to the model ({part_fact(findings, 'gap_fuses', 'shrinkage_size_error')}; OrcaSlicer only, other slicers ignore it)",
+            fixes=("gap_fuses", "shrinkage_size_error"))
     if rules & {"bridge_sag", "long_bridge", "sideways_hole_oval"}:
-        put("bridge_speed", 25, "Bridge speed", f"Slower bridges sag less: {part_fact(findings, 'long_bridge', 'bridge_sag', 'sideways_hole_oval')}")
+        put("bridge_speed", 25, "Bridge speed", f"Slower bridges sag less: {part_fact(findings, 'long_bridge', 'bridge_sag', 'sideways_hole_oval')}",
+            fixes=("long_bridge", "bridge_sag", "sideways_hole_oval"))
     return out
