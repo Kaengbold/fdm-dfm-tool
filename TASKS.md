@@ -1028,9 +1028,10 @@ Rules for every [UI] task:
 
 ### Phase 2: engine foundations (parallel to Phase 1)
 
-- [~] **T-520 P1** [UI] Material environment data, 1.0 nozzle, layer height, layer bonding. · plan: §6, §10.3 (point 4) · files: `core/fdmcore/data/presets.yaml`, `core/fdmcore/profile.py`, `core/fdmcore/strength.py`, tests · owner: Gemini Neon (`task/T-520-materials`), review: Claude
+- [x] **T-520 P1** [UI] Material environment data, 1.0 nozzle, layer height, layer bonding. · plan: §6, §10.3 (point 4) · files: `core/fdmcore/data/presets.yaml`, `core/fdmcore/profile.py`, `core/fdmcore/strength.py`, tests · owner: Gemini Neon (`task/T-520-materials`), review: Claude
   - Do: sourced material fields `water`, `food_notes`, `abrasion`, `oil_fuel`, `solvent`, `skin` (unknown stays unknown); a `1.0` nozzle preset; `Profile` accepts a layer-height override; a sourced, capped `layer_bond_factor(layer_height, nozzle)` (bonding rises to ~0.5–0.6 × nozzle, falls above ~0.7 ×; no bonus without a source). Sources go in the PR description.
   - Done when: tests cover the new fields and the curve; `node tools/pyodide_check.mjs` passes.
+  - Outcome: Added sourced environment fields (null where unverified) and `1.0` nozzle preset to `presets.yaml`, `layer_height` override + custom-field validation to `Profile`, capped `layer_bond_factor` wired into `strength.material_for`, and `core/tests/test_materials_and_bonding.py`; affected/consumer pytest suites and `node tools/pyodide_check.mjs` pass.
 - [ ] **T-521 P1** [UI] Regions, feature edges and inside corners for 3D picking. · plan: §7 (on entering), §8 · files: `core/fdmcore/regions.py`, `core/fdmcore/features.py`, `core/fdmcore/api.py`, `core/fdmcore/mcp_server.py`, tests · owner: —
   - Do: one call returning region id per triangle (area, normal, kind flat/cylinder/hole/curved, hole Ø), feature-edge polylines and inside corners (`concave_edges`), compact for the worker. Edges/corners map to `strength.py` as `points` + radius bands; test that a held edge actually constrains the solve.
   - Done when: STEP and STL fixtures give sensible regions/edges; pyodide check passes.

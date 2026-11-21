@@ -25,6 +25,7 @@ Results are indications — "fine / borderline / likely to break" and why.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import numpy as np
 
@@ -43,6 +44,30 @@ SINGULAR_RINGS = 2
 NEAR_SUPPORT_VOXELS = 4  # weakest spot this close to a held face: say the clamp may spread the load
 E_Z_RATIO = 0.85  # layer-direction stiffness vs. in-plane (stiffness drops far less than strength)
 INFILL_EXPONENT = 1.5  # Gibson–Ashby-style scaling for stiffness and strength of sparse infill
+# Interlayer bonding factor vs. layer_height / nozzle_diameter (r), relative to standard 0.5 × nozzle = 1.0.
+# Capped at 1.0 (no bonus beyond standard datasheet calibration without material-specific test data):
+# - Very thin layers (r < 0.5) carry less thermal mass and add more layer interfaces, giving slightly
+#   lower or equal upright strength (Chacón et al. 2017, doi:10.1016/j.matdes.2017.03.065; CNC Kitchen 2019,
+#   https://www.cnckitchen.com/blog/the-influence-of-layer-height-on-the-strength-of-fdm-3d-prints;
+#   Shokrollahi et al. 2026, doi:10.1108/RPJ-01-2026-0029).
+# - Optimal window around 0.50–0.60 × nozzle stays capped at 1.0.
+# - Above ~0.70 × nozzle, beads round out and wetted bond width shrinks sharply:
+#   Kuznetsov et al. 2018 (doi:10.3390/polym10030313, Table 1 normalized to h/D = 0.50:
+#   0.58 -> 0.99, 0.67 -> 0.78, 0.75 -> 0.51–0.76, 0.85 -> 0.40–0.50, 1.00 -> 0.34–0.36)
+#   and CNC Kitchen 2019 (0.75 -> ~0.50).
+LAYER_BOND_CAP = 1.0
+LAYER_BOND_CURVE: tuple[tuple[float, float], ...] = (
+    (0.15, 0.90),
+    (0.25, 0.94),
+    (0.40, 0.98),
+    (0.50, 1.00),
+    (0.60, 1.00),
+    (0.70, 0.90),
+    (0.75, 0.65),
+    (0.85, 0.45),
+    (1.00, 0.35),
+    (1.20, 0.25),
+)
 # Resting faces and screw holes: springs along the surface normal that only push (released where the
 # part pulls away, re-solved), much stiffer than the part next to them, plus a little friction sideways
 # (which also keeps a part that only rests from sliding away in the solve).
@@ -354,14 +379,31 @@ def _where(load: dict) -> str:
     return f"The spot at {np.round(spots[0], 1).tolist()}" if len(spots) == 1 else f"The painted area at {np.round(spots.mean(axis=0), 1).tolist()}"
 
 
+def layer_bond_factor(layer_height: float, nozzle: float | str) -> float:
+    """Interlayer bond multiplier vs. standard 0.5 × nozzle layer height (``LAYER_BOND_CURVE``).
+
+    Rises slightly from very thin layers to the 0.5–0.6 × nozzle window, stays capped at
+    ``LAYER_BOND_CAP`` (1.0, no unsupported bonus), and drops sharply above ~0.7 × nozzle
+    where rounded beads lose contact width (Kuznetsov et al. 2018; CNC Kitchen 2019).
+    """
+    if isinstance(layer_height, bool) or isinstance(nozzle, bool):
+        raise ValueError("layer_height and nozzle must be positive numbers")
+    lh, d = float(layer_height), float(nozzle)
+    if not (math.isfinite(lh) and math.isfinite(d) and lh > 0 and d > 0):
+        raise ValueError(f"layer_height and nozzle must be positive numbers, got {layer_height!r}, {nozzle!r}")
+    xs, ks = zip(*LAYER_BOND_CURVE)
+    return float(min(LAYER_BOND_CAP, float(np.interp(lh / d, xs, ks))))
+
+
 def material_for(profile: Profile) -> Material:
     m = profile.material
     k = heat_factor(profile)
+    bond = layer_bond_factor(profile.layer_height, profile.nozzle)
     return Material(
         e_xy=m["modulus_xy_mpa"] * k,
         e_z=m["modulus_xy_mpa"] * E_Z_RATIO * k,
         strength_xy=m["tensile_xy_mpa"] * k,
-        strength_z=m["tensile_xy_mpa"] * profile.z_strength_factor * k,
+        strength_z=m["tensile_xy_mpa"] * profile.z_strength_factor * bond * k,
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import math
 import re
 from pathlib import Path
 
@@ -101,6 +102,12 @@ MATERIAL_FIELDS = {
     "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
     "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
     "uv_resistance": (("good", "fair", "poor"), None, None),
+    "water": (("good", "fair", "poor", None), None, None),
+    "food_notes": ("note", None, 240),  # plain-language food-contact note, or None if unknown
+    "abrasion": (("good", "fair", "poor", None), None, None),
+    "oil_fuel": (("good", "fair", "poor", None), None, None),
+    "solvent": (("good", "fair", "poor", None), None, None),
+    "skin": (("good", "fair", "poor", None), None, None),
     "fit_gap_mm": ("fits", 0.0, 2.0),  # measured with the fit test print: {"press", "snug", "sliding", "loose"}
     "fibre": (("none", "carbon", "glass"), None, None),  # chopped fibre filled (-CF / -GF)
     "hole_error_mm": (float, -2, 2),  # measured − modelled diameter of a printed hole (negative: holes come out small)
@@ -140,9 +147,12 @@ def _custom_entry(kind: str, key: str, spec: dict, fields: dict, base_table: dic
             value = {k: float(v) for k, v in dict(value).items() if k in FITS}
             if not all(lo <= v <= hi for v in value.values()):
                 raise ValueError(f"{key}.{field} gaps must be between {lo} and {hi} mm")
+        elif kind_ == "note":
+            value = None if value is None else str(value)[:hi]
         elif isinstance(kind_, tuple):
             if value not in kind_:
-                raise ValueError(f"{key}.{field} must be one of {', '.join(kind_)}")
+                allowed = ", ".join("null" if v is None else str(v) for v in kind_)
+                raise ValueError(f"{key}.{field} must be one of {allowed}")
         elif kind_ is bool:
             value = bool(value)
         elif kind_ is str:
@@ -189,6 +199,20 @@ class Profile:
     goal: str = "balanced"  # what orientation and settings optimise for: see GOALS
     use_temp_c: float | None = None  # hottest the part gets in use (sun, car, near a heater); None = room
     constant_load: bool = False  # the load stays on (hangs permanently): plastic slowly creeps
+    layer_height: float | None = None  # override (mm); None uses the nozzle preset's default layer_height
+
+    def __post_init__(self) -> None:
+        if self.layer_height is None:
+            nozzle = presets()["nozzles"].get(self.nozzle)
+            if nozzle is not None:
+                object.__setattr__(self, "layer_height", float(nozzle["layer_height"]))
+            return
+        if isinstance(self.layer_height, bool) or not isinstance(self.layer_height, (int, float)):
+            raise ValueError(f"layer_height must be a positive number, got {self.layer_height!r}")
+        lh = float(self.layer_height)
+        if not math.isfinite(lh) or lh <= 0:
+            raise ValueError(f"layer_height must be a positive number, got {self.layer_height!r}")
+        object.__setattr__(self, "layer_height", lh)
 
     @property
     def printer(self) -> dict:
@@ -201,10 +225,6 @@ class Profile:
     @property
     def line_width(self) -> float:
         return presets()["nozzles"][self.nozzle]["line_width"]
-
-    @property
-    def layer_height(self) -> float:
-        return presets()["nozzles"][self.nozzle]["layer_height"]
 
     @property
     def enclosure(self) -> str:
@@ -222,6 +242,13 @@ class Profile:
     @classmethod
     def from_dict(cls, d: dict | None) -> "Profile":
         d = d or {}
+        raw_lh = d.get("layer_height")
+        if raw_lh in (None, ""):
+            lh = None
+        elif isinstance(raw_lh, bool):
+            raise ValueError(f"layer_height must be a positive number, got {raw_lh!r}")
+        else:
+            lh = float(raw_lh)
         p = cls(
             printer_id=d.get("printer", cls.printer_id),
             material_id=d.get("material", cls.material_id),
@@ -230,6 +257,7 @@ class Profile:
             goal=d.get("goal", "balanced"),
             use_temp_c=None if d.get("use_temp_c") in (None, "") else float(d["use_temp_c"]),
             constant_load=bool(d.get("constant_load", False)),
+            layer_height=lh,
         )
         if p.goal not in GOALS:
             raise ValueError(f"Unknown goal: {p.goal} (use one of {', '.join(GOALS)})")
