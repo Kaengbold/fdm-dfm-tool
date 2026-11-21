@@ -476,6 +476,16 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
                 material=c["material"], tg_c=c["tg"], seconds=time.time() - started, steps=steps)
 
 
+def bond_strength(bond: np.ndarray, most: float | None = None) -> np.ndarray:
+    """How strong the joint between layers is against a usual print, from its healing (``bond``): strength
+    grows with healing (Wool & O'Connor), and the material's layer strength was measured on prints that
+    healed about ``usual_bond``. Never above ``max_gain`` (or ``most``: bulk plastic), nor below
+    ``min_share``; a node without a joint below (first layer) counts as usual."""
+    cfg = load_data("thermal")["strength"]
+    top = float(cfg["max_gain"]) if most is None else min(float(cfg["max_gain"]), most)
+    return np.clip(np.nan_to_num(np.asarray(bond, float) / float(cfg["usual_bond"]), nan=1.0), float(cfg["min_share"]), top)
+
+
 INTENTS = ("cosmetic", "dimension_critical", "load_bearing")
 
 
