@@ -122,7 +122,7 @@ export function createStore(initial = initialState()) {
 
 /** Autosave to IndexedDB after changes settle. Fails quietly where storage is blocked (private windows, previews). */
 export function autosave(store, { name = "fdm-ui-autosave", delay = 800, indexedDB: idb = globalThis.indexedDB } = {}) {
-  if (!idb) return { flush: async () => false, restore: async () => null };
+  if (!idb) return { flush: async () => false, restore: async () => null, putExtra: async () => false, getExtra: async () => null };
   const open = () => new Promise((resolve, reject) => {
     let req;
     try { req = idb.open(name, 1); } catch (e) { reject(e); return; }
@@ -130,12 +130,12 @@ export function autosave(store, { name = "fdm-ui-autosave", delay = 800, indexed
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
-  const put = async () => {
+  const write = async (key, value) => {
     try {
       const db = await open();
       await new Promise((resolve, reject) => {
         const tx = db.transaction("state", "readwrite");
-        tx.objectStore("state").put({ savedAt: Date.now(), state: store.toJSON() }, "current");
+        tx.objectStore("state").put(value, key);
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
       });
@@ -145,23 +145,28 @@ export function autosave(store, { name = "fdm-ui-autosave", delay = 800, indexed
       return false;
     }
   };
+  const read = async (key) => {
+    try {
+      const db = await open();
+      const value = await new Promise((resolve, reject) => {
+        const req = db.transaction("state").objectStore("state").get(key);
+        req.onsuccess = () => resolve(req.result ?? null);
+        req.onerror = () => reject(req.error);
+      });
+      db.close();
+      return value;
+    } catch {
+      return null;
+    }
+  };
+  const put = () => write("current", { savedAt: Date.now(), state: store.toJSON() });
   let timer = null;
   store.subscribe(() => { clearTimeout(timer); timer = setTimeout(put, delay); });
   return {
     flush: () => { clearTimeout(timer); return put(); },
-    async restore() {
-      try {
-        const db = await open();
-        const saved = await new Promise((resolve, reject) => {
-          const req = db.transaction("state").objectStore("state").get("current");
-          req.onsuccess = () => resolve(req.result ?? null);
-          req.onerror = () => reject(req.error);
-        });
-        db.close();
-        return saved;
-      } catch {
-        return null;
-      }
-    },
+    restore: () => read("current"),
+    /** Big things that aren't inputs (the part's file bytes, a thumbnail) under their own key. */
+    putExtra: (key, value) => write(key, value),
+    getExtra: (key) => read(key),
   };
 }

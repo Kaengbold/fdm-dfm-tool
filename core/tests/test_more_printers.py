@@ -82,7 +82,8 @@ def test_every_key_used_by_the_page_exists():
     table = (web / "messages" / "en.js").read_text(encoding="utf-8")
     keys = set(re.findall(r'^  "([\w.]+)":', table, re.M))
     used = set(re.findall(r'data-i18n(?:-placeholder|-title)?="([\w.]+)"', (web / "index.html").read_text(encoding="utf-8")))
-    for script in ["app.js", "mypresets.js", "shell.js", *(f"ui/{p.name}" for p in (web / "ui").glob("*.js"))]:
+    for script in ["app.js", "mypresets.js", "shell.js", "main.js", *(f"ui/{p.name}" for p in (web / "ui").glob("*.js")),
+                   *(f"steps/{p.name}" for p in (web / "steps").glob("*.js"))]:
         src = (web / script).read_text(encoding="utf-8")
         used |= set(re.findall(r'\bt\("([\w.]+)"', src)) | set(re.findall(r'\bmsg\("([\w.]+)"', src))
     assert used and not used - keys, used - keys

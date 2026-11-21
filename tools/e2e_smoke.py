@@ -417,6 +417,69 @@ def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
     return f"{saved} saved; reopened {first} and {second}; Delete all emptied the list"
 
 
+def _scaled_stl(path: Path, factor: float) -> bytes:
+    """A binary STL scaled by ``factor`` (for the wrong-unit check)."""
+    import struct
+
+    data = bytearray(path.read_bytes())
+    n = struct.unpack_from("<I", data, 80)[0]
+    for i in range(n):
+        off = 84 + i * 50 + 12
+        coords = struct.unpack_from("<9f", data, off)
+        struct.pack_into("<9f", data, off, *(c * factor for c in coords))
+    return bytes(data)
+
+
+def check_new_ui(browser, port: int) -> str:
+    """The new UI (web/new.html, T-531): Start → Part → a sample lands on Setup with the part shown; a STEP file
+    does too; nothing but the format line and Sample parts sits under the drop zone."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        assert page.locator(".big-card.is-soon").get_attribute("aria-disabled") == "true"
+        assert page.locator(".big-card.is-soon").evaluate("e => e.tabIndex") < 0, "Coming soon card is a tab stop"
+        page.get_by_role("button", name="Optimize your print").click()
+        assert page.locator("#step-title").inner_text() == "Part"
+        texts = page.locator(".drop-wrap").inner_text().split("\n")
+        assert [x for x in texts if x.strip()] == ["Drop your part here", "Choose file", "STL, 3MF or STEP", "Sample parts"], texts
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Wall hook").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        assert page.evaluate("() => fdmUI.store.get().part.name") == "hook.stl"
+        assert page.evaluate("() => fdmUI.services.stage.part !== null"), "part not shown on the stage"
+        assert page.locator(".stage-camera").count() == 1
+        page.wait_for_function("() => Boolean(fdmUI.store.get().catalog?.printers)", timeout=60_000)
+        # A STEP file through the part pill (replace part) → Part → file input.
+        page.locator(".part-pill").click()
+        page.set_input_files(".drop-wrap input[type=file]", str(ROOT / "tools" / "fixtures" / "l_bracket.step"))
+        page.wait_for_function("() => fdmUI.store.get().part?.name === 'l_bracket.step' && document.getElementById('step-title')?.textContent === 'Setup'",
+                               timeout=240_000)
+        part = page.evaluate("() => fdmUI.store.get().part")
+        assert part["kind"] == "step" and round(part["size"][0]) == 60, part
+        # A broken file: a plain reason and "Try another file", the flow stays on Part.
+        page.locator(".part-pill").click()
+        page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "broken.stl", "mimeType": "model/stl", "buffer": b"not a mesh at all"}])
+        page.wait_for_selector(".drop-error", timeout=120_000)
+        assert page.get_by_role("button", name="Try another file").is_visible()
+        assert page.locator("#step-title").inner_text() == "Part"
+        # A part drawn in inches (25.4× too small): the unit bar asks, scaling fixes the size, then on to Setup.
+        tiny = _scaled_stl(ROOT / "web" / "samples" / "l_bracket.stl", 1 / 25.4)
+        page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "inch_bracket.stl", "mimeType": "model/stl", "buffer": tiny}])
+        page.wait_for_selector(".unit-bar", timeout=120_000)
+        page.locator(".unit-bar button").first.click()
+        page.wait_for_function("() => fdmUI.store.get().part?.name === 'inch_bracket.stl' && document.getElementById('step-title')?.textContent === 'Setup'",
+                               timeout=120_000)
+        scaled = page.evaluate("() => fdmUI.store.get().part.size")
+        assert round(scaled[0]) == 60, scaled
+        assert not errors, errors
+        return f"sample and STEP land on Setup; STEP size {[round(v) for v in part['size']]} mm; broken file stays on Part; inch part scaled to {round(scaled[0])} mm"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -461,6 +524,7 @@ def _run_suite(port: int, args) -> Run:
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
+        run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
         if args.quick:
             run_quick(run)
             run_extra_parts(run, args.parts)

@@ -14,13 +14,22 @@
 .panel-head h2:focus, .panel-head h2:focus-visible { outline: none; box-shadow: none; }  /* a focus target for keyboard users, not a control */
 .panel-foot > span:empty { flex: 1; }
 
+/* The stage: the 3D canvas fills it, steps draw in the overlay layer above it. */
+.stage { position: relative; }
+.stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage-ui { position: absolute; inset: 0; pointer-events: none; }
+.stage-ui > * { pointer-events: auto; }
+
 /* Part: the stage itself holds the step (drop zone, T-531); the head and footer sit on it. */
-.stage--part { display: grid; grid-template-rows: auto minmax(0, 1fr) var(--panel-foot-h); }
+.stage--part .stage-ui { display: grid; grid-template-rows: auto minmax(0, 1fr) var(--panel-foot-h); }
 .stage--part .panel-head { border-bottom: 0; }
 .stage--part .panel-foot { border-top: 0; }
+.screen-body { height: 100%; overflow: auto; }
 
 /* Options: the comparison takes the full width under the 3D strip. */
 .app-screen[data-layout="options"] > .stage { grid-column: 2; grid-row: 1; }
 .app-screen[data-layout="options"] > .compare { grid-column: 2; grid-row: 2; border-left: 0; border-top: 1px solid var(--line); }
 
 .start .row { display: flex; gap: var(--s-3); }
+.part-pill[hidden] { display: none; }
+.screen-body h1:focus, .screen-body h1:focus-visible { outline: none; box-shadow: none; }  /* focus target, not a control */
