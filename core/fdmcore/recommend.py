@@ -217,6 +217,13 @@ def print_risk(profile: Profile, findings: list[dict], height_mm: float, warp_ve
     return {"level": "low" if score == 0 else "medium" if score == 1 else "high", "score": score, "reasons": reasons, "hold": hold}
 
 
+def bambu(printer: dict) -> bool:
+    """A Bambu Lab printer, so most likely sliced in Bambu Studio. Its brim ears are a painting tool, not a
+    brim type: given ``brim_ears`` in a 3MF it drops the object's brim settings and prints no brim at all
+    (Bambu Studio 1.8, found by tools/slicer_check.py, T-493). Those printers get an outer brim instead."""
+    return str(printer.get("name", "")).startswith("Bambu Lab")
+
+
 def _finding_ids(findings: list[dict], *rules: str) -> list[str]:
     """Stable finding_ids in ``findings`` whose rule is in ``rules`` (deduplicated, order preserved)."""
     seen: list[str] = []
@@ -294,10 +301,15 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
         put("brim_width", width, "Brim width", "Wide enough to stop corners lifting", fixes=brim_fixes)
     elif risk["hold"] == "brim_ears":
         # Only the corners lift: ears at the sharp corners hold them with far less brim to cut off
-        # (OrcaSlicer wiki, Brim: Mouse ears). PrusaSlicer has none and gets an outer brim instead.
+        # (OrcaSlicer wiki, Brim: Mouse ears). PrusaSlicer has none and gets an outer brim instead (export3mf);
+        # so does Bambu Studio, where ears are painted by hand (see ``bambu``).
         fact = part_fact(findings, "warping") or "the warping simulation"
-        put("brim_type", "brim_ears", "Brim", f"Ears at the corners, where warping starts ({fact}); less to cut off than a full brim",
-            fixes=("warping",))
+        if bambu(profile.printer):
+            put("brim_type", "outer_only", "Brim", f"Holds the corners down, where warping starts ({fact}). A full brim: "
+                "Bambu Studio has no brim ears setting (you can paint ears there by hand instead)", fixes=("warping",))
+        else:
+            put("brim_type", "brim_ears", "Brim", f"Ears at the corners, where warping starts ({fact}); less to cut off than a full brim",
+                fixes=("warping",))
         put("brim_width", T["warping"]["brim_width_mm"], "Brim width", "Wide enough to stop corners lifting", fixes=("warping",))
     else:
         put("brim_type", "no_brim", "Brim", "Enough bed contact without one")

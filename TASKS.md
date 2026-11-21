@@ -815,10 +815,11 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
   - Done when: a timed-out screenshot is reported with its step and the remaining checks still run.
   - Outcome: `Run.step` catches a failed screenshot, counts it as the failure "<step> (screenshot)" and goes on to the next step and the final summary; capture timeout 90 s instead of 30 s. Checked with a stub page whose screenshot always times out: both steps ran, both screenshot failures reported. Full browser suite not run (no `web/` change).
 
-- [ ] **T-493 P1** [G] Bambu Studio prints no brim where we suggest brim ears. · files: `core/fdmcore/recommend.py` (brim choice), `core/fdmcore/export3mf.py` · owner: Claude (task/T-493-bambu-brim) · user chose (2026-11-21): ears unless the printer is a Bambu Lab one · found by `tools/slicer_check.py` (T-151 leftover, 2026-11-21)
+- [x] **T-493 P1** [G] Bambu Studio prints no brim where we suggest brim ears. · files: `core/fdmcore/recommend.py` (brim choice), `core/fdmcore/export3mf.py` · owner: Claude (task/T-493-bambu-brim) · user chose (2026-11-21): ears unless the printer is a Bambu Lab one · found by `tools/slicer_check.py` (T-151 leftover, 2026-11-21)
   - Seen: the 3MF for OrcaSlicer and Bambu Studio is the same file. For a part whose corners lift we write `brim_type: brim_ears`. OrcaSlicer prints ears (1,228 mm of brim against 3,671 for a full one); Bambu Studio 1.8.2 doesn't know the value, drops the object's brim settings and prints **no brim at all** (its ears are a painting tool since 1.10, with brim type "Painted", not a brim type).
   - Decide (user): an outer brim in the shared file (safe everywhere, more to cut off in OrcaSlicer), or a separate choice "Bambu Studio" in Download that writes `outer_only`, or ears only when the printer isn't a Bambu Lab one.
   - Done when: slicer_check shows a brim in Bambu Studio for a part that gets brim ears in OrcaSlicer.
+  - Outcome: as the user chose, ears unless the printer is a Bambu Lab one. `recommend.bambu(printer)`: those printers get an outer brim in the advice (with the reason: Bambu Studio has no brim ears setting, ears can be painted there by hand). `api.export` also turns `brim_ears` from elsewhere (a finding's fix) into `outer_only` for them. slicer_check exports per slicer with a matching printer: OrcaSlicer ears 1,228 mm against a 3,671 mm full brim; Bambu Studio now prints a 4,060 mm brim (was none).
 
 ## Thermal optimizer (2026-11-18, tag [TO])
 
