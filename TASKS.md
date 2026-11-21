@@ -919,7 +919,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - New `api.importance` / MCP `spot_importance`: per-cube weights, reasons and the important `areas` in plain words.
     - Checks: on the L-bracket pushed at the top of its upright, the upright's root weighs most (0.92); on the feature test part with no loads, the roots of the Ø3 pin and the thin slot walls come first. A sideways hole's side walls aren't taken for ribs.
     - Not done here: putting the fine heat detail only around important spots on big parts (T-583).
-- [ ] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: —
+- [ ] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: Claude (task/T-583-focus-detail)
   - Do: on big parts, run the heat model's fine cells (1 mm, more layers in detail) only around the spots that weigh most (T-475 `importance`) and around hot spots, with the coarse cells elsewhere, so a big part gets the fine answer where it counts at the quick tier's cost.
   - Done when: on a big part with a pin, the pin's covering temperature matches the all-fine run within 5 °C, at no more than twice the quick tier's time.
 - [x] **T-476 P2** [TO] Heat result back into the strength check. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` (`strength_z`), `core/fdmcore/api.py` · owner: Claude (task/T-476-heat-into-strength)
@@ -1187,7 +1187,7 @@ Rules for every [UI] task:
 - [ ] **T-552 P2** [UI] Partial optimizer results: Stop & show best so far, time budget. · plan: §10.1, §1.7 · files: `core/fdmcore/optimizer.py`, `core/fdmcore/api.py`, `web/worker.js`, `web/steps/analyse.js` · owner: —
   - Do: the worker can't answer a second call while optimize runs, so stream the best valid options so far with the progress messages (e.g. `progress.report(..., partial=…)` posted by the worker); Stop keeps the latest partial result and cancels; a time budget ends the search early with "Search ended early" + Continue (never "impossible").
   - Done when: stopping a long Extended run shows its best options so far; a budgeted run says it ended early.
-- [ ] **T-551 P1** [UI] Options step. · plan: §11, §10.2 (infeasible), §16.2 · files: `web/steps/options.js` · owner: —
+- [~] **T-551 P1** [UI] Options step. · plan: §11, §10.2 (infeasible), §16.2 · files: `web/steps/options.js` · owner: Claude (`task/T-551-options`)
   - Do: full-width mode with a 3D strip on top; 2–4 aligned columns (pros/cons at the top, the rows from §11); hover pin + click-to-edit; "Your choices" bar with chips, conflicts, Keep all; Re-optimize with my choices; infeasible banner with ways out; a below-target option can be used/exported after a clear warning.
   - Done when: e2e pins PLA, re-optimizes, and every new column uses PLA.
 
