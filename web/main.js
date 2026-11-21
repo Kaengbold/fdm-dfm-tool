@@ -11,6 +11,7 @@ import { Picker } from "./viewport/picker.js";
 import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
+import "./steps/holds.js";
 
 try {
   if (localStorage.getItem("fdm-theme") === "dark") document.documentElement.dataset.theme = "dark";

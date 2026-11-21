@@ -528,7 +528,13 @@ def check_new_ui_picker(browser, port: int) -> str:
         # Big part: the pick reads one pixel from the GPU, whatever the triangle count.
         perf = page.evaluate("""async () => {
           const THREE = await import('three');
-          const g = new THREE.IcosahedronGeometry(40, 160).toNonIndexed();
+          const gl0 = fdmUI.services.stage.renderer.getContext();
+          const dbg = gl0.getExtension('WEBGL_debug_renderer_info');
+          const gpu0 = String(dbg ? gl0.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl0.getParameter(gl0.RENDERER)).toLowerCase();
+          // 500k triangles only on a real GPU (that's what is timed); a software renderer gets ~50k, enough to check hits
+          // without slowing the browser for the checks after this one.
+          const soft = ['swiftshader', 'llvmpipe', 'software'].some((k) => gpu0.includes(k));
+          const g = new THREE.IcosahedronGeometry(40, soft ? 50 : 160).toNonIndexed();
           const tris = new Float32Array(g.attributes.position.array), n = tris.length / 9;
           fdmUI.services.stage.showPart(tris);
           const fr = new Uint32Array(n).map((_, i) => i % 64);
@@ -551,6 +557,62 @@ def check_new_ui_picker(browser, port: int) -> str:
         assert not errors, errors
         where = "software renderer, not timed" if software else "GPU"
         return f"{face}; {corner}; keyboard picked a hole; {perf['n']} triangles: {perf['ms']:.1f} ms per pick ({where})"
+    finally:
+        page.close()
+
+
+def check_new_ui_holds(browser, port: int) -> str:
+    """The new UI's Holds step (T-541): click a face → radial menu → hold; click the inside corner → hold the corner;
+    the holds map to the strength engine's format; "No loads" warns for Balanced and switching to Fast jumps on."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="L-bracket").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        page.evaluate("() => fdmUI.go('holds')")
+        page.wait_for_function("() => fdmUI.services.picker.enabled && fdmUI.services.picker.data", timeout=120_000)
+        assert page.get_by_role("button", name="Next").is_disabled(), "Next without a hold"
+        box = page.locator(".stage-canvas").bounding_box()
+        x, y = box["x"] + box["width"] * 0.55, box["y"] + box["height"] * 0.62
+        page.mouse.move(x, y)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'face'")
+        page.mouse.click(x, y)
+        page.wait_for_selector(".ui-radial", state="attached")
+        page.get_by_role("menuitem", name="Hold this face").click()
+        # The inside corner: 3 px off its projected middle, then click.
+        cx, cy = page.evaluate("""() => {
+          const p = fdmUI.services.picker, line = p.data.edges.find((l) => l.kind === 'corner');
+          const c = p.toClient(line.meta.midpoint);
+          return [c.x + 3, c.y];
+        }""")
+        page.mouse.move(cx, cy)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'corner'", timeout=5_000)
+        page.mouse.click(cx, cy)
+        page.wait_for_selector(".ui-radial", state="attached")
+        page.get_by_role("menuitem", name="Hold inside corner").click()
+        holds = page.evaluate("() => fdmUI.store.get().holds.map((h) => [h.kind, h.type])")
+        assert holds == [["face", "clamped"], ["corner", "clamped"]], holds
+        assert page.locator(".hold-marker").count() == 2
+        assert page.get_by_role("button", name="Next").is_enabled()
+        loads = page.evaluate("""async () => { const m = await import('./steps/holds.js');
+          return fdmUI.store.get().holds.map(m.holdLoad); }""")
+        assert loads[0]["kind"] == "fixed" and "region" in loads[0] and loads[1]["edge_kind"] == "concave", loads
+        # Undo removes the last hold.
+        page.keyboard.press("Control+z")
+        assert page.evaluate("() => fdmUI.store.get().holds.length") == 1
+        # "No loads" with Balanced asks first; Switch to Fast skips to Analyse.
+        page.get_by_role("button", name="No loads, skip strength").click()
+        assert "Balanced needs loads" in page.locator("dialog.ui-modal").inner_text()
+        page.get_by_role("button", name="Switch to Fast").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Analyse'")
+        assert page.evaluate("() => [fdmUI.store.get().goal, fdmUI.store.get().noLoads]") == ["fast", True]
+        assert not errors, errors
+        return "face and inside-corner holds with markers; engine format ok; undo; Balanced warns, Fast skips to Analyse"
     finally:
         page.close()
 
@@ -601,6 +663,7 @@ def _run_suite(port: int, args) -> Run:
         run.step("engine boots", run.booted)
         run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
         run.step("new UI: hover picker", lambda: check_new_ui_picker(browser, port))
+        run.step("new UI: holds", lambda: check_new_ui_holds(browser, port))
         if args.quick:
             run_quick(run)
             run_extra_parts(run, args.parts)
