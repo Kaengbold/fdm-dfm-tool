@@ -1964,21 +1964,10 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     from .importance import REASONS
     from .thermal import DELAYS_S, window
 
-    s = _require()
     p = Profile.from_dict(profile)
-    if s.gcode is None:
-        raise ValueError("Load the sliced G-code first (heat model)")
-    if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
-        raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
-    tp = s.gcode["toolpath"]
+    tp = _toolpath_for(up, "heat model")
     h, tm = _heat(p, fine)
-    pts = _gcode_to_oriented(s.gcode["rot"])(np.column_stack([h.xy, h.z]))
-    masks = _intent_masks(pts, intents, h.cell_mm)
-    imp = _importance_map(up, p, loads)
-    rot, base = _orientation(up, p)
-    spread = np.array([(dx, dy, 0.0) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]) * h.cell_mm / 3  # across each cell
-    weight, reason = imp.at((pts + base) @ rot, spread @ rot)
-    reason = np.where(masks.get("load_bearing", False), REASONS.index("tag"), reason)
+    pts, masks, weight, reason, imp = _spot_marks(h, up, p, intents, loads)
     w = window(h, p, masks, weight)
     state = np.select([w["too_hot"], w["needless"], w["too_cold"]], [1, 3, 2], 0)
     covered = np.isfinite(h.cover_c)
@@ -1998,6 +1987,91 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
         "reasons": list(REASONS), "guessed": imp.guessed,
         "findings": _heat_findings(tp, h, w, pts, p, masks.get("load_bearing"), reason, imp.guessed),
     }
+
+
+def _toolpath_for(up, what: str):
+    """The loaded G-code's toolpath, if it was sliced for build direction ``up``."""
+    s = _require()
+    if s.gcode is None:
+        raise ValueError(f"Load the sliced G-code first ({what})")
+    if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
+        raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
+    return s.gcode["toolpath"]
+
+
+def _spot_marks(h, up, p: Profile, intents: list[dict] | None, loads: list[dict] | None):
+    """For each heat node: its point in the oriented part's frame, the design-intent masks, its importance
+    weight and reason (a heat cell takes its most important plastic), and the importance map itself."""
+    from .importance import REASONS
+
+    pts = _gcode_to_oriented(_require().gcode["rot"])(np.column_stack([h.xy, h.z]))
+    masks = _intent_masks(pts, intents, h.cell_mm)
+    imp = _importance_map(up, p, loads)
+    rot, base = _orientation(up, p)
+    spread = np.array([(dx, dy, 0.0) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]) * h.cell_mm / 3  # across each cell
+    weight, reason = imp.at((pts + base) @ rot, spread @ rot)
+    reason = np.where(masks.get("load_bearing", False), REASONS.index("tag"), reason)
+    return pts, masks, weight, reason, imp
+
+
+def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None = None, intents: list[dict] | None = None,
+                     fine: bool = False) -> dict:
+    """A cooling plan for the loaded G-code (thermal_opt.py): fan ahead of time, slower layers or short park
+    moves where spots stay too hot, and the slicer's layer-time slowdown undone where it only made the layers
+    too cold to bond (at most ``max_speedup`` of the print time), each spot weighed by how much it matters
+    (``loads`` / ``intents`` as for heat_model). Two plans, each checked with the heat model: ``gcode`` (fan
+    and speeds per layer; for editing the G-code) and ``slicer`` (what the user's own slicer can take from
+    the 3MF: slower heights and a cooling tower; pass its ``cooling`` to ``export``). ``before`` / ``gcode`` /
+    ``slicer``: print minutes, spots too hot / too cold (weighted too), median bond. ``summary``: plain words.
+    All limits are estimates (``confidence`` "rough") until real prints tune them."""
+    from .thermal_opt import optimize
+
+    p = Profile.from_dict(profile)
+    tp = _toolpath_for(up, "cooling plan")
+    marks = {}
+
+    def mark(h):
+        if id(h) not in marks:
+            marks.clear()
+            marks[id(h)] = _spot_marks(h, up, p, intents, loads)
+        return marks[id(h)]
+
+    r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
+    imp = _importance_map(up, p, loads)
+
+    def view(part: dict) -> dict:
+        return {"print_min": round(part["print_s"] / 60, 1), **{k: part[k] for k in ("too_hot", "too_cold", "needless", "bond_median")},
+                "weighted_too_hot": round(part["weighted_hot"], 1), "weighted_too_cold": round(part["weighted_cold"], 1)}
+
+    out = {"before": view(r["before"]), "gcode": {**view(r["gcode"]), "plan": r["gcode"]["plan"]},
+           "slicer": {**view(r["slicer"]), "cooling": r["slicer"]["cooling"]}, "guessed": imp.guessed, "confidence": "rough"}
+    out["summary"] = _cooling_summary(out)
+    return out
+
+
+def _cooling_summary(r: dict) -> list[str]:
+    """What the cooling plans change, in plain words; why nothing, when nothing can be gained."""
+    b, g, sl = r["before"], r["gcode"], r["slicer"]
+
+    def spots(x):
+        return f"{x['too_hot']} spots too hot, {x['too_cold']} too cold to bond well"
+
+    if not g["plan"] and b["too_hot"] == 0 and b["too_cold"] == 0:
+        return ["Nothing to gain: every spot stays in its temperature window, and the slicer slowed no layer for cooling it didn't need."]
+    lines = [f"As sliced: {b['print_min']:.1f} min, {spots(b)}."]
+    if g["plan"]:
+        lines.append(f"With the cooling plan in the G-code: {g['print_min']:.1f} min, {spots(g)}.")
+        if g["too_hot"] and g["too_hot"] < b["too_hot"]:
+            lines.append("The spots still too hot can't be cooled more without their layers bonding too weakly: a feature "
+                         "that thin can't do both. Making it thicker helps most.")
+    else:
+        lines.append("The G-code plan finds nothing worth changing: the spots left outside their window can't be fixed with the fan or the speed.")
+    extra = " and a cooling tower beside the part" if sl["cooling"].get("tower") else ""
+    if sl["cooling"]["ranges"] or sl["cooling"].get("tower"):
+        lines.append(f"With your slicer's settings only (slower heights{extra}): {sl['print_min']:.1f} min, {spots(sl)}. "
+                     "Fan changes and undoing the slicer's slowdown need the G-code.")
+    lines.append("Rough: the limits are estimates, not yet tuned to your printer." + (" Which spots matter is guessed from the shape: add the loads for a real answer." if r["guessed"] else ""))
+    return lines
 
 
 def _heat(p: Profile, fine: bool = False):
@@ -3828,6 +3902,7 @@ METHODS = {
     "load_gcode": load_gcode,
     "heat_model": heat_model,
     "importance": importance,
+    "optimize_cooling": optimize_cooling,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
     "tolerance": tolerance,

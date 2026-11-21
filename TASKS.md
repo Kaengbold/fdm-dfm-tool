@@ -958,7 +958,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - **Fan per height: not possible from a project file.** Tested: Bambu Studio ignores custom G-code from a 3MF; OrcaSlicer and PrusaSlicer take one `M106` at a layer but their own fan control overrides or never restores it. So a plan with `fan` is refused with that reason; fan changes belong to T-481 (G-code edit). Minimum layer time is a filament setting, not per height either. The layer-time slowdown is never switched off (tested).
     - slicer_check, pin pair (Ø10 pin to 20 mm, Ø3 pin to 33 mm), plan: outer walls 23 mm/s over 1–20 mm, tower Ø10 to 26 mm. The fastest outer wall in the range is 23 mm/s in OrcaSlicer (200 without the plan), Bambu Studio (60) and PrusaSlicer (30). The tower prints in all three (footprint 27.8 mm wide up to 26 mm, 3.6 mm above).
     - The plan itself comes from the optimizer (T-480).
-- [ ] **T-480 P2** [TO] The optimizer. · files: `core/fdmcore/thermal_opt.py` (new) · owner: Claude (task/T-480-thermal-optimizer) · user (2026-11-21): build it on the estimated limits now, check against real prints later (T-477 is no longer a gate)
+- [x] **T-480 P2** [TO] The optimizer. · files: `core/fdmcore/thermal_opt.py` (new) · owner: Claude (task/T-480-thermal-optimizer) · user (2026-11-21): build it on the estimated limits now, check against real prints later (T-477 is no longer a gate)
   - Do:
     - **Sliding window:** look ahead 5–10 layers, fix the current layer, move on.
     - **What it costs:** time + Σ weight × how far each spot is outside its window + penalties for speed jumps on outer walls, speeds in vibration (VFA) bands, and many fan changes.
@@ -967,6 +967,23 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - **Fans:** ignore fan changes shorter than ~2× the spin-up time; respect kick-start; don't turn the fan off mid-layer unless the slicer did.
     - **Big parts:** prioritise by weight when not everything can be fixed. Total speed-up is capped (e.g. 30 %, Expert can raise it).
   - Done when: on the T-477 parts it is faster than Orca's cooling slowdown at equal or better window and strength results (simulated, then confirmed with a print).
+  - Outcome: new `thermal_opt.py`, `api.optimize_cooling` / MCP `optimize_cooling`. Built on the estimated limits (user, 2026-11-21); T-477 / T-482 check them later.
+    - **How:** the heat model takes tens of seconds per run, so the plan is chosen with a cooling law fitted per spot to two runs: as sliced, and with the part fan far from the slicer's. It is anchored on the real run, and bonds move between the two runs.
+    - **Per layer, from the bottom, cheapest first** (thermal.yaml `optimizer`):
+      - a fan value, starting 3 spin-ups early and holding at least 3 layers;
+      - slower lines (×0.85 … 0.4);
+      - undoing the slicer's layer-time slowdown (×1.5 … up to the set speed; total speed-up ≤ 30 %);
+      - a cooling park move (3–24 s beside the part, before the covering layer: slowing a tiny pin further mostly keeps the hot nozzle over it).
+      The cost is time + importance weight × how far each column's median is outside its window. Neighbouring layers' speeds ramp (≤ ×1.25 apart).
+    - **Checked with the heat model and corrected once:** still too hot → the next stronger fix; made too cold → one step back (whichever weighs more).
+    - **Never touched:** overhang / bridge / small-perimeter / flow-cap / unknown slowdowns, layers 0–1, non-part lines, ironing and wipes; nothing faster than its set speed.
+    - **Two plans, each simulated:** `gcode` (fan, speeds, parks per layer, for T-481) and `slicer` (slower heights + a cooling tower sized like the longest park, as `export(cooling=…)` takes it, T-479). `summary` in plain words, including what can't be fixed ("a feature that thin can't do both").
+    - **Checks:**
+      - load-bearing 6 mm wall slowed 200 → 20 mm/s: 32 % faster (cap), median bond 0.45 → 0.49, nothing too hot;
+      - Orca fixture pin: 40 spots too hot → 0 (3 s parks, +22 % time), nothing too cold;
+      - Bambu fixture, guessed weights (pin weighs ~1): 40 → 30 too hot, 0 too cold. The rest can't be fixed without weak bonds.
+      Pyodide: 21 s for a 7.5 min print.
+    - **Not done:** slowing other islands before the hot one (all adjustable lines of a layer slow together), vibration (VFA) bands, kick-start. The real-print confirmation is T-477.
 - [ ] **T-481 P2** [TO] Option B (opt-in): change the user's G-code directly. · files: `core/fdmcore/gcode_rewrite.py` (new), `core/fdmcore/api.py`, `web/app.js` · owner: —
   - Do: the user picks "Optimize my G-code directly", loads their file, and downloads the result; the original always stays available.
     - Change only speed (F) and add fan commands. Never change positions, extrusion (E) or temperatures. Split a line where the speed must change partway.

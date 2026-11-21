@@ -646,6 +646,17 @@ def heat_model(up: list[float], printer: str = "bambu_p1s", material: str = "pla
 
 
 @server.tool()
+def optimize_cooling(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", goal: str = "balanced",
+                     loads: list[dict] | None = None, intents: list[dict] | None = None, fine: bool = False) -> dict:
+    """A cooling plan for the G-code from load_gcode: where spots stay too hot (sag, blobs) it turns the fan up
+    ahead of time, slows layers or adds short park moves; where the slicer slowed layers for cooling they didn't
+    need, it undoes that (faster, better bonded). Two plans, both checked with the heat simulation: ``gcode``
+    (fan and speeds per layer) and ``slicer`` (slower heights and a cooling tower: pass its ``cooling`` to
+    export_3mf). ``summary`` says what changes, in plain words. loads / intents as for heat_model."""
+    return _clean(api.optimize_cooling(up, _profile(printer, material, nozzle, goal), loads, intents, fine))
+
+
+@server.tool()
 def spot_importance(up: list[float], loads: list[dict] | None = None, printer: str = "bambu_p1s", material: str = "pla",
                     nozzle: str = "0.4", goal: str = "balanced", intents: list[dict] | None = None) -> dict:
     """How much each spot of the part matters for bonding between layers (weight 0.2–1), which heat_model uses
@@ -976,6 +987,7 @@ API_TOOLS = {
     "load_gcode": "load_gcode",
     "heat_model": "heat_model",
     "importance": "spot_importance",
+    "optimize_cooling": "optimize_cooling",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
     "tolerance": "printer_tolerance",

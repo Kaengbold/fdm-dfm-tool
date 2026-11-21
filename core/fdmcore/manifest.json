@@ -39,6 +39,7 @@
  "split.py",
  "strength.py",
  "thermal.py",
+ "thermal_opt.py",
  "topopt.py",
  "voxel.py",
  "warp.py"
