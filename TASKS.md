@@ -948,9 +948,16 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - G-code option (T-481): printed lines coloured by speed change, with markers where the fan changes.
   - Plain language. The new API calls appear as MCP tools automatically (T-261).
   - Done when: e2e smoke covers the assess view with a sample G-code; a hobbyist can tell from the screen what changed and why.
-- [ ] **T-479 P2** [TO] Option A (default): settings for the user's own slicer. · files: `core/fdmcore/export3mf.py`, `core/fdmcore/recommend.py`, `tools/slicer_check.py` · owner: Claude (task/T-479-slicer-height-ranges)
+- [x] **T-479 P2** [TO] Option A (default): settings for the user's own slicer. · files: `core/fdmcore/export3mf.py`, `core/fdmcore/recommend.py`, `tools/slicer_check.py` · owner: Claude (task/T-479-slicer-height-ranges)
   - Do: turn the optimizer's fixes into things the slicer applies: height-range modifiers (fan, minimum layer time, speed), an added cooling tower object, or several copies at once. Export them in the 3MF; check with `slicer_check.py` that Orca, Bambu Studio and PrusaSlicer apply them. Don't switch off the layer-time slowdown in exports.
   - Done when: the pin-pair part's exported 3MF gives the planned settings per height range in OrcaSlicer.
+  - Outcome: `api.export(..., cooling=plan)` (MCP `export_3mf(cooling=…)`) writes a cooling plan into the 3MF.
+    - **Speeds per height:** `ranges` = [{z0, z1, speeds: {outer_wall, inner_wall, sparse_infill, internal_solid_infill, top_surface: mm/s}}] become height-range modifiers (`recommend.cooling_ranges`). `export3mf.range_files` now takes any settings per range: overlapping ranges (fine layers + slower speeds) are cut where they meet, the smaller value wins. PrusaSlicer gets its own key names (new speed keys in `PRUSA_KEYS`).
+    - **Cooling tower:** `tower` = {height, diameter} adds a cylinder as a second shell beside the part, on whichever side of the bed has room (not with several copies, which already add layer time).
+    - **Copies:** already there (`copies`).
+    - **Fan per height: not possible from a project file.** Tested: Bambu Studio ignores custom G-code from a 3MF; OrcaSlicer and PrusaSlicer take one `M106` at a layer but their own fan control overrides or never restores it. So a plan with `fan` is refused with that reason; fan changes belong to T-481 (G-code edit). Minimum layer time is a filament setting, not per height either. The layer-time slowdown is never switched off (tested).
+    - slicer_check, pin pair (Ø10 pin to 20 mm, Ø3 pin to 33 mm), plan: outer walls 23 mm/s over 1–20 mm, tower Ø10 to 26 mm. The fastest outer wall in the range is 23 mm/s in OrcaSlicer (200 without the plan), Bambu Studio (60) and PrusaSlicer (30). The tower prints in all three (footprint 27.8 mm wide up to 26 mm, 3.6 mm above).
+    - The plan itself comes from the optimizer (T-480).
 - [ ] **T-480 P2** [TO] The optimizer (after a "go" from T-477). · files: `core/fdmcore/thermal_opt.py` (new) · owner: —
   - Do:
     - **Sliding window:** look ahead 5–10 layers, fix the current layer, move on.

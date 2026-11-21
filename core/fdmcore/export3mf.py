@@ -58,6 +58,12 @@ PRUSA_KEYS = {
     "fuzzy_skin": "fuzzy_skin",  # none | external | all in both
     "fuzzy_skin_thickness": "fuzzy_skin_thickness",
     "fuzzy_skin_point_distance": "fuzzy_skin_point_dist",
+    # speeds (mm/s), also per height range (T-479)
+    "outer_wall_speed": "external_perimeter_speed",
+    "inner_wall_speed": "perimeter_speed",
+    "sparse_infill_speed": "infill_speed",
+    "internal_solid_infill_speed": "solid_infill_speed",
+    "top_surface_speed": "top_solid_infill_speed",
 }
 
 
@@ -138,17 +144,19 @@ VOLUME_TYPES = {
 
 def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None = None, bed_center=(128.0, 128.0),
                modifiers: list[tuple] = (), layout: str = "orca", pauses: list[dict] = (), ranges: list[dict] = (),
-               seam_block: np.ndarray | None = None, copies=((0.0, 0.0),)) -> bytes:
+               seam_block: np.ndarray | None = None, copies=((0.0, 0.0),), layer_height: float | None = None) -> bytes:
     """``mesh`` must already be oriented (lowest point at z = 0, centred on x/y = 0). ``modifiers``:
     (triangles in the same frame, settings[, kind]) per volume, kind one of VOLUME_TYPES (default
     "stronger": a settings modifier); ``layout`` "orca" (also Bambu Studio) or "prusa", see the
     module docstring. ``pauses``: {"top": pocket top (mm), "layer_height", "note"} each: pause before the
     first layer above it, to put something into the part (see pause_files). ``ranges``: {"z0", "z1",
-    "layer_height"} each: thinner layers over that height (see range_files). ``seam_block``: one bool per
+    key: value, ...} each: other settings over that height (see range_files; ``settings``' layer height,
+    else ``layer_height``, where a range sets none). ``seam_block``: one bool per
     triangle of ``mesh``: no seam there (painted as seam blocker). ``copies``: (x, y) offset of each copy on the
     plate, as build items of the one object (all three slicers print each; OrcaSlicer and Bambu Studio may
     re-arrange them)."""
-    extra = {**pause_files(pauses), **range_files(ranges)}
+    layer = (settings or {}).get("layer_height", layer_height)
+    extra = {**pause_files(pauses), **range_files(list(ranges), None if layer is None else float(layer))}
     if modifiers:
         if layout not in LAYOUTS:
             raise ValueError(f"layout must be one of {LAYOUTS}")
@@ -209,16 +217,46 @@ def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None =
     return buf.getvalue()
 
 
-def range_files(ranges: list[dict]) -> dict[str, str]:
-    """Height range modifiers (another layer height between two heights), as the slicers store them in
-    their project files: OrcaSlicer / Bambu Studio ``layer_config_ranges.xml``, PrusaSlicer
-    ``Prusa_Slicer_layer_config_ranges.xml``, the same layout. tools/slicer_check.py checks them."""
-    if not ranges:
+def range_files(ranges: list[dict], layer_height: float | None = None) -> dict[str, str]:
+    """Height range modifiers: other settings between two heights (``{"z0", "z1", key: value, ...}``, OrcaSlicer
+    keys: thinner layers, slower speeds), as the slicers store them in their project files: OrcaSlicer /
+    Bambu Studio ``layer_config_ranges.xml``, PrusaSlicer ``Prusa_Slicer_layer_config_ranges.xml`` (same
+    layout, its own keys). The slicers take no overlapping ranges, so ranges are cut where they meet and
+    each piece gets the settings of every range over it (the smaller value where two set the same key:
+    the thinner layer, the slower speed). Every range carries a layer height (``layer_height`` when it
+    sets none). tools/slicer_check.py checks that all three apply them."""
+    pieces = []
+    cuts = sorted({float(r["z0"]) for r in ranges} | {float(r["z1"]) for r in ranges})
+    for lo, hi in zip(cuts, cuts[1:]):
+        opts: dict[str, float] = {}
+        for r in ranges:
+            if r["z0"] <= lo + 1e-9 and r["z1"] >= hi - 1e-9:
+                for k, v in r.items():
+                    if k not in ("z0", "z1"):
+                        opts[k] = min(float(v), opts.get(k, float("inf")))
+        if not opts:
+            continue
+        if "layer_height" not in opts:
+            if layer_height is None:
+                raise ValueError("A height range needs a layer height")
+            opts["layer_height"] = float(layer_height)
+        if pieces and pieces[-1][1] == lo and pieces[-1][2] == opts:
+            pieces[-1] = (pieces[-1][0], hi, opts)  # the same settings go on: one range
+        else:
+            pieces.append((lo, hi, opts))
+    if not pieces:
         return {}
-    body = "".join(f' <range min_z="{r["z0"]:.3f}" max_z="{r["z1"]:.3f}">\n  <option opt_key="extruder">0</option>\n'
-                   f'  <option opt_key="layer_height">{r["layer_height"]:.3f}</option>\n </range>\n' for r in ranges)
-    text = f'<?xml version="1.0" encoding="utf-8"?>\n<objects>\n<object id="1">\n{body}</object>\n</objects>\n'
-    return {"Metadata/layer_config_ranges.xml": text, "Metadata/Prusa_Slicer_layer_config_ranges.xml": text}
+
+    def text(keys) -> str:
+        body = ""
+        for lo, hi, opts in pieces:
+            lines = "".join(f'  <option opt_key="{keys[k]}">{v:.3f}</option>\n' if k == "layer_height" else f'  <option opt_key="{keys[k]}">{v:g}</option>\n'
+                            for k, v in opts.items() if k in keys)
+            body += f' <range min_z="{lo:.3f}" max_z="{hi:.3f}">\n  <option opt_key="extruder">0</option>\n{lines} </range>\n'
+        return f'<?xml version="1.0" encoding="utf-8"?>\n<objects>\n<object id="1">\n{body}</object>\n</objects>\n'
+
+    keys = {k for _, _, o in pieces for k in o}
+    return {"Metadata/layer_config_ranges.xml": text({k: k for k in keys}), "Metadata/Prusa_Slicer_layer_config_ranges.xml": text(PRUSA_KEYS)}
 
 
 def pause_files(pauses: list[dict]) -> dict[str, str]:

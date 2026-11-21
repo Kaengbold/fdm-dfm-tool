@@ -356,6 +356,56 @@ def measure_first_layers(gcode: Path) -> dict:
     return {"ironing": any("ironing" in f for f in features), "brim_mm": round(brim), "wall_z": wall_z}
 
 
+# T-479: a cooling plan on the pin pair (a thick and a thin pin on a plate; above 20 mm only the thin one).
+# The range starts on the plate, whose layers the slicers' own slowdown leaves alone (the pins' small layers it slows anyway).
+PLAN = {"ranges": [{"z0": 1.0, "z1": 20.0, "speeds": {"outer_wall": 23}}], "tower": {"height": 26.0, "diameter": 10.0}}
+
+
+def pin_pair(layout: str, plan: dict | None) -> bytes:
+    """40 × 15 × 3 mm plate with a Ø10 mm pin to 20 mm and a Ø3 mm pin to 33 mm (one solid), exported with
+    the cooling ``plan`` (slower outer walls over 1–20 mm and a cooling tower to 26 mm) or without one."""
+    from shapely.geometry import Point, box
+
+    from fdmcore.additions import extrude
+    from fdmcore.booleans import _to_manifold
+
+    solid = (_to_manifold(extrude(box(0, 0, 40, 15), 0, 3)) + _to_manifold(extrude(Point(10, 7.5).buffer(5, 64), 3, 20))
+             + _to_manifold(extrude(Point(30, 7.5).buffer(1.5, 32), 3, 33))).to_mesh()
+    tris = solid.vert_properties[solid.tri_verts.reshape(-1)].reshape(-1, 3, 3).astype(float)
+    api.load(to_binary_stl(Mesh(tris)), "pin_pair")
+    return api.export([0, 0, 1], {}, {}, slicer=layout, cooling=plan)
+
+
+def measure_cooling(gcode: Path) -> dict:
+    """Outer wall speeds (mm/s) of the moves that print, by layer height, and how wide the printed plastic
+    is at each height (the diagonal of its footprint: a tower beside the part makes it wider, whichever way
+    the slicer turns the part)."""
+    z, feat, f, x, y = 0.0, None, 0.0, None, None
+    speeds: dict[float, list[float]] = {}
+    span: dict[float, list[float]] = {}
+    for line in gcode.read_text(errors="replace").splitlines():
+        if m := LAYER.match(line):
+            z = float(m.group(2))
+            continue
+        if m := FEATURE.match(line):
+            feat = m.group(2)
+            continue
+        if not line.startswith(("G1 ", "G2 ", "G3 ")):
+            continue
+        if m := re.search(r"F([\d.]+)", line):
+            f = float(m.group(1)) / 60
+        if m := re.search(r"X([-\d.]+)", line):
+            x = float(m.group(1))
+        if m := re.search(r"Y([-\d.]+)", line):
+            y = float(m.group(1))
+        if " E" in line and (" X" in line or " Y" in line) and None not in (x, y) and not re.search(r"E-", line):
+            lo, hi = span.get(z, [(x, y), (x, y)])
+            span[z] = [(min(lo[0], x), min(lo[1], y)), (max(hi[0], x), max(hi[1], y))]
+            if feat in ("Outer wall", "External perimeter"):
+                speeds.setdefault(z, []).append(f)
+    return {"speeds": speeds, "width": {k: float(np.hypot(v[1][0] - v[0][0], v[1][1] - v[0][1])) for k, v in span.items()}}
+
+
 def copies_block(layout: str, n: int) -> bytes:
     """20 mm cube, ``n`` copies on the plate."""
     from fdmcore.additions import extrude
@@ -479,6 +529,18 @@ def main():
         elif name == "bambu":  # its ears are a painting tool (1.10+), no brim type: the export gives it an outer brim (T-493)
             checks["brim_ears"] = (full, ears, ears > 0)
         # PrusaSlicer has no mouse ears: the export gives it an outer brim (export3mf.prusa_settings)
+        cool = {}
+        for label, plan in (("plain", None), ("plan", PLAN)):
+            model = work / f"{name}_cooling_{label}.3mf"
+            model.write_bytes(pin_pair(layout, plan))
+            cool[label] = measure_cooling(slice_with(name, cfg, model, work / f"{name}_cooling_{label}"))
+        top = {k: max((v for z, vs in c["speeds"].items() if 1.1 <= z <= 19.9 for v in vs), default=None) for k, c in cool.items()}
+        # The planned speed is the fastest outer wall over its heights (the slicer's own slowdown may go slower),
+        # and without the plan it is faster there: the range was applied.
+        checks["cooling_speed_range"] = (top["plain"], top["plan"], None not in top.values() and top["plan"] <= 23.5 < top["plain"])
+        wide = cool["plan"]["width"]
+        tower = (round(max((w for z, w in wide.items() if 22 <= z <= 25), default=0), 1), round(max((w for z, w in wide.items() if 28 <= z <= 32), default=0), 1))
+        checks["cooling_tower"] = (*tower, tower[0] > tower[1] + 8)  # beside the thin pin up to 26 mm, gone above (Ø3 mm pin alone)
         lift = (flat["plain"]["wall_z"], flat["raft"]["wall_z"])
         checks["raft_layers"] = (*lift, None not in lift and lift[1] - lift[0] >= 0.5)  # three raft layers and the gap lift the part
         for key, (va, vb, applied) in checks.items():
