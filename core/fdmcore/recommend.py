@@ -217,6 +217,35 @@ def print_risk(profile: Profile, findings: list[dict], height_mm: float, warp_ve
     return {"level": "low" if score == 0 else "medium" if score == 1 else "high", "score": score, "reasons": reasons, "hold": hold}
 
 
+# Speeds a cooling plan may set per height, and their OrcaSlicer keys (export3mf.PRUSA_KEYS has PrusaSlicer's).
+COOLING_SPEEDS = {"outer_wall": "outer_wall_speed", "inner_wall": "inner_wall_speed", "sparse_infill": "sparse_infill_speed",
+                  "internal_solid_infill": "internal_solid_infill_speed", "top_surface": "top_surface_speed"}
+
+
+def cooling_ranges(plan: dict) -> list[dict]:
+    """A cooling plan (the heat optimizer's fixes, T-480: ``ranges`` = [{"z0", "z1", "speeds": {part of the
+    print: mm/s}}]) as height ranges for the user's slicer (export3mf.range_files). Only speeds go per height:
+    OrcaSlicer, Bambu Studio and PrusaSlicer all apply them, but none takes a fan change per height from a
+    project file (Bambu Studio ignores it, the others drop it at their next fan change: tools/slicer_check.py),
+    and the slicer's own slowdown for layer cooling stays on."""
+    out = []
+    for r in plan.get("ranges") or []:
+        z0, z1 = float(r["z0"]), float(r["z1"])
+        if not z1 > z0 >= 0:
+            raise ValueError(f"A cooling range must go up from z0 to z1 (got {z0}–{z1} mm)")
+        if "fan" in r:
+            raise ValueError("A fan change per height can't go into a slicer project: only speeds can")
+        speeds = r.get("speeds") or {}
+        unknown = sorted(set(speeds) - set(COOLING_SPEEDS))
+        if unknown:
+            raise ValueError(f"Unknown speed: {', '.join(unknown)} (use {', '.join(COOLING_SPEEDS)})")
+        if any(float(v) <= 0 for v in speeds.values()):
+            raise ValueError("Speeds must be above 0 mm/s")
+        if speeds:
+            out.append({"z0": z0, "z1": z1, **{COOLING_SPEEDS[k]: float(v) for k, v in speeds.items()}})
+    return out
+
+
 def bambu(printer: dict) -> bool:
     """A Bambu Lab printer, so most likely sliced in Bambu Studio. Its brim ears are a painting tool, not a
     brim type: given ``brim_ears`` in a 3MF it drops the object's brim settings and prints no brim at all

@@ -29,7 +29,7 @@ from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
-from .recommend import bambu, goal_plan, grip_settings, print_risk, recommend_settings
+from .recommend import bambu, cooling_ranges, goal_plan, grip_settings, print_risk, recommend_settings
 from .service import required_safety
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
@@ -3537,7 +3537,7 @@ def emphasize_for_goal(findings: list[dict], goal: str) -> list[dict]:
 
 def export(up, profile: dict | None = None, settings: dict | None = None, zones: list[dict] | None = None, slicer: str = "orca",
            pauses: list[float] | None = None, fine_layers: list[dict] | None = None, faces: dict | None = None,
-           grip: bool = False, copies: int = 1, excluded_settings: list[str] | None = None) -> bytes:
+           grip: bool = False, copies: int = 1, excluded_settings: list[str] | None = None, cooling: dict | None = None) -> bytes:
     """Oriented part as 3MF, with slicer settings for OrcaSlicer / Bambu Studio / PrusaSlicer.
     ``fine_layers``: {"z0", "z1", "layer_height"} each (the metrics of shallow_slope_stairs findings):
     thinner layers over just that height. ``faces`` as in ``orientations``: no seam on the faces marked
@@ -3548,7 +3548,12 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     layer above each, to put something into the pocket (OrcaSlicer and PrusaSlicer; Bambu Studio ignores it).
     ``zones`` (from optimise_strength's ``zoned``: lo, hi, walls, infill) become modifier volumes, and
     the advanced design boxes (volume_at) support enforcers, blockers and negative volumes; then the
-    file is for one slicer: ``slicer`` "orca" (also Bambu Studio) or "prusa"."""
+    file is for one slicer: ``slicer`` "orca" (also Bambu Studio) or "prusa". ``cooling``: a cooling plan
+    (T-479): ``ranges`` = [{"z0", "z1", "speeds": {"outer_wall" | "inner_wall" | "sparse_infill" |
+    "internal_solid_infill" | "top_surface": mm/s}}] slow those heights down (recommend.cooling_ranges),
+    ``tower`` = {"height", "diameter"} (mm) adds a cooling tower beside the part, so each layer up to that
+    height takes longer (not with several copies, which already do that). The slicer's own slowdown for
+    layer cooling is never switched off."""
     s = _require()
     p = Profile.from_dict(profile)
     if settings is None:
@@ -3571,11 +3576,40 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     settings = {k: v for k, v in settings.items() if k not in excluded}
     if bambu(p.printer) and settings.get("brim_type") == "brim_ears":  # e.g. from a finding's fix: Bambu Studio would print no brim
         settings = {**settings, "brim_type": "outer_only"}
-    return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer,
-                      pauses=[{"top": float(z), "layer_height": float(settings.get("layer_height") or p.layer_height),
-                               "note": "Put the part into the pocket"} for z in pauses or []],
-                      ranges=[{k: float(r[k]) for k in ("z0", "z1", "layer_height")} for r in fine_layers or []],
-                      seam_block=_seam_block(faces), copies=plate(up, profile, copies)["offsets"] if copies > 1 else ((0.0, 0.0),))
+    layer = float(settings.get("layer_height") or p.layer_height)
+    part = orient(s.mesh, rotation)
+    seam = _seam_block(faces)
+    if (cooling or {}).get("tower"):
+        if copies > 1:
+            raise ValueError("Print several copies or add a cooling tower, not both: the copies already give each layer time to cool")
+        part, seam = _with_tower(part, seam, cooling["tower"], bed)
+    return export_3mf(part, s.name, settings, layer_height=layer, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer,
+                      pauses=[{"top": float(z), "layer_height": layer, "note": "Put the part into the pocket"} for z in pauses or []],
+                      ranges=[{k: float(r[k]) for k in ("z0", "z1", "layer_height")} for r in fine_layers or []] + cooling_ranges(cooling or {}),
+                      seam_block=seam, copies=plate(up, profile, copies)["offsets"] if copies > 1 else ((0.0, 0.0),))
+
+
+TOWER_GAP_MM = 5.0  # between the part and a cooling tower
+
+
+def _with_tower(part: Mesh, seam, tower: dict, bed) -> tuple[Mesh, np.ndarray | None]:
+    """The oriented part with a cooling tower (a cylinder ``diameter`` wide, ``height`` tall) as a second
+    shell beside it, on whichever side of the bed has room: the slicer prints it on every layer up to
+    its top, so those layers take longer and cool more (a common trick for small parts)."""
+    from shapely.geometry import Point
+
+    from .additions import extrude
+
+    d, height = float(tower["diameter"]), float(tower["height"])
+    lo, hi = part.bounds()
+    if not (d > 0 and 0 < height <= hi[2] + 1e-6):
+        raise ValueError(f"A cooling tower needs a diameter above 0 and a height up to the part's ({hi[2]:.1f} mm)")
+    for x in (hi[0] + TOWER_GAP_MM + d / 2, lo[0] - TOWER_GAP_MM - d / 2):
+        if abs(x) + d / 2 <= bed[0] / 2:
+            shell = extrude(Point(x, 0.0).buffer(d / 2, 32), 0.0, height)
+            out = Mesh(np.concatenate([part.triangles, shell]))
+            return out, None if seam is None else np.concatenate([seam, np.zeros(len(shell), bool)])
+    raise ValueError("There's no room on the bed for a cooling tower beside the part")
 
 
 def plate(up, profile: dict | None = None, copies: int | None = None) -> dict:
