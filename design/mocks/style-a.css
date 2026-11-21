@@ -1,0 +1,4 @@
+/* Style A, "Workbench": the plan's default look (§1.5). Neutral cool greys, one blue accent, crisp 1 px lines,
+   Atkinson Hyperlegible. Uses web/tokens.css as it is. */
+:root { --title-size: var(--fs-xl); }
+.stage { background: radial-gradient(120% 90% at 50% 35%, var(--stage-top), var(--stage-bottom)); }
