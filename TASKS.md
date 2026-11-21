@@ -948,7 +948,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - G-code option (T-481): printed lines coloured by speed change, with markers where the fan changes.
   - Plain language. The new API calls appear as MCP tools automatically (T-261).
   - Done when: e2e smoke covers the assess view with a sample G-code; a hobbyist can tell from the screen what changed and why.
-- [ ] **T-479 P2** [TO] Option A (default): settings for the user's own slicer. · files: `core/fdmcore/export3mf.py`, `core/fdmcore/recommend.py`, `tools/slicer_check.py` · owner: —
+- [ ] **T-479 P2** [TO] Option A (default): settings for the user's own slicer. · files: `core/fdmcore/export3mf.py`, `core/fdmcore/recommend.py`, `tools/slicer_check.py` · owner: Claude (task/T-479-slicer-height-ranges)
   - Do: turn the optimizer's fixes into things the slicer applies: height-range modifiers (fan, minimum layer time, speed), an added cooling tower object, or several copies at once. Export them in the 3MF; check with `slicer_check.py` that Orca, Bambu Studio and PrusaSlicer apply them. Don't switch off the layer-time slowdown in exports.
   - Done when: the pin-pair part's exported 3MF gives the planned settings per height range in OrcaSlicer.
 - [ ] **T-480 P2** [TO] The optimizer (after a "go" from T-477). · files: `core/fdmcore/thermal_opt.py` (new) · owner: —
