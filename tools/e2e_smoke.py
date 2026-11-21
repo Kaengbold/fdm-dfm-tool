@@ -417,6 +417,54 @@ def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
     return f"{saved} saved; reopened {first} and {second}; Delete all emptied the list"
 
 
+class SharedUi:
+    """The new-UI checks share one browser context, so Pyodide and its packages (tens of MB from the CDN) come from
+    the browser cache after the first check instead of downloading again per check, which made later checks time
+    out on slow runs. Each page still starts clean: this site's storage is wiped before it is handed out."""
+
+    def __init__(self, browser, port: int):
+        self.port = port
+        self.ctx = browser.new_context(viewport={"width": 1280, "height": 720}, accept_downloads=True)
+
+    def _clean_page(self):
+        page = self.ctx.new_page()
+        page.goto(f"http://127.0.0.1:{self.port}/web/samples/loaded_hook.json")
+        page.evaluate("""async () => {
+          try { localStorage.clear(); sessionStorage.clear(); } catch {}
+          for (const db of (await indexedDB.databases?.()) ?? []) await new Promise((r) => { const q = indexedDB.deleteDatabase(db.name); q.onsuccess = q.onerror = q.onblocked = r; });
+        }""")
+        return page
+
+    def new_page(self, viewport=None, **_):
+        page = self._clean_page()
+        if viewport:
+            page.set_viewport_size(viewport)
+        return page
+
+    def new_context(self, **_):
+        return _OneContext(self)
+
+    def close(self):
+        self.ctx.close()
+
+
+class _OneContext:
+    """What a check that asks for its own context gets: pages from the shared one; close() closes only its pages."""
+
+    def __init__(self, shared):
+        self.shared, self.pages = shared, []
+
+    def new_page(self, **kw):
+        page = self.shared.new_page(**kw)
+        self.pages.append(page)
+        return page
+
+    def close(self):
+        for page in self.pages:
+            if not page.is_closed():
+                page.close()
+
+
 def _scaled_stl(path: Path, factor: float) -> bytes:
     """A binary STL scaled by ``factor`` (for the wrong-unit check)."""
     import struct
@@ -795,11 +843,15 @@ def _run_suite(port: int, args) -> Run:
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
-        run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
-        run.step("new UI: holds", lambda: check_new_ui_holds(browser, port))
-        run.step("new UI: direction gizmo", lambda: check_new_ui_gizmo(browser, port))
-        run.step("new UI: settings", lambda: check_new_ui_settings(browser, port))
-        run.step("new UI: hover picker", lambda: check_new_ui_picker(browser, port))
+        ui = SharedUi(browser, port)
+        try:
+            run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(ui, port))
+            run.step("new UI: holds", lambda: check_new_ui_holds(ui, port))
+            run.step("new UI: direction gizmo", lambda: check_new_ui_gizmo(ui, port))
+            run.step("new UI: settings", lambda: check_new_ui_settings(ui, port))
+            run.step("new UI: hover picker", lambda: check_new_ui_picker(ui, port))
+        finally:
+            ui.close()
         if args.quick:
             run_quick(run)
             run_extra_parts(run, args.parts)
