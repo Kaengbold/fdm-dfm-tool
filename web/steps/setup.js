@@ -45,6 +45,7 @@ function render({ body, stage, store, go, openRoute }) {
     hint: p.bed?.length >= 2 ? t("setup.bedSize", { x: Math.round(p.bed[0]), y: Math.round(p.bed[1]) }) : null,
   }));
   const printerSelect = Select({
+    placeholder: t("setup.pickPrinter"),
     label: t("setup.printer"),
     options: printerOptions,
     value: profile.printer ?? "",

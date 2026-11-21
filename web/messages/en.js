@@ -196,4 +196,5 @@ export default {
   "env.conflictTitle": "{material} doesn't fit here.",
   "env.conflictReasons": "Issue: {reasons}.",
   "env.letToolChoose": "Let the tool choose",
+  "setup.pickPrinter": "Pick your printer",
 };
