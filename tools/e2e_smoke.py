@@ -528,7 +528,13 @@ def check_new_ui_picker(browser, port: int) -> str:
         # Big part: the pick reads one pixel from the GPU, whatever the triangle count.
         perf = page.evaluate("""async () => {
           const THREE = await import('three');
-          const g = new THREE.IcosahedronGeometry(40, 160).toNonIndexed();
+          const gl0 = fdmUI.services.stage.renderer.getContext();
+          const dbg = gl0.getExtension('WEBGL_debug_renderer_info');
+          const gpu0 = String(dbg ? gl0.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl0.getParameter(gl0.RENDERER)).toLowerCase();
+          // 500k triangles only on a real GPU (that's what is timed); a software renderer gets ~50k, enough to check hits
+          // without slowing the browser for the checks after this one.
+          const soft = ['swiftshader', 'llvmpipe', 'software'].some((k) => gpu0.includes(k));
+          const g = new THREE.IcosahedronGeometry(40, soft ? 50 : 160).toNonIndexed();
           const tris = new Float32Array(g.attributes.position.array), n = tris.length / 9;
           fdmUI.services.stage.showPart(tris);
           const fr = new Uint32Array(n).map((_, i) => i % 64);
