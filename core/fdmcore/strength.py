@@ -615,6 +615,22 @@ def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np
     return fi_layer, fi_plane
 
 
+def layer_index(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells()) -> np.ndarray:
+    """Per cube, the largest share of the layer bond's strength any load case uses (the "Layer" index of
+    ``failure_indices``): where the layers must hold, so the heat window can ask for a better bond there
+    (importance.py). Cubes right at loads and supports are capped at the highest value elsewhere: their
+    stress only grows as the grid gets finer, and it shouldn't outrank a real weak spot."""
+    mat = material_for(profile)
+    c = rotate_stiffness(mat.stiffness_print_frame(), rotation_to_z(up))
+    out = np.zeros(len(cases[0].model.elems))
+    for case in cases:
+        scale = element_scale(case.model, up, shells, profile)
+        u, _ = _solve(case, c, scale, mat.e_xy)
+        fl = failure_indices(element_stress(case.model, c, scale, u), np.asarray(up, float), mat, scale)[0]
+        out = np.maximum(out, np.minimum(fl, fl[~case.ignore].max(initial=0)))
+    return out
+
+
 def lines_index(stress: np.ndarray, up: np.ndarray, mat: Material, printed: Printed) -> np.ndarray:
     """Failure index for printed lines pulled or slid apart sideways (a bolt tearing out through
     the walls). Neighbouring lines in a layer are welded like layers are, so their bond is taken as

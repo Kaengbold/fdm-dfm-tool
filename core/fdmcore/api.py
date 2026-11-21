@@ -56,6 +56,7 @@ class Session:
     coarse: list | None = None  # curves exported with too few facets (checks.coarse_surfaces), computed on demand
     kind: str = "cad"  # "cad" or "organic" (scan, sculpt, figure): _model_kind, T-408
     cad_checks: bool = True  # hole / gap / pin / lettering checks and feature detection (off for organic parts)
+    importance: tuple | None = None  # (key, importance.Map): how much each spot matters (T-475), cached
 
 
 _session: Session | None = None
@@ -1821,13 +1822,16 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     covers it, how well each joint between layers bonds, and where that leaves the temperature window
     (``findings``: too hot, too cold to bond, or slowed down for cooling it doesn't need). The profile's
     goal moves the window; ``intents`` = [{"kind": cosmetic / dimension_critical / load_bearing,
-    "point", "radius"}] (oriented part's frame) tighten it where they are, and the strength check's
-    ``loads`` count as load-bearing. ``fine``: smaller cells and more layers in full detail (slower).
-    Per spot, as float32 bytes in the oriented part's frame: ``points`` (x, y, z), ``cover_c_all``,
-    ``cover_s``, ``above_tg_s``, ``bond``, ``joint_c`` (T_int at each of ``delays_s``) and ``window``
-    (uint8: 0 fine, 1 too hot, 2 too cold, 3 needless slowdown)."""
+    "point", "radius"}] (oriented part's frame) tighten it where they are. How much each spot matters
+    (``importance``, see the ``importance`` method) relaxes or tightens the bonding goal: from the
+    strength check's ``loads`` when given, else guessed from the shape (``guessed``). ``fine``: smaller
+    cells and more layers in full detail (slower). Per spot, as float32 bytes in the oriented part's
+    frame: ``points`` (x, y, z), ``cover_c_all``, ``cover_s``, ``above_tg_s``, ``bond``, ``joint_c``
+    (T_int at each of ``delays_s``), ``importance``; as uint8: ``window`` (0 fine, 1 too hot, 2 too
+    cold, 3 needless slowdown) and ``importance_reason`` (index into ``reasons``)."""
+    from .importance import REASONS
     from .kinematics import timing
-    from .thermal import DELAYS_S, INTENTS, simulate, window
+    from .thermal import DELAYS_S, simulate, window
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -1841,14 +1845,13 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     with progress.stage(0.05, 1):
         h = simulate(tp, tm, p, "fine" if fine else "quick")
     pts = _gcode_to_oriented(s.gcode["rot"])(np.column_stack([h.xy, h.z]))
-    marks = [*(intents or []), *({"kind": "load_bearing", "point": ld["point"], "radius": ld.get("radius", 5.0)} for ld in loads or [])]
-    masks = {}
-    for mark in marks:
-        if mark["kind"] not in INTENTS:
-            raise ValueError(f"Unknown design intent: {mark['kind']} (use one of {', '.join(INTENTS)})")
-        near = np.linalg.norm(pts - np.asarray(mark["point"], float), axis=1) <= float(mark.get("radius", 5.0)) + h.cell_mm
-        masks[mark["kind"]] = masks.get(mark["kind"], np.zeros(len(pts), bool)) | near
-    w = window(h, p, masks)
+    masks = _intent_masks(pts, intents, h.cell_mm)
+    imp = _importance_map(up, p, loads)
+    rot, base = _orientation(up, p)
+    spread = np.array([(dx, dy, 0.0) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]) * h.cell_mm / 3  # across each cell
+    weight, reason = imp.at((pts + base) @ rot, spread @ rot)
+    reason = np.where(masks.get("load_bearing", False), REASONS.index("tag"), reason)
+    w = window(h, p, masks, weight)
     state = np.select([w["too_hot"], w["needless"], w["too_cold"]], [1, 3, 2], 0)
     covered = np.isfinite(h.cover_c)
     hottest = np.flatnonzero(covered)[np.argsort(-h.cover_c[covered])][:HOT_SPOTS]
@@ -1863,13 +1866,107 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
         "delays_s": list(DELAYS_S),
         "points": f32(pts), "cover_c_all": f32(h.cover_c), "cover_s": f32(h.cover_s), "above_tg_s": f32(h.above_tg_s),
         "joint_c": f32(h.joint_c), "bond": f32(h.bond), "window": np.asarray(state, np.uint8).tobytes(),
-        "findings": _heat_findings(tp, h, w, pts, p, masks.get("load_bearing")),
+        "importance": f32(w["weight"]), "importance_reason": np.asarray(reason, np.uint8).tobytes(),
+        "reasons": list(REASONS), "guessed": imp.guessed,
+        "findings": _heat_findings(tp, h, w, pts, p, masks.get("load_bearing"), reason, imp.guessed),
     }
 
 
-def _heat_findings(tp, h, w: dict, pts: np.ndarray, p: Profile, load_bearing) -> list[dict]:
+def _orientation(up, p: Profile) -> tuple[np.ndarray, np.ndarray]:
+    """``rot`` and ``base`` of the oriented part (``orient``): oriented = part @ rot.T - base."""
+    rot = print_rotation(_require().mesh, up, p.printer["bed"], _moving(p))[0]
+    turned = _require().mesh.triangles.reshape(-1, 3) @ rot.T
+    lo, hi = turned.min(axis=0), turned.max(axis=0)
+    return rot, np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
+
+
+def _intent_masks(pts: np.ndarray, intents: list[dict] | None, reach: float) -> dict:
+    """Design-intent marks ({"kind", "point", "radius"}, oriented frame) -> kind: mask over ``pts``."""
+    from .thermal import INTENTS
+
+    masks = {}
+    for mark in intents or []:
+        if mark["kind"] not in INTENTS:
+            raise ValueError(f"Unknown design intent: {mark['kind']} (use one of {', '.join(INTENTS)})")
+        near = np.linalg.norm(pts - np.asarray(mark["point"], float), axis=1) <= float(mark.get("radius", 5.0)) + reach
+        masks[mark["kind"]] = masks.get(mark["kind"], np.zeros(len(pts), bool)) | near
+    return masks
+
+
+def _importance_map(up, p: Profile, loads: list[dict] | None):
+    """importance.Map for build direction ``up``: from the strength check's layer index for ``loads``,
+    else guessed from the shape. Cached per part, direction, loads, profile and feature answers."""
+    from . import importance
+    from .regions import find_regions
+    from .strength import layer_index
+
+    s = _require()
+    up = np.asarray(up, float) / np.linalg.norm(up)
+    key = json.dumps([np.round(up, 6).tolist(), loads or None, p.material, p.goal, p.constant_load, s.tags, s.cad_checks],
+                     sort_keys=True, default=str)
+    if s.importance is None or s.importance[0] != key:
+        if loads:
+            cases = _load_case(loads)
+            model = cases[0].model
+            fi = layer_index(cases, up, p, _shells(p))
+            m = importance.from_strength(model.grid, model.elems, fi, required_safety(p))
+        else:
+            if s.regions is None:
+                s.regions = find_regions(s.mesh)
+            m = importance.guessed(s.mesh, up, _features())
+        s.importance = (key, m)
+    return s.importance[1]
+
+
+IMPORTANCE_TEXT = {
+    "load": "The layers here carry a big share of the load.",
+    "tag": "You marked this spot as load-bearing.",
+    "root": "Root of a thin upright feature: its layers bend apart here first.",
+    "pin": "Thin upright feature: it snaps easily along its layers.",
+    "corner": "Sharp inside corner: stress gathers here.",
+    "hole": "Around a screw or insert hole: these layers hold the screw.",
+}
+
+
+def importance(up, loads: list[dict] | None = None, profile: dict | None = None, intents: list[dict] | None = None) -> dict:
+    """How much each spot of the part matters (importance.py), which tells the heat window where to ask
+    for a good bond between layers. From the strength check's ``loads`` when given; else guessed from
+    the shape (``guessed``: thin upright pins and ribs, their roots, sharp inside corners, screw and
+    insert holes, outer walls over infill), so the app can offer "Add loads" for a real answer.
+    ``intents`` marked load_bearing weigh 1. Per analysis cube, in the oriented part's frame (as
+    heat_model): ``points`` (float32 x, y, z), ``weight`` (float32, ``floor`` to 1) and ``reason``
+    (uint8 index into ``reasons``). ``areas``: the important spots, most important first, each with
+    its reason in plain words."""
+    from . import importance as imp_mod
+
+    p = Profile.from_dict(profile)
+    m = _importance_map(up, p, loads)
+    centres, weight, reason = m.voxels()
+    rot, base = _orientation(up, p)
+    pts = centres @ rot.T - base
+    tagged = _intent_masks(pts, intents, m.grid.h).get("load_bearing")
+    if tagged is not None:
+        weight, reason = np.where(tagged, 1.0, weight), np.where(tagged, imp_mod.REASONS.index("tag"), reason)
+    areas = []
+    for group in imp_mod.areas(m, weight):
+        top = group[np.argmax(weight[group])]
+        why = imp_mod.REASONS[reason[top]]
+        lo, hi = pts[group].min(axis=0) - m.grid.h / 2, pts[group].max(axis=0) + m.grid.h / 2
+        areas.append({"reason": why, "weight": round(float(weight[top]), 2), "text": IMPORTANCE_TEXT[why],
+                      "point": np.round(pts[group].mean(axis=0), 1).tolist(), "bbox": [lo.tolist(), hi.tolist()]})
+    f32 = lambda a: np.asarray(a, np.float32).tobytes()
+    return {
+        "guessed": m.guessed, "voxel_mm": float(m.grid.h), "floor": float(imp_mod.settings()["floor"]),
+        "reasons": list(imp_mod.REASONS), "points": f32(pts), "weight": f32(weight),
+        "reason": np.asarray(reason, np.uint8).tobytes(), "areas": areas,
+        "note": "Guessed from the shape. Add the loads for a real answer." if m.guessed else None,
+    }
+
+
+def _heat_findings(tp, h, w: dict, pts: np.ndarray, p: Profile, load_bearing, reason: np.ndarray, guessed: bool) -> list[dict]:
     """One finding per stretch of a column (layers in a row) that leaves the window, in plain words."""
     from .gcode import LAYER_TIME
+    from .importance import REASONS, settings
 
     name = p.material["name"]
     out = []
@@ -1900,11 +1997,18 @@ def _heat_findings(tp, h, w: dict, pts: np.ndarray, p: Profile, load_bearing) ->
                                 "detail": f"{where} the slicer slows down so the layers can cool (about {minutes:.1f} min), but they "
                                           f"already end up too cool to bond well. Print these layers faster, or with less fan."})
                     continue
-                carrying = load_bearing is not None and bool(load_bearing[m].any())
-                out.append({"rule": rule, "severity": "warn" if carrying else "info", "bbox": bbox, "metrics": metrics,
+                # Warn where the user said it carries load, or the strength check found it does; a guessed
+                # important spot is worth knowing about, but only a hint until loads are entered.
+                weight = float(np.median(w["weight"][m]))
+                top = REASONS[int(np.bincount(reason[m]).argmax())]
+                carrying = (load_bearing is not None and bool(load_bearing[m].any())) or (not guessed and weight > float(settings()["ordinary"]))
+                why = f" {IMPORTANCE_TEXT[top]}" if top in IMPORTANCE_TEXT and top not in ("load", "tag") else ""
+                guess = " (Guessed from the shape: add the loads for a real answer.)" if guessed and why else ""
+                out.append({"rule": rule, "severity": "warn" if carrying else "info", "bbox": bbox,
+                            "metrics": {**metrics, "importance": round(weight, 2), "reason": top},
                             "detail": f"{where} each new layer lands on plastic that has cooled a lot, so the layers fuse only "
                                       f"partly (a rough estimate: about {bond:.0%} of a full bond). The part is weaker along its "
-                                      f"layers here" + (", where it carries load." if carrying else ".")})
+                                      f"layers here" + (", where it carries load." if carrying else ".") + why + guess})
     return out
 
 
@@ -3477,6 +3581,7 @@ METHODS = {
     "set_cad_checks": set_cad_checks,
     "load_gcode": load_gcode,
     "heat_model": heat_model,
+    "importance": importance,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
     "tolerance": tolerance,

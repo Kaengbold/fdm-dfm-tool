@@ -902,13 +902,25 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     The healing scale rests on reptation times known only to ~10×, so the limits are anchored on the fixtures: Ø3 mm pin too hot; Orca and Bambu default-cooling blocks pass; a load-bearing 6 mm wall at 100 % fan too cold (same wall at 30 % passes).
     New rules `heat_too_hot`, `heat_weak_bond`, `heat_needless_slowdown`, each with slicer fixes. `api.heat_model` / MCP `heat_model` return the findings and a per-spot window code.
     Engine tests 682 passed, full browser test 0 failures. T-477 / T-482 tune the limits against real prints.
-- [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: Claude (task/T-475-strength-priorities)
+- [x] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: Claude (task/T-475-strength-priorities)
   - Do: a weight for each node from three inputs:
     - the strength check's "Layer" index (tension across layers, shear along them) for the user's loads;
     - design-intent tags;
     - when no loads are entered, guessed importance: thin tall features and pins, sharp inside corners, roots of ribs and pegs, screw and insert holes, outer walls over infill. Mark it "guessed" and link to "Add loads".
   - The weight makes the window stricter where a spot matters, and it sets where the fine detail goes. Weights never go below a minimum, so every spot keeps the "doesn't sag" limit; only the bonding goal is relaxed on unimportant spots.
   - Done when: on a bracket with a load, the root gets the highest weight; with no loads, the fallback picks the pins and roots on the T-389 test part.
+  - Outcome: new `importance.py`: a weight from 0.2 to 1 per spot.
+    - **With loads:** `strength.layer_index` (the "Layer" index of `failure_indices`, highest over the load cases) × the profile's required safety, so a spot right at that safety weighs 1. Cubes right at loads and supports are capped at the highest value elsewhere.
+    - **Without loads,** guessed from the shape and marked `guessed` ("Add the loads for a real answer"): roots of upright pins, pegs and ribs 1.0 (thin sections that end in the air and stand on wider plastic), the features themselves 0.9, sharp inside corners and screw / insert holes 0.7, outer walls 0.5, infill inside 0.2.
+    - **Intents:** spots marked load-bearing weigh 1.
+    - The weight moves only the bonding goal of `thermal.window` (the goal's own `min_bond` at 0.5, ×0.5 at 0.2, +0.35 at 1, the same as marking load-bearing); the sag limit stays for every spot. Values in `thermal.yaml` `importance` (estimated; T-477 tunes them).
+    - `api.heat_model` returns `importance`, `importance_reason` and `guessed` per spot. A heat cell takes its most important plastic: the middle of a bent peg carries nothing, its sides the most. A weak bond is a warning only where the loads or a load-bearing mark say so; a guessed spot gets a hint with the reason.
+    - New `api.importance` / MCP `spot_importance`: per-cube weights, reasons and the important `areas` in plain words.
+    - Checks: on the L-bracket pushed at the top of its upright, the upright's root weighs most (0.92); on the feature test part with no loads, the roots of the Ø3 pin and the thin slot walls come first. A sideways hole's side walls aren't taken for ribs.
+    - Not done here: putting the fine heat detail only around important spots on big parts (T-583).
+- [ ] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: —
+  - Do: on big parts, run the heat model's fine cells (1 mm, more layers in detail) only around the spots that weigh most (T-475 `importance`) and around hot spots, with the coarse cells elsewhere, so a big part gets the fine answer where it counts at the quick tier's cost.
+  - Done when: on a big part with a pin, the pin's covering temperature matches the all-fine run within 5 °C, at no more than twice the quick tier's time.
 - [ ] **T-476 P2** [TO] Heat result back into the strength check. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` (`strength_z`), `core/fdmcore/api.py` · owner: —
   - Do: at the detailed level, the strength between layers comes from each spot's bonding result instead of one constant for the whole part. Show the safety before and after optimizing ("bracket root: 1.4 → 1.9"). One round of strength → weights → optimize → strength; no looping until nothing changes.
   - Done when: an overcooled thin wall shows a lower safety factor than the same wall printed inside its window.
