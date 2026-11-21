@@ -417,6 +417,54 @@ def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
     return f"{saved} saved; reopened {first} and {second}; Delete all emptied the list"
 
 
+class SharedUi:
+    """The new-UI checks share one browser context, so Pyodide and its packages (tens of MB from the CDN) come from
+    the browser cache after the first check instead of downloading again per check, which made later checks time
+    out on slow runs. Each page still starts clean: this site's storage is wiped before it is handed out."""
+
+    def __init__(self, browser, port: int):
+        self.port = port
+        self.ctx = browser.new_context(viewport={"width": 1280, "height": 720}, accept_downloads=True)
+
+    def _clean_page(self):
+        page = self.ctx.new_page()
+        page.goto(f"http://127.0.0.1:{self.port}/web/samples/loaded_hook.json")
+        page.evaluate("""async () => {
+          try { localStorage.clear(); sessionStorage.clear(); } catch {}
+          for (const db of (await indexedDB.databases?.()) ?? []) await new Promise((r) => { const q = indexedDB.deleteDatabase(db.name); q.onsuccess = q.onerror = q.onblocked = r; });
+        }""")
+        return page
+
+    def new_page(self, viewport=None, **_):
+        page = self._clean_page()
+        if viewport:
+            page.set_viewport_size(viewport)
+        return page
+
+    def new_context(self, **_):
+        return _OneContext(self)
+
+    def close(self):
+        self.ctx.close()
+
+
+class _OneContext:
+    """What a check that asks for its own context gets: pages from the shared one; close() closes only its pages."""
+
+    def __init__(self, shared):
+        self.shared, self.pages = shared, []
+
+    def new_page(self, **kw):
+        page = self.shared.new_page(**kw)
+        self.pages.append(page)
+        return page
+
+    def close(self):
+        for page in self.pages:
+            if not page.is_closed():
+                page.close()
+
+
 def _scaled_stl(path: Path, factor: float) -> bytes:
     """A binary STL scaled by ``factor`` (for the wrong-unit check)."""
     import struct
@@ -695,6 +743,62 @@ def check_new_ui_gizmo(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_holds(browser, port: int) -> str:
+    """The new UI's Holds step (T-541): click a face → radial menu → hold; click the inside corner → hold the corner;
+    the holds map to the strength engine's format; "No loads" warns for Balanced and switching to Fast jumps on."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="L-bracket").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        page.evaluate("() => fdmUI.go('holds')")
+        page.wait_for_function("() => fdmUI.services.picker.enabled && fdmUI.services.picker.data", timeout=120_000)
+        assert page.get_by_role("button", name="Next").is_disabled(), "Next without a hold"
+        box = page.locator(".stage-canvas").bounding_box()
+        x, y = box["x"] + box["width"] * 0.55, box["y"] + box["height"] * 0.62
+        page.mouse.move(x, y)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'face'")
+        page.mouse.click(x, y)
+        page.wait_for_selector(".ui-radial", state="attached")
+        page.get_by_role("menuitem", name="Hold this face").click()
+        # The inside corner: 3 px off its projected middle, then click.
+        cx, cy = page.evaluate("""() => {
+          const p = fdmUI.services.picker, line = p.data.edges.find((l) => l.kind === 'corner');
+          const c = p.toClient(line.meta.midpoint);
+          return [c.x + 3, c.y];
+        }""")
+        page.mouse.move(cx, cy)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'corner'", timeout=5_000)
+        page.mouse.click(cx, cy)
+        page.wait_for_selector(".ui-radial", state="attached")
+        page.get_by_role("menuitem", name="Hold inside corner").click()
+        holds = page.evaluate("() => fdmUI.store.get().holds.map((h) => [h.kind, h.type])")
+        assert holds == [["face", "clamped"], ["corner", "clamped"]], holds
+        assert page.locator(".hold-marker").count() == 2
+        assert page.get_by_role("button", name="Next").is_enabled()
+        loads = page.evaluate("""async () => { const m = await import('./steps/holds.js');
+          return fdmUI.store.get().holds.map(m.holdLoad); }""")
+        assert loads[0]["kind"] == "fixed" and "region" in loads[0] and loads[1]["edge_kind"] == "concave", loads
+        # Undo removes the last hold.
+        page.keyboard.press("Control+z")
+        assert page.evaluate("() => fdmUI.store.get().holds.length") == 1
+        # "No loads" with Balanced asks first; Switch to Fast skips to Analyse.
+        page.get_by_role("button", name="No loads, skip strength").click()
+        assert "Balanced needs loads" in page.locator("dialog.ui-modal").inner_text()
+        page.get_by_role("button", name="Switch to Fast").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Analyse'")
+        assert page.evaluate("() => [fdmUI.store.get().goal, fdmUI.store.get().noLoads]") == ["fast", True]
+        assert not errors, errors
+        return "face and inside-corner holds with markers; engine format ok; undo; Balanced warns, Fast skips to Analyse"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -739,10 +843,15 @@ def _run_suite(port: int, args) -> Run:
         run = Run(page)
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
-        run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
-        run.step("new UI: direction gizmo", lambda: check_new_ui_gizmo(browser, port))
-        run.step("new UI: settings", lambda: check_new_ui_settings(browser, port))
-        run.step("new UI: hover picker", lambda: check_new_ui_picker(browser, port))
+        ui = SharedUi(browser, port)
+        try:
+            run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(ui, port))
+            run.step("new UI: holds", lambda: check_new_ui_holds(ui, port))
+            run.step("new UI: direction gizmo", lambda: check_new_ui_gizmo(ui, port))
+            run.step("new UI: settings", lambda: check_new_ui_settings(ui, port))
+            run.step("new UI: hover picker", lambda: check_new_ui_picker(ui, port))
+        finally:
+            ui.close()
         if args.quick:
             run_quick(run)
             run_extra_parts(run, args.parts)

@@ -59,6 +59,28 @@ export class Picker {
 
   on(event, fn) { this.listeners[event].add(fn); return () => this.listeners[event].delete(fn); }
 
+  /** Colour regions a step marks (holds, loads): ``colorFor(region)`` → THREE.Color or null. Repaints them now. */
+  setRegionColors(colorFor) {
+    const before = this.colored ?? new Set();
+    this.colorFor = colorFor;
+    if (!this.data || !this.stage.part) return;
+    const now = new Set();
+    for (let r = 0; r < this.data.regions.length; r++) if (colorFor(r)) now.add(r);
+    const base = this.stage.part.base;
+    for (const r of new Set([...before, ...now])) {
+      const c = colorFor(r) ?? base;
+      this.stage.paint(() => c, this.trianglesOf(r));
+    }
+    this.colored = now;
+  }
+
+  /** Where a part-coordinate point is on screen (client px), for markers and menus. */
+  toClient(point) {
+    const v = new THREE.Vector3(...point).add(this.stage.part.offset).project(this.stage.camera);
+    const r = this.stage.canvas.getBoundingClientRect();
+    return { x: (v.x + 1) / 2 * r.width + r.left, y: (1 - v.y) / 2 * r.height + r.top, behind: v.z > 1 };
+  }
+
   /** New part data (call after stage.showPart with the same triangles). */
   setData(data) {
     this.data = unpackRegions(data);
@@ -198,7 +220,8 @@ export class Picker {
     if (!this.data || !this.stage.part) return;
     const base = this.stage.part.base;
     const tint = base.clone().lerp(this.hover, 0.55);
-    if (this.tinted != null) this.stage.paint(() => base, this.trianglesOf(this.tinted));
+    // A region a step coloured (e.g. a hold) gets its own colour back, not the plain part colour.
+    if (this.tinted != null) { const keep = this.colorFor?.(this.tinted) ?? base; this.stage.paint(() => keep, this.trianglesOf(this.tinted)); }
     this.tinted = null;
     this.edgeLines.clear();
     const hit = this.hit;
