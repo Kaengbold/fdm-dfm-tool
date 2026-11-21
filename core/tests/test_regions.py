@@ -277,3 +277,20 @@ def test_regions_large_organic_mesh_compact_and_valid():
     assert all("hole_diameter" not in x for x in r["regions"])
     _assert_packed_edges_valid(r["feature_edges"], len(r["regions"]))
     _assert_packed_edges_valid(r["concave_edges"], len(r["regions"]))
+
+
+def test_noisy_mesh_edges_are_capped():
+    """A bumpy organic mesh has thousands of tiny sharp edges; only the longest, pickable ones are sent."""
+    from fdmcore import regions as rg
+
+    rng = np.random.default_rng(0)
+    phi, theta = np.meshgrid(np.linspace(0, np.pi, 60), np.linspace(0, 2 * np.pi, 120), indexing="ij")
+    r = 20 + rng.normal(0, 1.5, phi.shape)
+    r[:, -1] = r[:, 0]
+    r[0, :], r[-1, :] = r[0, 0], r[-1, 0]
+    xyz = np.stack([r * np.sin(phi) * np.cos(theta), r * np.sin(phi) * np.sin(theta), r * np.cos(phi)], axis=-1)
+    q = np.stack([xyz[:-1, :-1], xyz[1:, :-1], xyz[1:, 1:], xyz[:-1, 1:]], axis=2).reshape(-1, 4, 3)
+    mesh = Mesh(np.concatenate([q[:, [0, 1, 2]], q[:, [0, 2, 3]]]))
+    for packed in rg.extract_edges(mesh, rg.find_regions(mesh)):
+        assert len(packed["meta"]) <= rg.MAX_EDGES
+        assert all(m["length_mm"] >= rg.MIN_EDGE_MM for m in packed["meta"])

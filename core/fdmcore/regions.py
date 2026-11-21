@@ -24,6 +24,10 @@ EDGE_ANGLE_DEG = 30.0  # minimum dihedral angle (deg) for sharp feature edges an
 CORNER_ANGLE_DEG = 45.0  # polyline turn angle (deg) above which a chain splits at the corner
 EDGE_SIMPLIFY_MM = 1e-3  # drop interior polyline vertices deviating less than this from the chord
 EDGE_BAND_RADIUS = 2.0  # default band half-width (mm) when mapping an edge/corner to strength.py
+# Noisy or organic meshes have tens of thousands of tiny sharp edges that nobody picks; keeping them made the
+# result huge and slow in Pyodide (300k polylines, ~8 s natively on an 80k-triangle bumpy sphere).
+MIN_EDGE_MM = 1.0  # shorter chains aren't offered for picking
+MAX_EDGES = 2000  # per kind (feature / inside corner): the longest ones
 CYLINDER_MIN_COVERAGE = 0.4  # arc share above which a convex cylinder is "cylinder" rather than a corner fillet
 
 
@@ -343,12 +347,16 @@ def _chain_polylines(verts: np.ndarray, va: np.ndarray, vb: np.ndarray, f1: np.n
     reg_f2 = region[f2].tolist() if region is not None else None
     n_sum = n1 + n2
 
+    # Only chains worth picking, longest first (cheap: plain sums before any per-chain numpy work).
+    seg_len_list = seg_len.tolist()
+    totals = [sum(seg_len_list[i] for i in s_seq) for _, s_seq, _ in chains]
+    keep = sorted((i for i, t in enumerate(totals) if t >= MIN_EDGE_MM), key=lambda i: -totals[i])[:MAX_EDGES]
+    chains = [chains[i] for i in sorted(keep)]  # back in walk order, so ids stay stable for a given mesh
+
     for v_seq, s_seq, closed in chains:
         raw = verts[v_seq]
         lens = seg_len[s_seq]
         total = float(lens.sum())
-        if total <= 1e-4:
-            continue
         cum = np.concatenate([[0.0], np.cumsum(lens)])
         mid = [round(float(np.interp(0.5 * total, cum, raw[:, d])), 4) for d in range(3)]
         n_vec = (lens[:, None] * n_sum[s_seq]).sum(axis=0)
