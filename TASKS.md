@@ -932,7 +932,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - Checks: a 1.8 mm wall bent across its layers. Printed with 30 s waits per layer under full fan: safety 1.2 (layers). Straight through at 30 % fan: 2.4. Usual bonding: 2.3. Pyodide: 11 s.
     - Not done here: "before → after optimizing" and the one round strength → weights → optimize → strength need the optimizer (T-480), which calls this check twice.
     - Note for T-477: the overcooled wall's bond (0.37) still passes the window's ordinary-spot minimum (0.25, from T-474), though it means ~57 % of usual layer strength. Tune both against the same prints.
-- [ ] **T-477 P1 (go/no-go)** [TO] Real test prints decide whether to go on. · files: `research/thermal_validation.md` (new), `tools/` (test-part generator) · owner: — (needs the human: real prints)
+- [ ] **T-477 P1** [TO] Real test prints check the model (later; user 2026-11-21: no longer a go/no-go gate, build first). · files: `research/thermal_validation.md` (new), `tools/` (test-part generator) · owner: — (needs the human: real prints)
   - Do: print a thin + thick pin pair, a thick base narrowing to a thin tip, a part with several branches, and one big part limited by flow (as the control). Measure temperature where possible (IR / thermocouple), sag, snap strength between layers, and print time. Compare the T-473 model with `spot_heat` and `heat.py`. Estimate the time saved against OrcaSlicer's own cooling slowdown.
   - Tune the T-470 defaults with the results (confidence `tuned`).
   - Done when: model error and achievable savings are written down, with a go / pivot / stop decision. T-480 and later only on "go".
@@ -958,7 +958,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - **Fan per height: not possible from a project file.** Tested: Bambu Studio ignores custom G-code from a 3MF; OrcaSlicer and PrusaSlicer take one `M106` at a layer but their own fan control overrides or never restores it. So a plan with `fan` is refused with that reason; fan changes belong to T-481 (G-code edit). Minimum layer time is a filament setting, not per height either. The layer-time slowdown is never switched off (tested).
     - slicer_check, pin pair (Ø10 pin to 20 mm, Ø3 pin to 33 mm), plan: outer walls 23 mm/s over 1–20 mm, tower Ø10 to 26 mm. The fastest outer wall in the range is 23 mm/s in OrcaSlicer (200 without the plan), Bambu Studio (60) and PrusaSlicer (30). The tower prints in all three (footprint 27.8 mm wide up to 26 mm, 3.6 mm above).
     - The plan itself comes from the optimizer (T-480).
-- [ ] **T-480 P2** [TO] The optimizer (after a "go" from T-477). · files: `core/fdmcore/thermal_opt.py` (new) · owner: —
+- [ ] **T-480 P2** [TO] The optimizer. · files: `core/fdmcore/thermal_opt.py` (new) · owner: Claude (task/T-480-thermal-optimizer) · user (2026-11-21): build it on the estimated limits now, check against real prints later (T-477 is no longer a gate)
   - Do:
     - **Sliding window:** look ahead 5–10 layers, fix the current layer, move on.
     - **What it costs:** time + Σ weight × how far each spot is outside its window + penalties for speed jumps on outer walls, speeds in vibration (VFA) bands, and many fan changes.
