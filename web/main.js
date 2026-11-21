@@ -11,6 +11,7 @@ import { Picker } from "./viewport/picker.js";
 import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
+import "./steps/analyse.js";
 import "./steps/loads.js";
 import "./steps/details.js";
 import "./steps/holds.js";
