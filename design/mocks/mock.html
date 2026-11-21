@@ -4,10 +4,9 @@
 <meta charset="utf-8">
 <title>Style mockup</title>
 <!-- T-512: static style mockups (not clickable, decision 11). One markup, three looks:
-     ?screen=setup|holds|options &style=a|b|c &theme=light|dark. Part images come from render.html via
+     ?screen=start|part|setup|env|holds|loads|details|analyse|options|sim|problems|done|tolerances|settings &theme=light|dark
+     (&style=a, the picked look). Part images come from render.html via
      tools/screenshot_mocks.py (shots/parts/). Labels follow plan §1.4: short, details behind "More". -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&family=Inter+Tight:wght@400;600&display=swap">
 <link rel="stylesheet" href="../../web/tokens.css">
 <link rel="stylesheet" href="mock.css">
 <script>
@@ -161,6 +160,324 @@
   </section>
 </template>
 
+<template id="start">
+  <section class="start">
+    <h1>What would you like to do?</h1>
+    <div class="big-cards">
+      <div class="big-card go">
+        <div class="big-icon"><svg viewBox="0 0 24 24"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg></div>
+        <h2>Optimize your print</h2>
+        <p>Best orientation, settings and material for your part.</p>
+        <span class="big-cta">Start <svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></span>
+      </div>
+      <div class="big-card soon">
+        <div class="big-icon"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6Z"/></svg></div>
+        <h2>Fix your broken prints <span class="soon-badge">Coming soon</span></h2>
+        <ul class="soon-list"><li>Warping and lifting corners</li><li>Layers splitting apart</li><li>Stringing and blobs</li></ul>
+      </div>
+    </div>
+    <div class="slim-card">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10 2.1 2.1M4.9 19.1 7 17m10-10 2.1-2.1"/></svg>
+      <div><b>Settings &amp; calibration</b><span>Your printers, materials, profiles and test prints</span></div>
+      <svg class="chev-r" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+    </div>
+    <div class="recent">
+      <div class="recent-head"><span class="label">Recent projects</span><button class="link">Show all</button></div>
+      <div class="recent-row">
+        <div class="recent-card"><img src="shots/parts/{style}-{theme}-setup.png" alt=""><b>l_bracket</b><span>Today · Balanced</span></div>
+        <div class="recent-card"><img src="shots/parts/{style}-{theme}-done.png" alt=""><b>l_bracket v2</b><span>Yesterday · Strong</span></div>
+        <div class="recent-card"><img src="shots/parts/{style}-{theme}-held.png" alt=""><b>shelf_bracket</b><span>3 days ago · Fast</span></div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<template id="part">
+  <section class="stage drop-stage">
+    <div class="drop">
+      <div class="drop-icon"><svg viewBox="0 0 24 24"><path d="M12 15V3m0 0-4 4m4-4 4 4"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg></div>
+      <h2>Drop your part here</h2>
+      <button class="btn primary">Choose file</button>
+      <span class="hint">STL, 3MF or STEP</span>
+    </div>
+    <button class="btn secondary samples">Sample parts</button>
+  </section>
+</template>
+
+<template id="env">
+  <section class="stage">
+    <img class="part" src="shots/parts/{style}-{theme}-setup.png" alt="">
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Environment</h2><p class="purpose">Where will it be used? This decides the material.</p></div>
+    <div class="panel-body">
+      <div class="group">
+        <div class="label">Temperature</div>
+        <div class="cards three">
+          <div class="card"><b>Indoors</b><span class="num">~20 °C</span></div>
+          <div class="card"><b>Warm room</b><span class="num">~40 °C</span></div>
+          <div class="card sel"><b>Outdoors, sun</b><span class="num">~50 °C</span></div>
+          <div class="card"><b>Hot car</b><span class="num">70+ °C</span></div>
+          <div class="card"><b>Freezing</b><span class="num">below 0 °C</span></div>
+          <div class="card"><b>Custom</b><span class="num">°C</span></div>
+        </div>
+      </div>
+      <div class="group">
+        <div class="label">What will it touch?</div>
+        <div class="chips">
+          <span class="tchip on">Water</span><span class="tchip">Food or drinks</span><span class="tchip on">Sun and rain</span>
+          <span class="tchip">Dirt and scraping</span><span class="tchip">Oil and fuel</span><span class="tchip">Cleaners</span>
+          <span class="tchip">Skin</span><span class="tchip">None of these</span>
+        </div>
+      </div>
+      <div class="live"><span class="label">Suitable</span><b>PETG, ASA, PC</b><span class="muted">+1</span></div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary">Next</button></div>
+  </aside>
+</template>
+
+<template id="loads">
+  <section class="stage">
+    <div class="pill">Click a spot, pick a direction, type the force</div>
+    <img class="part" src="shots/parts/{style}-{theme}-held.png" alt="">
+    <div class="lock" style="left: 56.8%; top: 61.7%"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+    <svg class="gizmo" viewBox="0 0 842 844" preserveAspectRatio="none">
+      <ellipse cx="285" cy="274" rx="86" ry="34" class="ring"/>
+      <ellipse cx="285" cy="274" rx="34" ry="86" class="ring ring2"/>
+      <line x1="285" y1="274" x2="335" y2="296" class="axis ax-x"/><line x1="285" y1="274" x2="255" y2="298" class="axis ax-y"/><line x1="285" y1="274" x2="285" y2="220" class="axis ax-z"/>
+      <line x1="450" y1="196" x2="313" y2="261" class="arrow"/><path d="M293 270 L316.8 268.7 L309 252.5 Z" class="arrow-head"/>
+      <circle cx="285" cy="274" r="7" class="anchor"/>
+      <text x="352" y="226" class="angle">15°</text>
+    </svg>
+    <div class="dir-buttons" style="left: 22%; top: 45%"><button class="on">Push in</button><button>Pull out</button><button>±X</button><button>±Y</button><button>±Z</button></div>
+    <div class="force-pop" style="left: 55%; top: 15%">
+      <div class="force-row"><div class="num-field"><span class="num">50</span><span class="caret"></span></div><div class="seg small"><span class="on">N</span><span>MPa</span></div></div>
+      <span class="hint">≈ 5.1 kg of weight</span>
+      <div class="force-actions"><button class="btn ghost sm">Cancel</button><button class="btn primary sm">OK</button></div>
+    </div>
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Loads</h2><p class="purpose">Where is it pushed or pulled?</p></div>
+    <div class="panel-body">
+      <div class="group">
+        <div class="label">Loads · 1</div>
+        <div class="list">
+          <div class="item"><span class="swatch load"></span><div class="item-text"><b>Top edge · Push</b><span>Upright, 15° down</span></div><b class="num val">50 N</b><button class="x" aria-label="Remove">×</button></div>
+        </div>
+        <button class="link left">+ Separate load case</button>
+      </div>
+      <div class="group quiet">
+        <div class="label">Holds · 1</div>
+        <div class="item flat"><span class="swatch hold"></span><div class="item-text"><b>Screw hole Ø5</b></div></div>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary">Next</button></div>
+  </aside>
+</template>
+
+<template id="details">
+  <section class="stage">
+    <img class="part" src="shots/parts/{style}-{theme}-held.png" alt="">
+    <div class="lock" style="left: 56.8%; top: 61.7%"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+    <svg class="gizmo" viewBox="0 0 842 844" preserveAspectRatio="none">
+      <line x1="450" y1="196" x2="313" y2="261" class="arrow"/><path d="M293 270 L316.8 268.7 L309 252.5 Z" class="arrow-head"/><circle cx="285" cy="274" r="6" class="anchor"/>
+    </svg>
+    <div class="arrow-label" style="left: 54%; top: 20%">50 N</div>
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Load details</h2><p class="purpose">Three quick questions.</p></div>
+    <div class="panel-body">
+      <div class="group">
+        <div class="label">How long does it act?</div>
+        <div class="seg"><span>Short moments</span><span class="on">On and off</span><span>All the time</span></div>
+      </div>
+      <div class="group">
+        <div class="label">Temperature during use</div>
+        <div class="confirm-card"><span>We'll check at <b class="num">50 °C</b> (outdoors, sun). Right?</span><div class="row"><button class="btn secondary sm">Yes</button><button class="btn ghost sm">Change</button></div></div>
+      </div>
+      <div class="group">
+        <div class="label">Shaking or knocks?</div>
+        <div class="seg"><span class="on">No</span><span>Yes</span></div>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary">Next</button></div>
+  </aside>
+</template>
+
+<template id="analyse">
+  <section class="stage">
+    <img class="part dim" src="shots/parts/{style}-{theme}-setup.png" alt="">
+    <div class="progress-card">
+      <div class="pc-head"><h3>Finding your best options</h3><span class="num muted">1:12 of ~2 min</span></div>
+      <div class="bar"><i style="width: 58%"></i></div>
+      <ol class="stages">
+        <li class="ok">Finding orientations</li><li class="ok">Checking strength</li><li class="ok">Measuring support</li>
+        <li class="run">Trying nozzles, layers and settings</li><li>Picking options</li>
+      </ol>
+      <div class="pc-foot"><button class="btn ghost">Cancel</button><button class="btn secondary">Stop &amp; show best so far</button></div>
+    </div>
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Analyse</h2><p class="purpose">P1S · Balanced · Slicer settings</p></div>
+    <div class="panel-body">
+      <div class="group">
+        <div class="label">How deep should we look?</div>
+        <div class="depth">
+          <div class="dcard"><div><b>Fast</b><span>Orientation and a few settings.</span></div><span class="num time">~20 s</span></div>
+          <div class="dcard sel"><div><b>Extended</b><span>All orientations, settings, nozzles and materials.</span></div><span class="num time">~2 min</span></div>
+          <div class="dcard off"><div><b>Complete</b><span>Also tests reinforcements at weak spots.</span><span class="need">Needs design changes · <u>Allow</u></span></div><span class="num time">~12 min</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary" disabled>Running…</button></div>
+  </aside>
+</template>
+
+<template id="sim">
+  <section class="stage">
+    <div class="seg small overlay-switch"><span>Normal</span><span class="on">Heat</span><span>Warping</span><span>Stress</span><span>Overhangs</span></div>
+    <img class="part" src="shots/parts/{style}-{theme}-heat.png" alt="">
+    <div class="legend"><span class="label">Layer temperature</span><div class="heat-bar"></div><div class="heat-scale num"><span>45 °C</span><span>95 °C</span></div></div>
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Simulation</h2><p class="purpose">How the part behaves while it prints.</p></div>
+    <div class="panel-body">
+      <div class="setup-strip"><span class="num">On its back · PETG · 0.4 · 3 walls · 20 %</span><button class="link">Change</button></div>
+      <div class="slice-line"><span class="dot-ok"></span>Sliced with OrcaSlicer · G-code ready</div>
+      <div class="disc"><span>Print conditions</span><span class="muted num">Open · bed 80 · room 22 °C</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div>
+      <div class="group">
+        <div class="label">Results</div>
+        <div class="status-list">
+          <div class="status ok"><i></i><b>Cooling</b><span>Fine</span></div>
+          <div class="status warn"><i></i><b>Warping</b><span class="num">Corner lifts ~0.2 mm</span></div>
+          <div class="status bad"><i></i><b>Print issues</b><span>4 found</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary">Review problems (4)</button></div>
+  </aside>
+</template>
+
+<template id="problems">
+  <section class="stage">
+    <img class="part" src="shots/parts/{style}-{theme}-problem.png" alt="">
+    <div class="hover-badge" style="left: 36%; top: 27%">Ø6 hole · side</div>
+    <div class="pending-bar"><b>2 changes pending</b><button class="btn ghost sm">Review</button><button class="btn ghost sm">Discard</button><button class="btn primary">Confirm all changes</button></div>
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Problems</h2><p class="purpose">4 found. Fixes are under each one.</p></div>
+    <div class="panel-body tight">
+      <div class="pgroup"><div class="label">Shape off · 1</div>
+        <div class="prob open">
+          <div class="prob-top"><i class="pdot warn"></i><b>Side hole prints oval</b><span class="loc num">Ø6 · side</span></div>
+          <p class="pline">Top sags ~0.3 mm; an M6 bolt won't fit.</p>
+          <div class="fix added"><span class="tag">Slicer</span><span class="ftext">Hole size +0.15 mm</span><span class="fadded">✓ Added</span></div>
+          <div class="fix"><span class="tag design">Design</span><span class="ftext">Teardrop top</span><button class="btn secondary sm">Add</button></div>
+          <div class="prob-links"><button class="link">More</button><button class="link quiet">Accept this issue</button></div>
+        </div>
+      </div>
+      <div class="pgroup"><div class="label">Looks rough · 2</div>
+        <div class="prob"><div class="prob-top"><i class="pdot info"></i><b>Steps on shallow slope</b><span class="loc">top</span></div></div>
+        <div class="prob"><div class="prob-top"><i class="pdot info"></i><b>Seam on the front</b><span class="pstate done">Fixed</span></div></div>
+      </div>
+      <div class="pgroup"><div class="label">Weak · 1</div>
+        <div class="prob"><div class="prob-top"><i class="pdot bad"></i><b>Bend is the weakest spot</b><span class="loc num">×3.4</span></div></div>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary">Continue to Done</button></div>
+  </aside>
+</template>
+
+<template id="done">
+  <section class="stage">
+    <img class="part" src="shots/parts/{style}-{theme}-done.png" alt="">
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Your part is ready</h2><p class="purpose">Checked, optimized and ready to slice.</p></div>
+    <div class="panel-body">
+      <div class="sum-grid">
+        <div><span class="sub">Material</span><b>PETG</b></div><div><span class="sub">Nozzle · layer</span><b class="num">0.4 · 0.20</b></div>
+        <div><span class="sub">Walls · infill</span><b class="num">3 · 20 %</b></div><div><span class="sub">Print time</span><b class="num">2 h 05</b></div>
+        <div><span class="sub">Plastic</span><b class="num">41 g <small>6 support</small></b></div><div><span class="sub">Safety</span><b><span class="safety ok">Enough · ×3.4</span></b></div>
+      </div>
+      <div class="disc"><span>Slicer changes (6)</span><span class="muted">vs your profile</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div>
+      <div class="group">
+        <div class="row"><button class="btn primary grow">Export 3MF</button><div class="select narrow"><span>OrcaSlicer</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+        <div class="row"><button class="btn ghost sm">Save project</button><button class="btn ghost sm">Share report</button><button class="btn ghost sm">CAD checklist</button></div>
+      </div>
+      <div class="group">
+        <div class="label">Optional extras</div>
+        <div class="extra"><b>Tolerances &amp; fits</b><span>Check that holes and pegs fit.</span></div>
+        <div class="extra"><b>Make it lighter</b><span>Same safety, less plastic.</span></div>
+        <div class="extra"><b>G-code</b><span>Sliced with these settings.</span></div>
+        <div class="disc"><span>More tools</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn secondary">New part</button></div>
+  </aside>
+</template>
+
+<template id="tolerances">
+  <section class="stage">
+    <div class="pill">Click a hole or peg to check its fit</div>
+    <img class="part" src="shots/parts/{style}-{theme}-tol.png" alt="">
+    <svg class="gizmo" viewBox="0 0 842 844" preserveAspectRatio="none">
+      <path d="M262 290 L150 250 L150 290 L262 330 Z" class="ghost-pin"/>
+      <ellipse cx="150" cy="270" rx="12" ry="20" class="ghost-pin end"/>
+      <ellipse cx="292" cy="302" rx="25" ry="31" class="clear-ring"/>
+    </svg>
+    <div class="fit-pop" style="left: 42%; top: 27%">
+      <div class="fit-title"><b>Ø6 hole</b><span class="fit-gap num">0.18 mm gap</span></div>
+      <span class="hint">Measured on your P1S</span>
+      <div class="seg small"><span>Press</span><span class="on">Snug</span><span>Loose</span></div>
+      <div class="row two"><div class="field"><span class="sub">Mating size</span><div class="select num"><span>Ø 6.00</span></div></div><div class="field"><span class="sub">Type</span><div class="select"><span>Bolt</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div></div>
+      <div class="tick"><span class="check-box on"></span>Apply to all 2 × Ø6 holes</div>
+    </div>
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Tolerances &amp; fits</h2><p class="purpose">Will the other part fit?</p></div>
+    <div class="panel-body">
+      <div class="group">
+        <div class="label">Fits · 2</div>
+        <div class="list">
+          <div class="item"><span class="swatch fit"></span><div class="item-text"><b>Ø6 hole · M6 bolt</b><span>Snug · 2 holes</span></div><span class="safety ok">Fits</span></div>
+          <div class="item"><span class="swatch hold"></span><div class="item-text"><b>Ø5 hole · screw</b><span>Into plastic</span></div><span class="safety warn">Tight</span></div>
+        </div>
+      </div>
+      <div class="group quiet"><div class="label">Show</div><div class="seg small"><span class="on">Ghost mate</span><span>Printed vs CAD</span></div></div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back to Done</button><button class="btn primary">Add 2 changes</button></div>
+  </aside>
+</template>
+
+<template id="settings">
+  <section class="settings-wrap">
+    <nav class="tabs">
+      <button class="link left back">← Back to your part</button>
+      <span>Printers</span><span>Print profiles</span><span>Materials</span><span class="on">Calibration tests</span><span>What the checks use</span>
+    </nav>
+    <div class="settings-body">
+      <div class="set-head"><h1 class="h-set">Calibration tests</h1><p class="purpose">Print a test, enter what you see. The checks then use your numbers.</p></div>
+      <div class="cal-grid">
+        <div class="cal"><span class="badge m">Measured</span><b>Starter plate</b><span>First layer, bed level, flow.</span></div>
+        <div class="cal"><span class="badge m">Measured</span><b>Fits and tolerance</b><span>How tight holes and pegs come out.</span></div>
+        <div class="cal"><span class="badge t">Using typical</span><b>Overhang</b><span>How steep it prints without support.</span></div>
+        <div class="cal"><span class="badge t">Using typical</span><b>Bridge</b><span>How far it spans in the air.</span></div>
+        <div class="cal"><span class="badge t">Using typical</span><b>Warping bar</b><span>How long a part can be before it lifts.</span></div>
+        <div class="cal"><span class="badge t">Using typical</span><b>Layer strength</b><span>How well layers stick together.</span></div>
+      </div>
+      <div class="set-foot"><button class="btn secondary">Export all my settings</button><button class="btn ghost">Import</button></div>
+    </div>
+  </section>
+</template>
+
 <script>
 const COLUMNS = [
   { badge: "Recommended", focus: true, pros: ["Least support", "Safety ×3.4"], cons: ["Needs PETG"],
@@ -189,13 +506,18 @@ const fill = (html) => html.replaceAll("{style}", STYLE).replaceAll("{theme}", T
   .replace("{camera}", document.getElementById("camera").innerHTML)
   .replace("{columns}", COLUMNS.map(columnHtml).join(""));
 const screen = document.getElementById("screen");
-screen.dataset.layout = SCREEN === "options" ? "options" : "work";
-screen.innerHTML = document.getElementById("rail").innerHTML + fill(document.getElementById(SCREEN).innerHTML);
-const order = ["setup", "env", "holds", "loads", "details", "analyse", "options"];
-for (const li of screen.querySelectorAll(".steps li[data-s]")) {
-  const at = order.indexOf(li.dataset.s), now = order.indexOf(SCREEN);
-  if (li.dataset.s === SCREEN) li.classList.add("now");
-  else if (at >= 0 && at < now) li.classList.add("done");
+const LAYOUT = { start: "full", settings: "full", part: "part", options: "options" };
+screen.dataset.layout = LAYOUT[SCREEN] || "work";
+document.body.dataset.screen = SCREEN;
+const rail = screen.dataset.layout === "full" ? "" : document.getElementById("rail").innerHTML;
+screen.innerHTML = rail + fill(document.getElementById(SCREEN).innerHTML);
+const order = ["part", "setup", "env", "holds", "loads", "details", "analyse", "options", "sim", "problems", "done"];
+const current = SCREEN === "tolerances" ? "done" : SCREEN;
+for (const li of screen.querySelectorAll(".steps li")) {
+  const s = li.dataset.s || "part", at = order.indexOf(s), now = order.indexOf(current);
+  li.classList.remove("done", "now");
+  if (s === current) li.classList.add("now");
+  else if (at < now) li.classList.add("done");
 }
 Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })))
   .then(() => document.fonts.ready).then(() => { document.body.dataset.ready = "1"; });

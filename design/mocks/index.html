@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Style mockups</title>
+<title>Style A mockups</title>
 <!-- T-512 overview for the owner: three looks, light and dark, on the three key screens. Regenerate the pictures
      with `python tools/screenshot_mocks.py`. Click a picture to open it full size. -->
 <style>
@@ -12,33 +12,24 @@
   section { margin-bottom: 48px; }
   h2 { margin: 0 0 4px; font-size: 20px; }
   .what { margin: 0 0 16px; color: #4B5563; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
   figure { margin: 0; }
   figcaption { font-size: 13px; color: #6B7280; margin-top: 4px; }
   img { width: 100%; display: block; border-radius: 8px; box-shadow: 0 1px 3px rgb(0 0 0 / 0.15); }
 </style>
 </head>
 <body>
-<h1>Pick a look</h1>
-<p>Three styles for the new UI, each in light and dark, on Setup, Holds (radial menu at the cursor) and Options
-(four columns). These are pictures only, not working screens. Pick one style, or mix (for example "B, with C's labels"),
-and the full set of screens follows in that style.</p>
+<h1>Style A · Workbench, every screen</h1>
+<p>The look the owner picked on 2026-11-21, in light and dark. Pictures only, not working screens. Order follows the flow
+(plan §2). Regenerate with <code>python tools/screenshot_mocks.py</code>.</p>
 <div id="sets"></div>
 <script>
-  const STYLES = {
-    a: ["A · Workbench", "Neutral cool greys, one blue accent, crisp lines. The plan's default."],
-    b: ["B · Studio", "Warm paper, ink text, burnt-orange accent, soft floating panels, rounded buttons."],
-    c: ["C · Instrument", "Dense and precise: dark header bar, teal accent, square corners, small caps labels, dotted grid."],
-  };
-  const html = [];
-  for (const [s, [name, what]] of Object.entries(STYLES)) {
-    for (const theme of ["light", "dark"]) {
-      html.push(`<section><h2>${name} · ${theme}</h2><div class="what">${what}</div><div class="grid">` +
-        ["setup", "holds", "options"].map(screen => `<figure><a href="shots/${s}-${theme}-${screen}.png"><img src="shots/${s}-${theme}-${screen}.png" alt="${name} ${theme} ${screen}"></a><figcaption>${screen}</figcaption></figure>`).join("") +
-        `</div></section>`);
-    }
-  }
-  document.getElementById("sets").innerHTML = html.join("");
+  const SCREENS = [["start", "Start"], ["part", "1 Part"], ["setup", "2 Setup"], ["env", "3 Environment"], ["holds", "4 Holds"],
+    ["loads", "5 Loads"], ["details", "6 Load details"], ["analyse", "7 Analyse (running)"], ["options", "8 Options"],
+    ["sim", "9 Simulation"], ["problems", "10 Problems"], ["done", "11 Done"], ["tolerances", "Tolerances & fits"], ["settings", "Settings & calibration"]];
+  document.getElementById("sets").innerHTML = SCREENS.map(([id, name]) => `<section><h2>${name}</h2><div class="grid">` +
+    ["light", "dark"].map(t => `<figure><a href="shots/a-${t}-${id}.png"><img src="shots/a-${t}-${id}.png" alt="${name} ${t}"></a><figcaption>${t}</figcaption></figure>`).join("") +
+    `</div></section>`).join("");
 </script>
 </body>
 </html>

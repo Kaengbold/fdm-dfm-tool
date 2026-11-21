@@ -44,17 +44,35 @@ geo.computeVertexNormals();
 const pos = geo.attributes.position, n = geo.attributes.normal, count = pos.count;
 const cols = new Float32Array(count * 3);
 const hl = q.get("hl");
+geo.computeBoundingBox();
+const zMax = geo.boundingBox.max.z || 1;
+// Simulation heat look: cool blue at the bed, hot at the thin top of the upright (heat builds up in small layers).
+const HEAT = ["#2563EB", "#06B6D4", "#22C55E", "#FACC15", "#F97316", "#DC2626"].map(h => new THREE.Color(h));
+function heat(t) {
+  const x = Math.min(Math.max(t, 0), 1) * (HEAT.length - 1), i = Math.min(Math.floor(x), HEAT.length - 2);
+  return HEAT[i].clone().lerp(HEAT[i + 1], x - i);
+}
 for (let t = 0; t < count; t += 3) {
   const nx = n.getX(t), ny = n.getY(t), nz = n.getZ(t);
   const cx = (pos.getX(t) + pos.getX(t + 1) + pos.getX(t + 2)) / 3;
   const cz = (pos.getZ(t) + pos.getZ(t + 1) + pos.getZ(t + 2)) / 3;
   let c = color;
-  if (hl === "holds") {
-    const zHole = Math.abs(nz) < 0.1 && Math.abs(nx) > 0.1 && Math.abs(ny) > 0.1;
-    if (zHole && cx > 0) c = holdColor;
-    else if (nx > 0.99 && cx < -10 && cz > 4) c = color.clone().lerp(hoverColor, 0.6);  // the upright face
+  const zHole = Math.abs(nz) < 0.1 && Math.abs(nx) > 0.1 && Math.abs(ny) > 0.1 && cx > 0;  // screw hole in the base
+  const xHole = Math.abs(nx) < 0.1 && Math.abs(ny) > 0.1 && Math.abs(nz) > 0.1;            // hole in the upright
+  if (hl === "holds" || hl === "held") {
+    if (zHole) c = holdColor;
+    else if (hl === "holds" && nx > 0.99 && cx < -10 && cz > 4) c = color.clone().lerp(hoverColor, 0.6);  // the upright face
+  } else if (hl === "heat") {
+    c = heat(cz / zMax);
+  } else if (hl === "problem" && xHole) {
+    c = new THREE.Color(q.get("mark") || "#B45309");
+  } else if (hl === "tol" && xHole) {
+    c = new THREE.Color(q.get("mark") || "#15803D");
   }
-  for (let k = 0; k < 3; k++) cols.set([c.r, c.g, c.b], (t + k) * 3);
+  for (let k = 0; k < 3; k++) {
+    const v = hl === "heat" ? heat(pos.getZ(t + k) / zMax) : c;
+    cols.set([v.r, v.g, v.b], (t + k) * 3);
+  }
 }
 geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
 const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02, flatShading: false }));
