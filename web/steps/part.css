@@ -1,0 +1,67 @@
+/* Start screen and Part step (T-531), matching the approved mockups (design/mocks: start, part). Spacing only from
+   the --s-* tokens (core/tests/test_css_tokens.py). */
+
+/* ---------- Start ---------- */
+.start { width: 100%; max-width: var(--start-max); margin: 0 auto; padding: var(--s-7) var(--s-6); display: grid; gap: var(--s-5); align-content: start; }
+.start h1:focus { outline: none; }
+.big-cards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-5); }
+.big-card { position: relative; min-height: 230px; padding: var(--s-6); border-radius: var(--r-lg); background: var(--surface-raised); border: 1px solid var(--line);
+  display: grid; align-content: start; justify-items: start; gap: var(--s-3); text-align: left; font: inherit; color: var(--text); }
+button.big-card { cursor: pointer; }
+.big-card.is-go { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-pop); }
+.big-card.is-go:hover { background: var(--accent-soft); }
+.big-icon { width: 48px; height: 48px; border-radius: var(--r); display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); }
+.big-icon .ui-icon { width: 26px; height: 26px; }
+.big-title { font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+.big-line { color: var(--text-2); }
+.big-cta { position: absolute; right: var(--s-6); bottom: var(--s-5); display: inline-flex; align-items: center; gap: var(--s-2); color: var(--accent-text); font-weight: var(--fw-bold); }
+.big-card.is-soon { background: var(--surface-sunken); }
+.big-card.is-soon .big-icon { background: var(--surface); color: var(--text-3); }
+.big-card.is-soon .big-title { color: var(--text-2); }
+.soon-badge { margin-left: var(--s-2); padding: var(--s-1) var(--s-2); vertical-align: middle; border-radius: var(--r-pill); background: var(--warn-soft); color: var(--warn); font-size: var(--fs-xs); }
+.soon-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); color: var(--text-3); font-size: var(--fs-sm); }
+.soon-list li::before { content: "·"; margin-right: var(--s-2); }
+.slim-card { display: flex; align-items: center; gap: var(--s-4); padding: var(--s-4) var(--s-5); border-radius: var(--r-lg); background: var(--surface-raised);
+  border: 1px solid var(--line); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.slim-card:hover { border-color: var(--line-strong); }
+.slim-card > .ui-icon { width: 22px; height: 22px; color: var(--text-2); }
+.slim-text { display: grid; flex: 1; }
+.slim-text span { font-size: var(--fs-sm); color: var(--text-3); }
+.recent { display: grid; gap: var(--s-3); margin-top: var(--s-3); }
+.recent-card { display: grid; gap: var(--s-1); justify-items: start; width: 320px; padding: var(--s-3); border-radius: var(--r); background: var(--surface-raised);
+  border: 1px solid var(--line); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.recent-card:hover { border-color: var(--line-strong); }
+.recent-card img { width: 100%; height: 120px; object-fit: contain; border-radius: var(--r-sm); background: linear-gradient(var(--stage-top), var(--stage-bottom)); }
+.recent-card span { font-size: var(--fs-xs); color: var(--text-3); }
+
+/* ---------- Part: the stage is one big drop zone ---------- */
+.stage--part .panel-body { display: grid; place-items: center; padding: 0; }
+.drop-wrap { display: grid; justify-items: center; gap: var(--s-5); }
+.drop { width: 600px; min-height: 320px; padding: var(--s-6); border: 2px dashed var(--line-strong); border-radius: var(--r-lg); display: grid; place-items: center;
+  align-content: center; gap: var(--s-3); background: rgb(255 255 255 / 0.35); text-align: center; transition: border-color var(--t-fast), background var(--t-fast); }
+[data-theme="dark"] .drop { background: rgb(0 0 0 / 0.18); }
+.drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
+.drop h2 { font-size: var(--fs-xl); }
+.drop-icon { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); }
+.drop-icon .ui-icon { width: 26px; height: 26px; }
+.drop-progress { display: flex; align-items: center; gap: var(--s-3); }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: ui-spin 0.9s linear infinite; }
+.drop-error { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--bad-soft); color: var(--bad); font-size: var(--fs-sm); }
+.body-list { display: grid; gap: var(--s-2); }
+.unit-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-2); padding: var(--s-3) var(--s-4); border-radius: var(--r);
+  background: var(--warn-soft); color: var(--text); }
+.unit-bar b { color: var(--warn); }
+
+/* Sample parts popover, above its button. */
+.sample-pop { position: fixed; transform: translate(-50%, -100%); display: grid; gap: var(--s-3); padding: var(--s-4); border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--surface-raised); box-shadow: var(--shadow-pop); z-index: 30; }
+.sample-grid { display: grid; grid-template-columns: repeat(4, 112px); gap: var(--s-2); }
+.sample-card { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-2); border: 1px solid transparent; border-radius: var(--r); background: none;
+  color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.sample-card:hover { border-color: var(--line); background: var(--surface); }
+.sample-card img { width: 96px; height: 96px; border-radius: var(--r-sm); background: linear-gradient(var(--stage-top), var(--stage-bottom)); }
+
+/* Camera bar buttons (stage.js cameraBar). */
+.stage-camera { display: flex; gap: var(--s-1); padding: var(--s-1); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-pop); }
+.stage-camera button { padding: var(--s-1) var(--s-3); border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.stage-camera button.is-on { background: var(--accent-soft); color: var(--accent-text); font-weight: var(--fw-bold); }
