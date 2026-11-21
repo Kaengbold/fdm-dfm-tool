@@ -1,0 +1,19 @@
+/* Holds step (T-541): lock markers on the stage, the instruction pill, the hold list. Spacing only from the --s-*
+   tokens (core/tests/test_css_tokens.py). */
+.stage-ui .stage-pill { position: absolute; top: var(--s-4); left: 50%; transform: translateX(-50%); padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-pill); background: var(--surface-raised); border: 1px solid var(--line); box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm); font-weight: var(--fw-bold); pointer-events: none; }
+.hold-marker { position: absolute; z-index: 4; transform: translate(-50%, -50%); width: 30px; height: 30px; padding: 0; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--ov-hold); color: #fff; box-shadow: 0 0 0 3px var(--surface-raised), var(--shadow-pop); cursor: pointer; }
+.hold-marker .ui-icon { width: 15px; height: 15px; }
+.how-steps { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-2); color: var(--text-2); }
+.hold-list { display: grid; gap: var(--s-2); }
+.hold-row { display: flex; align-items: flex-start; gap: var(--s-3); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); }
+.hold-row:hover { border-color: var(--ov-hold); }
+.hold-swatch { width: 10px; align-self: stretch; border-radius: var(--r-sm); background: var(--ov-hold); }
+.hold-text { display: grid; gap: var(--s-1); flex: 1; }
+.hold-text span { font-size: var(--fs-xs); color: var(--text-3); }
+.hold-x { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3); cursor: pointer; }
+.hold-x:hover { background: var(--surface-sunken); color: var(--bad); }
+.hold-x .ui-icon { width: 14px; height: 14px; }
+.hold-skip { padding-top: var(--s-4); border-top: 1px solid var(--line); }
