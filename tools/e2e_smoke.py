@@ -5,8 +5,8 @@
 
 Starts its own static server, drives the UI like a user, and prints one line per
 step plus every console error. Screenshots go to ./e2e-output/. Exit code 1 on failure.
-With --quick, runs a short subset (~2 min: boot, phone start screen, Simple flow to 3MF,
-level switch, one finding). With --gemini-review, the Gemini CLI looks at each screenshot
+With --quick, runs a short subset (~2 min: boot, desktop start screen, Simple flow to 3MF,
+start guide, one finding). With --gemini-review, the Gemini CLI looks at each screenshot
 for visual problems and writes its notes to e2e-output/gemini-review.md (it only gets the
 image, no shell access).
 """
@@ -244,46 +244,71 @@ def check_finding_views(page, limit: int | None = None) -> str:
     return f"{len(entries)} findings clicked, {focused} places framed; most common colour {worst:.1%}; flights outside, whole-part return works"
 
 
+def set_level(page, level: str) -> None:
+    """The old levels without the level switch (removed in T-500; users always get Advanced): the app takes
+    them from ?level= or the fdm-test-level event. The URL keeps the level across page.reload()."""
+    page.evaluate("""(l) => {
+      history.replaceState(null, '', `${location.pathname}?level=${l}`);
+      dispatchEvent(new CustomEvent('fdm-test-level', { detail: l }));
+    }""", level)
+
+
+def wait_settled(page, action) -> None:
+    """Run ``action`` and wait until any work it started is finished. Unlike Run.act it doesn't require work to start
+    (a mode change re-checks only when a part is open)."""
+    action()
+    page.wait_for_timeout(500)
+    page.wait_for_function("() => Number(document.body.dataset.busy || 0) === 0", timeout=300_000)
+
+
 def check_fresh_start(page):
     """Shared fresh-visit assertions for the start screen."""
-    assert page.evaluate("() => document.body.dataset.level") == "simple"
+    assert page.evaluate("() => document.body.dataset.level") == "advanced"
     assert page.evaluate("() => fdm.steps.current") == "part"
     assert page.locator("#drop").is_visible(), "fresh visit hides the drop zone"
     assert not page.locator("#guide").evaluate("d => d.open"), "guide opened by itself"
     assert page.locator("#more-tools").is_hidden(), "more tools offered before a result"
-    assert page.evaluate("() => localStorage.getItem('fdm-guided')") == "1"
+    assert page.locator("input[name=level]").count() == 0, "a level switch is back"
 
 
-def check_phone_start_screen(page) -> str:
-    """Verify the start screen fits cleanly at phone width without horizontal overflow."""
+def check_desktop_start(page) -> str:
+    """T-500 at 1280 x 720 (the smallest supported window): the header is the top row, nothing overflows sideways."""
     check_fresh_start(page)
-    assert page.locator(".samples").evaluate("e => e.scrollWidth <= e.clientWidth"), "sample list overflows phone width"
-    assert page.locator("[data-pane=part]").evaluate("e => e.scrollWidth <= e.clientWidth"), "start pane overflows phone width"
-    assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth"), "page overflows phone width"
-    return "390x844 start screen: Simple drop zone and samples fit without overflow"
+    top = page.locator(".top").bounding_box()
+    assert top["y"] == 0 and top["height"] < 70, f"header not the top row: {top}"
+    page.evaluate("() => document.body.prepend(Object.assign(document.createElement('div'), { id: 'injected', textContent: 'x' }))")
+    try:
+        assert page.locator(".top").bounding_box()["y"] < 5, "an element before the header pushes it down"
+    finally:
+        page.evaluate("() => document.getElementById('injected').remove()")
+    assert page.evaluate("() => document.documentElement.scrollWidth <= window.innerWidth"), "page overflows sideways"
+    return "1280x720: header on top (also with an injected element), no sideways overflow"
 
 
 def check_levels_and_guide(page) -> str:
-    """Open the start guide, verify Simple visibility, and switch to Expert."""
+    """The guide offers one way to check a part (no levels) and the failed-print path; the old checks then run in Expert."""
     assert not page.locator("#guide").evaluate("d => d.open")
     page.click("#show-guide")
     assert page.locator("#guide").evaluate("d => d.open")
-    assert page.locator("[data-guide=settings]").get_attribute("class") == "current"
-    page.click("[data-guide=settings]")
-    simple = page.evaluate("() => [document.body.dataset.level, document.getElementById('design-block').checkVisibility(), document.getElementById('my-presets').checkVisibility()]")
-    assert simple == ["simple", False, False], simple
+    assert page.locator("[data-guide]").count() == 1, "the guide offers levels again"
     assert page.locator("#failed-guide").is_enabled(), "fix-my-print path unavailable in the guide"
+    wait_settled(page, lambda: page.click("[data-guide=steps]"))  # "Both" re-checks an open part
+    assert page.evaluate("() => document.body.dataset.level") == "advanced"
+    assert page.is_checked("input[name=mode][value=both]")
+    # The old checks expect "print"; the choice sits on another step, so set it like the guide does.
+    wait_settled(page, lambda: page.evaluate("""() => { const r = document.querySelector('input[name=mode][value=print]');
+      r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); }"""))
 
+    set_level(page, "simple")
     # T-374: strength is a step of its own in Simple; the optional fold stays hidden.
     assert page.evaluate("() => document.getElementById('load-optional').hidden && fdm.steps.steps.includes('strength')"), "Simple: strength not a step"
-    page.click("input[name=level][value=expert] >> xpath=..")
-    assert page.evaluate("() => localStorage.getItem('fdm-level')") == "expert"
+    set_level(page, "expert")
     order = page.evaluate("() => fdm.steps.steps")  # T-376: simulations first, then the problems
     assert order.index("sims") < order.index("printing") < order.index("problems"), order
 
     # T-352: the optional load fold is only there in Simple (where the strength block moves into it).
     assert page.evaluate("() => document.getElementById('load-optional').hidden"), "empty load fold shown in Expert"
-    return f"guide -> {simple[0]}; back to expert"
+    return "guide -> Advanced, both; old checks continue in Expert"
 
 
 def assert_primary_at_foot(page, button: str):
@@ -297,7 +322,7 @@ def assert_primary_at_foot(page, button: str):
 def simple_flow_to_3mf(run: Run, sample: str = "mushroom") -> str:
     """Walk one sample through the Simple steps (part -> have -> strength -> result) to the 3MF download."""
     page = run.page
-    page.click("input[name=level][value=simple] >> xpath=..")
+    set_level(page, "simple")
     page.evaluate("() => fdm.steps.go('part')")  # the samples are on the first step
     assert_primary_at_foot(page, "step-next")
     run.act(lambda: click_sample(page, sample))
@@ -355,59 +380,6 @@ def gemini_review(binary: str):
     (OUT / "gemini-review.md").write_text("# Gemini screenshot review\n\n" + "\n".join(notes), encoding="utf-8")
 
 
-def check_phone_content_first(run: Run) -> str:
-    """T-456 at 390 x 844 with a part loaded: one header row with the levels behind "Menu"; on each Simple step
-    the heading (Result: the verdict) and the first control show without scrolling; no control is covered by
-    the sticky buttons or the sticky 3D view; the view folds to a strip and comes back."""
-    page = run.page
-    page.set_viewport_size({"width": 390, "height": 844})
-    try:
-        assert page.locator(".levels").is_hidden() and page.locator("#menu-button").is_visible(), "levels not behind Menu"
-        header = page.locator(".top").bounding_box()["height"]
-        assert header < 60, f"header is {header:.0f} px: more than one row"
-        page.click("#menu-button")
-        assert page.locator(".levels").is_visible(), "Menu does not open"
-        page.keyboard.press("Escape")
-        assert page.locator(".levels").is_hidden(), "Escape leaves the menu open"
-        seen = []
-        for step in ("have", "result"):
-            page.evaluate(f"() => (fdm.steps.go('{step}'), window.scrollTo(0, 0))")
-            page.wait_for_timeout(200)
-            first = page.evaluate("""() => {
-              const pane = [...document.querySelectorAll('.pane')].find((p) => p.getClientRects().length);
-              const head = pane.querySelector('h2') ?? document.getElementById('verdict');
-              const control = [...pane.querySelectorAll('button, select, input:not([type=hidden])')].find((c) => c.checkVisibility());
-              const bar = document.querySelector('.foot-buttons').getBoundingClientRect().top;
-              return { pane: pane.dataset.pane, head: head.getBoundingClientRect().bottom, control: control.getBoundingClientRect().bottom, bar };
-            }""")
-            assert first["head"] <= first["bar"] and first["control"] <= first["bar"], f"{step}: content starts below the fold {first}"
-            covered = page.evaluate("""() => {
-              const panel = document.getElementById('panel');
-              const out = [];
-              for (const c of panel.querySelectorAll('button, select, summary, input:not([type=hidden])')) {
-                if (!c.checkVisibility() || c.closest('.foot-buttons')) continue; // closed <details> content still has boxes
-                const target = c.type === 'checkbox' || c.type === 'radio' ? (c.closest('label') ?? c) : c;
-                target.scrollIntoView({ block: 'center' });
-                const r = target.getBoundingClientRect();
-                if (!r.width || !r.height) continue;
-                const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-                if (hit && !target.contains(hit) && !hit.contains(target)) out.push(`${c.id || c.textContent.trim().slice(0, 30)} under ${hit.id || hit.className}`);
-              }
-              return out;
-            }""")
-            assert not covered, f"{step}: covered controls {covered}"
-            seen.append(f"{step}: heading at {first['head']:.0f} px")
-        page.evaluate("() => window.scrollTo(0, 0)")
-        page.click("#view-hide")
-        strip = page.locator("main#viewer").bounding_box()["height"]
-        assert strip < 70, f"folded view is {strip:.0f} px"
-        page.click("#view-hide")  # "Show 3D view"
-        assert page.locator("main#viewer canvas").is_visible(), "the view does not come back"
-        return f"header {header:.0f} px; {'; '.join(seen)}; folded view {strip:.0f} px; nothing covered"
-    finally:
-        page.set_viewport_size({"width": 1500, "height": 950})
-
-
 def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
     """T-453: two parts worked on in a row are both under "Your recent projects" after a reload and both reopen
     as the same entries (no copies); "Delete all" empties the list."""
@@ -446,15 +418,14 @@ def check_saved_projects(run: Run, other: str = "l_bracket") -> str:
 
 
 def run_quick(run: Run) -> None:
-    """Short smoke check (~2 min): phone start screen, Simple flow to 3MF, level switch, one finding."""
+    """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
-    page.set_viewport_size({"width": 390, "height": 844})
+    page.set_viewport_size({"width": 1280, "height": 720})
     try:
-        run.step("phone start screen", lambda: check_phone_start_screen(page))
+        run.step("desktop start screen", lambda: check_desktop_start(page))
     finally:
         page.set_viewport_size({"width": 1500, "height": 950})
     run.step("simple flow to 3MF download", lambda: simple_flow_to_3mf(run, "hole_block"))
-    run.step("phone: content first", lambda: check_phone_content_first(run))
     run.step("levels and start guide", lambda: check_levels_and_guide(page))
 
     def open_one_finding():
@@ -508,15 +479,16 @@ def _run_suite(port: int, args) -> Run:
         run.step("failed print without a part", failed_without_part)
 
         def part_first():
-            check_fresh_start(page)
-            page.click("input[name=level][value=advanced] >> xpath=..")
+            page.set_viewport_size({"width": 1280, "height": 720})
+            try:
+                desktop = check_desktop_start(page)
+            finally:
+                page.set_viewport_size({"width": 1500, "height": 950})
             page.reload()
             run.booted()
-            assert page.evaluate("() => document.body.dataset.level") == "advanced", "returning visit lost its level"
-            assert page.locator("#drop").is_visible()
+            check_fresh_start(page)
             assert not page.locator("#guide").evaluate("d => d.open"), "returning visit opened the guide"
-            page.click("input[name=level][value=simple] >> xpath=..")
-            return "fresh: Simple drop zone; returning: saved Advanced; no automatic dialog"
+            return f"{desktop}; returning visit: Advanced drop zone, no automatic dialog"
 
         run.step("first and returning visits start with the part", part_first)
 
@@ -559,12 +531,12 @@ def _run_suite(port: int, args) -> Run:
             other.add_init_script("Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });")
             other.goto(f"http://127.0.0.1:{port}/web/")
             other.wait_for_function("() => document.getElementById('status').textContent.startsWith('Ready')", timeout=180_000)
-            assert other.evaluate("() => document.body.dataset.level") == "simple"
+            assert other.evaluate("() => document.body.dataset.level") == "advanced"
             assert other.locator("#drop").is_visible()
             assert not other.locator("#guide").evaluate("d => d.open")
             other.click("#show-guide")
             assert other.locator("#guide").evaluate("d => d.open"), "Guide button needs storage"
-            other.click("[data-guide=settings]")
+            other.click("[data-guide=steps]")
             assert not other.locator("#guide").evaluate("d => d.open")
             other.close()
             assert not errors, errors
@@ -578,17 +550,17 @@ def _run_suite(port: int, args) -> Run:
             assert page.locator(".more-samples").evaluate("d => !d.open"), "More samples starts open"
             names = page.locator(".sample-example [data-sample]").evaluate_all("bs => bs.map(b => b.dataset.sample)")
             assert names == ["hole_block", "loaded_hook", "enclosure"], names
-            for width in (390, 1500):
+            for width in (1280, 1500):
                 page.set_viewport_size({"width": width, "height": 950})
                 assert page.locator(".samples").evaluate("e => e.scrollWidth <= e.clientWidth"), "sample list overflows"
-            page.click("input[name=level][value=simple] >> xpath=..")
+            set_level(page, "simple")
             run.act(lambda: click_sample(page, "hole_block"))
             page.evaluate("() => fdm.steps.go('result')")
             classes = page.evaluate("() => [...fdm.state.options[fdm.state.active].face_classes]")
             assert any(c in (1, 2) for c in classes), "first sample has no warning colours"
             assert page.locator("#view-key").is_visible()
             assert page.evaluate("() => fdm.state.check.findings.some(f => f.fixes.some(fx => fx.domain === 'slicer'))"), "no slicer fix"
-            page.click("input[name=level][value=expert] >> xpath=..")
+            set_level(page, "expert")
             page.evaluate("() => fdm.steps.go('part')")
             run.act(lambda: click_sample(page, "loaded_hook"))
             page.wait_for_function("() => fdm.state.loads.some(l => l.kind === 'force')")
@@ -648,7 +620,7 @@ def _run_suite(port: int, args) -> Run:
         run.step("broken mesh notice", broken_mesh_notice)
 
         def answer_first_result():
-            page.click("input[name=level][value=simple] >> xpath=..")
+            set_level(page, "simple")
             page.evaluate("() => fdm.steps.go('part')")
             sample = page.locator("[data-sample=feature_test]")
             fold = sample.locator("xpath=ancestor::details[1]")
@@ -694,28 +666,21 @@ def _run_suite(port: int, args) -> Run:
             for selector in ("#dl-copies", "#dl-grip", "#dl-report", "#dl-share", "#settings-fold > summary"):
                 assert page.locator(selector).is_visible(), f"More options lost {selector}"
             page.click("#result-options > summary")
-            page.set_viewport_size({"width": 390, "height": 844})
-            assert page.locator("[data-pane=result]").evaluate("p => p.scrollWidth <= p.clientWidth"), "phone Result overflows"
             assert stats.is_visible()
             assert page.locator(".pane-foot #dl-3mf.primary").is_visible()
-            page.click("#result-options > summary")
-            assert page.locator("#result-options").evaluate("p => p.scrollWidth <= p.clientWidth"), "phone options overflow"
-            assert page.locator("#dl-copies").is_visible()
-            page.click("#result-options > summary")
-            page.set_viewport_size({"width": 1500, "height": 950})
-            page.click("input[name=level][value=basic] >> xpath=..")
+            set_level(page, "basic")
             page.evaluate("() => fdm.steps.go('problems')")
             assert stats.is_visible() and stats.evaluate("p => p.closest('[data-pane]').dataset.pane") == "problems"
             assert page.evaluate("() => !!(document.getElementById('stats').compareDocumentPosition(document.getElementById('blk-problems')) & Node.DOCUMENT_POSITION_FOLLOWING)"), "stats returned below the findings"
             assert page.locator("#blk-download #dl-copies").count() == 1
-            page.click("input[name=level][value=expert] >> xpath=..")
+            set_level(page, "expert")
             page.evaluate("() => fdm.steps.go('part')")
-            return f"{text} | three pictured problem kinds with one fix each; optional controls folded; phone fits; stats restore in Basic"
+            return f"{text} | three pictured problem kinds with one fix each; optional controls folded; stats restore in Basic"
 
         run.step("Simple Result puts the answer first", answer_first_result)
 
         def quiet_hook_key():
-            page.click("input[name=level][value=simple] >> xpath=..")
+            set_level(page, "simple")
             page.evaluate("() => fdm.steps.go('part')")
             run.act(lambda: click_sample(page, "hook"))
             assert page.is_hidden("#view-label"), "orientation ranking shown on the setup step"
@@ -737,38 +702,31 @@ def _run_suite(port: int, args) -> Run:
                 assert page.is_hidden("#view-label"), "duplicate pose still labelled best"
             finally:
                 page.evaluate("() => { fdm.state.options = window.savedOptions; delete window.savedOptions; }")
-                page.click("input[name=level][value=expert] >> xpath=..")
+                set_level(page, "expert")
             return "Simple Hook: no key; ranking only with a different pose to compare"
         run.step("quiet colour key and orientation label on Hook", quiet_hook_key)
 
         def more_tools():
             assert page.locator("#more-tools").is_hidden(), "invitation visible outside Simple"
-            page.click("input[name=level][value=simple] >> xpath=..")
+            set_level(page, "simple")
             page.evaluate("() => fdm.steps.go('result')")
             invitation = page.locator("#more-tools")
             assert invitation.is_visible(), "first Simple result has no invitation"
             assert "Want to check strength, fits or design changes?" in invitation.inner_text()
             assert "link" in page.locator("#show-more-tools").get_attribute("class").split()
-            page.set_viewport_size({"width": 375, "height": 812})
-            try:
-                assert invitation.evaluate("p => p.scrollWidth <= p.clientWidth"), "invitation overflows at phone width"
-                for selector in ("#show-more-tools", "#dismiss-more-tools"):
-                    assert page.locator(selector).evaluate("b => { const r = b.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }"), selector
-            finally:
-                page.set_viewport_size({"width": 1500, "height": 950})
             run.act(lambda: page.click("#show-more-tools"))
             assert page.evaluate("() => document.body.dataset.level") == "advanced"
             assert page.evaluate("() => fdm.steps.current") == "strength"
             assert page.evaluate("() => ['strength', 'fits', 'design'].every(s => fdm.steps.steps.includes(s))")
             assert page.is_checked("input[name=mode][value=both]"), "design changes not enabled"
-            page.click("input[name=level][value=simple] >> xpath=..")
+            set_level(page, "simple")
             page.evaluate("() => fdm.steps.go('result')")
             assert invitation.is_hidden(), "used invitation came back"
             page.reload()
             run.booted()
             assert page.locator("#more-tools").evaluate("p => p.hidden"), "used invitation forgot on return"
-            page.click("input[name=level][value=expert] >> xpath=..")
-            return "Simple result offers a wrapping secondary link; Advanced opens strength, fits and design; use remembered"
+            set_level(page, "expert")
+            return "Simple result offers a secondary link; Advanced opens strength, fits and design; use remembered"
 
         run.step("Simple result offers more tools", more_tools)
 
@@ -776,7 +734,7 @@ def _run_suite(port: int, args) -> Run:
             other = browser.new_page()
             other_run = Run(other)
             try:
-                other.goto(f"http://127.0.0.1:{port}/web/")
+                other.goto(f"http://127.0.0.1:{port}/web/?level=simple")
                 other_run.booted()
                 other_run.act(lambda: click_sample(other, "hook"))
                 other.click("#step-next")
@@ -1239,7 +1197,7 @@ def _run_suite(port: int, args) -> Run:
               return { off: b.disabled, why: n && n.classList.contains('why-off') && !n.hidden ? n.textContent : '' }; }""", sel)
 
         def disabled_say_why():
-            """T-402: every disabled button in the strength flow says why in text (phones show no tooltips)."""
+            """T-402: every disabled button in the strength flow says why in text (tooltips are easy to miss)."""
             page.evaluate("() => fdm.steps.go('strength')")
             assert not page.evaluate("() => fdm.state.loads.length"), "test expects a part without loads here"
             for sel, words in (("#as-fixed", "Tap a face"), ("[data-next=load]", "held"), ("#run-strength", "where it's held and where the load goes"),
@@ -1570,16 +1528,7 @@ def _run_suite(port: int, args) -> Run:
             assert all(text.strip() for text in reasons.all_inner_texts()), "empty reason line"
             assert "Hover a row" not in page.locator("#settings-block").text_content()
             assert page.locator("#settings tr[title]").count() == 0, "duplicate reason tooltip"
-            viewport = page.viewport_size
-            try:
-                page.set_viewport_size({"width": 375, "height": 812})
-                assert reasons.first.is_visible(), "setting reason hidden on phones"
-                assert page.locator("#settings").evaluate(
-                    "table => table.scrollWidth <= table.clientWidth && table.getBoundingClientRect().right <= innerWidth"
-                ), "settings overflow phone width"
-            finally:
-                page.set_viewport_size(viewport)
-            return f"{reasons.count()} visible reason lines; phone width fits"
+            return f"{reasons.count()} visible reason lines"
         run.step("slicer setting reasons are visible", visible_setting_reasons)
 
         def settings_difference_export():
@@ -1604,9 +1553,6 @@ def _run_suite(port: int, args) -> Run:
             assert not walls.is_checked(), "Redo did not restore the untick"
             assert page.locator("#sh-walls").input_value() == shell_walls, "unticking changed the estimate's wall assumption"
             assert page.locator("#settings-estimate-note").is_visible(), "unknown slicer settings need an estimate note"
-            page.set_viewport_size({"width": 375, "height": 812})
-            assert page.locator("#settings").evaluate("t => t.scrollWidth <= t.clientWidth"), "difference table overflows phone width"
-            page.set_viewport_size({"width": 1500, "height": 950})
             page.evaluate("() => fdm.steps.go('download')")
             with page.expect_download(timeout=300_000) as dl:
                 page.evaluate("() => document.getElementById('dl-3mf').click()")
@@ -1636,7 +1582,7 @@ def _run_suite(port: int, args) -> Run:
                 page.evaluate("() => fdm.steps.go('strength')")
                 run.act(lambda: page.click("#run-strength"), 300_000)
                 page.evaluate("() => fdm.steps.go('settings')")
-            return "goal defaults shown; unchanged rows folded; unticked walls absent from both 3MF configs and kept in projects; phone fits"
+            return "goal defaults shown; unchanged rows folded; unticked walls absent from both 3MF configs and kept in projects"
         run.step("settings differences and per-row export choice", settings_difference_export)
 
         def import_print_settings():
@@ -1793,7 +1739,7 @@ def _run_suite(port: int, args) -> Run:
         run.step("warping simulation", warping)
 
         def all_settings():
-            page.check("input[name=level][value=expert]")
+            set_level(page, "expert")
             page.click("#show-expert")
             try:
                 page.wait_for_selector("#expert[open] .expert-values", state="attached")  # sections start folded
@@ -1933,7 +1879,7 @@ def _run_suite(port: int, args) -> Run:
                           " fdm.state.loads = [{ region: flat[0].id, kind: 'fixed' }, { region: flat[1].id, kind: 'force', kg: 2 }]; }")
             # T-377: its own step in Advanced, after the design changes.
             level = page.evaluate("() => fdm.steps.level")
-            page.click("input[name=level][value=advanced] >> xpath=..")
+            set_level(page, "advanced")
             order = page.evaluate("() => fdm.steps.steps")
             assert order.index("lighter") == order.index("extra") + 1, order
             assert not page.locator("[data-pane=design] #run-topology").count(), "still inside Design changes"
@@ -1958,7 +1904,7 @@ def _run_suite(port: int, args) -> Run:
             run.act(lambda: page.get_by_role("button", name="Use it as a new version").click(), 300_000)
             assert page.evaluate("() => fdm.state.versions.length") == versions + 1 and "lighter_50" in page.evaluate("() => fdm.state.name")
             assert not page.evaluate("() => Boolean(fdm.viewer.lighter)"), "the old shape stays on the new version"
-            page.click(f"input[name=level][value={level}] >> xpath=..")
+            set_level(page, level)
             return text.splitlines()[0]
         run.step("suggest a lighter shape", lighter_shape)
 
@@ -2743,7 +2689,7 @@ def _run_suite(port: int, args) -> Run:
         def settings_lead():
             """T-375: Simple and Basic put the settings first: steps across the top, the 3D view a card on the
             right that says what the step changes, with Before / After for how the part lies."""
-            page.click("input[name=level][value=basic] >> xpath=..")
+            set_level(page, "basic")
             page.evaluate("() => fdm.steps.go('orient')")
             box = lambda sel: page.locator(sel).bounding_box()  # noqa: E731
             nav, panel, view = box("#steps"), box("#panel"), box("#viewer")
@@ -2759,10 +2705,10 @@ def _run_suite(port: int, args) -> Run:
             page.evaluate("() => fdm.steps.go('problems')")  # another step shows the part as it prints again
             assert page.evaluate("() => !fdm.viewer.before && fdm.viewer.part.visible")
             assert page.is_hidden("#view-compare")
-            page.click("input[name=level][value=advanced] >> xpath=..")
+            set_level(page, "advanced")
             panel, view = box("#panel"), box("#viewer")
             assert view["x"] < panel["x"] and page.is_hidden("#view-changes"), (panel, view)
-            page.click("input[name=level][value=expert] >> xpath=..")
+            set_level(page, "expert")
             return "Basic: settings left, 3D card right, Before / After works; Advanced keeps the big 3D view"
         run.step("Simple and Basic: settings first, 3D beside them", settings_lead)
 
@@ -2929,14 +2875,13 @@ def _run_suite(port: int, args) -> Run:
             assert page.evaluate("() => fdm.state.strength !== simpleStrength"), "changed load reused stale strength"
 
             for level in ("basic", "advanced", "expert"):
-                page.click(f"input[name=level][value={level}] >> xpath=..")
+                set_level(page, level)
                 assert page.locator("#blk-download #dl-3mf.primary.big").count() == 1, f"download not restored in {level}"
                 assert page.locator("#run-strength.primary").count() == 1, f"strength action not restored in {level}"
                 assert page.locator(".sa-next.primary").count() == 2, f"strength stages not restored in {level}"
             page.evaluate("() => { delete window.simpleCompleted; delete window.simpleStrength; }")
             return " | ".join(items.all_inner_texts())
         run.step("simple: one primary and missing work on Result", simple_result)
-        run.step("phone: content first", lambda: check_phone_content_first(run))
 
         def tick_and_recheck():
             """T-364: ideas are ticked and applied together with one "Re-check", not one button each."""
@@ -3019,7 +2964,7 @@ def _run_suite(port: int, args) -> Run:
 
             run.step(f"thumbnails {sample.stem}", extra_thumbnails)
         # Every shipped part, including fixtures outside the sample buttons, must keep visual context.
-        page.click("input[name=level][value=expert] >> xpath=..")
+        set_level(page, "expert")
         for sample in sorted((ROOT / "web" / "samples").glob("*.stl")):
             def finding_views(sample=sample):
                 page.evaluate("() => fdm.steps.go('part')")
@@ -3040,7 +2985,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("parts", nargs="*", type=Path)
     ap.add_argument("--quick", action="store_true",
-                    help="short smoke check (~2 min): boot, phone start screen, Simple flow to 3MF, level switch, one finding")
+                    help="short smoke check (~2 min): boot, desktop start screen, Simple flow to 3MF, start guide, one finding")
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--browser", default="msedge", choices=["msedge", "chrome", "chromium"],
                     help="chromium = Playwright's own build (CI: playwright install chromium)")

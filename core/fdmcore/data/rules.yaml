@@ -173,6 +173,72 @@ rules:
     sources:
     - Prusa Knowledge Base — Max volumetric speed (Layer time cooldown) — https://help.prusa3d.com/article/max-volumetric-speed_127176
     - OrcaSlicer Wiki — Material cooling — https://github.com/OrcaSlicer/OrcaSlicer/wiki/material_cooling
+  heat_too_hot:
+    title: Still too hot when the next layer goes on
+    why: This spot gets the next layer while it is still soft from the last one, so it can sag, blob or lose its
+      sharp shape. Small or thin areas stay hot because each of their layers prints so quickly.
+    fixes:
+    - domain: slicer
+      text: Give each layer more time to cool. Raise the minimum layer time and let the printer slow down for
+        small layers, with the part fan at full speed.
+      settings:
+        slow_down_for_layer_cooling: '1'
+        slow_down_layer_time: '10'
+        fan_max_speed: 100%
+    - domain: process
+      text: Print a second copy of the part, or a small throwaway tower, on the same plate. The nozzle then leaves
+        this spot for a while every layer, and it cools in the meantime.
+    - domain: geometry
+      text: Make the thin feature thicker, or join it to a bigger part of the model.
+    tags:
+    - cooling
+    - overheating
+    - sagging
+    sources:
+    - OrcaSlicer Wiki — Material cooling — https://github.com/OrcaSlicer/OrcaSlicer/wiki/material_cooling
+    - Prusa Knowledge Base — Max volumetric speed (Layer time cooldown) — https://help.prusa3d.com/article/max-volumetric-speed_127176
+  heat_weak_bond:
+    title: Layers cool too much to bond well
+    why: Each new layer lands on plastic that has already cooled a lot, for example under a strong fan on big
+      layers. The layers then fuse only partly, and the part breaks more easily along its layers.
+    fixes:
+    - domain: slicer
+      text: Turn the part cooling fan down for this part, as far as the material allows, so the layer below is
+        still warm when the next one lands.
+      settings:
+        fan_min_speed: 20%
+        fan_max_speed: 60%
+    - domain: slicer
+      text: Print 5–10 °C hotter, so each new layer brings more heat into the joint with the one below.
+    - domain: process
+      text: Print in an enclosure, or close the printer's door, so the part cools less between layers.
+    tags:
+    - cooling
+    - bonding
+    - strength
+    sources:
+    - Seppala et al. 2017, Weld formation during material extrusion additive manufacturing, Soft Matter 13:6761
+      — https://doi.org/10.1039/c7sm00950j
+    - OrcaSlicer Wiki — Material cooling — https://github.com/OrcaSlicer/OrcaSlicer/wiki/material_cooling
+  heat_needless_slowdown:
+    title: Slowed down for cooling it doesn't need
+    why: The slicer slows these layers down so they can cool, but they already end up too cool to bond well. The
+      slow-down costs print time and makes the part weaker here.
+    fixes:
+    - domain: slicer
+      text: Lower the minimum layer time, so these layers print at their normal speed.
+      settings:
+        slow_down_layer_time: '4'
+    - domain: slicer
+      text: Turn the part cooling fan down for this part instead of slowing it down.
+      settings:
+        fan_max_speed: 60%
+    tags:
+    - cooling
+    - speed
+    - bonding
+    sources:
+    - OrcaSlicer Wiki — Material cooling — https://github.com/OrcaSlicer/OrcaSlicer/wiki/material_cooling
   enclosure_recommended:
     title: This material warps on an open printer
     why: Temperature-sensitive filaments like ABS or ASA need warm ambient air to print properly. Cold drafts cause

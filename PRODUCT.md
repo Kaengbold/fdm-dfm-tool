@@ -25,11 +25,10 @@ Drop in a part, get the best orientation, what will go wrong, slicer settings th
 Runs entirely in the browser, free and open source (AGPL-3.0-or-later), no account, no upload. Every check is deterministic code; AI is optional. Exports a 3MF with per-part settings, so the user's own slicer profiles stay theirs.
 
 ## Operating Context
-Used at a desk next to the printer, between CAD and slicer, on desktop mostly. No phone app (decided 2026-11-15): the file to check lives on a computer, and prints started from a phone are pre-sliced and need no check. On a phone the site has to do two things well: read a shared report, and the failed-print path at the printer. Everything else only has to work there. Parts arrive as STL, 3MF or STEP.
+Used at a desk next to the printer, between CAD and slicer. **Desktop only** (decided 2026-11-21, feedback round 5): windows of 1280 × 720 and larger. There are no phone or tablet layouts, and nothing built for phones may change the desktop layout. Parts arrive as STL, 3MF or STEP.
 
 ## Capabilities and Constraints
-- Four levels: Simple (printer and material, optional load, one result), Basic (all choices, no deep simulation), Advanced (everything, step by step), Expert (everything on one long page, later).
-- Step-by-step flow for Simple, Basic and Advanced: part, what you have, orientation, problems, strength, design changes, slicer settings, download.
+- One guided step-by-step flow for now, no level switch (decided 2026-11-21). The Expert page (everything on one long page) is gone; if levels come back, Expert has the same structure as Advanced. The flow being built is in [research/redesign-2026-11/PLAN-COMBINED.md](research/redesign-2026-11/PLAN-COMBINED.md) (TASKS.md, "UI revision").
 - Background work must always say what runs, how long, what it will update, and allow cancel. A change must say what it updates.
 - Short text; explanations only behind "More information".
 - English only for now.

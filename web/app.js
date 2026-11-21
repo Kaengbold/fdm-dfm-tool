@@ -1177,19 +1177,6 @@ function setCompare(before) {
   document.body.classList.toggle("view-before", before);
   for (const b of $("view-compare").children) b.setAttribute("aria-pressed", String((b.dataset.compare === "before") === !!before));
 }
-$("view-size").onclick = () => {
-  const big = document.body.classList.toggle("view-big");
-  $("view-size").setAttribute("aria-pressed", String(big));
-  $("view-size").textContent = big ? "Smaller view" : "Bigger view";
-};
-/** Phones: fold the 3D view to a strip so the step gets the screen (T-456). */
-function hideView(hidden) {
-  document.body.classList.toggle("view-hidden", hidden);
-  $("view-hide").setAttribute("aria-pressed", String(hidden));
-  $("view-hide").textContent = hidden ? "Show 3D view" : "Hide view";
-}
-$("view-hide").onclick = () => hideView(!document.body.classList.contains("view-hidden"));
-$("viewer").addEventListener("viewer-look", () => hideView(false));
 for (const b of $("view-compare").children) b.onclick = () => setCompare(b.dataset.compare === "before");
 
 /** Does the 3D view show the things of ``block`` (strength, problems, design) now? Blocks move
@@ -4730,20 +4717,18 @@ updateGoalNote();
 $("working-cancel").onclick = cancelEngine;
 
 // ---------- levels and the start guide ----------
+// Everyone gets the step-by-step flow (Advanced): the level switch and the Expert page are gone (T-500,
+// feedback round 5). The other levels stay only for the old browser test, which sets them with
+// ?level= or the fdm-test-level event, until the new UI replaces this page (T-580).
 const LEVELS = ["simple", "basic", "advanced", "expert"];
 function setLevel(level) {
-  if (level === "advanced-old") level = "advanced";
   if (!LEVELS.includes(level)) return;
   document.body.dataset.level = level;
-  document.querySelector(`input[name=level][value=${level}]`).checked = true;
-  store.set("fdm-level", level);
   steps.setLevel(level);
   setTimeout(() => viewer.resize()); // the step list comes and goes (Expert), so the 3D view changes size
 }
-for (const r of document.querySelectorAll("input[name=level]")) r.onchange = () => setLevel(r.value);
-// Start with a part before asking newcomers how much of the workbench they want to see.
-setLevel(new URLSearchParams(location.search).get("level") ?? (store.get("fdm-guided") ? store.get("fdm-level") : "simple") ?? "simple");
-store.set("fdm-guided", "1");
+addEventListener("fdm-test-level", (e) => setLevel(e.detail));
+setLevel(new URLSearchParams(location.search).get("level") ?? "advanced");
 
 /** Set "What can you change?" like a click would (it re-checks the part). */
 function setMode(value) {
@@ -4754,49 +4739,18 @@ function setMode(value) {
 }
 
 const GUIDE = {
-  settings: { level: "simple", mode: "print", next: "Drop your part, or try a sample." },
-  strength: { level: "basic", mode: "print", next: "Drop your part, or try a sample. Then follow the steps on the left." },
   steps: { level: "advanced", mode: "both", next: "Drop your part, or try a sample. Then follow the steps on the left." },
-  expert: { level: "expert", mode: "both", next: "Everything is on this page. Drop a part to start." },
 };
 for (const b of document.querySelectorAll("[data-guide]")) {
   b.onclick = () => {
     const g = GUIDE[b.dataset.guide];
     setLevel(g.level);
     setMode(g.mode);
-    store.set("fdm-guided", "1");
     $("guide").close();
     setStatus(g.next);
   };
 }
-/** The guide marks the level you are on and starts there, so Enter keeps it. */
-function openGuide() {
-  const level = document.body.dataset.level;
-  for (const b of document.querySelectorAll("[data-guide]")) {
-    const now = GUIDE[b.dataset.guide].level === level;
-    b.classList.toggle("current", now);
-    b.toggleAttribute("autofocus", now);
-  }
-  $("guide").showModal();
-}
-$("show-guide").onclick = openGuide;
-
-// Phones: the levels and the header buttons sit behind "Menu" (style.css, T-456). It closes after a
-// choice, on Escape and on a tap elsewhere, so it never stays over the step it just changed.
-function setMenu(open) {
-  $("menu-button").setAttribute("aria-expanded", String(open));
-  document.body.classList.toggle("menu-open", open);
-}
-$("menu-button").onclick = () => setMenu($("menu-button").getAttribute("aria-expanded") !== "true");
-// Capture: closed before the button acts, so Explain's tour measures the page without the menu over it.
-$("top-menu").addEventListener("click", (e) => e.target.closest("button") && setMenu(false), true);
-$("top-menu").addEventListener("change", () => setMenu(false));
-addEventListener("pointerdown", (e) => !e.target.closest(".top") && setMenu(false));
-addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || $("menu-button").getAttribute("aria-expanded") !== "true") return;
-  setMenu(false);
-  $("menu-button").focus();
-});
+$("show-guide").onclick = () => $("guide").showModal();
 
 // This invitation lives in Simple's Result pane, so it waits until the visitor has an answer.
 $("more-tools").hidden = !!store.get("fdm-more-tools");
@@ -4851,18 +4805,13 @@ foldInfo();
 const onScreen = (node) => node.getClientRects().length > 0 && !node.closest("[hidden]");
 const TOUR_START = [
   ["#steps", "The steps", "Go through them in order. A tick means that step is done; tap any step to go back to it."],
-  [".levels", "How much to show", "Simple shows only what you need to print. Switch up for more choices and checks, any time."],
   ["#viewer", "Your part in 3D", "Drag to turn it, scroll or pinch to zoom. Tap a face to pick it: to hold it, load it or keep it clean."],
 ];
 
-/** The stops for what is on screen now: the steps, the levels, the 3D view, then every explained heading
+/** The stops for what is on screen now: the steps, the 3D view, then every explained heading
  * that is visible, in page order. Built fresh each time, so it always matches the page. */
 function tourStops() {
   const stops = TOUR_START.map(([sel, title, text]) => ({ node: document.querySelector(sel), title, text }));
-  const levels = stops.find((s) => s.node?.matches(".levels"));
-  if (levels && !onScreen(levels.node)) { // phones: folded into the menu
-    Object.assign(levels, { node: $("menu-button"), text: `${levels.text} It's in the menu, with the guide.` });
-  }
   for (const p of document.querySelectorAll(".info-text")) {
     const host = p.infoHost;
     if (host && onScreen(host)) stops.push({ node: host, title: host.textContent.replace(/\s*i$/, "").trim(), text: p.textContent.trim() });
@@ -4907,7 +4856,7 @@ function startTour() {
 }
 function endTour() {
   $("tour").hidden = true;
-  (onScreen($("explain")) ? $("explain") : $("menu-button")).focus();
+  $("explain").focus();
 }
 $("explain").onclick = startTour;
 $("tour-next").onclick = () => (tour.at < tour.stops.length - 1 ? (tour.at++, showStop()) : endTour());
@@ -5026,7 +4975,7 @@ async function renderSetup() {
 async function renderCopies() {
   const want = Math.max(1, parseInt($("dl-copies").value, 10) || 1);
   const r = state.check && (await call("plate", { up: activeOption().up, profile: profile(), copies: want }).catch(() => null));
-  if (!r) return;
+  if (!r || !state.check) return; // a new part may have started loading while the plate was worked out
   $("dl-copies").max = String(Math.max(1, r.most));
   if (r.most && want > r.most) $("dl-copies").value = String(r.most);
   state.copies = Math.max(1, r.copies);

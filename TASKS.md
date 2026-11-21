@@ -887,13 +887,21 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - quick and fine tiers agree on cover temperature within 10 %.
     Timing: a 20-min print takes 13 s in Pyodide and 6 s natively; a 73-min print 30 s natively.
     Engine tests 674 passed, full browser test 0 failures, pyodide_check ok. Not done yet: the error band against real prints (T-477).
-- [ ] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: Claude (task/T-474-temperature-window)
+- [x] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: Claude (task/T-474-temperature-window)
   - Do: each node gets a window with two limits:
     - **Too hot (shape):** temperature of the layer below when the next bead lands ≤ the sag limit, stricter on overhangs and bridges.
     - **Too cold (bonding):** seconds the joint stays above Tg ≥ a minimum; add the welding integral with WLF / reptation values from T-470.
   - Goals: **Fastest / Balanced / Strongest**, which move the window. Design-intent tags (cosmetic / load-bearing / dimension-critical) adjust it per region.
   - New findings ("spot stays too hot", "spot is overcooled, weak bonding", "slowdown that isn't needed") need `rules.yaml` entries, each with a slicer or process fix, in plain words.
   - Done when: the thin pin is flagged too hot, a thick load-bearing wall under 100 % fan is flagged too cold, and a block passes.
+  - Outcome: `thermal.window(heat, profile, intents)` gives every spot two limits:
+    - **too hot:** temperature when covered above the layer heat check's limit (softening + hot margin), or above the material's `no_sag_c` on bridges and overhangs;
+    - **too cold:** joint healing below a minimum. Healing is a welding integral: the WLF-shifted reptation time over the joint's temperature (Wool's ¼ power), including the moment the bead lands (contact at the mean temperature for ~0.1 s, which the cells can't resolve).
+    Each column is judged in 5-layer bands by the median. A slowdown is needless where a band is too cold and the slicer slowed it for layer cooling.
+    Profile goals (speed / material / balanced / strength) and design intents (cosmetic / dimension_critical / load_bearing; strength loads count as load-bearing) move the limits; values are in `thermal.yaml` `window`.
+    The healing scale rests on reptation times known only to ~10×, so the limits are anchored on the fixtures: Ø3 mm pin too hot; Orca and Bambu default-cooling blocks pass; a load-bearing 6 mm wall at 100 % fan too cold (same wall at 30 % passes).
+    New rules `heat_too_hot`, `heat_weak_bond`, `heat_needless_slowdown`, each with slicer fixes. `api.heat_model` / MCP `heat_model` return the findings and a per-spot window code.
+    Engine tests 682 passed, full browser test 0 failures. T-477 / T-482 tune the limits against real prints.
 - [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: Claude (task/T-475-strength-priorities)
   - Do: a weight for each node from three inputs:
     - the strength check's "Layer" index (tension across layers, shear along them) for the user's loads;
@@ -1010,19 +1018,21 @@ Rules for every [UI] task:
 
 ### Phase 0: triage on today's UI
 
-- [~] **T-500 P1** [UI] Quick triage: header on top, phone layout out, Expert off. · plan: §1.1, §1.2, §1.3 · files: `web/style.css`, `web/index.html`, `web/app.js`, `web/steps.js`, `tools/e2e_smoke.py`, `PRODUCT.md` · owner: Claude (`task/T-500-triage`)
+- [x] **T-500 P1** [UI] Quick triage: header on top, phone layout out, Expert off. · plan: §1.1, §1.2, §1.3 · files: `web/style.css`, `web/index.html`, `web/app.js`, `web/steps.js`, `tools/e2e_smoke.py`, `PRODUCT.md` · owner: Claude (`task/T-500-triage`)
   - Do: keep the header in its own grid row (done in T-491), delete every `@media (max-width: …)` rule and phone-only markup/JS, drop the phone passes in `e2e_smoke.py`, hide the level switch and remove the Expert scroll page, rewrite PRODUCT.md "Operating Context" as desktop only.
   - Done when: header stays on top even with an element injected before it; no `max-width` media query left; e2e passes at 1280×720.
+  - Outcome: phone layout, menu, view-size fold and level switch gone; everyone gets the Advanced flow with a header of All settings / Explain / Guide, and the guide offers one "Check my part" path. The old levels stay reachable only through `?level=` / `fdm-test-level` for the old browser test until T-580. Also fixed a race in `renderCopies` when a new part loads mid-plate. Full e2e green.
 
 ### Phase 1: design system and style mockups (owner approval gate)
 
-- [~] **T-510 P1** [UI] Design tokens, new base CSS, spacing lint. · plan: §1.5, §1.6, §16.6 · files: `web/tokens.css` (new), new base stylesheet, `core/tests/test_css_tokens.py` (new) · owner: Claude (`task/T-510-tokens`)
+- [x] **T-510 P1** [UI] Design tokens, new base CSS, spacing lint. · plan: §1.5, §1.6, §16.6 · files: `web/tokens.css` (new), new base stylesheet, `core/tests/test_css_tokens.py` (new) · owner: Claude (`task/T-510-tokens`)
   - Do: tokens for colour (light **and dark** values; light default, a dark switch), spacing 4/8/12/16/24/32/48, type 12–28 px, two weights, radii, focus ring; layout grids from §1.6 (`216 rail │ stage │ 384 panel`, wide Options mode, full-canvas Start/Settings, `#portal-root`).
   - Done when: the lint test fails on any raw px in margin/padding/gap outside the token file; both themes render.
+  - Outcome: `web/tokens.css` (light + `data-theme="dark"`, spacing/type/radius/layout tokens), `web/ui/base.css` (reset, focus ring, header row 1, `full`/`part`/`work`/`options` layouts, panel head/body/foot, `#portal-root`), `core/tests/test_css_tokens.py` (spacing lint for every CSS under `web/` and `design/` except the old `style.css`; every colour has a dark value), preview `design/tokens.html`. Deviations: weights 400/700 (the font has no 600); panel body padding 24 not 20 (20 isn't on the scale); added `--accent-text` so dark-theme buttons keep white-text contrast.
 - [ ] **T-511 P1** [UI] Component library and gallery. · plan: §1.5 (component list), §1.8 · files: `web/ui/*.js` (new), `design/gallery.html` (new) · owner: —
   - Do: Button, ChoiceCard, SegmentedControl, Chip, Select (searchable, "Decide later", badges), NumberField (unit switch N | MPa, conversion line), Disclosure, RadialMenu, Popover3D, OptionColumn, ConstraintsBar, FindingRow, PendingBar, ProgressCard, Toast, Modal, StepRail. Every state (hover, focus, active, disabled, error); keyboard per §1.8. No browser-default-looking controls.
   - Done when: the gallery shows every component in light and dark; keyboard-only use works; screenshots at 1280×720 and 1440×900.
-- [ ] **T-512 P1** [UI] Static style mockups for the owner to pick the final look. · plan: §3–§15 (screens), §16.6, §16.11 · files: `design/mocks/*.html` (new), `tools/screenshot_mocks.py` (new) · owner: — (needs the human: approval)
+- [~] **T-512 P1** [UI] Static style mockups for the owner to pick the final look. · plan: §3–§15 (screens), §16.6, §16.11 · files: `design/mocks/*.html` (new), `tools/screenshot_mocks.py` (new) · owner: Claude (`task/T-512-mockups`) (needs the human: approval)
   - Do: **static, not clickable** (decision 11). First 2–3 style directions (each light and dark) on 3 key screens (Setup, Holds with a radial menu, Options with 4 columns); after the owner picks one, mock every screen in that style: Start, Part, Setup, Environment, Holds, Loads (gizmo + force popover), Load details, Analyse (+ running), Options, Simulation, Problems (pending bar), Done, Tolerances, Settings hub. Use real sample parts as screenshots in the stage.
   - Done when: the owner has approved one direction and the full set. Nothing in Phase 3+ starts before that.
 
@@ -1031,8 +1041,7 @@ Rules for every [UI] task:
 - [x] **T-520 P1** [UI] Material environment data, 1.0 nozzle, layer height, layer bonding. · plan: §6, §10.3 (point 4) · files: `core/fdmcore/data/presets.yaml`, `core/fdmcore/profile.py`, `core/fdmcore/strength.py`, tests · owner: Gemini Neon (`task/T-520-materials`), review: Claude
   - Do: sourced material fields `water`, `food_notes`, `abrasion`, `oil_fuel`, `solvent`, `skin` (unknown stays unknown); a `1.0` nozzle preset; `Profile` accepts a layer-height override; a sourced, capped `layer_bond_factor(layer_height, nozzle)` (bonding rises to ~0.5–0.6 × nozzle, falls above ~0.7 ×; no bonus without a source). Sources go in the PR description.
   - Done when: tests cover the new fields and the curve; `node tools/pyodide_check.mjs` passes.
-  - Outcome: Added sourced environment fields (null where unverified) and `1.0` nozzle preset to `presets.yaml`, `layer_height` override + custom-field validation to `Profile`, capped `layer_bond_factor` wired into `strength.material_for`, and `core/tests/test_materials_and_bonding.py`; affected/consumer pytest suites and `node tools/pyodide_check.mjs` pass.
-- [ ] **T-521 P1** [UI] Regions, feature edges and inside corners for 3D picking. · plan: §7 (on entering), §8 · files: `core/fdmcore/regions.py`, `core/fdmcore/features.py`, `core/fdmcore/api.py`, `core/fdmcore/mcp_server.py`, tests · owner: —
+- [~] **T-521 P1** [UI] Regions, feature edges and inside corners for 3D picking. · plan: §7 (on entering), §8 · files: `core/fdmcore/regions.py`, `core/fdmcore/features.py`, `core/fdmcore/api.py`, `core/fdmcore/mcp_server.py`, tests · owner: Gemini Neon (`task/T-521-regions`), review: Claude
   - Do: one call returning region id per triangle (area, normal, kind flat/cylinder/hole/curved, hole Ø), feature-edge polylines and inside corners (`concave_edges`), compact for the worker. Edges/corners map to `strength.py` as `points` + radius bands; test that a held edge actually constrains the solve.
   - Done when: STEP and STL fixtures give sensible regions/edges; pyodide check passes.
 - [ ] **T-522 P1** [UI] The optimizer: `api.optimize`. · plan: §10.2, §10.3, §11 (constraints), §14 (Quality objective), §16.2, §16.4, §16.7 · files: `core/fdmcore/optimizer.py` (new), `core/fdmcore/api.py`, `core/fdmcore/mcp_server.py`, `core/fdmcore/manifest.json`, `core/tests/test_optimizer.py` (new) · owner: — · serves: 1, 2, 3

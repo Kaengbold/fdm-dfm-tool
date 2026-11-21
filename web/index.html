@@ -16,23 +16,14 @@
     <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net 'sha256-awN6EPLRoRUir7UrloQ2+yfey9cipCXtvMTTJuKeRwc=' 'sha256-bKcILR4CcR6JodJ3fpfvbtORJXMqeOnH5YV3/z9G/tA='; object-src 'none'; base-uri 'self'" />
     <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"},"integrity":{"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js":"sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk","https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js":"sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP","https://cdn.jsdelivr.net/npm/manifold-3d@3.5.4/manifold.js":"sha384-EOsX2khT48LC7b2eu/O0+bqGUQLkJOEKF4hEN0VViSLPW7vZzAjlfczpBJmVQoSx"}}</script>
   </head>
-  <body data-level="simple">
+  <body data-level="advanced">
     <header class="top">
       <div class="brand">
         <svg viewBox="0 0 26 26" aria-hidden="true"><rect x="3" y="18" width="20" height="4" rx="1" opacity=".35" /><rect x="6" y="13" width="14" height="4" rx="1" opacity=".6" /><rect x="9" y="8" width="8" height="4" rx="1" /><path d="M13 1.5v4.5" stroke="currentColor" stroke-width="2" /></svg>
         <span>FDM Check</span> <small>pre-alpha</small>
       </div>
-      <!-- Phones: one header row, these sit behind "Menu" (style.css); wider screens show them in the row. -->
-      <button type="button" id="menu-button" class="ghost small menu-button" aria-expanded="false" aria-controls="top-menu">Menu</button>
-      <div id="top-menu" class="top-menu">
-        <p class="top-menu-label" id="levels-label">How much to show</p>
-        <div class="levels" role="radiogroup" aria-labelledby="levels-label">
-          <label title="Printer and material, then one result"><input type="radio" name="level" value="simple" checked /> Simple</label>
-          <label title="All choices, step by step, without the detailed simulations"><input type="radio" name="level" value="basic" /> Basic</label>
-          <label title="Everything, step by step: detailed strength, shaking and knocks, design changes"><input type="radio" name="level" value="advanced" /> Advanced</label>
-          <label title="Every tool on one long page"><input type="radio" name="level" value="expert" /> Expert</label>
-        </div>
-        <button type="button" id="show-expert" class="ghost small" data-min="expert" title="Every number the checks use, with its source">All settings</button>
+      <div class="top-tools">
+        <button type="button" id="show-expert" class="ghost small" title="Every number the checks use, with its source">All settings</button>
         <button type="button" id="explain" class="ghost small" title="Walk through what is on this step, one thing at a time">Explain</button>
         <button type="button" id="show-guide" class="ghost small">Guide</button>
       </div>
@@ -64,10 +55,6 @@
         <button type="button" data-compare="after" aria-pressed="true">After</button>
       </div>
       <p class="view-before-label">As it lies in your file</p>
-      <div class="view-size-tools">
-        <button type="button" id="view-size" class="view-size small" aria-pressed="false">Bigger view</button>
-        <button type="button" id="view-hide" class="small" aria-pressed="false">Hide view</button>
-      </div>
       <div id="working" class="working" role="status" aria-live="polite" hidden>
         <div class="working-head">
           <span class="spinner" aria-hidden="true"></span>
@@ -838,11 +825,7 @@
       <h2>What do you want to do?</h2>
       <p class="hint">Everything runs here in your browser: your files never leave your computer, and there is no account and nothing to pay.</p>
       <h3>Make my print better</h3>
-      <p class="hint">How much do you want to see? You can switch any time at the top.</p>
-      <button data-guide="settings"><b>Simple</b><span>Pick your printer and material. Get the problems, settings and a file to print.</span></button>
-      <button data-guide="strength"><b>Basic</b><span>Every choice, step by step: orientation, problems, strength, settings.</span></button>
-      <button data-guide="steps"><b>Advanced</b><span>Also detailed strength views, optional simulations (warping, shaking and knocks, your G-code) and design changes.</span></button>
-      <button data-guide="expert"><b>Expert</b><span>Every tool on one long page.</span></button>
+      <button data-guide="steps"><b>Check my part</b><span>Step by step: orientation, problems, strength, design changes, settings.</span></button>
       <h3>Help me fix my print failures</h3>
       <button type="button" id="failed-guide"><b>Fix a failed print</b><span>Pick what went wrong to see causes and fixes.</span></button>
     </dialog>
