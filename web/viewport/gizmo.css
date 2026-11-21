@@ -1,0 +1,11 @@
+/* Direction gizmo (T-542): the one-click direction row under the spot and the read-only angle label while turning.
+   Spacing only from the --s-* tokens (core/tests/test_css_tokens.py). */
+.gizmo-row { position: absolute; z-index: 7; display: flex; gap: var(--s-1); padding: var(--s-1); border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--surface-raised); box-shadow: var(--shadow-pop); }
+.gizmo-row button { padding: var(--s-1) var(--s-2); border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2);
+  font: inherit; font-size: var(--fs-xs); font-weight: var(--fw-bold); cursor: pointer; }
+.gizmo-row button:hover { background: var(--surface-sunken); color: var(--text); }
+.gizmo-row button.is-on { background: var(--ov-load); color: #fff; }
+.gizmo-angle { position: absolute; z-index: 7; padding: var(--s-1) var(--s-2); border-radius: var(--r-sm); background: var(--text); color: var(--surface-raised);
+  font-size: var(--fs-xs); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; pointer-events: none; }
+.gizmo-angle[hidden] { display: none; }

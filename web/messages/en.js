@@ -237,6 +237,10 @@ export default {
   "camera.front": "Front",
   "camera.fit": "Fit",
 
+  // Direction gizmo (T-542).
+  "gizmo.title": "Direction",
+  "gizmo.push": "Push in",
+  "gizmo.pull": "Pull out",
   // Settings & calibration hub (T-533, plan §15.3). Short labels, one-line hints, full sentences.
   "settings.nav": "Settings sections",
   "settings.tab.printers": "Printers",
