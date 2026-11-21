@@ -92,6 +92,37 @@ def test_more_tools(tmp_path):
     assert snapped["volume_mm3"] > grown["volume_mm3"] and snapped["placed"]
 
 
+def test_list_faces_and_edges():
+    m.load_part(str(SAMPLES / "l_bracket.stl"))
+    faces = m.list_faces()
+    holes = [f for f in faces if f["kind"] == "hole"]
+    assert len(holes) == 2
+    assert sorted(round(h["hole_diameter"], 1) for h in holes) == [6.0, 8.0]
+
+    edges = m.list_edges()
+    assert edges["feature_edges"] and edges["concave_edges"]
+    corner = edges["concave_edges"][0]
+    assert corner["length_mm"] == pytest.approx(30.0, abs=1.0)
+    assert len(corner["points"]) >= 2 and corner["radius"] > 0
+
+    pushed = next(
+        f for f in sorted(faces, key=lambda f: -f["area_mm2"])
+        if f["kind"] == "flat" and abs(f["normal"][2]) < 0.5
+    )
+    res = m.check_strength(
+        [0.0, 0.0, 1.0],
+        [
+            {"points": corner["points"], "radius": corner["radius"], "kind": "fixed"},
+            {"region": pushed["id"], "kind": "force", "kg": 1.0},
+        ],
+    )
+    assert res["safety_factor"] > 0
+
+    m.load_part(str(SAMPLES / "enclosure.stl"))
+    kinds = {f["kind"] for f in m.list_faces()}
+    assert {"flat", "cylinder", "hole"} <= kinds
+
+
 def test_file_access_limits(tmp_path, monkeypatch):
     mine = tmp_path / "mine.stl"
     mine.write_bytes(b"the user's own file")
