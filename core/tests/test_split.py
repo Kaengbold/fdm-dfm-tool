@@ -137,3 +137,43 @@ def test_cut_to_print_without_supports():
     api.load(to_binary_stl(Mesh(box([0, 0, 0], 1) * [40, 30, 20])), "block")
     with pytest.raises(ValueError, match="one piece"):
         api.split({}, purpose="supports")
+
+
+def _three_arms(block: float):
+    """Three 60 mm arms along x, y and z from one corner (meeting in a ``block`` mm cube), held at the x arm's end,
+    pushed at the y and z arms' ends: no single way to lay it has every arm's layers along its own load."""
+    trimesh = pytest.importorskip("trimesh")
+    pytest.importorskip("manifold3d")
+    L, T = 60, 8
+    boxes = [trimesh.creation.box(extents=(block, block, block)).apply_translation((block / 2,) * 3)] + [
+        trimesh.creation.box(extents=e).apply_translation(c) for e, c in (
+            ((L, T, T), (L / 2, block / 2, block / 2)), ((T, L, T), (block / 2, L / 2, block / 2)), ((T, T, L), (block / 2, block / 2, L / 2)))]
+    api.load(to_binary_stl(Mesh(trimesh.boolean.union(boxes, engine="manifold").triangles)), "arms")
+    api.regions()
+    s = api._require()
+    normals, _ = s.mesh.normals_and_areas()
+    c = s.mesh.triangles.mean(axis=1)
+    face = lambda k: int(s.regions[np.flatnonzero((normals[:, k] > 0.99) & (np.abs(c[:, k] - L) < 1e-3))[0]])  # noqa: E731
+    return [{"region": face(0), "kind": "fixed"}, {"region": face(1), "kind": "force", "kg": 3, "direction": [0, 0, -1]},
+            {"region": face(2), "kind": "force", "kg": 3, "direction": [0, -1, 0]}]
+
+
+def test_cut_so_each_piece_prints_its_strong_way():
+    """T-347: with a solid block where the arms meet, cutting off one arm lets each piece lie its strong way: clearly
+    stronger together, the glued face inside the block where little load crosses it. Offered as an idea too."""
+    loads = _three_arms(20)
+    plan = api.split({}, "pins", "strength", loads)
+    sf = plan["safety"]
+    assert sf["safety"] >= 1.25 * sf["whole_safety"] and sf["joint_safety"] > 2 * sf["safety"]
+    assert len(plan["pieces"]) == 2 and "layers along its own load" in plan["explanation"]
+    ideas = api.strength_options([0, 0, 1], loads, {})  # "How can I make it stronger?"
+    assert any(o["kind"] == "split" and o["purpose"] == "strength" and o["safety_factor"] > o.get("base_safety", 0) for o in ideas)
+
+
+def test_no_strength_cut_where_one_orientation_suits_it():
+    """Arms meeting at a bare corner are limited at the corner itself, which no cut helps: not cut. No loads: no cut."""
+    loads = _three_arms(8)
+    with pytest.raises(ValueError, match="one piece"):
+        api.split({}, "pins", "strength", loads)
+    with pytest.raises(ValueError, match="load"):
+        api.split({}, "pins", "strength", None)

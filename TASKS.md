@@ -902,7 +902,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     The healing scale rests on reptation times known only to ~10×, so the limits are anchored on the fixtures: Ø3 mm pin too hot; Orca and Bambu default-cooling blocks pass; a load-bearing 6 mm wall at 100 % fan too cold (same wall at 30 % passes).
     New rules `heat_too_hot`, `heat_weak_bond`, `heat_needless_slowdown`, each with slicer fixes. `api.heat_model` / MCP `heat_model` return the findings and a per-spot window code.
     Engine tests 682 passed, full browser test 0 failures. T-477 / T-482 tune the limits against real prints.
-- [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: —
+- [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: Claude (task/T-475-strength-priorities)
   - Do: a weight for each node from three inputs:
     - the strength check's "Layer" index (tension across layers, shear along them) for the user's loads;
     - design-intent tags;

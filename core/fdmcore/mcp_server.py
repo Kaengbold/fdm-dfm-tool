@@ -816,17 +816,19 @@ def plan_plate(up: list[float], copies: int | None = None, printer: str = "bambu
 
 @server.tool()
 def split_part(output_folder: str, joint: str = "pins", purpose: str = "fit", printer: str = "bambu_p1s", material: str = "pla",
-               nozzle: str = "0.4") -> dict:
+               nozzle: str = "0.4", loads: list[dict] | None = None) -> dict:
     """Cut a part that is too big for the printer flat into pieces that fit, with holes for alignment pins
     (``joint`` "pins") or a sliding dovetail ("dovetail"). Saves piece_1.stl, piece_2.stl, … (and pin.stl:
     print that many pins, standing up) into ``output_folder`` and says where it cut and how to put the pieces
     together. ``purpose`` "supports": cut a part that fits so each piece needs much less support (errors when no
-    cut helps). ``rotations``: how to turn each piece to print it. The loaded part stays as it was."""
+    cut helps); "strength" (with ``loads`` as for check_strength): cut so each piece prints with its layers along its own
+    load and together they hold clearly more (errors when no cut does). ``rotations``: how to turn each piece to print
+    it. The loaded part stays as it was."""
     from .booleans import apply_edits
     from .mesh import Mesh
     import numpy as np
 
-    plan = api.split(_profile(printer, material, nozzle), joint, purpose)
+    plan = api.split(_profile(printer, material, nozzle), joint, purpose, loads)
     folder = Path(output_folder).expanduser().resolve()
     paths = [_out(str(folder / f"piece_{i}.stl"), (".stl",), "piece") for i in range(1, len(plan["pieces"]) + 1)]
     pin = _out(str(folder / "pin.stl"), (".stl",), "pin")

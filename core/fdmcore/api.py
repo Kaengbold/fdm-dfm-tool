@@ -2208,7 +2208,7 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
 
 
 # How much fuss each kind of change is: the easiest one that is enough comes first (T-366).
-EFFORT = {"slicer": 0, "orientation": 1, "design": 2}
+EFFORT = {"slicer": 0, "orientation": 1, "design": 2, "split": 3}  # split: two pieces to print and glue
 
 
 def _preferred(options: list[dict], need: float) -> list[dict]:
@@ -2278,6 +2278,16 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
         add(f"Print it in {m['name']}", "material", sf,
             f"{m['name']} is stronger{' and its layers bond better' if other.z_strength_factor > p.z_strength_factor else ''}.",
             "needs " + ", ".join(needs) if needs else "", material=mid)
+
+    # Two pieces, each printed its strong way (T-347): only where no single orientation suits every part of it.
+    from .split import strength_cut
+
+    cut = strength_cut(s.mesh, _load_case(loads), p, _shells(p)) if loads else None
+    if cut is not None:
+        add("Print it in two pieces, each its strong way", "split", base["safety_factor"] * cut["safety"] / cut["whole_safety"],
+            "No single way to lay it suits every part of it: one part's layers always run across its load. Cut in two, each "
+            "piece lies so its layers run along its own load, and the glued face sits where little load crosses it. Rough "
+            "(from one solve); check the strength of the pieces after printing.", "two pieces to glue, with pins", purpose="strength")
 
     # Less load: stresses grow in step with the load, so the safety does the opposite.
     sf = base["safety_factor"]
@@ -2639,14 +2649,16 @@ def _coarse_note(region: int) -> str:
     return ""
 
 
-def split(profile: dict | None = None, joint: str = "pins", purpose: str = "fit") -> dict:
+def split(profile: dict | None = None, joint: str = "pins", purpose: str = "fit", loads: list[dict] | None = None) -> dict:
     """A part too big for the printer, cut flat into pieces that fit (split.py), joined with alignment
     pins or (``joint`` "dovetail") a sliding dovetail: each piece's ``edits`` (cut the rest away, then
     the pin holes) to apply to the part and its print ``rotation``, the pin as triangles
     (``pin.stl_triangles``, float32) and how many, and a plain explanation. Keeps the cut away from the
     weak spot of the last strength check, and uses the snug gap from the fit test print. ``purpose``
     "supports": cut a part that fits so each piece, turned its own best way, needs much less support
-    (split.support_cut; each piece's ``rotation`` is then that way); raises when no cut helps enough."""
+    (split.support_cut; each piece's ``rotation`` is then that way); raises when no cut helps enough.
+    ``purpose`` "strength" (needs ``loads``, as for strength): cut so each piece prints its own strong way and
+    together they hold clearly more (split.strength_cut), the glued face where little load crosses it."""
     from .split import split_plan
 
     s = _require()
@@ -2657,8 +2669,10 @@ def split(profile: dict | None = None, joint: str = "pins", purpose: str = "fit"
     weak = s.weak_spot[0] if s.weak_spot else None
     if purpose == "fit":
         return split_plan(s.mesh, p.printer["bed"], weak, gap, joint)
+    if purpose == "strength":
+        return _strength_split(s, p, gap, joint, weak, loads)
     if purpose != "supports":
-        raise ValueError('purpose is "fit" or "supports"')
+        raise ValueError('purpose is "fit", "supports" or "strength"')
     from .split import _half, support_cut
 
     cut = support_cut(s.mesh, orientation_settings(p), p)
@@ -2672,6 +2686,28 @@ def split(profile: dict | None = None, joint: str = "pins", purpose: str = "fit"
                            f"{cut['pieces_mm3'] / 1000:.1f} cm³ of support instead of {cut['whole_mm3'] / 1000:.1f} cm³. "
                            + rest.split(" pieces that each fit the bed. ", 1)[-1])
     plan["support_mm3"] = {"whole": round(cut["whole_mm3"]), "pieces": round(cut["pieces_mm3"])}
+    return plan
+
+
+def _strength_split(s: Session, p: Profile, gap, joint: str, weak, loads: list[dict] | None) -> dict:
+    """split(purpose="strength"): the cut, each piece turned its strong way, and what it buys (T-347)."""
+    from .split import _half, split_plan, strength_cut
+
+    if not loads:
+        raise ValueError("Set where it is held and the load first (Strength analysis)")
+    cut = strength_cut(s.mesh, _load_case(loads), p, _shells(p))
+    if cut is None:
+        raise ValueError("No straight cut makes it clearly stronger: print it in one piece")
+    plan = split_plan(s.mesh, p.printer["bed"], weak, gap, joint, force=(cut["axis"], [cut["cut"]]))
+    for i, (piece, up) in enumerate(zip(plan["pieces"], cut["ups"])):
+        piece["rotation"] = print_rotation(_half(s.mesh, cut["axis"], cut["cut"], i == 0), up, p.printer["bed"], _moving(p))[0].tolist()
+    note, rest = plan["explanation"].split("Cut ", 1)
+    plan["explanation"] = (note + f"Cut in two so each piece prints with its layers along its own load: together "
+                           f"{_format_safety(cut['safety'])} instead of {_format_safety(cut['whole_safety'])} in one piece "
+                           f"(rough, from one solve). The glued face sits where little load crosses it "
+                           f"({_format_safety(cut['joint_safety'])} there, taking glue as strong as the layers). "
+                           + rest.split(" pieces that each fit the bed. ", 1)[-1])
+    plan["safety"] = {k: round(float(cut[k]), 2) for k in ("whole_safety", "safety", "joint_safety")}
     return plan
 
 
