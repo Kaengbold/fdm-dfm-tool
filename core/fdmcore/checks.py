@@ -220,6 +220,26 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     return {"findings": findings, "stats": stats, "z_strength_factor": profile.z_strength_factor, "material": profile.material["name"]}
 
 
+def nozzle_findings(mesh: Mesh, profile: Profile, max_layers: int = 80, hholes: list[dict] | None = None) -> list[dict]:
+    """Only the nozzle-dependent findings (``NOZZLE_RULES``), skipping unrelated checks such as
+    shape-settings sampling, pockets, reliefs and shrinkage."""
+    T = load_data("thresholds")
+    layers = slice_mesh(mesh, profile.layer_height, max_layers)
+    tracker = Tracker(link=2 * profile.line_width)
+    _scan_layers(layers, profile, tracker, T)
+    findings = _feature_findings(tracker, profile, T) + _hole_findings(tracker, profile, T) + _first_layer_findings(layers, profile, T)
+    H = T["holes"]
+    nozzle = float(profile.nozzle)
+    min_d = max(H["vertical_min_mm"] * nozzle / 0.4, H["vertical_min_nozzle"] * nozzle)
+    for h in (horizontal_holes(mesh) if hholes is None else hholes):
+        d, cz = h["diameter"], h["center"][2]
+        if d < min_d:
+            findings.append(_finding("hole_closes", "problem",
+                                     f"Sideways Ø{d:.1f} mm hole at {cz:.1f} mm height — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up",
+                                     bbox=h["bbox"], nozzle=nozzle, diameter=round(d, 2), axis=h["axis"], center=h["center"]))
+    return [f for f in findings if f["rule"] in NOZZLE_RULES]
+
+
 def _wall_width_samples(g, count: int) -> tuple[np.ndarray, float]:
     """Cast inward normals from evenly spaced boundary points to the opposite wall.
 

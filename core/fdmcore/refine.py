@@ -26,9 +26,9 @@ from .slicer import slice_mesh
 QUAD = 2
 
 
-def support_stats(mesh: Mesh, profile: Profile, max_layers: int = 40) -> dict:
+def support_stats(mesh: Mesh, profile: Profile, max_layers: int = 40, layers=None) -> dict:
     """``mesh`` in print orientation (lowest point at z = 0)."""
-    layers = slice_mesh(mesh, profile.layer_height, max_layers)
+    layers = slice_mesh(mesh, profile.layer_height, max_layers) if layers is None else layers
     if not layers:
         return {"bed_area": 0.0, "support_volume": 0.0, "support_area": 0.0, "scar_area": 0.0, "small_spots": 0, "thin_share": 0.0}
     tan_lim = np.tan(np.radians(profile.material["max_overhang_deg"]))

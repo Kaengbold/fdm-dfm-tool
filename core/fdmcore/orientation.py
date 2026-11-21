@@ -302,7 +302,7 @@ def rotation_to_z(up) -> np.ndarray:
     b = np.array([0.0, 0.0, 1.0])
     v = np.cross(a, b)
     c = float(np.dot(a, b))
-    if np.linalg.norm(v) < 1e-12:
+    if np.linalg.norm(v) < 1e-12 or 1 + c < 1e-12:
         return np.eye(3) if c > 0 else np.diag([1.0, -1.0, -1.0])
     vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
     return np.eye(3) + vx + vx @ vx / (1 + c)

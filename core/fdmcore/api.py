@@ -986,8 +986,9 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
 def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str = "extended", profile: dict | None = None,
              owned: list[str] | None = None, materials: list[str] | None = None, nozzles: list[str] | None = None,
              environment: dict | None = None, constraints: dict | None = None, change: str = "slicer") -> dict:
-    """The new UI's optimizer (T-522, optimizer.py): 2–4 verified options for ``goal`` (strong / balanced / fast /
-    light / quality) over orientation, material, nozzle, layer height and walls / top / infill.
+    """The new UI's optimizer (optimizer.py): 2–4 verified options for ``goal`` (strong / balanced / fast /
+    light / quality) over orientation, material, nozzle, layer height and walls / top / infill, plus local
+    reinforcements at Complete depth (or whenever ``change="design"``).
 
     ``loads`` as for strength (none, or goal quality: no strength solve). ``depth``: fast / extended / complete.
     ``profile``: printer, nozzle, use_temp_c, constant_load (its material and goal are ignored; lock a material
@@ -1005,8 +1006,29 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
     env.setdefault("temp_c", base.use_temp_c)
     return optimizer.optimize(s.mesh, goal=goal, loads=loads or None, depth=depth, base=base, owned=owned, materials=materials,
                               nozzles=nozzles, environment=env, constraints=constraints, change=change,
-                              load_case=_load_case, climb=lambda cases, up, p, target, mesh: _climb(cases, up, p, target, mesh),
-                              grams_minutes=_grams_minutes_of, evaluate=_evaluate, orientation_settings=orientation_settings)
+                              load_case=_load_case, climb=_climb, grams_minutes=_grams_minutes_of,
+                              evaluate=_evaluate, orientation_settings=orientation_settings,
+                              zone_info=_zone_info, unit_shape=_unit_shape)
+
+
+def estimate_runtime(depth: str = "extended", loads: list[dict] | None = None, profile: dict | None = None,
+                     goal: str = "balanced", owned: list[str] | None = None, materials: list[str] | None = None,
+                     nozzles: list[str] | None = None, environment: dict | None = None,
+                     constraints: dict | None = None, change: str = "slicer") -> dict:
+    """Calibrated runtime estimate for ``optimize`` on the loaded part: how long ``depth`` (fast / extended /
+    complete) takes here (``seconds``) and in the browser (``browser_seconds``, ~3× slower in Pyodide).
+    Computed from triangle count, size, voxel count and candidate count without running FEA or importing scipy."""
+    from . import optimizer
+
+    s = _require()
+    d = dict(profile or {})
+    d.pop("goal", None)
+    base = Profile.from_dict(d)
+    env = dict(environment or {})
+    env.setdefault("temp_c", base.use_temp_c)
+    return optimizer.estimate_runtime(s.mesh, depth=depth, loads=loads or None, base=base, goal=goal,
+                                      owned=owned, materials=materials, nozzles=nozzles, environment=env,
+                                      constraints=constraints, change=change, target_voxels=_grid("strength_voxels"))
 
 
 def _stressed_for(s: Session, model, up, p: Profile) -> tuple[np.ndarray, np.ndarray] | None:
@@ -1417,18 +1439,20 @@ def _zoned_story(zoned: dict, plain: dict, target: float) -> str:
     return f"{head}: {_format_safety(zoned['safety_factor'])}, but it saves almost nothing here — the load spreads through most of the part.{where}"
 
 
-def _grams_minutes_of(model, up, sh, p: Profile, mesh: Mesh) -> tuple[float, float]:
+def _grams_minutes_of(model, up, sh, p: Profile, mesh: Mesh, volume_mm3: float | None = None) -> tuple[float, float]:
     """Grams and print minutes of the plastic inside the part with shells ``sh`` (voxel volume scaled
-    to the mesh's true volume)."""
+    to ``volume_mm3`` or the mesh's true volume)."""
     from .checks import shell_infill_minutes
     from .strength import material_split
 
-    scale = abs(mesh.volume()) / (len(model.elems) * model.grid.h**3)
+    vol = abs(mesh.volume()) if volume_mm3 is None else float(volume_mm3)
+    scale = vol / (len(model.elems) * model.grid.h**3)
     shell, infill = (v * scale for v in material_split(model, up, sh, p))
     return (shell + infill) / 1000 * p.material["density_g_cm3"], shell_infill_minutes(shell, infill, p)
 
 
-def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None = None) -> dict:
+def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None = None,
+           precond_cache: dict | None = None, eval_fn=None, solid_known_ok: bool = False) -> dict:
     """Greedy search from a light print: each step takes the change with the most safety per cost.
     Cost counts plastic and print time alike (each relative to the light start): walls take longer
     per gram than infill, so a gram of walls costs more. With ``zones`` the zones' own infill and
@@ -1438,13 +1462,26 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
     from .strength import Shells, evaluate_cases
 
     model = cases[0].model
-    memo: dict = {}
+    pc = {} if precond_cache is None else precond_cache
+    memo: dict = {}  # sh -> (sf, u_all, exact_bool)
     costs: dict = {}
 
-    def sf(sh):
-        if sh not in memo:
-            memo[sh] = evaluate_cases(cases, up, p, sh)["safety_factor"]
-        return memo[sh]
+    def solve_sh(sh, rtol: float = 1e-3, x0=None):
+        exact = rtol <= 1e-4
+        hit = memo.get(sh)
+        if hit is not None and (hit[2] or not exact):
+            return hit[0], hit[1]
+        start = hit[1] if hit is not None else x0
+        if eval_fn is not None:
+            val, u_all = eval_fn(sh, rtol, start)
+        else:
+            r = evaluate_cases(cases, up, p, sh, x0=start, rtol=rtol, precond_cache=pc)
+            val, u_all = float(r["safety_factor"]), r.get("_u_all")
+        memo[sh] = (val, u_all, exact)
+        return val, u_all
+
+    def sf(sh, rtol: float = 1e-3, x0=None):
+        return solve_sh(sh, rtol=rtol, x0=x0)[0]
 
     def gm(sh):
         if sh not in costs:
@@ -1463,12 +1500,24 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
         g, m = gm(q)
         return g / g0 + m / m0
 
-    if sf(solid) < target:  # not even a solid print is enough: no need to search
-        sh = solid
+    # Check the light start first; if it already meets the target (or a prior scan already did),
+    # skip solving the solid upper bound.
+    cur_sf, cur_u = solve_sh(sh, rtol=1e-3)
+    if cur_sf >= target:
+        cur_sf, cur_u = solve_sh(sh, rtol=1e-4, x0=cur_u)
+    if cur_sf < target and not solid_known_ok:
+        solid_sf, _ = solve_sh(solid, rtol=1e-3, x0=cur_u)
+        if solid_sf < target:  # not even a solid print is enough: no need to search
+            sh = solid
+            cur_sf, cur_u = solve_sh(sh, rtol=1e-4)
     steps = []
     for n in range(OPT_MAX_STEPS):
         progress.report(n / OPT_MAX_STEPS, "Trying settings")
-        if sf(sh) >= target:
+        if cur_sf >= target:
+            cur_sf, cur_u = solve_sh(sh, rtol=1e-4, x0=cur_u)
+            if cur_sf >= target:
+                break
+        if sh == solid:
             break
         moves = []
         if sh.walls + 1 in OPT_WALLS:
@@ -1485,17 +1534,24 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
                 moves.append((replace(sh, zones=tuple(replace(q, infill=OPT_INFILL[k + 1]) for q in sh.zones)), f"{OPT_INFILL[k + 1]:.0%} infill in the zones"))
             if z.walls + 1 in OPT_WALLS:
                 moves.append((replace(sh, zones=tuple(replace(q, walls=z.walls + 1) for q in sh.zones)), f"{z.walls + 1} walls in the zones"))
-        gain = [(np.log(sf(m) / sf(sh)) / max(cost(m) - cost(sh), 1e-3), m, label) for m, label in moves if np.isfinite(sf(m))]
-        gain = [g for g in gain if g[0] > 1e-4]
+        gain = []
+        for m, label in moves:
+            msf = sf(m, rtol=1e-3, x0=cur_u)
+            if np.isfinite(msf) and cur_sf > 0:
+                score = np.log(msf / cur_sf) / max(cost(m) - cost(sh), 1e-3)
+                if score > 1e-4:
+                    gain.append((score, m, label))
         if not gain:
             break
         _, sh, label = max(gain, key=lambda g: g[0])
-        steps.append({"change": label, "safety_factor": float(sf(sh))})
+        cur_sf, cur_u = solve_sh(sh, rtol=1e-3, x0=cur_u)
+        steps.append({"change": label, "safety_factor": float(cur_sf)})
+    final_sf, _ = solve_sh(sh, rtol=1e-4, x0=cur_u)
     settings = {"wall_loops": str(sh.walls), "top_shell_layers": str(sh.top), "bottom_shell_layers": str(sh.bottom),
                 "sparse_infill_density": f"{sh.infill:.0%}"}
     if p.goal == "material":  # lightning infill only holds up the top surface, not a load
         settings["sparse_infill_pattern"] = "gyroid"
-    out = {"met": bool(sf(sh) >= target), "safety_factor": float(sf(sh)), "grams": round(grams(sh), 1), "minutes": round(gm(sh)[1], 1),
+    out = {"met": bool(final_sf >= target), "safety_factor": float(final_sf), "grams": round(grams(sh), 1), "minutes": round(gm(sh)[1], 1),
            "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": sh.infill, "settings": settings, "steps": steps}
     if sh.zones:
         out["zones"] = [_zone_info(replace(z, walls=max(z.walls, sh.walls), infill=max(z.infill, sh.infill)), mesh, up, p.printer["bed"], _moving(p))
@@ -3816,6 +3872,7 @@ METHODS = {
     "design": design,
     "compare_nozzles": compare_nozzles,
     "optimize": optimize,
+    "estimate_runtime": estimate_runtime,
     "topology": topology,
 }
 
