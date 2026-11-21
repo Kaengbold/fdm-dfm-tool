@@ -1,5 +1,7 @@
 // Entry of the new UI (web/new.html, T-530). The theme follows the saved switch (light by default, §16.6).
 import { startShell } from "./shell.js";
+import "./steps/setup.js";
+import "./steps/environment.js";
 
 try {
   if (localStorage.getItem("fdm-theme") === "dark") document.documentElement.dataset.theme = "dark";
