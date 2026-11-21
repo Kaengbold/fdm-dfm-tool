@@ -131,6 +131,7 @@ class Printed:
     lines: np.ndarray  # (E, 3) main line direction, part frame
     aligned: np.ndarray  # (E,) 1 = all lines one way (walls), 0 = crossing (grid infill, alternating solid layers)
     first_s: np.ndarray  # (E,) when the cube was first printed (s since start)
+    bond: np.ndarray | None = None  # (E,) layer bond against a usual print, from the heat model (T-476); None: usual
 
 
 def printed_from(dep: dict, model: Model, inside: np.ndarray) -> Printed:
@@ -564,7 +565,7 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
     scale = element_scale(case.model, up, shells, profile) if printed is None else printed.scale
     u, info = _solve(case, c, scale, mat.e_xy)
     stress = element_stress(case.model, c, scale, u)
-    fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale)
+    fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale, None if printed is None else printed.bond)
     fi_lines = None if printed is None else lines_index(stress, np.asarray(up, float), mat, printed)
     out = _summary(case, fi_layer, fi_plane, u, info, fi_lines)
     out["verdict"] = verdict(out["safety_factor"], required_safety(profile))
@@ -638,10 +639,11 @@ def orientation_safety(case: LoadCase, ups: np.ndarray, profile: Profile, shells
     return np.array(out)
 
 
-def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np.ndarray):
+def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np.ndarray, bond: np.ndarray | None = None):
     """(layer, in-plane) failure index per element; ≥ 1 means expected to break.
 
-    Layer: tension across layers and shear along them vs. interlayer strength.
+    Layer: tension across layers and shear along them vs. interlayer strength, times ``bond`` per
+    element where the heat model says the layers fused better or worse than usual.
     In-plane: von Mises vs. in-plane strength. Sparse infill is weaker by ``scale``.
     """
     up = up / np.linalg.norm(up)
@@ -651,6 +653,8 @@ def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np
     shear = np.linalg.norm(traction - normal[:, None] * up, axis=1)
     allow = np.maximum(scale, 1e-3)
     fi_layer = np.hypot(np.maximum(normal, 0) / mat.strength_z, shear / mat.strength_z) / allow
+    if bond is not None:
+        fi_layer = fi_layer / bond
     sx, sy, sz, syz, sxz, sxy = stress.T
     vm = np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (syz**2 + sxz**2 + sxy**2))
     fi_plane = vm / mat.strength_xy / allow

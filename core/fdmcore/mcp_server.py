@@ -239,11 +239,14 @@ def detailed_strength(
     gcode_path: str | None = None,
     settings: dict[str, str] | None = None,
     fine: bool = False,
+    heat: bool = False,
 ) -> dict:
     """Strength from the real sliced print: the plastic really in each spot (walls, solid layers, infill)
     and which way the printed lines run — lines pulled apart sideways are a third way to break ('lines').
     Uses ``gcode_path`` (sliced from our 3MF in this orientation), or slices with the installed OrcaSlicer
-    (our recommended settings, or ``settings`` overrides; tens of seconds). loads as in check_strength."""
+    (our recommended settings, or ``settings`` overrides; tens of seconds). loads as in check_strength.
+    ``heat``: the layers' strength follows how well they fused in the heat simulation (slower); ``heat`` in
+    the result compares the safety with the same print bonded as usual."""
     prof = _profile(printer, material, nozzle)
     if gcode_path:
         text = _in(gcode_path, GCODE, "G-code file").read_text(errors="replace")
@@ -251,7 +254,7 @@ def detailed_strength(
     else:
         sliced = _slice(up, printer, material, nozzle, settings, keep_gcode=True)
         text = sliced["orcaslicer"].pop("gcode")
-    out = {"gcode": api.load_gcode(text, up, prof), **_clean(api.strength(up, loads, prof, fine=fine, detailed=True))}
+    out = {"gcode": api.load_gcode(text, up, prof), **_clean(api.strength(up, loads, prof, fine=fine, detailed=True, heat=heat))}
     if sliced:
         out["slicer_settings"] = sliced["settings"]
     return out

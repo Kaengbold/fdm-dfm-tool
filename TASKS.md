@@ -921,9 +921,16 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
 - [ ] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: —
   - Do: on big parts, run the heat model's fine cells (1 mm, more layers in detail) only around the spots that weigh most (T-475 `importance`) and around hot spots, with the coarse cells elsewhere, so a big part gets the fine answer where it counts at the quick tier's cost.
   - Done when: on a big part with a pin, the pin's covering temperature matches the all-fine run within 5 °C, at no more than twice the quick tier's time.
-- [ ] **T-476 P2** [TO] Heat result back into the strength check. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` (`strength_z`), `core/fdmcore/api.py` · owner: Claude (task/T-476-heat-into-strength)
+- [x] **T-476 P2** [TO] Heat result back into the strength check. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` (`strength_z`), `core/fdmcore/api.py` · owner: Claude (task/T-476-heat-into-strength)
   - Do: at the detailed level, the strength between layers comes from each spot's bonding result instead of one constant for the whole part. Show the safety before and after optimizing ("bracket root: 1.4 → 1.9"). One round of strength → weights → optimize → strength; no looping until nothing changes.
   - Done when: an overcooled thin wall shows a lower safety factor than the same wall printed inside its window.
+  - Outcome: `api.strength(..., detailed=True, heat=True)` (MCP `detailed_strength(heat=True)`): each analysis cube's layer strength follows the heat model's bond around it, instead of one value for the whole part.
+    - `thermal.bond_strength`: strength grows with healing (Wool & O'Connor), against `usual_bond` 0.65, the healing of the default-cooling test block, which stands for the prints behind the material's layer strength. Capped at ×1.25 and at the plastic's own strength; floor 0.2. Values in `thermal.yaml` `strength`.
+    - `failure_indices` takes the per-cube factor (`Printed.bond`). `heat_model` and the strength check share one cached heat run.
+    - The result's `heat` gives the safety next to that of the same print with usual bonding, in plain words: "This print's cooling weakens the layers: safety 1.2 instead of 2.3 …".
+    - Checks: a 1.8 mm wall bent across its layers. Printed with 30 s waits per layer under full fan: safety 1.2 (layers). Straight through at 30 % fan: 2.4. Usual bonding: 2.3. Pyodide: 11 s.
+    - Not done here: "before → after optimizing" and the one round strength → weights → optimize → strength need the optimizer (T-480), which calls this check twice.
+    - Note for T-477: the overcooled wall's bond (0.37) still passes the window's ordinary-spot minimum (0.25, from T-474), though it means ~57 % of usual layer strength. Tune both against the same prints.
 - [ ] **T-477 P1 (go/no-go)** [TO] Real test prints decide whether to go on. · files: `research/thermal_validation.md` (new), `tools/` (test-part generator) · owner: — (needs the human: real prints)
   - Do: print a thin + thick pin pair, a thick base narrowing to a thin tip, a part with several branches, and one big part limited by flow (as the control). Measure temperature where possible (IR / thermocouple), sag, snap strength between layers, and print time. Compare the T-473 model with `spot_heat` and `heat.py`. Estimate the time saved against OrcaSlicer's own cooling slowdown.
   - Tune the T-470 defaults with the results (confidence `tuned`).

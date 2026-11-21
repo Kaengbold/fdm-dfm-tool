@@ -1830,8 +1830,7 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     (T_int at each of ``delays_s``), ``importance``; as uint8: ``window`` (0 fine, 1 too hot, 2 too
     cold, 3 needless slowdown) and ``importance_reason`` (index into ``reasons``)."""
     from .importance import REASONS
-    from .kinematics import timing
-    from .thermal import DELAYS_S, simulate, window
+    from .thermal import DELAYS_S, window
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -1840,10 +1839,7 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
         raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
     tp = s.gcode["toolpath"]
-    with progress.stage(0, 0.05):
-        tm = timing(tp)
-    with progress.stage(0.05, 1):
-        h = simulate(tp, tm, p, "fine" if fine else "quick")
+    h, tm = _heat(p, fine)
     pts = _gcode_to_oriented(s.gcode["rot"])(np.column_stack([h.xy, h.z]))
     masks = _intent_masks(pts, intents, h.cell_mm)
     imp = _importance_map(up, p, loads)
@@ -1870,6 +1866,42 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
         "reasons": list(REASONS), "guessed": imp.guessed,
         "findings": _heat_findings(tp, h, w, pts, p, masks.get("load_bearing"), reason, imp.guessed),
     }
+
+
+def _heat(p: Profile, fine: bool = False):
+    """The heat model over the loaded G-code (thermal.Heat, kinematics.Timing), cached per profile and tier:
+    heat_model and the strength check's heat option share one run."""
+    from .kinematics import timing
+    from .thermal import simulate
+
+    g = _require().gcode
+    key = json.dumps([p.material, p.printer, p.nozzle, bool(fine)], sort_keys=True, default=str)
+    if g.get("heat", (None,))[0] != key:
+        with progress.stage(0, 0.05):
+            tm = timing(g["toolpath"])
+        with progress.stage(0.05, 1):
+            g["heat"] = (key, (simulate(g["toolpath"], tm, p, "fine" if fine else "quick"), tm))
+    return g["heat"][1]
+
+
+def _bond_per_cube(model, up, p: Profile, mat) -> np.ndarray:
+    """thermal.bond_strength for each analysis cube: from the heat nodes in and around it (their median)."""
+    import warnings
+
+    from scipy.spatial import cKDTree
+
+    from .thermal import bond_strength
+
+    h, _ = _heat(p)
+    rot, base = _orientation(up, p)
+    nodes = (_gcode_to_oriented(rot)(np.column_stack([h.xy, h.z])) + base) @ rot  # part frame
+    reach = h.cell_mm / 2 + model.grid.h
+    dist, idx = cKDTree(nodes).query(model.grid.centers(model.elems), k=8, distance_upper_bound=reach)
+    bonds = np.append(h.bond, np.nan)[np.minimum(idx, len(nodes))]  # no node in reach: NaN
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # a cube with no joint near it: all NaN (counts as usual)
+        near = np.nanmedian(bonds, axis=1)
+    return bond_strength(near, mat.strength_xy / mat.strength_z)
 
 
 def _orientation(up, p: Profile) -> tuple[np.ndarray, np.ndarray]:
@@ -2034,7 +2066,7 @@ def _printed(model):
 
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
              top: int | None = None, bottom: int | None = None, fine: bool = False, detailed: bool = False,
-             zones: list[dict] | None = None) -> dict:
+             zones: list[dict] | None = None, heat: bool = False) -> dict:
     """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks).
     ``walls`` (lines), ``infill`` (0–1), ``top``/``bottom`` (solid layers) say how it will be printed
     (default: the goal's usual settings). With several load cases (``case`` on forces) the weakest
@@ -2042,8 +2074,13 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     changes, the coarse one can be trusted (the usual mesh-convergence check in FEA). ``detailed``
     uses the G-code from ``load_gcode`` instead of walls/infill/top/bottom: the plastic really in
     each spot and which way its lines run (lines pulled apart sideways become a third way to break).
-    ``zones``: stronger zones from optimise_strength (slicer modifier volumes)."""
-    from .strength import evaluate_cases, face_values, refine, sample_nodes, surface_values
+    ``zones``: stronger zones from optimise_strength (slicer modifier volumes). ``heat`` (with
+    ``detailed``): the layers' strength in each spot follows how well they fused in the heat model
+    instead of one value for the whole part; ``heat`` in the result compares the safety with that of
+    the same print with every layer bonded as usual."""
+    from dataclasses import replace
+
+    from .strength import evaluate_cases, face_values, material_for, refine, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -2057,10 +2094,18 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
         if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
             raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
         printed, missed = _printed(model)
+    elif heat:
+        raise ValueError("The heat option needs the detailed check (load the sliced G-code)")
+    usual = None
+    if heat:
+        usual = evaluate_cases(cases, up, p, sh, printed)["safety_factor"]
+        printed = replace(printed, bond=_bond_per_cube(model, up, p, material_for(p)))
     r = evaluate_cases(cases, up, p, sh, printed) if printed is not None else _evaluate(cases, up, p, sh)
     r["fine"] = bool(fine)
     if printed is not None:
         r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
+    if heat:
+        r["heat"] = _heat_strength(model, printed.bond, r, usual)
     fi, vm, u = r.pop("fi"), r.pop("vm"), r.pop("u")
     heat = face_values(s.mesh, model.grid, model, fi)
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
@@ -2103,6 +2148,23 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     r["story_parts"] = _strength_story_parts(r)
     r["explanation"] = _strength_story(s.mesh, up, r, p)
     return r
+
+
+def _heat_strength(model, bond: np.ndarray, r: dict, usual: float) -> dict:
+    """What the print's cooling does to the safety, in plain words: this print against the same one with
+    every layer bonded as usual, and how well the layers fused at the weakest spot."""
+    sf = r["safety_factor"]
+    at = int(np.argmin(np.linalg.norm(model.grid.centers(model.elems) - r["critical_point"], axis=1)))
+    share = float(bond[at])
+    if sf < usual * 0.97:
+        text = (f"This print's cooling weakens the layers: safety {sf:.1f} instead of {usual:.1f} if every layer "
+                f"had fused as usual. At the weakest spot they hold about {share:.0%} of their usual strength.")
+    elif sf > usual * 1.03:
+        text = f"The layers of this print fuse better than usual: safety {sf:.1f} instead of {usual:.1f}."
+    else:
+        text = f"This print's cooling hardly changes the strength (safety {sf:.1f}, {usual:.1f} with usual bonding)."
+    return {"safety_factor": sf, "usual_safety_factor": usual, "bond_at_weakest": round(share, 2),
+            "bond_min": round(float(bond.min()), 2), "text": text}
 
 
 def strength_variant(up, loads: list[dict], data: bytes, profile: dict | None = None, walls: int | None = None,

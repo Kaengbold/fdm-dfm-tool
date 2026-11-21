@@ -150,6 +150,14 @@ window:
     dimension_critical: {sag_shift_c: -10}
     load_bearing:       {sag_shift_c: 0}           # and importance weight 1 (the strictest bonding goal)
 
+# The heat model's bond back in the strength check (T-476, thermal.bond_strength): layer strength scales with
+# healing. The material's layer strength comes from prints like the default-cooling test block (median bond
+# about 0.66 in this model; a 6 mm wall at full fan 0.55, at 30 % fan 0.83). Estimated; T-477 tunes it.
+strength:
+  usual_bond: 0.65         # the healing behind the material's layer strength
+  max_gain: 1.25           # a better-fused joint is at most this much stronger (and never stronger than the plastic)
+  min_share: 0.2           # nor weaker than this share (the model's healing is rough at the cold end)
+
 # How much each spot matters (importance.py, T-475): a weight from floor to 1 that moves only the bonding
 # goal of the window (the sag limit stays for every spot). Estimated, not tuned; T-477 tunes them.
 importance:
