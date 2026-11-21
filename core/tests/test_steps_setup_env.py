@@ -172,7 +172,8 @@ def page():
 
 
 def test_loading_state_before_catalog_arrives(page):
-    page.evaluate("() => { fdmUI.store.set({ part: { name: 'l_bracket.stl', size: [60, 30, 40], kind: 'stl' } }); fdmUI.go('setup'); }")
+    # The Settings hub (T-533) fills the catalog early from saved settings; clear it to see the not-yet-loaded state.
+    page.evaluate("() => { fdmUI.store.set({ catalog: null, part: { name: 'l_bracket.stl', size: [60, 30, 40], kind: 'stl' } }); fdmUI.go('setup'); }")
     assert "Loading" in page.locator(".panel-body").inner_text()
 
 
