@@ -57,7 +57,7 @@ ready.then(
 );
 
 // Methods that need scipy; it is a big download, so it's fetched on first use.
-const NEEDS_SCIPY = new Set(["clearance", "regions", "set_gap", "set_fastener", "fastener_suggestions", "snap_model", "stronger_orientation", "strength", "strength_variant", "strength_options", "optimise_strength", "design", "tag_feature", "warping", "dynamics", "box_heat", "topology", "heat_model", "importance"]);
+const NEEDS_SCIPY = new Set(["clearance", "regions", "set_gap", "set_fastener", "fastener_suggestions", "snap_model", "stronger_orientation", "strength", "strength_variant", "strength_options", "optimise_strength", "optimize", "design", "tag_feature", "warping", "dynamics", "box_heat", "topology", "heat_model", "importance"]);
 // Loads and marked faces need face regions (scipy) too.
 const marksFaces = (args) => args?.faces && Object.values(args.faces).some((ids) => ids?.length);
 const needsScipy = (method, args) =>

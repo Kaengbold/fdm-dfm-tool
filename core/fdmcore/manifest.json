@@ -20,6 +20,7 @@
  "importance.py",
  "kinematics.py",
  "mesh.py",
+ "optimizer.py",
  "orientation.py",
  "placement.py",
  "profile.py",
