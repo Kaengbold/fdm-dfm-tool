@@ -110,6 +110,7 @@ def _fit_cylinder(n, a, c, tris) -> dict | None:
         "length": float(t.max() - t.min()),
         "full_circle": coverage > 0.9,
         "fit_error": float(resid.max() / radius),
+        "coverage": float(coverage),
     }
 
 
@@ -1980,34 +1981,14 @@ def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
     """Sharp inside edges: two faces meeting at more than ``min_angle_deg`` with the second face in
     front of the first one's plane. Each: end points a, b; face normals n1, n2; t1, t2 the directions
     along each face away from the edge."""
-    tris = mesh.triangles
-    normals, _ = mesh.normals_and_areas()
-    verts, inv = np.unique(np.round(tris.reshape(-1, 3), 4), axis=0, return_inverse=True)
-    ids = inv.reshape(-1, 3)
-    # Faces sharing an edge, vectorised (a Python loop over every half-edge is slow on big parts).
-    # Sorting is stable, so equal edges keep face order; like a slicer's edge map, the 1st and 2nd
-    # face on an edge pair up, then the 3rd and 4th (a non-manifold edge).
-    edges = np.sort(np.stack([ids[:, [0, 1]], ids[:, [1, 2]], ids[:, [2, 0]]], axis=1).reshape(-1, 2), axis=1)
-    order = np.lexsort((edges[:, 1], edges[:, 0]))
-    e = edges[order]
-    pos = np.arange(len(e))
-    new = np.r_[True, np.any(e[1:] != e[:-1], axis=1)]
-    run_start = np.maximum.accumulate(np.where(new, pos, 0))
-    k = np.flatnonzero(~new & ((pos - run_start) % 2 == 1))
-    second, first = order[k], order[k - 1]
-    by_second = np.argsort(second)  # the order the edges complete in, face by face
-    second, first = second[by_second], first[by_second]
-    f1, f2 = first // 3, second // 3
-    a, b = edges[second, 0], edges[second, 1]
+    from .regions import sharp_edge_segments
 
-    centroids = tris.mean(axis=1)
-    n1, n2 = normals[f1], normals[f2]
-    pa = verts[a]
-    keep = ((a != b)  # a != b: drops sliver triangles (common after a boolean) whose corners round to one point
-            & (np.einsum("ij,ij->i", n1, n2) <= np.cos(np.radians(min_angle_deg)))
-            & (np.einsum("ij,ij->i", centroids[f2] - pa, n1) > 1e-6))  # second face behind the first: a convex edge
-    a, b, f1, f2, n1, n2, pa = a[keep], b[keep], f1[keep], f2[keep], n1[keep], n2[keep], pa[keep]
-    pb = verts[b]
+    verts, a, b, f1, f2, n1, n2, keep = sharp_edge_segments(mesh, min_angle_deg)
+    a, b, f1, f2, n1, n2 = a[keep], b[keep], f1[keep], f2[keep], n1[keep], n2[keep]
+    if len(a) == 0:
+        return []
+    centroids = mesh.triangles.mean(axis=1)
+    pa, pb = verts[a], verts[b]
     d = (pb - pa) / np.linalg.norm(pb - pa, axis=1, keepdims=True)
     t1, t2 = np.cross(n1, d), np.cross(n2, d)
     t1 *= np.where(np.einsum("ij,ij->i", centroids[f1] - pa, t1) > 0, 1.0, -1.0)[:, None]

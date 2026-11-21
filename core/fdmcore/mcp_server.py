@@ -169,8 +169,36 @@ def check_print(
 
 @server.tool()
 def list_faces() -> list[dict]:
-    """Faces (regions) of the part with id, flat/curved, area, normal and centroid — use ids for loads."""
+    """Faces (regions) of the part with id, kind (flat / cylinder / hole / curved), area_mm2,
+    normal, centroid and hole_diameter (on holes) — use ids for loads."""
     return api.regions()["regions"]
+
+
+@server.tool()
+def list_edges(radius_mm: float = 2.0) -> dict:
+    """Sharp outer feature edges (``feature_edges``) and inside corners (``concave_edges``) of the part.
+    Each entry has ``id``, ``closed``, ``length_mm``, ``midpoint``, ``normal``, ``regions``, ``points``
+    (sampled along the polyline) and ``radius`` mm. Pass ``{"points": e["points"], "radius": e["radius"],
+    "kind": "fixed" | "force", ...}`` (or ``{"edge": e["id"], "edge_kind": "feature" | "concave", ...}``)
+    directly to check_strength."""
+    import numpy as np
+
+    from .regions import EDGE_BAND_RADIUS, sample_polyline, unpack_polylines
+
+    r = api.regions()
+    rad = float(radius_mm) if radius_mm > 0 else EDGE_BAND_RADIUS
+
+    def pack(group: dict) -> list[dict]:
+        lines = unpack_polylines(group)
+        return [
+            {**meta, "points": np.round(sample_polyline(pts, 0.75 * rad), 3).tolist(), "radius": rad}
+            for meta, pts in zip(group["meta"], lines)
+        ]
+
+    return {
+        "feature_edges": pack(r["feature_edges"]),
+        "concave_edges": pack(r["concave_edges"]),
+    }
 
 
 @server.tool()
@@ -196,8 +224,9 @@ def check_strength(
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
     Forces with different ``case`` numbers are separate situations; the weakest decides (all listed in ``cases``).
     Instead of "region", a load can sit on a spot: "point": [x, y, z] (part coordinates) with "radius" mm
-    (default 3) — for an edge, a corner or part of a big face — or on an area: "points": [[x, y, z], …] with
-    "radius" (everything within it of any point, like the web app's brush).
+    (default 3) — for an edge, a corner or part of a big face — on an area/edge band: "points": [[x, y, z], …] with
+    "radius" (everything within it of any point, like the web app's brush or list_edges), or directly on a
+    list_edges entry: "edge": id, "edge_kind": "feature" | "concave" (with optional "radius").
     ``zones``: stronger areas (add_zone, or optimise_strength's ``zoned``) printed with their own walls / infill.
     Returns safety factor, verdict and failure mode ('layers' = layers separate, 'material' = plastic yields)."""
     return _clean(api.strength(up, loads, _profile(printer, material, nozzle, use_temp_c=use_temp_c, constant_load=constant_load),

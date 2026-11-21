@@ -39,6 +39,7 @@ class Session:
     mesh: Mesh
     name: str
     regions: np.ndarray | None = None  # region id per triangle, computed on demand
+    edges: tuple[dict, dict] | None = None  # cached (feature_edges, concave_edges) polylines for 3D picking
     load_case: tuple | None = None  # (loads json, prepared LoadCase) cache
     solved: tuple | None = None  # (key, result): the last static strength solve, reused by the next check
     bodies: list = field(default_factory=list)  # (name, Mesh) per body in the file
@@ -364,7 +365,7 @@ def select_body(index: int) -> dict:
     s = _require()
     if not 0 <= index < len(s.bodies):
         raise ValueError("No such body")
-    s.mesh, s.body, s.regions, s.load_case, s.tags = s.bodies[index][1], index, None, None, {}
+    s.mesh, s.body, s.regions, s.edges, s.load_case, s.tags = s.bodies[index][1], index, None, None, None, {}
     _set_kind()
     return _info()
 
@@ -375,7 +376,7 @@ def scale(factor: float) -> dict:
     if not 1e-4 <= factor <= 1e4:
         raise ValueError("Scale factor out of range")
     s.bodies = [(n, Mesh(m.triangles * factor)) for n, m in s.bodies]
-    s.mesh, s.load_case = s.bodies[s.body][1], None
+    s.mesh, s.edges, s.load_case = s.bodies[s.body][1], None, None
     return _info()
 
 
@@ -1611,21 +1612,68 @@ def _stress_story(r: dict) -> str:
             f"(rough, real plastic relaxes some of it): {tail}")
 
 
-def regions() -> dict:
-    """Clickable faces: region id per triangle (uint32 bytes) and region summaries."""
-    from .regions import find_regions, region_info
+def _edges() -> tuple[dict, dict]:
+    """Cached compact (feature_edges, concave_edges) polylines for the loaded part."""
+    from .regions import extract_edges, find_regions
 
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
-    info = region_info(s.mesh, s.regions)
-    # Name round holes, so the UI can say "held by a screw here" when one is picked.
-    from .features import accepted
+    if s.edges is None:
+        s.edges = extract_edges(s.mesh, s.regions)
+    return s.edges
 
-    for f in accepted(_features()):
-        if f["type"] == "hole":
-            info[f["region"]]["hole_diameter"] = f["diameter"]
-    return {"face_regions": s.regions.astype("<u4").tobytes(), "regions": info}
+
+def _resolve_loads(loads: list[dict]) -> list[dict]:
+    """Expand any edge/inside-corner load (``{"edge": id, "edge_kind": "feature"|"concave", ...}``)
+    into a standard ``strength.py`` ``points`` + ``radius`` band. Loads already using ``region``,
+    ``point`` or ``points`` pass through untouched."""
+    if not any("edge" in l and l.get("points") is None and l.get("point") is None for l in loads):
+        return loads
+    from .regions import EDGE_BAND_RADIUS, edge_load, unpack_polylines
+
+    feature_edges, concave_edges = _edges()
+    groups = {"feature": feature_edges, "concave": concave_edges}
+    unpacked: dict[str, list[np.ndarray]] = {}
+    out = []
+    for load in loads:
+        if "edge" not in load or load.get("points") is not None or load.get("point") is not None:
+            out.append(load)
+            continue
+        edge_kind = load.get("edge_kind", "feature")
+        if edge_kind not in groups:
+            raise ValueError(f"edge_kind must be 'feature' or 'concave', got {edge_kind!r}")
+        if edge_kind not in unpacked:
+            unpacked[edge_kind] = unpack_polylines(groups[edge_kind])
+        idx = int(load["edge"])
+        lines = unpacked[edge_kind]
+        if not 0 <= idx < len(lines):
+            raise ValueError(f"Unknown {edge_kind} edge {idx}")
+        extra = {k: v for k, v in load.items() if k not in ("edge", "edge_kind", "radius", "kind")}
+        radius = float(load.get("radius", EDGE_BAND_RADIUS))
+        out.append(edge_load(lines[idx], kind=load["kind"], radius=radius, **extra))
+    return out
+
+
+def regions() -> dict:
+    """Clickable faces and edges for 3D picking: region id per triangle (uint32 bytes), region
+    summaries (area, normal, centroid, kind: flat/cylinder/hole/curved, hole_diameter on holes),
+    plus compact feature-edge and inside-corner (concave_edges) polylines."""
+    from .features import accepted
+    from .regions import EDGE_BAND_RADIUS, find_regions, region_info
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    info = region_info(s.mesh, s.regions, accepted(_features()))
+    feature_edges, concave_edges = _edges()
+    return {
+        "face_regions": s.regions.astype("<u4").tobytes(),
+        "regions": info,
+        "feature_edges": feature_edges,
+        "concave_edges": concave_edges,
+        "edge_radius_mm": EDGE_BAND_RADIUS,
+    }
 
 
 def _load_case(loads: list[dict], voxels: int | None = None):
@@ -1635,11 +1683,12 @@ def _load_case(loads: list[dict], voxels: int | None = None):
 
     s = _require()
     voxels = voxels or _grid("strength_voxels")
-    key = json.dumps([loads, voxels], sort_keys=True)
+    resolved = _resolve_loads(loads)
+    key = json.dumps([resolved, voxels], sort_keys=True)
     if s.load_case is None or s.load_case[0] != key:
         if s.regions is None:
             s.regions = find_regions(s.mesh)
-        s.load_case = (key, prepare_cases(s.mesh, s.regions, loads, voxels))
+        s.load_case = (key, prepare_cases(s.mesh, s.regions, resolved, voxels))
     return s.load_case[1]
 
 
@@ -2125,7 +2174,7 @@ def strength_variant(up, loads: list[dict], data: bytes, profile: dict | None = 
     variant = Session(mesh, f"{s.name} (variant)", find_regions(mesh))
     new = region_info(mesh, variant.regions)
     moved = []
-    for load in loads:
+    for load in _resolve_loads(loads):
         if "region" not in load or load.get("point") is not None or load.get("points"):
             moved.append(load)
             continue

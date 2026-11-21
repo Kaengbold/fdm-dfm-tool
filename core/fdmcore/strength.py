@@ -230,10 +230,18 @@ def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: in
                 contact_nodes.append(nodes)
                 contact_normals.append(_node_normals(model, nodes, mesh.triangles[sel], normals[sel]))
         else:
-            n = (normals[sel] * mesh.normals_and_areas()[1][sel, None]).sum(axis=0)
-            n /= np.linalg.norm(n)
             d = load.get("direction", "push")
-            vec = {"push": -n, "pull": n, "down": np.array([0.0, 0.0, -1.0])}.get(d) if isinstance(d, str) else np.asarray(d, float)
+            if isinstance(d, str) and d in ("push", "pull"):
+                n = (normals[sel] * mesh.normals_and_areas()[1][sel, None]).sum(axis=0)
+                norm = float(np.linalg.norm(n))
+                if norm <= 1e-12:
+                    raise ValueError(f"{_where(load)} has no single outward direction; pass an explicit direction vector")
+                n = n / norm
+                vec = -n if d == "push" else n
+            elif isinstance(d, str) and d == "down":
+                vec = np.array([0.0, 0.0, -1.0])
+            else:
+                vec = np.asarray(d, float)
             vec = vec / np.linalg.norm(vec)
             forces[nodes] += vec * float(load["kg"]) * G / len(nodes)
     contact = None
@@ -319,9 +327,21 @@ def _load_faces(mesh: Mesh, region: np.ndarray, load: dict, h: float) -> np.ndar
     (at least ~1.5 voxels, so a small spot still reaches the grid)."""
     if on_spots(load):
         r = _radius(load, h)
-        sel = np.zeros(len(mesh.triangles), dtype=bool)
-        for p in _spots(load):
-            sel |= _distance_to_triangles(mesh.triangles, p) <= r
+        pts = _spots(load)
+        t = mesh.triangles
+        lo, hi = pts.min(axis=0) - r, pts.max(axis=0) + r
+        cand = np.flatnonzero(
+            (t[:, :, 0].max(axis=1) >= lo[0]) & (t[:, :, 0].min(axis=1) <= hi[0])
+            & (t[:, :, 1].max(axis=1) >= lo[1]) & (t[:, :, 1].min(axis=1) <= hi[1])
+            & (t[:, :, 2].max(axis=1) >= lo[2]) & (t[:, :, 2].min(axis=1) <= hi[2])
+        )
+        sel = np.zeros(len(t), dtype=bool)
+        if len(cand):
+            sub = t[cand]
+            hit = np.zeros(len(cand), dtype=bool)
+            for p in pts:
+                hit |= _distance_to_triangles(sub, p) <= r
+            sel[cand] = hit
         if not sel.any():
             raise ValueError(f"No surface within {r:.1f} mm of {_where(load).lower()}")
         return sel
@@ -342,7 +362,11 @@ def _spots(load: dict) -> np.ndarray:
 
 
 def _distance_to_points(xyz: np.ndarray, points: np.ndarray) -> np.ndarray:
-    """Distance from each of ``xyz`` to the nearest of ``points`` (a stroke has a few hundred at most)."""
+    """Distance from each of ``xyz`` to the nearest of ``points``."""
+    if len(points) > 16:
+        from scipy.spatial import cKDTree
+
+        return cKDTree(points).query(xyz)[0]
     best = np.full(len(xyz), np.inf)
     for p in points:
         best = np.minimum(best, np.linalg.norm(xyz - p, axis=1))
