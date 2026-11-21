@@ -1181,7 +1181,7 @@ Rules for every [UI] task:
 
 ### Phase 5: optimize and choose
 
-- [ ] **T-550 P1** [UI] Analyse step. · plan: §10.1 · files: `web/steps/analyse.js`, `web/worker.js` · owner: —
+- [~] **T-550 P1** [UI] Analyse step. · plan: §10.1 · files: `web/steps/analyse.js`, `web/worker.js` · owner: Claude (`task/T-550-analyse`)
   - Do: Fast / Extended (default) / Complete cards with this part's time estimate (Complete disabled with "Allow" link if design can't change; hidden for Quality); stage list, elapsed, estimate, Cancel, **Stop & show best so far**, "Search ended early" + Continue.
 - [ ] **T-551 P1** [UI] Options step. · plan: §11, §10.2 (infeasible), §16.2 · files: `web/steps/options.js` · owner: —
   - Do: full-width mode with a 3D strip on top; 2–4 aligned columns (pros/cons at the top, the rows from §11); hover pin + click-to-edit; "Your choices" bar with chips, conflicts, Keep all; Re-optimize with my choices; infeasible banner with ways out; a below-target option can be used/exported after a clear warning.
