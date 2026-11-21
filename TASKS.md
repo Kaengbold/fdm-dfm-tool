@@ -1024,9 +1024,10 @@ Rules for every [UI] task:
 
 ### Phase 1: design system and style mockups (owner approval gate)
 
-- [~] **T-510 P1** [UI] Design tokens, new base CSS, spacing lint. · plan: §1.5, §1.6, §16.6 · files: `web/tokens.css` (new), new base stylesheet, `core/tests/test_css_tokens.py` (new) · owner: Claude (`task/T-510-tokens`)
+- [x] **T-510 P1** [UI] Design tokens, new base CSS, spacing lint. · plan: §1.5, §1.6, §16.6 · files: `web/tokens.css` (new), new base stylesheet, `core/tests/test_css_tokens.py` (new) · owner: Claude (`task/T-510-tokens`)
   - Do: tokens for colour (light **and dark** values; light default, a dark switch), spacing 4/8/12/16/24/32/48, type 12–28 px, two weights, radii, focus ring; layout grids from §1.6 (`216 rail │ stage │ 384 panel`, wide Options mode, full-canvas Start/Settings, `#portal-root`).
   - Done when: the lint test fails on any raw px in margin/padding/gap outside the token file; both themes render.
+  - Outcome: `web/tokens.css` (light + `data-theme="dark"`, spacing/type/radius/layout tokens), `web/ui/base.css` (reset, focus ring, header row 1, `full`/`part`/`work`/`options` layouts, panel head/body/foot, `#portal-root`), `core/tests/test_css_tokens.py` (spacing lint for every CSS under `web/` and `design/` except the old `style.css`; every colour has a dark value), preview `design/tokens.html`. Deviations: weights 400/700 (the font has no 600); panel body padding 24 not 20 (20 isn't on the scale); added `--accent-text` so dark-theme buttons keep white-text contrast.
 - [ ] **T-511 P1** [UI] Component library and gallery. · plan: §1.5 (component list), §1.8 · files: `web/ui/*.js` (new), `design/gallery.html` (new) · owner: —
   - Do: Button, ChoiceCard, SegmentedControl, Chip, Select (searchable, "Decide later", badges), NumberField (unit switch N | MPa, conversion line), Disclosure, RadialMenu, Popover3D, OptionColumn, ConstraintsBar, FindingRow, PendingBar, ProgressCard, Toast, Modal, StepRail. Every state (hover, focus, active, disabled, error); keyboard per §1.8. No browser-default-looking controls.
   - Done when: the gallery shows every component in light and dark; keyboard-only use works; screenshots at 1280×720 and 1440×900.
