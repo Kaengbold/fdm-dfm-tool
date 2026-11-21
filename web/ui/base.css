@@ -1,0 +1,117 @@
+/* Base stylesheet of the new UI (T-510, plan §1.5, §1.6). Load after ../tokens.css. It holds the reset, text defaults,
+   focus ring and the screen layouts; components (T-511) bring their own CSS next to their module in web/ui/.
+   Desktop only (≥ 1280 × 720): no max-width media queries. Spacing only through the --s-* tokens (lint: test_css_tokens.py). */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: var(--fw-normal) var(--fs-md) / var(--lh) var(--font);
+  color: var(--text);
+  background: var(--surface);
+  min-width: 1280px;
+  min-height: 720px;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, p, ul, ol, figure { margin: 0; }
+h1 { font-size: var(--fs-xxl); line-height: var(--lh-tight); font-weight: var(--fw-bold); }
+h2 { font-size: var(--fs-xl); line-height: var(--lh-tight); font-weight: var(--fw-bold); }
+h3 { font-size: var(--fs-lg); line-height: var(--lh-tight); font-weight: var(--fw-bold); }
+button, input, select, textarea { font: inherit; color: inherit; }
+img, svg, canvas { display: block; max-width: 100%; }
+a { color: var(--accent-text); }
+::selection { background: var(--accent-soft); }
+
+/* One visible focus ring on everything that takes focus (§1.5 targets). */
+:focus { outline: none; }
+:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--r-sm); }
+
+.num { font-variant-numeric: tabular-nums; }   /* readouts */
+.hint { font-size: var(--fs-sm); color: var(--text-3); }
+.muted { color: var(--text-2); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---------- App shell: the header is always grid row 1 (§1.1, T-500), the screen fills the rest. ---------- */
+.app {
+  display: grid;
+  grid-template-rows: var(--header-h) minmax(0, 1fr);
+  height: 100vh;
+}
+.app-header {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-4);
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line);
+}
+.app-screen { grid-row: 2; min-height: 0; }
+
+/* ---------- Screen layouts (§1.6). The screen element carries one data-layout. ---------- */
+
+/* Start and Settings: full canvas, no rail, no 3D. */
+.app-screen[data-layout="full"] { overflow: auto; padding: var(--s-7) var(--s-6); }
+.start { max-width: var(--start-max); margin: 0 auto; display: grid; gap: var(--gap-sections); }
+.settings {
+  max-width: calc(var(--settings-tabs-w) + var(--s-6) + var(--settings-max));
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: var(--settings-tabs-w) minmax(0, var(--settings-max));
+  gap: var(--s-6);
+}
+
+/* Part (before a file is loaded): rail + a stage that is all drop zone, no right panel. */
+.app-screen[data-layout="part"] { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); }
+
+/* Working steps (Setup … Analyse, Simulation, Problems, Done): rail │ 3D stage │ right panel. */
+.app-screen[data-layout="work"] { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--panel-w); }
+
+/* Options: rail collapses to icons, full-width comparison under a 3D preview strip. */
+.app-screen[data-layout="options"] {
+  display: grid;
+  grid-template-columns: var(--rail-w-collapsed) minmax(0, 1fr);
+  grid-template-rows: var(--options-strip-h) minmax(0, 1fr);
+}
+.app-screen[data-layout="options"] > .rail { grid-row: 1 / -1; }
+.app-screen[data-layout="options"] > .compare { overflow: auto; padding: var(--s-5); }
+
+.rail {
+  background: var(--surface-raised);
+  border-right: 1px solid var(--line);
+  padding: var(--s-4) var(--s-3);
+  overflow: auto;
+}
+.stage {
+  position: relative;
+  min-width: 0;
+  background: linear-gradient(var(--stage-top), var(--stage-bottom));
+  overflow: hidden;
+}
+/* Stage furniture (§1.6): camera bar bottom-left, instruction pill top-centre, legend top-right, toasts bottom-centre. */
+.stage-camera { position: absolute; left: var(--s-4); bottom: var(--s-4); display: flex; gap: var(--s-1); }
+.stage-pill { position: absolute; top: var(--s-4); left: 50%; transform: translateX(-50%); }
+.stage-legend { position: absolute; top: var(--s-4); right: var(--s-4); }
+.stage-toasts { position: absolute; bottom: var(--s-4); left: 50%; transform: translateX(-50%); display: grid; gap: var(--s-2); }
+
+/* Right panel: fixed header, scrolling body, fixed footer with Back left and Next right, always in the same spot. */
+.panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) var(--panel-foot-h);
+  min-height: 0;
+  background: var(--surface-raised);
+  border-left: 1px solid var(--line);
+}
+.panel-head { padding: var(--s-5) var(--s-5) var(--s-4); border-bottom: 1px solid var(--line); display: grid; gap: var(--s-1); }
+.panel-body { overflow: auto; padding: var(--s-5); display: grid; align-content: start; gap: var(--gap-groups); }
+.panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 0 var(--s-5);
+  border-top: 1px solid var(--line);
+}
+
+/* Popovers, radial menus and modals render here, above the screen (§1.6). */
+#portal-root { position: fixed; inset: 0; pointer-events: none; z-index: 100; }
+#portal-root > * { pointer-events: auto; }

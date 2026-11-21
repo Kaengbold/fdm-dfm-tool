@@ -1,0 +1,138 @@
+/* Design tokens for the new UI (T-510, plan research/redesign-2026-11/PLAN-COMBINED.md §1.5, §1.6, §16.6).
+   Every colour, space, size and radius the new stylesheets use comes from here; core/tests/test_css_tokens.py fails on
+   raw px in margin/padding/gap anywhere else. Light is the default; <html data-theme="dark"> switches every colour token
+   (the owner picks the final look from the T-512 style mockups, so the values may still change, the names shouldn't). */
+
+@font-face { font-family: "Atkinson Hyperlegible"; font-weight: 400; font-display: swap; src: url(fonts/atkinson-hyperlegible-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Atkinson Hyperlegible"; font-weight: 700; font-display: swap; src: url(fonts/atkinson-hyperlegible-latin-700-normal.woff2) format("woff2"); }
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces: app background, raised panels, sunken wells (inputs, rails). */
+  --surface: #F5F6F8;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #ECEFF3;
+  --line: #D9DEE5;          /* 1 px dividers and control borders */
+  --line-strong: #B8C0CC;   /* hovered borders */
+  --stage-top: #E4E8EE;     /* 3D stage gradient */
+  --stage-bottom: #D8DEE6;
+
+  /* Text: main, secondary, hints. */
+  --text: #111827;
+  --text-2: #4B5563;
+  --text-3: #6B7280;
+  --text-on-accent: #FFFFFF;
+
+  /* One accent, for actions only. */
+  --accent: #2563EB;
+  --accent-hover: #1D4ED8;
+  --accent-soft: #DBE6FD;   /* selected cards, current step */
+  --accent-text: #1D4ED8;   /* accent used as text (links, current step) */
+
+  /* Status colours, for status only (text-safe on --surface-raised) with soft backgrounds. */
+  --good: #15803D;  --good-soft: #DCF3E4;
+  --warn: #B45309;  --warn-soft: #FCEBD5;
+  --bad:  #B91C1C;  --bad-soft:  #FBE0E0;
+
+  /* 3D overlays (viewport materials read these). */
+  --ov-hover: #38BDF8;
+  --ov-hold: #2563EB;
+  --ov-load: #9333EA;
+  --ov-added: #16A34A;
+  --ov-removed: #DC2626;
+
+  --focus: #2563EB;
+  --shadow-pop: 0 8px 24px rgb(17 24 39 / 0.14), 0 1px 3px rgb(17 24 39 / 0.10);
+  --scrim: rgb(17 24 39 / 0.40);
+
+  /* Spacing: the only allowed values (§1.5). Inside a control 8, between controls 12, between groups 24, sections 32. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --gap-control: var(--s-2);
+  --gap-group-items: var(--s-3);
+  --gap-groups: var(--s-5);
+  --gap-sections: var(--s-6);
+
+  /* Type: Atkinson Hyperlegible ships 400 and 700 only, so the two weights are 400 and 700 (the plan's 600 isn't in the font). */
+  --font: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --fs-xs: 12px;   /* units, badges */
+  --fs-sm: 13px;   /* hints, captions */
+  --fs-md: 15px;   /* body, controls */
+  --fs-lg: 16px;   /* panel titles, card titles */
+  --fs-xl: 20px;   /* step titles */
+  --fs-xxl: 28px;  /* start screen */
+  --fw-normal: 400;
+  --fw-bold: 700;
+  --lh: 1.45;
+  --lh-tight: 1.2;
+
+  /* Shape and size. */
+  --r-sm: 4px;
+  --r: 8px;
+  --r-lg: 12px;
+  --r-pill: 999px;
+  --hit: 36px;           /* smallest click target */
+  --hit-primary: 44px;   /* primary buttons */
+  --focus-ring: 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--focus);
+
+  /* Layout (§1.6). */
+  --header-h: 56px;
+  --rail-w: 216px;
+  --rail-w-collapsed: 56px;
+  --panel-w: 384px;
+  --panel-foot-h: 64px;
+  --start-max: 1040px;
+  --settings-tabs-w: 220px;
+  --settings-max: 880px;
+  --options-strip-h: 220px;
+
+  --t-fast: 120ms;
+  --t: 200ms;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface: #14171C;
+  --surface-raised: #1C2027;
+  --surface-sunken: #0F1216;
+  --line: #2E343D;
+  --line-strong: #444C57;
+  --stage-top: #1E232B;
+  --stage-bottom: #161A20;
+
+  --text: #E8EBF0;
+  --text-2: #B3BAC5;
+  --text-3: #8A93A0;
+  --text-on-accent: #FFFFFF;
+
+  --accent: #2F6BEB;
+  --accent-hover: #4C82F7;
+  --accent-soft: #1E2F52;
+  --accent-text: #8FB2FA;
+
+  --good: #4ADE80;  --good-soft: #15301F;
+  --warn: #F5A04A;  --warn-soft: #3A2A14;
+  --bad:  #F87171;  --bad-soft:  #3D1C1C;
+
+  --ov-hover: #38BDF8;
+  --ov-hold: #4C82F7;
+  --ov-load: #B26BF5;
+  --ov-added: #22C55E;
+  --ov-removed: #EF4444;
+
+  --focus: #6B98F8;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.40);
+  --scrim: rgb(0 0 0 / 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t: 0ms; }
+}
