@@ -7,7 +7,8 @@ import { t } from "../i18n.js";
 export const LATER = "";  // the value of "Decide later"
 
 /** options: [{value, label, badge?, hint?}]. */
-export function Select({ label, options, value = LATER, decideLater = false, clearable = false, searchable = true, onChange, disabled = false }) {
+/** ``placeholder``: what an empty required field says (default "Decide later"). */
+export function Select({ label, options, value = LATER, decideLater = false, clearable = false, searchable = true, onChange, disabled = false, placeholder }) {
   const listId = uid("list");
   const all = decideLater ? [{ value: LATER, label: t("ui.decideLater"), later: true }, ...options] : options;
   const text = h("span", { class: "ui-select__text" });
@@ -24,7 +25,7 @@ export function Select({ label, options, value = LATER, decideLater = false, cle
 
   function render() {
     const current = all.find((o) => o.value === value);
-    text.textContent = current?.label ?? t("ui.decideLater");
+    text.textContent = current?.label ?? placeholder ?? t("ui.decideLater");
     el.classList.toggle("is-later", !current || current.later === true);
     clear.hidden = !clearable || value === LATER || disabled;
   }

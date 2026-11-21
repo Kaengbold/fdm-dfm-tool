@@ -1,0 +1,111 @@
+/* Step-specific layout and pieces for the new UI (T-532: Setup & Environment).
+   Load after tokens.css, ui/base.css, ui/components.css and shell.css.
+   Spacing only through the --s-* tokens (core/tests/test_css_tokens.py). */
+
+.stage-note {
+  position: absolute;
+  top: var(--s-4);
+  left: var(--s-4);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.step-loading { padding: var(--s-2) 0; }
+.step-group { display: grid; gap: var(--s-3); }
+.step-field { display: grid; gap: var(--s-1); min-width: 0; }
+.step-sub { font-size: var(--fs-xs); color: var(--text-3); }
+.step-row { display: flex; align-items: stretch; gap: var(--s-2); }
+.step-row-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-3); }
+.step-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+
+/* Keep selects tidy inside narrow panel columns and prevent popovers from clipping off the right edge. */
+.step-row > .ui-select,
+.step-row-two .ui-select { flex: 1; min-width: 0; }
+.step-row .ui-select__button,
+.step-row-two .ui-select__button { min-width: 0; }
+.step-row .ui-select__text,
+.step-row-two .ui-select__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-row-two > :last-child .ui-select__pop { left: auto; right: 0; }
+
+/* Setup: nozzle chips carry a small checkbox mark like the approved style A mockup and fit 5 sizes on one row. */
+.step-nozzles .ui-chip--toggle {
+  gap: var(--s-1);
+  padding: 0 var(--s-2);
+}
+.step-nozzles .ui-chip--toggle::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: var(--r-sm);
+  border: 1.5px solid var(--text-3);
+}
+.step-nozzles .ui-chip--toggle[aria-pressed="true"]::before {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+
+/* Setup: selected goal card spans full width so its one-line explanation sits cleanly above the 2x2 others. */
+.step-goal-cards .ui-cards__item[aria-checked="true"] { grid-column: 1 / -1; }
+
+/* Environment: temperature 3-up cards keep compact spacing. */
+.step-temp-cards .ui-cards__item { padding: var(--s-3) var(--s-2); }
+.step-food-note { margin: 0; }
+
+/* Inline warnings and conflict cards (STEP warning in Setup, locked-material conflict in Environment). */
+.step-notice {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-sunken);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.step-notice p { margin: 0; }
+.step-notice--warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+.step-notice--bad {
+  border-color: var(--bad);
+  background: var(--bad-soft);
+  color: var(--text);
+}
+.step-notice__title { font-weight: var(--fw-bold); color: var(--warn); }
+.step-notice--bad .step-notice__title { color: var(--bad); }
+.step-notice__actions { display: flex; gap: var(--s-2); justify-self: start; }
+
+/* Environment: live "Suitable" strip and its details disclosure. */
+.step-suitable-group { display: grid; gap: var(--s-2); }
+.step-live {
+  display: grid;
+  gap: var(--s-1);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r);
+  background: var(--good-soft);
+}
+.step-live__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.step-live__names { color: var(--good); font-weight: var(--fw-bold); }
+.step-live__more { font-size: var(--fs-sm); color: var(--text-3); }
+.step-live__note { font-size: var(--fs-sm); color: var(--text-2); }
+.step-live--warn { background: var(--warn-soft); }
+.step-live--warn .step-live__names { color: var(--warn); }
+.step-live--bad { background: var(--bad-soft); }
+.step-live--bad .step-live__names { color: var(--bad); }
+
+.step-mat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-1);
+}
