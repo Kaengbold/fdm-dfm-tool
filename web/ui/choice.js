@@ -1,6 +1,6 @@
 // ChoiceCard group and SegmentedControl (§1.5): one choice out of a few, as a radio group with roving focus.
 // Arrows move and select (like native radios), Tab leaves the group. Only the selected card shows its line (§5).
-import { arrowIndex, h, uid } from "./dom.js";
+import { arrowIndex, h, uid, withProps } from "./dom.js";
 
 function radioGroup({ label, options, value, onChange, className, render }) {
   const group = h("div", { role: "radiogroup", class: className, "aria-label": label });
@@ -33,7 +33,7 @@ function radioGroup({ label, options, value, onChange, className, render }) {
     select(enabled[to].dataset.value, true);
   });
   select(value, false);
-  return Object.assign(group, { get value() { return value; }, set value(v) { select(v, false); } });
+  return withProps(group, { get value() { return value; }, set value(v) { select(v, false); } });
 }
 
 /** Big selectable cards. options: [{value, title, line?, meta?, disabled?}]. */

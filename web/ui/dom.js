@@ -24,6 +24,12 @@ export function h(tag, props = {}, ...children) {
   return el;
 }
 
+/** Add ``props`` to ``el`` keeping getters and setters live (Object.assign would call a getter once and copy the
+ * value, so ``field.value`` would never change). */
+export function withProps(el, props) {
+  return Object.defineProperties(el, Object.getOwnPropertyDescriptors(props));
+}
+
 /** Inline icon from a path list (24 × 24 view box, stroked). */
 export function icon(d, label) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

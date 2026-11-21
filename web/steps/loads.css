@@ -1,0 +1,24 @@
+/* Loads and Load details steps (T-543). Spacing only from the --s-* tokens (core/tests/test_css_tokens.py). */
+.stage-ui .stage-pill { position: absolute; top: var(--s-4); left: 50%; transform: translateX(-50%); padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-pill); background: var(--surface-raised); border: 1px solid var(--line); box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm); font-weight: var(--fw-bold); pointer-events: none; }
+.how-steps { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-2); color: var(--text-2); }
+.load-label { position: absolute; z-index: 4; transform: translate(-50%, -130%); padding: var(--s-1) var(--s-2); border: 0; border-radius: var(--r-sm);
+  background: var(--ov-load); color: #fff; font: inherit; font-size: var(--fs-xs); font-weight: var(--fw-bold); cursor: pointer; white-space: nowrap; }
+.load-list { display: grid; gap: var(--s-2); }
+.load-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); }
+.load-row:hover { border-color: var(--ov-load); }
+.load-swatch { width: 10px; align-self: stretch; border-radius: var(--r-sm); background: var(--ov-load); }
+.load-text { display: grid; gap: var(--s-1); flex: 1; }
+.load-text span { font-size: var(--fs-xs); color: var(--text-3); }
+.load-value { white-space: nowrap; }
+.load-x { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 var(--s-1); border: 0; border-radius: var(--r-sm); background: none;
+  color: var(--text-3); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.load-x:hover { background: var(--surface-sunken); color: var(--text); }
+.load-x .ui-icon { width: 14px; height: 14px; }
+.force-pop { display: grid; gap: var(--s-2); }
+.force-actions { display: flex; justify-content: flex-end; gap: var(--s-2); }
+.confirm-card { display: grid; gap: var(--s-3); padding: var(--s-3) var(--s-4); border-radius: var(--r); border: 1px solid var(--line); background: var(--surface-raised); }
+.confirm-card.is-ok { border-color: var(--good); background: var(--good-soft); }
+.confirm-card .row { display: flex; gap: var(--s-2); }
+.group { display: grid; gap: var(--s-3); }
