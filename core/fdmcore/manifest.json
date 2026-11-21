@@ -22,6 +22,7 @@
  "kinematics.py",
  "mesh.py",
  "messages.py",
+ "optimizer.py",
  "orientation.py",
  "placement.py",
  "profile.py",
