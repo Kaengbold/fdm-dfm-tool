@@ -555,6 +555,90 @@ def check_new_ui_picker(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_settings(browser, port: int) -> str:
+    """The new UI's Settings & calibration hub with the live Python engine (T-533): calibration STL download,
+    calibration results pushed to custom_presets and used by api.tolerance, reload persistence into the engine,
+    and Back returning to the part intact."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720}, accept_downloads=True)
+    page = ctx.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.wait_for_function("() => Boolean(fdmUI.services.settings?.isEngineSynced?.())", timeout=240_000)
+
+        # Load a sample part so we can verify "Back to your part" preserves it.
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Wall hook").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+
+        # Open Settings -> Calibration tests -> Overhang: download STL + save 65 deg.
+        page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
+        page.wait_for_selector(".settings-wrap")
+        page.locator("#settings-tab-calibration").click()
+        page.locator('[data-cal-card="overhang"]').click()
+        with page.expect_download(timeout=60_000) as dl_info:
+            page.get_by_role("button", name="Download model").click()
+        stl_name = dl_info.value.suggested_filename
+        stl_size = Path(dl_info.value.path()).stat().st_size
+        assert stl_name.endswith(".stl") and stl_size > 1000, (stl_name, stl_size)
+        page.locator('.cal-pick[data-pick-value="65"]').click()
+        page.get_by_role("button", name="Save result").click()
+
+        # Also enter Fits (snug +0.1 mm, sliding +0.3 mm).
+        page.get_by_role("button", name="All calibration tests").click()
+        page.locator('[data-cal-card="fit"]').click()
+        groups = page.locator(".cal-picker")
+        groups.nth(0).locator('[data-pick-value="0.1"]').click()
+        groups.nth(1).locator('[data-pick-value="0.3"]').click()
+        page.get_by_role("button", name="Save result").click()
+
+        # Confirm the Python engine actually received the measured values and uses them in tolerance().
+        page.wait_for_function(
+            "() => fdmUI.store.get().catalog.materials.my_cal_pla?.max_overhang_deg === 65",
+            timeout=30_000,
+        )
+        engine_check = page.evaluate("""async () => {
+          await fdmUI.services.settings.syncEngine();
+          const presets = await fdmUI.services.engine.call("presets");
+          const tol = await fdmUI.services.engine.call("tolerance", {
+            profile: { printer: "bambu_p1s", material: "my_cal_pla", nozzle: "0.4" },
+          });
+          return { mat: presets.materials.my_cal_pla, tol };
+        }""")
+        assert engine_check["mat"]["max_overhang_deg"] == 65, engine_check
+        assert engine_check["tol"]["measured"] is True, engine_check
+        assert abs(engine_check["tol"]["gaps"]["snug"] - 0.1) < 1e-6, engine_check
+
+        # Back to your part returns with hook.stl intact on Setup.
+        page.get_by_role("button", name="Back to your part").click()
+        assert page.locator("#step-title").inner_text() == "Setup"
+        assert page.evaluate("() => fdmUI.store.get().part?.name") == "hook.stl"
+
+        # Reload: engine receives the persisted calibration automatically on boot.
+        page.reload()
+        page.wait_for_selector("body[data-ready]")
+        page.wait_for_function("() => Boolean(fdmUI.services.settings?.isEngineSynced?.())", timeout=240_000)
+        reloaded = page.evaluate("""async () => {
+          const presets = await fdmUI.services.engine.call("presets");
+          return presets.materials.my_cal_pla;
+        }""")
+        assert reloaded and reloaded["max_overhang_deg"] == 65, reloaded
+
+        # More thresholds disclosure loads engine expert_settings cleanly.
+        page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
+        page.wait_for_selector(".settings-wrap")
+        page.locator("#settings-tab-active").click()
+        page.get_by_role("button", name="More thresholds").click()
+        page.wait_for_selector(".expert-row", timeout=30_000)
+        assert not errors, errors
+        return f"downloaded {stl_name} ({stl_size} B); engine uses 65 deg overhang & measured fit; survived reload"
+    finally:
+        ctx.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -600,6 +684,7 @@ def _run_suite(port: int, args) -> Run:
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
         run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
+        run.step("new UI: settings", lambda: check_new_ui_settings(browser, port))
         run.step("new UI: hover picker", lambda: check_new_ui_picker(browser, port))
         if args.quick:
             run_quick(run)
