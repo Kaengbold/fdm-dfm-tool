@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Style mockups</title>
+<!-- T-512 overview for the owner: three looks, light and dark, on the three key screens. Regenerate the pictures
+     with `python tools/screenshot_mocks.py`. Click a picture to open it full size. -->
+<style>
+  body { margin: 0; padding: 32px; font: 15px/1.45 system-ui, sans-serif; background: #F5F6F8; color: #111827; }
+  h1 { margin: 0 0 8px; font-size: 28px; }
+  p { margin: 0 0 32px; color: #4B5563; max-width: 760px; }
+  section { margin-bottom: 48px; }
+  h2 { margin: 0 0 4px; font-size: 20px; }
+  .what { margin: 0 0 16px; color: #4B5563; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  figure { margin: 0; }
+  figcaption { font-size: 13px; color: #6B7280; margin-top: 4px; }
+  img { width: 100%; display: block; border-radius: 8px; box-shadow: 0 1px 3px rgb(0 0 0 / 0.15); }
+</style>
+</head>
+<body>
+<h1>Pick a look</h1>
+<p>Three styles for the new UI, each in light and dark, on Setup, Holds (radial menu at the cursor) and Options
+(four columns). These are pictures only, not working screens. Pick one style, or mix (for example "B, with C's labels"),
+and the full set of screens follows in that style.</p>
+<div id="sets"></div>
+<script>
+  const STYLES = {
+    a: ["A · Workbench", "Neutral cool greys, one blue accent, crisp lines. The plan's default."],
+    b: ["B · Studio", "Warm paper, ink text, burnt-orange accent, soft floating panels, rounded buttons."],
+    c: ["C · Instrument", "Dense and precise: dark header bar, teal accent, square corners, small caps labels, dotted grid."],
+  };
+  const html = [];
+  for (const [s, [name, what]] of Object.entries(STYLES)) {
+    for (const theme of ["light", "dark"]) {
+      html.push(`<section><h2>${name} · ${theme}</h2><div class="what">${what}</div><div class="grid">` +
+        ["setup", "holds", "options"].map(screen => `<figure><a href="shots/${s}-${theme}-${screen}.png"><img src="shots/${s}-${theme}-${screen}.png" alt="${name} ${theme} ${screen}"></a><figcaption>${screen}</figcaption></figure>`).join("") +
+        `</div></section>`);
+    }
+  }
+  document.getElementById("sets").innerHTML = html.join("");
+</script>
+</body>
+</html>

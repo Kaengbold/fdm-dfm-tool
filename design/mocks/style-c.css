@@ -1,0 +1,39 @@
+/* Style C, "Instrument": a precise, dense tool look. Dark header bar in both themes, teal accent, hairlines,
+   small uppercase labels, square corners, Inter Tight with Plex Mono readouts, a dotted measuring grid on the stage. */
+:root[data-style="c"] {
+  --font: "Inter Tight", system-ui, sans-serif;
+  --num-font: "IBM Plex Mono", ui-monospace, monospace;
+  --surface: #F3F4F4; --surface-raised: #FFFFFF; --surface-sunken: #E8EBEB;
+  --line: #DCE0E0; --line-strong: #B9C0C0; --stage-top: #EDF0F0; --stage-bottom: #E3E7E7;
+  --text: #0B1212; --text-2: #3F4B4B; --text-3: #6B7676;
+  --accent: #0F766E; --accent-hover: #115E59; --accent-soft: #D5F0EC; --accent-text: #0F766E;
+  --focus: #0F766E;
+  --hdr-bg: #0E1414;
+  --btn-r: 3px; --card-r: 3px; --r: 3px; --ctl-h: 34px;
+  --label-size: var(--fs-xs); --label-case: uppercase; --label-track: 0.08em; --label-color: var(--text-3);
+  --fw-bold: 600; --title-size: var(--fs-lg);
+}
+:root[data-style="c"][data-theme="dark"] {
+  --surface: #0C1111; --surface-raised: #121919; --surface-sunken: #080C0C;
+  --line: #1F2A2A; --line-strong: #2F3D3D; --stage-top: #0F1515; --stage-bottom: #0A0F0F;
+  --text: #E4ECEB; --text-2: #A3B2B0; --text-3: #6F807E;
+  --accent: #2DD4BF; --accent-hover: #5EEAD4; --accent-soft: #0F2E2B; --accent-text: #5EEAD4; --text-on-accent: #04201D;
+  --focus: #5EEAD4;
+  --hdr-bg: #050808;
+}
+[data-style="c"] .hdr { color: #E4ECEB; border-bottom-color: #000; }
+[data-style="c"] .hdr .btn.ghost { color: #A3B2B0; }
+[data-style="c"] .hdr .btn.secondary { background: transparent; border-color: #2F3D3D; color: #E4ECEB; }
+[data-style="c"] .file { border-left-color: #2F3D3D; }
+[data-style="c"] .file-meta { color: #6F807E; }
+[data-style="c"] .logo { border-radius: 2px; box-shadow: none; }
+[data-style="c"] .stage, [data-style="c"] .strip {
+  background: radial-gradient(circle, var(--line-strong) 1px, transparent 1.4px) 0 0 / 20px 20px, linear-gradient(var(--stage-top), var(--stage-bottom)); }
+[data-style="c"] .steps li { font-size: var(--fs-sm); }
+[data-style="c"] .steps li.now { background: transparent; box-shadow: inset 2px 0 0 var(--accent); border-radius: 0; }
+[data-style="c"] .panel-head h2 { text-transform: uppercase; letter-spacing: 0.06em; }
+[data-style="c"] .card.on { box-shadow: inset 3px 0 0 var(--accent); }
+[data-style="c"] .check { border-radius: 2px; }
+[data-style="c"] .chip { border-radius: 2px; }
+[data-style="c"] .pill, [data-style="c"] .safety { border-radius: 2px; }
+[data-style="c"] .btn.primary { text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--fs-sm); }

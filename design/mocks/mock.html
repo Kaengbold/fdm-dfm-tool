@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Style mockup</title>
+<!-- T-512: static style mockups (not clickable, decision 11). One markup, three looks:
+     ?screen=setup|holds|options &style=a|b|c &theme=light|dark. Part images come from render.html via
+     tools/screenshot_mocks.py (shots/parts/). Labels follow plan §1.4: short, details behind "More". -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&family=Inter+Tight:wght@400;600&display=swap">
+<link rel="stylesheet" href="../../web/tokens.css">
+<link rel="stylesheet" href="mock.css">
+<script>
+  const Q = new URLSearchParams(location.search);
+  const STYLE = Q.get("style") || "a", THEME = Q.get("theme") || "light", SCREEN = Q.get("screen") || "setup";
+  document.documentElement.dataset.theme = THEME;
+  document.documentElement.dataset.style = STYLE;
+  document.write(`<link rel="stylesheet" href="style-${STYLE}.css">`);
+</script>
+</head>
+<body>
+<div class="app">
+  <header class="hdr">
+    <div class="brand"><span class="logo" aria-hidden="true"></span>FDM Check</div>
+    <div class="file"><span class="file-name">l_bracket.stl</span><span class="file-meta">60 × 30 × 40 mm</span></div>
+    <div class="hdr-right">
+      <button class="btn ghost">Settings</button>
+      <button class="btn ghost icon" aria-label="Dark mode"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg></button>
+      <button class="btn secondary">Export 3MF</button>
+    </div>
+  </header>
+  <main class="screen" id="screen"></main>
+</div>
+
+<template id="rail">
+  <nav class="rail">
+    <ol class="steps">
+      <li class="done"><i></i>Part</li>
+      <li data-s="setup"><i></i>Setup</li>
+      <li data-s="env"><i></i>Environment</li>
+      <li data-s="holds"><i></i>Holds</li>
+      <li data-s="loads"><i></i>Loads</li>
+      <li data-s="details"><i></i>Load details</li>
+      <li data-s="analyse"><i></i>Analyse</li>
+      <li data-s="options"><i></i>Options</li>
+      <li data-s="sim"><i></i>Simulation</li>
+      <li data-s="problems"><i></i>Problems</li>
+      <li data-s="done"><i></i>Done</li>
+    </ol>
+  </nav>
+</template>
+
+<template id="camera">
+  <div class="cam">
+    <button class="on">Iso</button><button>Top</button><button>Front</button><button>Fit</button><span class="sep"></span><button>Section</button>
+  </div>
+</template>
+
+<template id="setup">
+  <section class="stage">
+    <img class="part" src="shots/parts/{style}-{theme}-setup.png" alt="">
+    <div class="stage-note"><b>Bambu Lab P1S</b> · 256 × 256 mm bed</div>
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Setup</h2><p class="purpose">What you have to print with.</p></div>
+    <div class="panel-body">
+      <div class="group">
+        <div class="label">Printer</div>
+        <div class="row">
+          <div class="select grow"><span>Bambu Lab P1S</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div>
+          <button class="btn secondary">Manage</button>
+        </div>
+        <div class="row two">
+          <div class="field"><div class="sub">Material</div><div class="select later"><span>Decide later</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+          <div class="field"><div class="sub">Nozzle</div><div class="select later"><span>Decide later</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+        </div>
+        <div class="field"><div class="sub">Nozzles to consider</div>
+          <div class="checks"><span class="check on">0.2</span><span class="check on">0.4</span><span class="check on">0.6</span><span class="check on">0.8</span></div>
+        </div>
+      </div>
+      <div class="group">
+        <div class="label">What matters most?</div>
+        <div class="cards">
+          <div class="card on"><b>Balanced</b><span>Strong enough, least plastic.</span></div>
+          <div class="card"><b>Strong</b></div>
+          <div class="card"><b>Fast</b></div>
+          <div class="card"><b>Light</b></div>
+          <div class="card"><b>Quality</b></div>
+        </div>
+      </div>
+      <div class="group">
+        <div class="label">What can you change?</div>
+        <div class="seg"><span class="on">Slicer settings</span><span>The design</span><span>Both</span></div>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary">Next</button></div>
+  </aside>
+</template>
+
+<template id="holds">
+  <section class="stage">
+    <div class="pill">Hover the part, click where it's held</div>
+    <img class="part" src="shots/parts/{style}-{theme}-holds.png" alt="">
+    <div class="lock" style="left: 56.8%; top: 61.7%"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+    <div class="hover-badge" style="left: 27%; top: 25%">Upright face · 1 400 mm²</div>
+    <div class="radial" style="left: 36%; top: 49%">
+      <span class="r-dot"></span>
+      <button class="r-item r-n primary-item">Hold this face</button>
+      <button class="r-item r-e">Hold this edge</button>
+      <button class="r-item r-w">Hold inside corner</button>
+      <button class="r-item r-s">Cancel</button>
+    </div>
+    {camera}
+  </section>
+  <aside class="panel">
+    <div class="panel-head"><h2>Holds</h2><p class="purpose">Where is the part fixed?</p></div>
+    <div class="panel-body">
+      <div class="group">
+        <div class="label">Holds · 1</div>
+        <div class="list">
+          <div class="item">
+            <span class="swatch hold"></span>
+            <div class="item-text"><b>Screw hole Ø5</b><span>Bottom plate</span>
+              <div class="mini-seg"><span>Fixed</span><span>Resting</span><span class="on">Screw</span></div></div>
+            <button class="x" aria-label="Remove">×</button>
+          </div>
+        </div>
+        <p class="hint">Click more spots, or go on.</p>
+      </div>
+      <div class="group quiet">
+        <button class="btn ghost wide">No loads, skip strength</button>
+      </div>
+    </div>
+    <div class="panel-foot"><button class="btn ghost">Back</button><button class="btn primary">Next</button></div>
+  </aside>
+</template>
+
+<template id="options">
+  <section class="strip">
+    <img class="strip-part" src="shots/parts/{style}-{theme}-opt-0.png" alt="">
+    <div class="strip-tools"><div class="seg small"><span class="on">Print view</span><span>Stress</span><span>Reinforcements</span></div></div>
+    <div class="strip-title"><b>Recommended</b> · lying on its back, 6 g support</div>
+  </section>
+  <section class="compare">
+    <div class="cols">
+      <div class="rowlabels">
+        <div class="rl head"></div>
+        <div class="rl">Orientation</div><div class="rl">Material</div><div class="rl">Nozzle</div><div class="rl">Layer height</div>
+        <div class="rl">Walls</div><div class="rl">Infill</div><div class="rl">Support</div><div class="rl">Total</div>
+        <div class="rl">Print time</div><div class="rl">Safety</div>
+      </div>
+      {columns}
+    </div>
+    <div class="choices">
+      <span class="label">Your choices</span>
+      <span class="chip">Material: PETG <b>×</b></span><span class="chip">Nozzle: 0.4 <b>×</b></span>
+      <span class="grow"></span>
+      <button class="btn secondary">Re-optimize with my choices</button>
+    </div>
+  </section>
+</template>
+
+<script>
+const COLUMNS = [
+  { badge: "Recommended", focus: true, pros: ["Least support", "Safety ×3.4"], cons: ["Needs PETG"],
+    v: ["On its back", "PETG <em>Owned</em>", "0.4", "0.20 mm", "3", "20 %", "6 g", "41 g", "2 h 05", ["ok", "Enough · ×3.4"]] },
+  { badge: "Least plastic", pros: ["37 g total"], cons: ["14 min slower"],
+    v: ["Upright", "PETG <em>Owned</em>", "0.4", "0.20 mm", "2", "15 %", "9 g", "37 g", "2 h 19", ["ok", "Enough · ×3.0"]] },
+  { badge: "PLA only", pros: ["On your shelf"], cons: ["Weak above 50 °C"],
+    v: ["On its back", "PLA <em>Owned</em>", "0.4", "0.20 mm", "4", "25 %", "6 g", "44 g", "2 h 12", ["warn", "Low · ×2.6"]] },
+  { badge: "Fastest", pros: ["1 h 10"], cons: ["Needs a 0.6 nozzle", "Coarser surface"],
+    v: ["On its back", "PETG <em>Owned</em>", "0.6", "0.30 mm", "2", "20 %", "7 g", "45 g", "1 h 10", ["ok", "Enough · ×3.1"]] },
+];
+function columnHtml(c, i) {
+  const cells = c.v.map((v, k) => k === 0
+    ? `<div class="cell orient"><img src="shots/parts/${STYLE}-${THEME}-opt-${i === 1 ? 1 : 0}.png" alt=""><span>${v}</span></div>`
+    : Array.isArray(v) ? `<div class="cell"><span class="safety ${v[0]}">${v[1]}</span></div>`
+    : `<div class="cell${(i === 0 && (k === 1 || k === 2)) ? " pinned" : ""}">${v}</div>`).join("");
+  return `<div class="col${c.focus ? " focus" : ""}">
+    <div class="col-head"><span class="badge">${c.badge}</span>
+      <ul class="pc">${c.pros.map(p => `<li class="pro">${p}</li>`).join("")}${c.cons.map(p => `<li class="con">${p}</li>`).join("")}</ul>
+      <button class="link">Keep all</button></div>
+    ${cells}
+    <div class="col-foot"><button class="btn ${c.focus ? "primary" : "secondary"} wide">Use this option</button></div>
+  </div>`;
+}
+const fill = (html) => html.replaceAll("{style}", STYLE).replaceAll("{theme}", THEME)
+  .replace("{camera}", document.getElementById("camera").innerHTML)
+  .replace("{columns}", COLUMNS.map(columnHtml).join(""));
+const screen = document.getElementById("screen");
+screen.dataset.layout = SCREEN === "options" ? "options" : "work";
+screen.innerHTML = document.getElementById("rail").innerHTML + fill(document.getElementById(SCREEN).innerHTML);
+const order = ["setup", "env", "holds", "loads", "details", "analyse", "options"];
+for (const li of screen.querySelectorAll(".steps li[data-s]")) {
+  const at = order.indexOf(li.dataset.s), now = order.indexOf(SCREEN);
+  if (li.dataset.s === SCREEN) li.classList.add("now");
+  else if (at >= 0 && at < now) li.classList.add("done");
+}
+Promise.all([...document.images].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })))
+  .then(() => document.fonts.ready).then(() => { document.body.dataset.ready = "1"; });
+</script>
+</body>
+</html>

@@ -1035,6 +1035,7 @@ Rules for every [UI] task:
 - [~] **T-512 P1** [UI] Static style mockups for the owner to pick the final look. · plan: §3–§15 (screens), §16.6, §16.11 · files: `design/mocks/*.html` (new), `tools/screenshot_mocks.py` (new) · owner: Claude (`task/T-512-mockups`) (needs the human: approval)
   - Do: **static, not clickable** (decision 11). First 2–3 style directions (each light and dark) on 3 key screens (Setup, Holds with a radial menu, Options with 4 columns); after the owner picks one, mock every screen in that style: Start, Part, Setup, Environment, Holds, Loads (gizmo + force popover), Load details, Analyse (+ running), Options, Simulation, Problems (pending bar), Done, Tolerances, Settings hub. Use real sample parts as screenshots in the stage.
   - Done when: the owner has approved one direction and the full set. Nothing in Phase 3+ starts before that.
+  - Status: round 1 done: styles A Workbench / B Studio / C Instrument, light + dark, on Setup, Holds, Options (`design/mocks/index.html`, pictures in `design/mocks/shots/`, `python tools/screenshot_mocks.py` regenerates them). Waiting for the owner to pick a direction; then the full screen set.
 
 ### Phase 2: engine foundations (parallel to Phase 1)
 

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mock part render</title>
+<!-- T-512: renders a real sample part for the static style mockups (tools/screenshot_mocks.py screenshots the canvas
+     with a transparent background). Not part of the app. Query: part, color, edge, bed, hl (holds|none), rx/ry/rz (deg),
+     hold, hover (hex), w, h, zoom. -->
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+<style>html, body { margin: 0; background: transparent; } canvas { display: block; }</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from "three";
+import { STLLoader } from "three/addons/loaders/STLLoader.js";
+
+const q = new URLSearchParams(location.search);
+const W = +(q.get("w") || 900), H = +(q.get("h") || 700);
+const color = new THREE.Color(q.get("color") || "#C9CED6");
+const holdColor = new THREE.Color(q.get("hold") || "#2563EB");
+const hoverColor = new THREE.Color(q.get("hover") || "#38BDF8");
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(2);
+renderer.setSize(W, H);
+renderer.setClearColor(0x000000, 0);
+document.body.append(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a93a0, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(-60, -90, 140); scene.add(sun);
+const rim = new THREE.DirectionalLight(0xffffff, 0.5); rim.position.set(80, 60, 40); scene.add(rim);
+
+const geo = new STLLoader().parse(await (await fetch(`../../web/samples/${q.get("part") || "l_bracket"}.stl`)).arrayBuffer());
+geo.rotateX(THREE.MathUtils.degToRad(+(q.get("rx") || 0)));
+geo.rotateY(THREE.MathUtils.degToRad(+(q.get("ry") || 0)));
+geo.rotateZ(THREE.MathUtils.degToRad(+(q.get("rz") || 0)));
+geo.computeBoundingBox();
+const bb = geo.boundingBox;
+geo.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);  // centred, standing on z = 0
+geo.computeVertexNormals();
+
+// Per-triangle colours: the hovered region (soft tint) and the held screw hole (hold blue), like the Holds step (plan §7).
+const pos = geo.attributes.position, n = geo.attributes.normal, count = pos.count;
+const cols = new Float32Array(count * 3);
+const hl = q.get("hl");
+for (let t = 0; t < count; t += 3) {
+  const nx = n.getX(t), ny = n.getY(t), nz = n.getZ(t);
+  const cx = (pos.getX(t) + pos.getX(t + 1) + pos.getX(t + 2)) / 3;
+  const cz = (pos.getZ(t) + pos.getZ(t + 1) + pos.getZ(t + 2)) / 3;
+  let c = color;
+  if (hl === "holds") {
+    const zHole = Math.abs(nz) < 0.1 && Math.abs(nx) > 0.1 && Math.abs(ny) > 0.1;
+    if (zHole && cx > 0) c = holdColor;
+    else if (nx > 0.99 && cx < -10 && cz > 4) c = color.clone().lerp(hoverColor, 0.6);  // the upright face
+  }
+  for (let k = 0; k < 3; k++) cols.set([c.r, c.g, c.b], (t + k) * 3);
+}
+geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02, flatShading: false }));
+scene.add(mesh);
+const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 28),
+  new THREE.LineBasicMaterial({ color: new THREE.Color(q.get("edge") || "#4B5563"), transparent: true, opacity: 0.55 }));
+scene.add(edges);
+
+const size = new THREE.Vector3(); geo.boundingBox.getSize(size);
+const span = Math.max(size.x, size.y, size.z);
+if (q.get("bed")) {
+  const bedSize = Math.max(span * 1.9, 80);
+  const bed = new THREE.Mesh(new THREE.PlaneGeometry(bedSize, bedSize),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(q.get("bed")), roughness: 0.9 }));
+  bed.position.z = -0.05; scene.add(bed);
+  const grid = new THREE.GridHelper(bedSize, Math.round(bedSize / 10), new THREE.Color(q.get("grid") || "#9aa3af"), new THREE.Color(q.get("grid") || "#9aa3af"));
+  grid.rotateX(Math.PI / 2); grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
+}
+
+const zoom = +(q.get("zoom") || 1);
+const camera = new THREE.PerspectiveCamera(30, W / H, 1, 5000);
+const dist = size.length() / 2 / Math.sin(THREE.MathUtils.degToRad(15)) / zoom;  // the part's bounding sphere fits the view
+camera.up.set(0, 0, 1);
+camera.position.set(dist * 0.62, -dist * 0.78, dist * 0.55 + size.z * 0.2);
+camera.lookAt(0, 0, size.z * 0.42);
+renderer.render(scene, camera);
+document.body.dataset.ready = "1";
+</script>
+</body>
+</html>
