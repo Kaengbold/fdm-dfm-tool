@@ -158,6 +158,20 @@ strength:
   max_gain: 1.25           # a better-fused joint is at most this much stronger (and never stronger than the plastic)
   min_share: 0.2           # nor weaker than this share (the model's healing is rough at the cold end)
 
+# The cooling plan (thermal_opt.py, T-480). Estimated; T-477 / T-482 check it against real prints.
+optimizer:
+  max_speedup: 0.3          # undoing the slicer's slowdowns saves at most this share of the print time
+  fan_steps: [0.2, 0.4, 0.6, 0.8, 1.0]  # part fan values a layer may get (up when too hot, down when too cold)
+  slow_steps: [0.85, 0.7, 0.55, 0.4]    # speed factors a layer may get, mildest first
+  fast_steps: [1.5, 2.0, 3.0, 10.0]     # how much of the slicer's layer-time slowdown a layer may undo (x, up to its set speed)
+  park_steps: [3, 6, 12, 24]           # cooling park moves (s waiting beside the part before a layer)
+  park_cost: 1.2            # a parked second costs a bit more than a printed one (the moves there and back)
+  fan_lead_spin_ups: 3      # the fan goes up this many spin-up times before it is needed
+  min_fan_layers: 3         # a fan value holds for at least this many layers (fewer changes)
+  max_speed_step: 0.8       # neighbouring layers' speeds differ by at most this factor (no jumps on the outer wall)
+  seconds_per_degree: 5.0   # print time the plan spends to bring a spot of weight 1 one degree back under its sag limit
+  seconds_per_bond: 300.0   # ... to bring its joint's bond 1.0 (all of it) back up to the goal
+
 # How much each spot matters (importance.py, T-475): a weight from floor to 1 that moves only the bonding
 # goal of the window (the sag limit stays for every spot). Estimated, not tuned; T-477 tunes them.
 importance:
