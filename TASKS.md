@@ -1038,7 +1038,7 @@ Rules for every [UI] task:
 
 ### Phase 2: engine foundations (parallel to Phase 1)
 
-- [~] **T-520 P1** [UI] Material environment data, 1.0 nozzle, layer height, layer bonding. · plan: §6, §10.3 (point 4) · files: `core/fdmcore/data/presets.yaml`, `core/fdmcore/profile.py`, `core/fdmcore/strength.py`, tests · owner: Gemini Neon (`task/T-520-materials`), review: Claude
+- [x] **T-520 P1** [UI] Material environment data, 1.0 nozzle, layer height, layer bonding. · plan: §6, §10.3 (point 4) · files: `core/fdmcore/data/presets.yaml`, `core/fdmcore/profile.py`, `core/fdmcore/strength.py`, tests · owner: Gemini Neon (`task/T-520-materials`), review: Claude
   - Do: sourced material fields `water`, `food_notes`, `abrasion`, `oil_fuel`, `solvent`, `skin` (unknown stays unknown); a `1.0` nozzle preset; `Profile` accepts a layer-height override; a sourced, capped `layer_bond_factor(layer_height, nozzle)` (bonding rises to ~0.5–0.6 × nozzle, falls above ~0.7 ×; no bonus without a source). Sources go in the PR description.
   - Done when: tests cover the new fields and the curve; `node tools/pyodide_check.mjs` passes.
 - [~] **T-521 P1** [UI] Regions, feature edges and inside corners for 3D picking. · plan: §7 (on entering), §8 · files: `core/fdmcore/regions.py`, `core/fdmcore/features.py`, `core/fdmcore/api.py`, `core/fdmcore/mcp_server.py`, tests · owner: Gemini Neon (`task/T-521-regions`), review: Claude
