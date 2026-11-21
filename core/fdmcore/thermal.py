@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import progress
-from .gcode import PART_KINDS, SUPPORT, Toolpath, _role
+from .gcode import LAYER_TIME, PART_KINDS, SOLID, SUPPORT, WALL, Toolpath, _role
 from .kinematics import Timing, nozzle_at
 from .profile import Profile, load_data
 
@@ -58,6 +58,10 @@ class Heat:
     cover_s: np.ndarray  # (M,) seconds until then
     joint_c: np.ndarray  # (M, len(DELAYS_S)) joint to the node below, T_int at each delay (NaN: no node below)
     above_tg_s: np.ndarray  # (M,) seconds the joint stayed above the glass transition
+    bond: np.ndarray  # (M,) how far the joint healed, 0..1 (welding integral, Wool: (∫dt / reptation time)^¼)
+    overhang: np.ndarray  # (M,) share of its plastic printed as bridge or overhang
+    cooled: np.ndarray  # (M,) share of its plastic the slicer slowed down for layer cooling
+    shell: np.ndarray  # (M,) share of walls and solid layers (what holds layers together; sparse infill barely does)
     island: np.ndarray  # (M,) connected area of its layer
     column: np.ndarray  # (M,) islands joined from layer to layer
     cell_mm: float
@@ -136,6 +140,9 @@ def constants(profile: Profile, settings: dict | None = None) -> dict:
         "z_ratio": _value(pr["z_conductivity_ratio"]),
         "bed_contact": float(pr["bed_contact_conductance"]["smooth_pei"]),
         "nozzle_h": float(pr["nozzle_reheat"]["h_equiv"]), "melt_drop": pr["melt_temp_drop_c"]["points"],
+        "wlf_c1": float(m["wlf"]["c1"]), "wlf_c2": float(m["wlf"]["c2_k"]), "wlf_ref": float(m["wlf"]["t_ref_c"]),
+        "reptation_s": _value(m["reptation_s"]), "reptation_ref": float(m["reptation_s"]["t_ref_c"]),
+        "no_sag_c": _value(m["no_sag_c"]),
     }
 
 
@@ -148,6 +155,18 @@ def _heat_capacity(T: np.ndarray, c: dict) -> np.ndarray:
         width = 10.0
         cp = cp + c["latent"] * np.exp(-0.5 * ((T - c["tc"]) / width) ** 2) / (width * np.sqrt(2 * np.pi))
     return cp
+
+
+def _reptation_s(T: np.ndarray, c: dict) -> np.ndarray:
+    """How long the plastic's chains take to cross a joint at temperature T (s): the reptation time
+    at its reference temperature, shifted by WLF. Below the glass transition they don't move at all."""
+    def log_shift(t):
+        dt = t - c["wlf_ref"]
+        return -c["wlf_c1"] * dt / (c["wlf_c2"] + dt)
+
+    above = T > c["wlf_ref"]
+    shifted = log_shift(np.where(above, T, c["wlf_ref"] + 1)) - log_shift(c["reptation_ref"])
+    return np.where(above, c["reptation_s"] * 10.0 ** np.minimum(shifted, 30), np.inf)
 
 
 def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict) -> dict:
@@ -195,8 +214,13 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict) -> dict:
     # The part's skin: outer walls face the air, whatever the cell size (inner lines touch other plastic).
     outer = np.array([_role(f) in ("outer", "overhang") for f in tp.features])[tp.feature[line]]
     skin = np.bincount(node, outer * length[seg] / n[seg], minlength=len(keys))
+    spans = np.array([_role(f) in ("bridge", "internal_bridge", "overhang") for f in tp.features])[tp.feature[line]]
+    overhang = np.bincount(node, vol * spans, minlength=len(keys)) / volume
+    cooled = np.bincount(node, vol * (tp.cause[line] == LAYER_TIME), minlength=len(keys)) / volume
+    shell = np.bincount(node, vol * np.isin(tp.kind[line], (WALL, SOLID)), minlength=len(keys)) / volume
     return {"keys": keys, "nx": nx, "ny": ny, "layer": lay, "ix": cx, "iy": cy, "lo": lo, "volume": volume,
-            "born": born, "birth": birth, "z": tp.layer_z[lay] - lh / 2, "lh": lh, "skin_mm": skin}
+            "born": born, "birth": birth, "z": tp.layer_z[lay] - lh / 2, "lh": lh, "skin_mm": skin,
+            "overhang": overhang, "cooled": cooled, "shell": shell}
 
 
 def _neighbours(keys: np.ndarray, offsets) -> np.ndarray:
@@ -313,6 +337,7 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     cover_s = np.full(n, np.nan)
     joint = np.full((n, len(DELAYS_S)), np.nan)
     above_tg = np.zeros(n)
+    weld = np.zeros(n)  # ∫ dt / reptation time at the joint
     # Nodes are sorted by layer (their keys start with it), so a layer is one slice; edges by their upper layer.
     lay_start = np.searchsorted(layer, np.arange(n_layers + 1))
     e_order = np.argsort(layer[eb], kind="stable")
@@ -340,6 +365,12 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
             cover_c[below[ok]] = T[rep[below[ok]]]
             cover_s[below[ok]] = d["born"][new[ok]] - d["born"][below[ok]]
             T[new] = d["birth"][new]
+            # The moment the bead lands, before the cells even out: two bodies in contact meet at the mean of
+            # their temperatures, until the heat has crossed half a layer (~0.1 s for PLA). Most healing happens here.
+            joined = new[ok]
+            contact_c = (d["birth"][joined] + T[rep[below[ok]]]) / 2
+            t_contact = (lh_m[joined] / 2) ** 2 * c["rho"] * c["cp_melt"] / c["k"]
+            weld[joined] += t_contact / _reptation_s(contact_c, c)
             born[new] = True
             cur = max(cur, int(layer[new].max()))
         # Merge old layers into their column's lump (heat kept, contact to the bed kept).
@@ -427,6 +458,7 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
             above = np.where((lo_t > c["tg"]) & (hi_t > c["tg"]), 1.0,
                              np.where((lo_t > c["tg"]) | (hi_t > c["tg"]), np.clip(frac, 0, 1), 0.0))
             above_tg[j] += span * above
+            weld[j] += span / _reptation_s((lo_t + hi_t) / 2, c)
         t = t_next
         steps += 1
         if (t - t_begin) / (t_stop - t_begin) >= report_at:
@@ -437,6 +469,61 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     has_below = down >= 0
     joint[~has_below] = np.nan
     above_tg[~has_below] = np.nan
+    bond = np.where(has_below, np.minimum(weld, 1.0) ** 0.25, np.nan)
     return Heat(layer=layer, xy=xy, z=z, volume=d["volume"], born_s=d["born"], birth_c=d["birth"], cover_c=cover_c,
-                cover_s=cover_s, joint_c=joint, above_tg_s=above_tg, island=island, column=column, cell_mm=cell, tier=tier,
+                cover_s=cover_s, joint_c=joint, above_tg_s=above_tg, bond=bond,
+                overhang=d["overhang"], cooled=d["cooled"], shell=d["shell"], island=island, column=column, cell_mm=cell, tier=tier,
                 material=c["material"], tg_c=c["tg"], seconds=time.time() - started, steps=steps)
+
+
+INTENTS = ("cosmetic", "dimension_critical", "load_bearing")
+
+
+def window(h: Heat, profile: Profile, intents: dict | None = None) -> dict:
+    """The temperature window of every node, and which parts of the print leave it:
+
+    - too hot: the node is above its sag limit when the next layer lands (stricter on bridges and
+      overhangs, which nothing holds up);
+    - too cold: its joint to the layer below healed too little (or was above Tg too briefly);
+    - needless slowdown: too cold where the slicer slowed the layer down for cooling.
+
+    The profile's goal and the user's design intents (``intents``: kind -> node mask) move the limits.
+    Each column of the part is judged in bands of a few layers by the band's median, so a single cell
+    doesn't raise an alarm; every node of a failing band is flagged."""
+    data = load_data("thermal")
+    win = data["window"]
+    goal = win["goals"][profile.goal]
+    mat = data["materials"].get(h.material, data["materials"]["pla"])
+    supported = float(profile.material["softening_c"]) + float(load_data("thresholds")["cooling"]["hot_margin_c"])
+    spans = h.overhang >= win["overhang_share"]
+    limit = np.where(spans, _value(mat["no_sag_c"]), supported) + goal["sag_shift_c"]
+    min_bond = np.full(len(h.layer), float(goal["min_bond"]))
+    for kind, mask in (intents or {}).items():
+        shift = win["intents"][kind]
+        limit = limit + np.where(mask, shift["sag_shift_c"], 0.0)
+        min_bond = min_bond + np.where(mask, shift["min_bond_shift"], 0.0)
+
+    band = h.column.astype(np.int64) * (int(h.layer.max()) + 1) + h.layer // int(win["band_layers"])
+    keys, inv = np.unique(band, return_inverse=True)
+
+    def band_median(values: np.ndarray) -> np.ndarray:
+        """Each node gets its band's median (NaN values left out; a band of only NaN gives NaN)."""
+        out = np.full(len(keys), np.nan)
+        ok = np.isfinite(values)
+        order = np.lexsort((values[ok], inv[ok]))
+        b, v = inv[ok][order], values[ok][order]
+        start = np.searchsorted(b, np.arange(len(keys)))
+        count = np.bincount(b, minlength=len(keys))
+        has = count > 0
+        lo = v[np.minimum(start + (count - 1) // 2, len(v) - 1)]
+        hi = v[np.minimum(start + count // 2, len(v) - 1)]
+        out[has] = ((lo + hi) / 2)[has]
+        return out[inv]
+
+    hot_margin = band_median(h.cover_c - limit)
+    bond_short = band_median(h.bond - min_bond)
+    brief = band_median(h.above_tg_s) < float(win["min_above_tg_s"])
+    too_hot = np.nan_to_num(hot_margin, nan=-1.0) > 0
+    too_cold = (np.nan_to_num(bond_short, nan=1.0) < 0) | brief
+    needless = too_cold & (band_median(h.cooled) >= 0.5)
+    return {"limit_c": limit, "min_bond": min_bond, "too_hot": too_hot, "too_cold": too_cold, "needless": needless}

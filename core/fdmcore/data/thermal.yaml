@@ -127,3 +127,25 @@ process:
     confidence: estimated
   air_bed_layer_mm: {value: 5, range: [2, 15], unit: mm, source: "estimate: air near the hot bed is warmer, fading to the chamber's over a few mm (T-473)", confidence: estimated}
   melt_temp_lag_s: {value: 2, range: [0.5, 5], unit: s, source: "estimate from the step responses in Pollard et al. 2017", confidence: estimated}
+
+# T-474: the temperature window each spot of the part should stay in. Our choices, anchored on the T-471 fixtures:
+# a Ø3 mm PLA pin is too hot; ordinary blocks at the slicers' default cooling (Bambu Studio on a cool plate, the
+# coldest) pass; a load-bearing thick wall under 100 % fan is too cold (tests/test_heat_window.py). The healing
+# values rest on the estimated reptation times above (known to a factor of ~10), so only their order is trusted:
+# load-bearing regions ask for a clearly better bond than default cooling gives. T-477 / T-482 tune all of it.
+window:
+  overhang_share: 0.5        # a spot with at least this share of bridge / overhang plastic gets the strict sag limit
+  band_layers: 5             # judged per column in bands of this many layers (median), not cell by cell
+  min_above_tg_s: 0.5        # a joint that is above Tg for less than this hasn't bonded at all
+  # Too hot: supported spots use the layer heat check's limit (softening + thresholds cooling.hot_margin_c);
+  # bridges and overhangs the material's no_sag_c (nothing below holds them up).
+  # Too cold: the joint's healing (0..1, see thermal.py) must reach min_bond.
+  goals:                     # the profile's goal
+    speed:    {sag_shift_c: 10, min_bond: 0.2}
+    material: {sag_shift_c: 10, min_bond: 0.2}
+    balanced: {sag_shift_c: 0, min_bond: 0.25}
+    strength: {sag_shift_c: 0, min_bond: 0.4}     # bonding, not shape: the sag limit stays
+  intents:                   # regions the user marks
+    cosmetic:           {sag_shift_c: -10, min_bond_shift: 0}
+    dimension_critical: {sag_shift_c: -10, min_bond_shift: 0}
+    load_bearing:       {sag_shift_c: 0, min_bond_shift: 0.35}

@@ -887,13 +887,21 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - quick and fine tiers agree on cover temperature within 10 %.
     Timing: a 20-min print takes 13 s in Pyodide and 6 s natively; a 73-min print 30 s natively.
     Engine tests 674 passed, full browser test 0 failures, pyodide_check ok. Not done yet: the error band against real prints (T-477).
-- [ ] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: Claude (task/T-474-temperature-window)
+- [x] **T-474 P2** [TO] Temperature window and goals. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/rules.yaml`, `core/fdmcore/api.py` · owner: Claude (task/T-474-temperature-window)
   - Do: each node gets a window with two limits:
     - **Too hot (shape):** temperature of the layer below when the next bead lands ≤ the sag limit, stricter on overhangs and bridges.
     - **Too cold (bonding):** seconds the joint stays above Tg ≥ a minimum; add the welding integral with WLF / reptation values from T-470.
   - Goals: **Fastest / Balanced / Strongest**, which move the window. Design-intent tags (cosmetic / load-bearing / dimension-critical) adjust it per region.
   - New findings ("spot stays too hot", "spot is overcooled, weak bonding", "slowdown that isn't needed") need `rules.yaml` entries, each with a slicer or process fix, in plain words.
   - Done when: the thin pin is flagged too hot, a thick load-bearing wall under 100 % fan is flagged too cold, and a block passes.
+  - Outcome: `thermal.window(heat, profile, intents)` gives every spot two limits:
+    - **too hot:** temperature when covered above the layer heat check's limit (softening + hot margin), or above the material's `no_sag_c` on bridges and overhangs;
+    - **too cold:** joint healing below a minimum. Healing is a welding integral: the WLF-shifted reptation time over the joint's temperature (Wool's ¼ power), including the moment the bead lands (contact at the mean temperature for ~0.1 s, which the cells can't resolve).
+    Each column is judged in 5-layer bands by the median. A slowdown is needless where a band is too cold and the slicer slowed it for layer cooling.
+    Profile goals (speed / material / balanced / strength) and design intents (cosmetic / dimension_critical / load_bearing; strength loads count as load-bearing) move the limits; values are in `thermal.yaml` `window`.
+    The healing scale rests on reptation times known only to ~10×, so the limits are anchored on the fixtures: Ø3 mm pin too hot; Orca and Bambu default-cooling blocks pass; a load-bearing 6 mm wall at 100 % fan too cold (same wall at 30 % passes).
+    New rules `heat_too_hot`, `heat_weak_bond`, `heat_needless_slowdown`, each with slicer fixes. `api.heat_model` / MCP `heat_model` return the findings and a per-spot window code.
+    Engine tests 682 passed, full browser test 0 failures. T-477 / T-482 tune the limits against real prints.
 - [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: Claude (task/T-475-strength-priorities)
   - Do: a weight for each node from three inputs:
     - the strength check's "Layer" index (tension across layers, shear along them) for the user's loads;
