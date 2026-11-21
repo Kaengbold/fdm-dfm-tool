@@ -418,7 +418,7 @@ export default {
   "settings.active.rowHoleErr": "Hole size error",
   "settings.active.rowOuterErr": "Outer size error",
   "settings.active.rowProfile": "Print profile baseline",
-  "settings.active.none": "None",
+  "settings.active.none": "No correction",
   "settings.active.builtInDefaults": "Built-in defaults",
   "settings.active.deg": "{v}°",
   "settings.active.mm": "{v} mm",
