@@ -561,6 +561,140 @@ def check_new_ui_picker(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_settings(browser, port: int) -> str:
+    """The new UI's Settings & calibration hub with the live Python engine (T-533): calibration STL download,
+    calibration results pushed to custom_presets and used by api.tolerance, reload persistence into the engine,
+    and Back returning to the part intact."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720}, accept_downloads=True)
+    page = ctx.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.wait_for_function("() => Boolean(fdmUI.services.settings?.isEngineSynced?.())", timeout=240_000)
+
+        # Load a sample part so we can verify "Back to your part" preserves it.
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Wall hook").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+
+        # Open Settings -> Calibration tests -> Overhang: download STL + save 65 deg.
+        page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
+        page.wait_for_selector(".settings-wrap")
+        page.locator("#settings-tab-calibration").click()
+        page.locator('[data-cal-card="overhang"]').click()
+        with page.expect_download(timeout=60_000) as dl_info:
+            page.get_by_role("button", name="Download model").click()
+        stl_name = dl_info.value.suggested_filename
+        stl_size = Path(dl_info.value.path()).stat().st_size
+        assert stl_name.endswith(".stl") and stl_size > 1000, (stl_name, stl_size)
+        page.locator('.cal-pick[data-pick-value="65"]').click()
+        page.get_by_role("button", name="Save result").click()
+
+        # Also enter Fits (snug +0.1 mm, sliding +0.3 mm).
+        page.get_by_role("button", name="All calibration tests").click()
+        page.locator('[data-cal-card="fit"]').click()
+        groups = page.locator(".cal-picker")
+        groups.nth(0).locator('[data-pick-value="0.1"]').click()
+        groups.nth(1).locator('[data-pick-value="0.3"]').click()
+        page.get_by_role("button", name="Save result").click()
+
+        # Confirm the Python engine actually received the measured values and uses them in tolerance().
+        page.wait_for_function(
+            "() => fdmUI.store.get().catalog.materials.my_cal_pla?.max_overhang_deg === 65",
+            timeout=30_000,
+        )
+        engine_check = page.evaluate("""async () => {
+          await fdmUI.services.settings.syncEngine();
+          const presets = await fdmUI.services.engine.call("presets");
+          const tol = await fdmUI.services.engine.call("tolerance", {
+            profile: { printer: "bambu_p1s", material: "my_cal_pla", nozzle: "0.4" },
+          });
+          return { mat: presets.materials.my_cal_pla, tol };
+        }""")
+        assert engine_check["mat"]["max_overhang_deg"] == 65, engine_check
+        assert engine_check["tol"]["measured"] is True, engine_check
+        assert abs(engine_check["tol"]["gaps"]["snug"] - 0.1) < 1e-6, engine_check
+
+        # Back to your part returns with hook.stl intact on Setup.
+        page.get_by_role("button", name="Back to your part").click()
+        assert page.locator("#step-title").inner_text() == "Setup"
+        assert page.evaluate("() => fdmUI.store.get().part?.name") == "hook.stl"
+
+        # Reload: engine receives the persisted calibration automatically on boot.
+        page.reload()
+        page.wait_for_selector("body[data-ready]")
+        page.wait_for_function("() => Boolean(fdmUI.services.settings?.isEngineSynced?.())", timeout=240_000)
+        reloaded = page.evaluate("""async () => {
+          const presets = await fdmUI.services.engine.call("presets");
+          return presets.materials.my_cal_pla;
+        }""")
+        assert reloaded and reloaded["max_overhang_deg"] == 65, reloaded
+
+        # More thresholds disclosure loads engine expert_settings cleanly.
+        page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
+        page.wait_for_selector(".settings-wrap")
+        page.locator("#settings-tab-active").click()
+        page.get_by_role("button", name="More thresholds").click()
+        page.wait_for_selector(".expert-row", timeout=30_000)
+        assert not errors, errors
+        return f"downloaded {stl_name} ({stl_size} B); engine uses 65 deg overhang & measured fit; survived reload"
+    finally:
+        ctx.close()
+
+
+def check_new_ui_gizmo(browser, port: int) -> str:
+    """The new UI's direction gizmo (T-542): Push in / ±Z by one click (a second click flips the sign), a ring drag
+    snaps to 15° with the angle shown, arrow keys nudge, Esc cancels."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="L-bracket").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        # The upright's inner face of the bracket: x = -25, facing +x.
+        page.evaluate("""() => { window.cancelled = false;
+          window.g = fdmUI.services.openGizmo([-25, 0, 25], [1, 0, 0], { onCancel: () => { window.cancelled = true; } }); }""")
+        dirs = lambda: page.evaluate("() => window.g.direction().map((x) => Math.round(x * 1000) / 1000)")
+        assert dirs() == [-1, 0, 0], "Push in should point into the face"
+        page.get_by_role("button", name="+Z").click()
+        assert dirs() == [0, 0, 1]
+        page.get_by_role("button", name="+Z").click()
+        assert dirs() == [0, 0, -1], "second click should flip to -Z"
+        page.get_by_role("button", name="Push in").click()
+        pts = page.evaluate("""async () => {
+          const THREE = await import('three');
+          const ring = window.g._debug.rings[0].holder, st = fdmUI.services.stage;
+          ring.updateMatrixWorld(true);
+          const r = st.canvas.getBoundingClientRect();
+          return [60, 70, 81].map((deg) => { const a = deg * Math.PI / 180;
+            const v = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).applyMatrix4(ring.matrixWorld).project(st.camera);
+            return [(v.x + 1) / 2 * r.width + r.left, (1 - v.y) / 2 * r.height + r.top]; });
+        }""")
+        page.mouse.move(*pts[0])
+        page.mouse.down()
+        page.mouse.move(*pts[1], steps=3)
+        page.mouse.move(*pts[2], steps=3)
+        label = page.locator(".gizmo-angle").inner_text()
+        tilts = page.evaluate("() => window.g._debug.tilts")
+        page.mouse.up()
+        assert label == "15°" and tilts == [15, 0], (label, tilts)
+        page.keyboard.press("ArrowUp")
+        assert page.evaluate("() => window.g._debug.tilts") == [15, 15]
+        page.keyboard.press("Escape")
+        assert page.locator(".gizmo-row").count() == 0 and page.evaluate("() => window.cancelled"), "Esc didn't cancel"
+        assert not errors, errors
+        return f"push into the face, ±Z flips, ring drag snapped to {label}, arrow key nudged 15°, Esc cancelled"
+    finally:
+        page.close()
+
+
 def check_new_ui_holds(browser, port: int) -> str:
     """The new UI's Holds step (T-541): click a face → radial menu → hold; click the inside corner → hold the corner;
     the holds map to the strength engine's format; "No loads" warns for Balanced and switching to Fast jumps on."""
@@ -662,8 +796,10 @@ def _run_suite(port: int, args) -> Run:
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
         run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
-        run.step("new UI: hover picker", lambda: check_new_ui_picker(browser, port))
         run.step("new UI: holds", lambda: check_new_ui_holds(browser, port))
+        run.step("new UI: direction gizmo", lambda: check_new_ui_gizmo(browser, port))
+        run.step("new UI: settings", lambda: check_new_ui_settings(browser, port))
+        run.step("new UI: hover picker", lambda: check_new_ui_picker(browser, port))
         if args.quick:
             run_quick(run)
             run_extra_parts(run, args.parts)

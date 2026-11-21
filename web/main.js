@@ -12,6 +12,8 @@ import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
 import "./steps/holds.js";
+import { openGizmo } from "./viewport/gizmo.js";
+import { initSettings, openSettingsTab, restoreSettingsToEngine } from "./steps/settings.js";
 
 try {
   if (localStorage.getItem("fdm-theme") === "dark") document.documentElement.dataset.theme = "dark";
@@ -22,6 +24,7 @@ const saving = autosave(store);
 let source = null; // the part's file: {name, bytes, faceIds, kind}, to give a restarted engine the part again
 const engine = createEngine({ onProgress: ({ fraction, text }) => services.onProgress?.(fraction, text) });
 engine.onRestore(async (post) => {
+  await restoreSettingsToEngine(post);
   if (source) await post("load", { name: source.name, face_ids: source.faceIds }, source.bytes);
 });
 const stageHost = document.createElement("section");
@@ -48,7 +51,15 @@ const services = {
     app.go(last.state.step);
   },
   cameraBar: () => cameraBar(services.stage, { title: t("camera.title"), iso: t("camera.iso"), top: t("camera.top"), front: t("camera.front"), fit: t("camera.fit") }),
+  // Direction gizmo for a load at ``point`` with face ``normal`` (part coordinates). The Loads step (T-543) uses it;
+  // until then it is the dev hook for trying it out.
+  openGizmo: (point, normal, options = {}) => openGizmo(services.stage, { point, normal, ...options,
+    labels: { push: t("gizmo.push"), pull: t("gizmo.pull"), title: t("gizmo.title") } }),
   loadPart: (name, bytes) => loadPart({ name, bytes, store, go: app.go, services, rerender: () => services.rerender() }),
+  openSettings: (tab) => {
+    openSettingsTab(tab);
+    app.openRoute("settings");
+  },
 };
 // What the picker's badge says for a hovered face, edge or inside corner (§7).
 const pickLabel = (hit) => {
@@ -76,8 +87,8 @@ async function preparePicker() {
   services.picker.enable(on);
 }
 const app = startShell(document.getElementById("app"), { store, saving, services });
-// What Setup and Environment choose from (printers, materials, nozzles): ready once the engine is.
-engine.call("presets").then((catalog) => store.set({ catalog }, { undoable: false })).catch(() => {});
+// Load persisted settings, populate store.catalog (printers + nozzles + owned materials), and push to the engine once ready.
+initSettings({ store, saving, engine, services });
 store.subscribe((_, changed) => {
   if (changed.includes("part") && services.stage.part) saving.putExtra("thumb", thumbnail(services.stage.part.geo.attributes.position.array));
 });
