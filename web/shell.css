@@ -1,0 +1,26 @@
+/* The shell's own pieces (T-530) on top of tokens.css, ui/base.css (layouts) and ui/components.css. Spacing only
+   from the --s-* tokens (core/tests/test_css_tokens.py). */
+
+.app-header .brand { display: flex; align-items: center; gap: var(--s-2); padding: 0; border: 0; background: none; color: var(--text);
+  font: inherit; font-size: var(--fs-lg); font-weight: var(--fw-bold); cursor: pointer; }
+.app-header .logo { width: 22px; height: 22px; border-radius: var(--r-sm); background: var(--accent); box-shadow: inset 0 -6px 0 rgb(0 0 0 / 0.18); }
+.app-header .workflow { padding-left: var(--s-3); border-left: 1px solid var(--line); color: var(--text-2); }
+.part-pill { display: inline-flex; align-items: baseline; gap: var(--s-1); padding: var(--s-1) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-pill);
+  background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.part-pill:hover { border-color: var(--line-strong); }
+.part-pill .num { color: var(--text-3); }
+
+.app-screen[data-layout="work"], .app-screen[data-layout="part"], .app-screen[data-layout="options"] { min-height: 0; }
+.panel-head h2:focus, .panel-head h2:focus-visible { outline: none; box-shadow: none; }  /* a focus target for keyboard users, not a control */
+.panel-foot > span:empty { flex: 1; }
+
+/* Part: the stage itself holds the step (drop zone, T-531); the head and footer sit on it. */
+.stage--part { display: grid; grid-template-rows: auto minmax(0, 1fr) var(--panel-foot-h); }
+.stage--part .panel-head { border-bottom: 0; }
+.stage--part .panel-foot { border-top: 0; }
+
+/* Options: the comparison takes the full width under the 3D strip. */
+.app-screen[data-layout="options"] > .stage { grid-column: 2; grid-row: 1; }
+.app-screen[data-layout="options"] > .compare { grid-column: 2; grid-row: 2; border-left: 0; border-top: 1px solid var(--line); }
+
+.start .row { display: flex; gap: var(--s-3); }
