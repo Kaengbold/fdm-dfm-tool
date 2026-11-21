@@ -107,17 +107,36 @@ def build_model(grid: VoxelGrid) -> Model:
 
 
 def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fixed: np.ndarray, rtol: float = 1e-4,
-          springs: tuple | None = None, x0: np.ndarray | None = None):
+          springs: tuple | None = None, x0: np.ndarray | None = None, precond_cache: dict | None = None):
     """Displacements for nodal ``forces`` (n_nodes, 3) with ``fixed`` node mask (n_nodes,).
     ``springs`` (nodes, directions (m, 3), stiffness (m,) N/mm): supports that only hold along a
     direction, e.g. the face normal of a part resting on a surface. ``x0``: displacements to start
-    from (n_nodes, 3), e.g. the last solve's when only the stiffness changed a little (topopt)."""
-    k = stiffness(model, c, scale, springs)
+    from (n_nodes, 3), e.g. the last solve's when only the stiffness changed a little (topopt).
+    ``precond_cache``: optional dict to reuse the coarse-grid LU factorisation across solves on the
+    same model, stiffness tensor and supports (only accelerates CG; the solved system ``kf`` is exact)."""
     n = model.n_nodes * 3
     free = np.repeat(~fixed, 3)
-    kf = k[free][:, free]
+    kf = _stiffness_free(model, c, scale, free, springs, precond_cache)
     f = forces.ravel()[free]
-    m = two_level_preconditioner(kf, prolongation(model)[free])
+    reused = False
+    cache_key = None
+    if precond_cache is not None and springs is None:
+        cache_key = (id(model), c.tobytes(), fixed.tobytes())
+        cur_mean = float(np.mean(scale))
+        entry = precond_cache.get(cache_key)
+        if entry is not None and entry.get("model") is not model:
+            entry = None
+        if entry is not None and cur_mean > 0 and abs(np.log(cur_mean / entry["ref_mean"])) <= 0.6:
+            m = _two_level_operator(kf, entry["p"], entry["coarse"], coarse_scale=entry["ref_mean"] / cur_mean)
+            reused = True
+        else:
+            p = prolongation(model)[free]
+            p = p[:, np.asarray(p.getnnz(axis=0) > 0).ravel()]
+            coarse = _factor_coarse(kf, p)
+            precond_cache[cache_key] = {"model": model, "p": p, "coarse": coarse, "ref_mean": max(cur_mean, 1e-12)}
+            m = _two_level_operator(kf, p, coarse)
+    else:
+        m = two_level_preconditioner(kf, prolongation(model)[free])
     its = [0]
 
     def tick(_):
@@ -127,23 +146,86 @@ def solve(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray, fi
 
     start = None if x0 is None else x0.ravel()[free]
     uf, info = spla.cg(kf, f, x0=start, rtol=rtol, maxiter=2000, M=m, callback=tick)
+    if reused and its[0] > 28 and precond_cache is not None and cache_key is not None:
+        precond_cache.pop(cache_key, None)
     u = np.zeros(n)
     u[free] = uf
     return u.reshape(-1, 3), info
+
+
+def _stiffness_free(model: Model, c: np.ndarray, scale: np.ndarray, free: np.ndarray,
+                    springs: tuple | None = None, precond_cache: dict | None = None) -> sp.csr_matrix:
+    """Global stiffness matrix restricted to ``free`` DOFs, assembled directly with int32 indices.
+    When ``precond_cache`` is given, the CSR sparsity pattern and COO->CSR scatter indices for
+    ``(model, free)`` are built once and reused across orientations and shell recipes."""
+    ke = element_stiffness(c, model.grid.h)
+    n = model.n_nodes * 3
+    nf = int(free.sum())
+    if nf == 0:
+        return sp.csr_matrix((0, 0))
+    if precond_cache is not None:
+        pat_key = ("_kf_pat", id(model), free.tobytes())
+        held = precond_cache.get(pat_key)
+        # id() can be reused once a model is freed: the entry keeps its model and must be the same object.
+        pat = held[1] if held is not None and held[0] is model else None
+        if pat is None:
+            dof_map = np.full(n, -1, dtype=np.int32)
+            dof_map[free] = np.arange(nf, dtype=np.int32)
+            fe = dof_map[model.edof]
+            rows = np.repeat(fe, 24, axis=1).ravel()
+            cols = np.tile(fe, (1, 24)).ravel()
+            keep = (rows >= 0) & (cols >= 0) if nf < n else None
+            r, col = (rows[keep], cols[keep]) if keep is not None else (rows, cols)
+            csr = sp.csr_matrix((np.ones(len(r), dtype=np.int8), (r, col)), shape=(nf, nf))
+            csr.sort_indices()
+            csr_row = np.repeat(np.arange(nf, dtype=np.int64), np.diff(csr.indptr))
+            csr_key = csr_row * nf + csr.indices
+            slot = np.searchsorted(csr_key, r.astype(np.int64) * nf + col).astype(np.int32)
+            pat = (dof_map, keep, slot, csr.indices, csr.indptr, len(csr.data))
+            precond_cache[pat_key] = (model, pat)
+        dof_map, keep, slot, indices, indptr, nnz = pat
+        vals = (scale[:, None] * ke.ravel()[None, :]).ravel()
+        if keep is not None:
+            vals = vals[keep]
+        data = np.bincount(slot, weights=vals, minlength=nnz)
+        kf = sp.csr_matrix((data, indices, indptr), shape=(nf, nf), copy=False)
+    else:
+        dof_map = np.full(n, -1, dtype=np.int32)
+        dof_map[free] = np.arange(nf, dtype=np.int32)
+        fe = dof_map[model.edof]
+        rows = np.repeat(fe, 24, axis=1).ravel()
+        cols = np.tile(fe, (1, 24)).ravel()
+        vals = (scale[:, None] * ke.ravel()[None, :]).ravel()
+        if nf < n:
+            keep = (rows >= 0) & (cols >= 0)
+            rows, cols, vals = rows[keep], cols[keep], vals[keep]
+        kf = sp.csr_matrix((vals, (rows, cols)), shape=(nf, nf))
+    if springs is not None and len(springs[0]):
+        nodes, d, ks = springs
+        block = ks[:, None, None] * d[:, :, None] * d[:, None, :]  # k · d dᵀ per node
+        dof = dof_map[nodes[:, None] * 3 + np.arange(3)]
+        sr = np.repeat(dof, 3, axis=1).ravel()
+        sc = np.tile(dof, (1, 3)).ravel()
+        sv = block.ravel()
+        skeep = (sr >= 0) & (sc >= 0)
+        if skeep.any():
+            kf = kf + sp.csr_matrix((sv[skeep], (sr[skeep], sc[skeep])), shape=(nf, nf))
+    return kf
 
 
 def stiffness(model: Model, c: np.ndarray, scale: np.ndarray, springs: tuple | None = None) -> sp.csr_matrix:
     """Global stiffness matrix (N/mm), with ``springs`` as in ``solve``."""
     ke = element_stiffness(c, model.grid.h)
     n = model.n_nodes * 3
-    rows = np.repeat(model.edof, 24, axis=1).ravel()
-    cols = np.tile(model.edof, (1, 24)).ravel()
+    edof = model.edof.astype(np.int32, copy=False)
+    rows = np.repeat(edof, 24, axis=1).ravel()
+    cols = np.tile(edof, (1, 24)).ravel()
     vals = (scale[:, None] * ke.ravel()[None, :]).ravel()
     k = sp.csr_matrix((vals, (rows, cols)), shape=(n, n))
     if springs is not None and len(springs[0]):
         nodes, d, ks = springs
         block = ks[:, None, None] * d[:, :, None] * d[:, None, :]  # k · d dᵀ per node
-        dof = nodes[:, None] * 3 + np.arange(3)
+        dof = (nodes[:, None] * 3 + np.arange(3)).astype(np.int32)
         k = k + sp.csr_matrix((block.ravel(), (np.repeat(dof, 3, axis=1).ravel(), np.tile(dof, (1, 3)).ravel())), shape=(n, n))
     return k
 
@@ -160,9 +242,8 @@ def lowest_mode(model: Model, c: np.ndarray, scale: np.ndarray, node_mass: np.nd
     way or the other) that a single vector converges to only slowly. Loose tolerances (inner solves to
     1e-3, the frequency to 0.1 %): the Rayleigh-Ritz step still finds the frequency to 0.01 Hz on the
     test parts, in about 60 % of the time of 1e-6 / 1e-4."""
-    k = stiffness(model, c, scale, springs)
     free = np.repeat(~fixed, 3)
-    kf = k[free][:, free].tocsr()
+    kf = _stiffness_free(model, c, scale, free, springs).tocsr()
     m = np.repeat(node_mass, 3)[free]
     precond = two_level_preconditioner(kf, prolongation(model)[free])
     x = np.random.default_rng(0).standard_normal((kf.shape[0], block))
@@ -196,7 +277,10 @@ def _small_eig(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def prolongation(model: Model) -> sp.csr_matrix:
-    """Trilinear interpolation from a 2x-coarser node grid to the model's dofs."""
+    """Trilinear interpolation from a 2x-coarser node grid to the model's dofs (cached on ``model``)."""
+    cached = model.__dict__.get("_prolong")
+    if cached is not None:
+        return cached
     shape = np.array(model.node_index.shape)
     coords = np.argwhere(model.node_index >= 0)
     ids = model.node_index[tuple(coords.T)]
@@ -216,7 +300,34 @@ def prolongation(model: Model) -> sp.csr_matrix:
     rows, cols, vals = map(np.concatenate, (rows, cols, vals))
     used, cols = np.unique(cols, return_inverse=True)
     p = sp.csr_matrix((vals, (rows, cols)), shape=(model.n_nodes, len(used)))
-    return sp.kron(p, sp.eye(3), format="csr")  # same weights for x, y, z dofs
+    out = sp.kron(p, sp.eye(3), format="csr")  # same weights for x, y, z dofs
+    model.__dict__["_prolong"] = out
+    return out
+
+
+def _factor_coarse(k: sp.csr_matrix, p: sp.csr_matrix):
+    kc = (p.T @ k @ p).tocsc()
+    # In thin features several coarse nodes can reach the same one or two fine nodes, which makes
+    # their columns dependent and kc singular. A tiny diagonal shift only touches the preconditioner,
+    # not the solution CG converges to.
+    kc = kc + sp.identity(kc.shape[0], format="csc") * (1e-9 * kc.diagonal().mean())
+    return spla.splu(kc)
+
+
+def _two_level_operator(k: sp.csr_matrix, p: sp.csr_matrix, coarse, sweeps: int = 2, omega: float = 0.5,
+                        coarse_scale: float = 1.0):
+    dinv = omega / k.diagonal()
+
+    def apply(r):
+        x = dinv * r
+        for _ in range(sweeps - 1):
+            x += dinv * (r - k @ x)
+        x += coarse_scale * (p @ coarse.solve(p.T @ (r - k @ x)))
+        for _ in range(sweeps):
+            x += dinv * (r - k @ x)
+        return x
+
+    return spla.LinearOperator(k.shape, matvec=apply)
 
 
 def two_level_preconditioner(k: sp.csr_matrix, p: sp.csr_matrix, sweeps: int = 2, omega: float = 0.5):
@@ -225,24 +336,7 @@ def two_level_preconditioner(k: sp.csr_matrix, p: sp.csr_matrix, sweeps: int = 2
     ``omega`` 0.6 sat just past the stable limit for parts mixing stiff wall voxels with soft infill:
     a 572k-triangle CAD part needed ~800 CG iterations instead of 12 (and the hook 29 instead of 13)."""
     p = p[:, np.asarray(p.getnnz(axis=0) > 0).ravel()]
-    kc = (p.T @ k @ p).tocsc()
-    # In thin features several coarse nodes can reach the same one or two fine nodes, which makes
-    # their columns dependent and kc singular. A tiny diagonal shift only touches the preconditioner,
-    # not the solution CG converges to.
-    kc = kc + sp.identity(kc.shape[0], format="csc") * (1e-9 * kc.diagonal().mean())
-    coarse = spla.splu(kc)
-    dinv = omega / k.diagonal()
-
-    def apply(r):
-        x = dinv * r
-        for _ in range(sweeps - 1):
-            x += dinv * (r - k @ x)
-        x += p @ coarse.solve(p.T @ (r - k @ x))
-        for _ in range(sweeps):
-            x += dinv * (r - k @ x)
-        return x
-
-    return spla.LinearOperator(k.shape, matvec=apply)
+    return _two_level_operator(k, p, _factor_coarse(k, p), sweeps=sweeps, omega=omega)
 
 
 def element_stress(model: Model, c: np.ndarray, scale: np.ndarray, u: np.ndarray) -> np.ndarray:

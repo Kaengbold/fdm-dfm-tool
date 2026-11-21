@@ -597,6 +597,30 @@ def optimize_print(
 
 
 @server.tool()
+def estimate_optimize_runtime(
+    depth: str = "extended",
+    loads: list[dict] | None = None,
+    goal: str = "balanced",
+    printer: str = "bambu_p1s",
+    nozzle: str = "0.4",
+    use_temp_c: float | None = None,
+    constant_load: bool = False,
+    owned: list[str] | None = None,
+    materials: list[str] | None = None,
+    nozzles: list[str] | None = None,
+    touches: list[str] | None = None,
+    constraints: dict | None = None,
+    change: str = "slicer",
+) -> dict:
+    """Calibrated runtime estimate for optimize_print on the loaded part: ``seconds`` on this machine and
+    ``browser_seconds`` (~3× slower in the browser), from triangle count, size, voxel count and candidate
+    count. Runs instantaneously without solving FEA."""
+    profile = {"printer": printer, "nozzle": nozzle, "use_temp_c": use_temp_c, "constant_load": constant_load}
+    return _clean(api.estimate_runtime(depth, loads, profile, goal, owned, materials, nozzles,
+                                       {"temp_c": use_temp_c, "touches": touches or []}, constraints, change))
+
+
+@server.tool()
 def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> list[dict]:
     """The same part with every nozzle size: print time, filament, problems that come with the bigger
     nozzles (``new``) and the detail each one can't print."""
@@ -987,6 +1011,7 @@ API_TOOLS = {
     "design": "suggest_design_changes",
     "compare_nozzles": "compare_nozzles",
     "optimize": "optimize_print",
+    "estimate_runtime": "estimate_optimize_runtime",
     "topology": "suggest_lighter_shape",
 }
 # Only for the web app: it keeps the engine's state while restarting its worker (Cancel). The MCP

@@ -6,6 +6,7 @@
  "checks.py",
  "clearance.py",
  "data/messages/en.yaml",
+ "data/optimizer_timing.yaml",
  "data/presets.yaml",
  "data/rules.yaml",
  "data/symptoms.yaml",

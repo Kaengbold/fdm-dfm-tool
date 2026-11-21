@@ -281,11 +281,12 @@ def _node_normals(model: Model, nodes: np.ndarray, tris: np.ndarray, normals: np
     return normals[src[i]]
 
 
-def _solve(case: LoadCase, c: np.ndarray, scale: np.ndarray, e: float, x0: np.ndarray | None = None, rtol: float = 1e-4):
+def _solve(case: LoadCase, c: np.ndarray, scale: np.ndarray, e: float, x0: np.ndarray | None = None, rtol: float = 1e-4,
+           precond_cache: dict | None = None):
     """``solve`` with the case's supports. Resting faces and screw holes only push: springs where the
     part pulls away are released and the solve repeated until nothing changes. ``x0`` / ``rtol`` as in solve."""
     if case.contact is None or not len(case.contact[0]):
-        return solve(case.model, c, scale, case.forces, case.fixed, rtol, x0=x0)
+        return solve(case.model, c, scale, case.forces, case.fixed, rtol, x0=x0, precond_cache=precond_cache)
     nodes, n = case.contact
     k = CONTACT_STIFFNESS * e * case.model.grid.h
     active = np.ones(len(nodes), dtype=bool)
@@ -293,7 +294,7 @@ def _solve(case: LoadCase, c: np.ndarray, scale: np.ndarray, e: float, x0: np.nd
         m = int(active.sum())
         if m == 0:
             if case.fixed.any():  # lifts off the rest, the clamp alone holds it
-                return solve(case.model, c, scale, case.forces, case.fixed, rtol, x0=x0)
+                return solve(case.model, c, scale, case.forces, case.fixed, rtol, x0=x0, precond_cache=precond_cache)
             raise ValueError("The part lifts off everywhere it rests: hold it somewhere too (clamped or a screw)")
         sel = nodes[active]
         springs = (np.concatenate([sel] + [sel] * 3), np.concatenate([n[active]] + [np.tile(np.eye(3)[i], (m, 1)) for i in range(3)]),
@@ -580,14 +581,15 @@ def _depth_along(grid: VoxelGrid, pts: np.ndarray, dirs: np.ndarray, cap: float)
     return out
 
 
-def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None) -> dict:
+def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None,
+             x0: np.ndarray | None = None, rtol: float = 1e-4, precond_cache: dict | None = None) -> dict:
     """Solve with the anisotropic material for build direction ``up``. With ``printed`` (from the
     G-code) the plastic in each cube and the line directions replace the shells model."""
     mat = material_for(profile)
     r = rotation_to_z(up)
     c = rotate_stiffness(mat.stiffness_print_frame(), r)
     scale = element_scale(case.model, up, shells, profile) if printed is None else printed.scale
-    u, info = _solve(case, c, scale, mat.e_xy)
+    u, info = _solve(case, c, scale, mat.e_xy, x0=x0, rtol=rtol, precond_cache=precond_cache)
     stress = element_stress(case.model, c, scale, u)
     fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale, None if printed is None else printed.bond)
     fi_lines = None if printed is None else lines_index(stress, np.asarray(up, float), mat, printed)
@@ -627,14 +629,121 @@ def impact_factor(drop_mm: float, deflection_mm: float) -> float:
     return 1 + float(np.sqrt(1 + 2 * max(drop_mm, 0.0) / max(deflection_mm, 1e-6)))
 
 
-def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None) -> dict:
+def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None,
+                   x0: list[np.ndarray | None] | None = None, rtol: float = 1e-4,
+                   precond_cache: dict | None = None) -> dict:
     """``evaluate`` for every case; the weakest one is returned, with all safety factors in ``cases``."""
-    results = [evaluate(c, up, profile, shells, printed) for c in cases]
+    starts = x0 if x0 is not None else [None] * len(cases)
+    results = [evaluate(c, up, profile, shells, printed, x0=s, rtol=rtol, precond_cache=precond_cache)
+               for c, s in zip(cases, starts)]
     k = int(np.argmin([r["safety_factor"] for r in results]))
     worst = results[k]
     worst["case"] = cases[k].number
     worst["cases"] = [{"case": c.number, "safety_factor": r["safety_factor"], "verdict": r["verdict"]} for c, r in zip(cases, results)]
+    worst["case_fi"] = [(r["fi_layers_max"], r["fi_material_max"]) for r in results]
+    worst["_u_all"] = [r["u"] for r in results]
     return worst
+
+
+def augment_cases(cases: list[LoadCase], new_solid: np.ndarray, new_fill: np.ndarray | None,
+                  pad_lo: tuple[int, int, int] = (0, 0, 0)) -> tuple[list[LoadCase], np.ndarray]:
+    """Map ``cases`` onto an expanded voxel grid (``new_solid`` must be a superset of the shifted
+    original grid) without re-voxelising or calling mesh booleans. Returns ``(new_cases, node_map)``
+    where ``node_map[old_node_id] = new_node_id`` (usable to warm-start CG)."""
+    old_model = cases[0].model
+    old_grid = old_model.grid
+    pad = np.asarray(pad_lo, dtype=int)
+    new_origin = old_grid.origin - pad * old_grid.h
+    new_grid = VoxelGrid(new_solid, new_origin, old_grid.h, new_fill)
+    new_model = build_model(new_grid)
+
+    old_coords = np.argwhere(old_model.node_index >= 0)
+    old_ids = old_model.node_index[tuple(old_coords.T)]
+    new_ids = new_model.node_index[tuple((old_coords + pad).T)]
+    node_map = np.empty(old_model.n_nodes, dtype=np.int64)
+    node_map[old_ids] = new_ids
+
+    new_shape = new_solid.shape
+    old_mask = np.zeros(new_shape, dtype=bool)
+    old_elems_shifted = old_model.elems + pad
+    old_mask[tuple(old_elems_shifted.T)] = True
+    is_new_elem = ~old_mask[tuple(new_model.elems.T)]
+    elem_corners = _element_nodes(new_model, np.arange(len(new_model.elems)))
+
+    out = []
+    for case in cases:
+        forces = np.zeros((new_model.n_nodes, 3))
+        forces[node_map] = case.forces
+        fixed = np.zeros(new_model.n_nodes, dtype=bool)
+        fixed[node_map] = case.fixed
+        contact = None if case.contact is None else (node_map[case.contact[0]], case.contact[1].copy())
+        ign_grid = np.zeros(new_shape, dtype=bool)
+        ign_elems = old_model.elems[case.ignore] + pad
+        ign_grid[tuple(ign_elems.T)] = True
+        ignore = ign_grid[tuple(new_model.elems.T)]
+        bc_nodes = fixed | (np.abs(forces).sum(axis=1) > 0)
+        if contact is not None:
+            bc_nodes[contact[0]] = True
+        ignore = ignore | (is_new_elem & bc_nodes[elem_corners].any(axis=1))
+        out.append(LoadCase(new_model, forces, fixed, ignore, number=case.number, contact=contact))
+    return out, node_map
+
+
+def map_displacement(n_new_nodes: int, node_map: np.ndarray, u_old: np.ndarray | None) -> np.ndarray | None:
+    """Transfer nodal displacements from the original model to an augmented model for CG warm start."""
+    if u_old is None:
+        return None
+    u_new = np.zeros((n_new_nodes, 3))
+    u_new[node_map] = u_old
+    return u_new
+
+
+def rasterize_edit_onto_grid(old_grid: VoxelGrid, pieces: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, tuple[int, int, int], float]:
+    """Union closed addition triangle ``pieces`` onto ``old_grid`` in voxel space (no mesh booleans).
+    Each piece is rasterised over its own local sub-box so overlapping prisms never cancel out.
+    Returns ``(new_solid, new_fill, pad_lo, added_mm3)``."""
+    from . import voxel
+
+    valid = [p for p in pieces if len(p) > 0 and np.isfinite(p).all()]
+    if not valid:
+        fill = old_grid.solid.astype(float) if old_grid.fill is None else old_grid.fill.copy()
+        return old_grid.solid.copy(), fill, (0, 0, 0), 0.0
+    h = old_grid.h
+    all_pts = np.concatenate([p.reshape(-1, 3) for p in valid])
+    lo, hi = all_pts.min(axis=0), all_pts.max(axis=0)
+    old_shape = np.array(old_grid.solid.shape, dtype=int)
+    old_lo = old_grid.origin
+    old_hi = old_grid.origin + old_shape * h
+    pad_lo = np.maximum(np.ceil((old_lo - lo) / h).astype(int), 0)
+    pad_hi = np.maximum(np.ceil((hi - old_hi) / h).astype(int), 0)
+    new_shape = old_shape + pad_lo + pad_hi
+    new_origin = old_lo - pad_lo * h
+
+    old_fill = old_grid.solid.astype(float) if old_grid.fill is None else old_grid.fill
+    new_solid = np.zeros(tuple(new_shape), dtype=bool)
+    new_fill = np.zeros(tuple(new_shape), dtype=float)
+    sl_old = tuple(slice(int(pad_lo[k]), int(pad_lo[k] + old_shape[k])) for k in range(3))
+    new_solid[sl_old] = old_grid.solid
+    new_fill[sl_old] = old_fill
+    before_vol = float(new_fill.sum())
+
+    for piece in valid:
+        pm = Mesh(piece)
+        plo, phi = piece.reshape(-1, 3).min(axis=0), piece.reshape(-1, 3).max(axis=0)
+        i0 = np.maximum(np.floor((plo - new_origin) / h).astype(int), 0)
+        i1 = np.minimum(np.ceil((phi - new_origin) / h).astype(int), new_shape)
+        sub_shape = i1 - i0
+        if np.any(sub_shape <= 0):
+            continue
+        sub_origin = new_origin + i0 * h
+        pf = voxel._fill(pm, sub_origin, h, sub_shape)
+        ps = voxel._solid(pm, sub_origin, h, sub_shape) | (pf >= voxel.FILL_MIN)
+        sl = tuple(slice(int(i0[k]), int(i1[k])) for k in range(3))
+        new_fill[sl] = np.maximum(new_fill[sl], np.where(ps, np.maximum(pf, voxel.FILL_MIN), 0.0))
+        new_solid[sl] |= ps
+
+    added_mm3 = max(0.0, float(new_fill.sum()) - before_vol) * h**3
+    return new_solid, new_fill, (int(pad_lo[0]), int(pad_lo[1]), int(pad_lo[2])), added_mm3
 
 
 def cases_safety(cases: list[LoadCase], ups: np.ndarray, profile: Profile, shells: Shells = Shells()) -> np.ndarray:

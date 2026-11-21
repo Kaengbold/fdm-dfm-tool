@@ -1,0 +1,53 @@
+# Calibrated runtime model for api.optimize / api.estimate_runtime.
+# Fitted by timing api.optimize across 43 cases from core/tests/corpus and web/samples
+# (24 to 20,000 triangles, unloaded and loaded, Fast / Extended / Complete, 3k–12k voxels).
+# All 43 corpus cases fit within ±40% (mean |error| 20.3%, max 39.3%).
+#
+# Model (native seconds):
+#   size_fac = 0.35 + size_scale * min(mean(size_mm) / 50, 2.0)
+#   tk       = (triangles / 1000) ** tri_exp
+#   tri_fac  = (1 + tri_scale * tk / (1 + tri_sat * tk)) * size_fac
+#   t = overhead_s
+#     + orient_per_tri_s * triangles + orient_per_pose_s * poses
+#     + support_per_pose_s * poses * tri_fac
+#     + nozzle_check_s * bigger_nozzles * tri_fac
+#     + (if strength_on):
+#         voxelize_base_s + voxelize_per_tri_s * triangles + voxelize_per_vox_s * voxels
+#       + solve_per_kvox_s * (voxels / 1000) ** voxel_exp * load_cases * (est_solves + est_reinf_solves)
+#       + reinf_mesh_s * reinf_design_poses * tri_fac
+#
+# Browser (Pyodide/WASM) runs single-threaded ~3x slower than native CPython/NumPy.
+
+browser_factor: 3.0
+
+overhead_s: 0.15
+orient_per_tri_s: 0.000204
+orient_per_pose_s: 0.0683
+support_per_pose_s: 0.0339
+nozzle_check_s: 0.373
+tri_scale: 8.46
+tri_exp: 1.5
+tri_sat: 0.969
+size_scale: 0.238
+
+voxelize_base_s: 0.02
+voxelize_per_tri_s: 0.000275
+voxelize_per_vox_s: 0.000169
+
+# Per-solve cost with preconditioner + CSR scatter reuse + warm starts.
+solve_per_kvox_s: 0.0631
+voxel_exp: 1.151
+
+# Expected number of unique FEA solves per phase (fitted across corpus).
+solves_orientation_hint: 1.0
+solves_per_scan_pose: 1.0
+solves_per_refine_pose: 1.0
+solves_per_own_material: 1.09
+solves_per_bigger_nozzle: 1.09
+solves_per_zone_pose: 9.77
+solves_per_gap_pose_cheap: 1.68
+solves_per_gap_pose_full: 2.86
+solves_per_design_pose_cheap: 3.79
+solves_per_design_pose_full: 6.72
+
+reinf_mesh_s: 0.02
