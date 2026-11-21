@@ -1,0 +1,282 @@
+# English text for engine findings (T-524, T-454).
+# Keys follow <area>.<what>; {name} placeholders match web/i18n.js.
+# Plurals use {one: ..., other: ...} selected by params.count.
+# Rules:
+#   - finding.<rule>.title: <= 6 words, plain hobbyist language, sentence case.
+#   - finding.<rule>.one_liner*: <= 80 chars, what goes wrong and why it matters.
+#   - finding.place.*: short location / feature pill.
+
+finding.place.hole_side: "Ø{d} · side"
+finding.place.hole_upright: "Ø{d} · upright"
+finding.place.hole_z: "Ø{d} · z {z} mm"
+finding.place.hole_midair: "Ø{d} · mid-air"
+finding.place.nut_trap: "{fastener} nut trap"
+finding.place.wall: "{w} mm wall"
+finding.place.detail: "{w} mm detail"
+finding.place.gap: "{w} mm gap"
+finding.place.pin: "{w} mm pin"
+finding.place.hinge: "{t} mm hinge"
+finding.place.snap_tab: "{t} mm tab"
+finding.place.thread_side: "{size} · side"
+finding.place.thread_upright: "{size} · upright"
+finding.place.z: "z {z} mm"
+finding.place.z_range: "z {z0}–{z1} mm"
+finding.place.top: "top"
+finding.place.side: "side"
+finding.place.bed: "bed"
+finding.place.clean_face: "clean face"
+finding.place.outer_wall: "outer wall"
+finding.place.curved_face: "curved face"
+finding.place.inside_corner: "inside corner"
+finding.place.interior: "interior"
+finding.place.whole_part: "whole part"
+finding.place.printer: "printer"
+finding.place.material: "material"
+finding.place.settings: "settings"
+
+# --- Printability & knowledge-base rules (every rule in rules.yaml) ---
+
+finding.long_bridge.title: "Long bridge will sag"
+finding.long_bridge.one_liner: "Unsupported span is too long; strands droop and leave a rough underside."
+finding.long_bridge.one_liner_span: "{span} mm span is over {material}'s {max_bridge} mm limit; underside sags."
+
+finding.too_thin_to_print.title: "Too thin to print"
+finding.too_thin_to_print.one_liner: "Thinner than the nozzle can print; the slicer skips this feature."
+finding.too_thin_to_print.one_liner_size: "About {width} mm wide; a {nozzle} mm nozzle skips it completely."
+
+finding.small_bed_contact.title: "Small contact with bed"
+finding.small_bed_contact.one_liner: "Very little touches the bed; the part can break loose mid-print."
+finding.small_bed_contact.one_liner_none: "Nothing touches the bed in this pose; the print fails right away."
+finding.small_bed_contact.one_liner_area: "Only {area} mm² touches the bed; the part can break loose mid-print."
+
+finding.print_may_fail.title: "Print may come loose"
+finding.print_may_fail.one_liner: "Several bed risks add up; the part may lift or tip over mid-print."
+
+finding.tipping_risk.title: "Tall part can tip"
+finding.tipping_risk.one_liner: "Tall over a narrow base; the nozzle can knock it over mid-print."
+finding.tipping_risk.one_liner_size: "{height} mm tall on a {width} mm base; nozzle can knock it over."
+
+finding.tall_thin_feature.title: "Tall thin part wobbles"
+finding.tall_thin_feature.one_liner: "Slender upright section bends under the nozzle and prints messy."
+finding.tall_thin_feature.one_liner_size: "{width} mm wide, {height} mm tall; wobbles and prints messy."
+
+finding.small_layers_cooling.title: "Small layers stay soft"
+finding.small_layers_cooling.one_liner: "Tiny layers stay hot when the next one lands; tips droop or blob."
+finding.small_layers_cooling.one_liner_temp: "Still ~{temp} °C when the next layer lands; tips droop or blob."
+
+finding.heat_too_hot.title: "Spot stays too hot"
+finding.heat_too_hot.one_liner: "Plastic is still soft when the next layer lands; it may sag or blob."
+finding.heat_too_hot.one_liner_temp: "Still ~{temp} °C at next layer (limit {limit} °C); may sag or blob."
+
+finding.heat_weak_bond.title: "Layers cool too fast"
+finding.heat_weak_bond.one_liner: "Previous layer cools too far; layers bond weakly and snap easier."
+finding.heat_weak_bond.one_liner_bond: "Only ~{bond}% layer bond here; snaps more easily along layers."
+
+finding.heat_needless_slowdown.title: "Unneeded cooling slowdown"
+finding.heat_needless_slowdown.one_liner: "Slicer slows down for cooling while layers are already too cool."
+finding.heat_needless_slowdown.one_liner_time: "Slows ~{minutes} min for cooling while layers already bond poorly."
+
+finding.enclosure_recommended.title: "Material warps in open air"
+finding.enclosure_recommended.one_liner: "Drafts cool this plastic too fast; corners lift and layers split."
+finding.enclosure_recommended.one_liner_mat: "{material} needs warm air; open drafts warp and split layers."
+
+finding.hardened_nozzle_required.title: "Needs a hardened nozzle"
+finding.hardened_nozzle_required.one_liner: "Abrasive filament wears brass nozzles fast and ruins print size."
+finding.hardened_nozzle_required.one_liner_mat: "{material} wears out brass nozzles fast and ruins print size."
+
+finding.dry_filament.title: "Filament needs drying"
+finding.dry_filament.one_liner: "Absorbs air moisture; prints stringy, bubbly, and weak if wet."
+finding.dry_filament.one_liner_mat: "{material} absorbs moisture; wet spools print stringy and weak."
+
+finding.stress_at_inside_corner.title: "Sharp inside corner cracks"
+finding.stress_at_inside_corner.one_liner: "Stress piles up in this sharp corner; the part cracks under load."
+
+finding.too_hot_in_use.title: "Too hot where used"
+finding.too_hot_in_use.one_liner: "Use temperature approaches softening; the part bends or creeps."
+finding.too_hot_in_use.one_liner_soft: "{material} softens at {limit} °C; bends or sags at {temp} °C."
+finding.too_hot_in_use.one_liner_near: "Near {material}'s {limit} °C limit at {temp} °C; creeps under load."
+
+finding.side_detail_small.title: "Side text too fine"
+finding.side_detail_small.one_liner: "Upright text is too small or deep to print cleanly."
+finding.side_detail_small.one_liner_small: "Only {height} mm tall; too few layers for clear upright letters."
+finding.side_detail_small.one_liner_deep: "Engraved {depth} mm deep; top edges of upright letters droop."
+
+finding.shallow_relief.title: "Top detail too shallow"
+finding.shallow_relief.one_liner: "Raised or sunk detail is too shallow and may barely show."
+finding.shallow_relief.one_liner_vanish: "Only {depth} mm ({layers} layers); top detail may not show."
+finding.shallow_relief.one_liner_faint: "Only {depth} mm ({layers} layers); top detail prints faintly."
+
+finding.elephant_foot.title: "Bottom edge bulges out"
+finding.elephant_foot.one_liner: "First layers squish outward 0.1–0.2 mm; bed holes print tight."
+finding.elephant_foot.one_liner_holes:
+  one: "{count} bed hole bulges 0.1–0.2 mm tighter at the bottom."
+  other: "{count} bed holes bulge 0.1–0.2 mm tighter at the bottom."
+
+finding.exceeds_build_volume.title: "Too big for printer"
+finding.exceeds_build_volume.one_liner: "Larger than the build plate; the slicer cannot fit this part."
+finding.exceeds_build_volume.one_liner_printer: "Larger than the {printer} bed; the slicer cannot fit it."
+
+finding.turned_to_fit.title: "Turned on bed to fit"
+finding.turned_to_fit.one_liner: "Rotated on the bed so it fits; keep this angle in your slicer."
+finding.turned_to_fit.one_liner_deg: "Turned {deg}° so it fits the {printer} bed; keep this angle."
+
+finding.support_marks.title: "Rough underside from supports"
+finding.support_marks.one_liner: "Supported overhang prints rougher where breakaway supports touch."
+finding.support_marks.one_liner_area: "~{area} mm² rests on supports; underside prints rough."
+finding.support_marks.one_liner_clean: "Supports touch your clean face (~{area} mm²) and leave marks."
+
+finding.trapped_support.title: "Support trapped inside"
+finding.trapped_support.one_liner: "Enclosed overhang needs support inside that you cannot remove."
+finding.trapped_support.one_liner_hole: "Ø{d} mm side hole needs support inside you cannot pull out."
+finding.trapped_support.one_liner_pocket: "Pocket {depth} mm deep behind {opening} mm mouth traps support."
+
+finding.bridge_sag.title: "Unsupported top sags"
+finding.bridge_sag.one_liner: "Flat ceiling bridges in mid-air and sags into the opening."
+finding.bridge_sag.one_liner_span: "{span} mm span droops ~{sag} mm into the opening."
+
+finding.hole_starts_midair.title: "Hole starts in mid-air"
+finding.hole_starts_midair.one_liner: "Hole opens over empty space; the first rim droops and prints messy."
+finding.hole_starts_midair.one_liner_size: "Ø{d} mm hole starts over air; the first rim droops."
+
+finding.sideways_hole_oval.title: "Side hole prints oval"
+finding.sideways_hole_oval.one_liner: "Top sags ~0.3 mm; round pins and bolts will not slide in."
+finding.sideways_hole_oval.one_liner_fastener: "Top sags ~{sag} mm; an {fastener} bolt won't fit."
+finding.sideways_hole_oval.one_liner_size: "Top sags ~{sag} mm; a Ø{d} pin won't slide in."
+
+finding.shrinkage_size_error.title: "Long part shrinks short"
+finding.shrinkage_size_error.one_liner: "Cooling shrinkage shortens long spans; tight fits may miss."
+finding.shrinkage_size_error.one_liner_span: "{length} mm span shrinks ~{short} mm; tight fits may miss."
+
+finding.grip_texture.title: "Add grip texture"
+finding.grip_texture.one_liner: "Smooth outer wall; fuzzy skin adds grip and hides layer lines."
+
+finding.floor_shrink_line.title: "Floor pulls outer line"
+finding.floor_shrink_line.one_liner: "Solid internal floor shrinks and pulls a visible line outside."
+finding.floor_shrink_line.one_liner_z: "Internal floor shrinks at z {z} mm, pulling a visible line."
+
+finding.rib_sink_line.title: "Rib leaves sink line"
+finding.rib_sink_line.one_liner: "Thick internal rib shrinks and pulls a vertical line outside."
+finding.rib_sink_line.one_liner_size: "{rib} mm rib pulls a vertical sink line on the outer wall."
+
+finding.flat_gap_fuses.title: "Flat gap fuses shut"
+finding.flat_gap_fuses.one_liner: "Narrow vertical gap sags in mid-air and welds moving parts shut."
+finding.flat_gap_fuses.one_liner_size: "{gap} mm vertical gap sags in mid-air and welds solid."
+
+finding.gap_fuses.title: "Narrow gap fuses shut"
+finding.gap_fuses.one_liner: "Gap under 0.2 mm bulges shut and welds moving parts together."
+finding.gap_fuses.one_liner_size: "{width} mm gap is under 0.2 mm; moving parts weld shut."
+
+finding.hole_closes.title: "Tiny hole closes shut"
+finding.hole_closes.one_liner: "Too small for the nozzle; molten plastic drags inward and closes it."
+finding.hole_closes.one_liner_size: "Ø{d} mm is too small for a {nozzle} mm nozzle; closes up."
+
+finding.small_hole_undersized.title: "Small hole prints tight"
+finding.small_hole_undersized.one_liner: "Prints ~0.2 mm small; a screw or pin won't fit without drilling."
+finding.small_hole_undersized.one_liner_fastener: "Prints ~0.2 mm small; an {fastener} screw won't fit cleanly."
+finding.small_hole_undersized.one_liner_size: "Ø{d} mm prints ~0.2 mm small; pin or screw won't fit."
+
+finding.nut_trap_tight.title: "Nut pocket too tight"
+finding.nut_trap_tight.one_liner: "Hex pocket prints slightly small; the nut binds or cracks walls."
+finding.nut_trap_tight.one_liner_size: "{af} mm hex is tight for an {fastener} nut; may crack walls."
+
+finding.insert_wall_thin.title: "Thin wall around insert"
+finding.insert_wall_thin.one_liner: "Thin wall around insert hole can bulge or split when pressed in."
+finding.insert_wall_thin.one_liner_size: "Only {wall} mm wall around {fastener} insert; may split."
+
+finding.screw_wall_thin.title: "Thin wall around screw"
+finding.screw_wall_thin.one_liner: "Thin wall around screw hole can split or strip when driven in."
+finding.screw_wall_thin.one_liner_size: "Only {wall} mm wall for {fastener} screw; may split or strip."
+
+finding.first_layer_detail.title: "Bed detail gets squashed"
+finding.first_layer_detail.one_liner: "Fine details on the bed get squished and blurred by layer one."
+
+finding.fine_detail_rough.title: "Fine detail prints rough"
+finding.fine_detail_rough.one_liner: "Too narrow for clean walls; prints rough, jagged, or incomplete."
+finding.fine_detail_rough.one_liner_size: "{width} mm feature is too fine for a {nozzle} mm nozzle."
+
+finding.warping.title: "Base corners can lift"
+finding.warping.one_liner: "Long flat base shrinks as it cools and pulls corners off the bed."
+finding.warping.one_liner_len: "{length} mm {material} base cools and lifts corners off the bed."
+
+finding.weak_upright_pin.title: "Upright pin snaps easily"
+finding.weak_upright_pin.one_liner: "Layers run across the stem; a sideways bump snaps it off."
+finding.weak_upright_pin.one_liner_size: "{width} mm pin stands {height} mm tall; snaps along layers."
+
+finding.living_hinge.title: "Thin hinge may crack"
+finding.living_hinge.one_liner: "Thin flexing band can crack quickly in rigid plastic or upright."
+finding.living_hinge.one_liner_upright: "{t} mm hinge stands upright; snaps along layers on first bend."
+finding.living_hinge.one_liner_brittle: "{t} mm {material} hinge cracks after a few hundred bends."
+finding.living_hinge.one_liner_flat: "{t} mm hinge prints flat; {material} handles repeated bending."
+
+finding.snap_fit_upright.title: "Upright snap tab snaps"
+finding.snap_fit_upright.one_liner: "Bends across weak layer lines; tab can snap off on first push."
+finding.snap_fit_upright.one_liner_strain: "Bends {strain}% across layers ({material} allows {max}%); snaps."
+finding.snap_fit_upright.one_liner_pct: "Bends {strain}% across layers; print flat so it won't snap."
+
+finding.thick_solid_block.title: "Thick solid block"
+finding.thick_solid_block.one_liner: "Thick core uses hollow infill; walls add more strength than infill."
+finding.thick_solid_block.one_liner_vol: "{cm3} cm³ thick core; extra infill wastes plastic for little strength."
+
+finding.thin_neck.title: "Narrow neck breaks easily"
+finding.thin_neck.one_liner: "Loads concentrate at the narrow neck and snap across few layers."
+finding.thin_neck.one_liner_area: "{area} mm² neck carries everything above on just a few layers."
+
+finding.single_line_wall.title: "Single-line wall is weak"
+finding.single_line_wall.one_liner: "Prints as one thin bead; leaves pinholes and cracks easily."
+finding.single_line_wall.one_liner_size: "{width} mm wall prints as one line; weak and cracks easily."
+
+finding.setup_layer_too_thick.title: "Layers too thick"
+finding.setup_layer_too_thick.one_liner: "Layers over 75% of nozzle width press poorly and split apart."
+finding.setup_layer_too_thick.one_liner_size: "{lh} mm layers on a {nozzle} mm nozzle bond poorly."
+
+finding.setup_support_gap_zero.title: "Support touches the part"
+finding.setup_support_gap_zero.one_liner: "Zero support gap welds supports to the part and tears the surface."
+finding.setup_support_gap_zero.one_liner_gap: "{gap} mm support gap welds to the part and tears the surface."
+
+finding.setup_flow_too_high.title: "Faster than hotend melts"
+finding.setup_flow_too_high.one_liner: "Print speed outruns hotend melt rate; walls print thin and weak."
+finding.setup_flow_too_high.one_liner_speed: "{speed} mm/s needs {flow} mm³/s; slicer will cap your speed."
+finding.setup_flow_too_high.one_liner_hotend: "{flow} mm³/s exceeds standard hotends; walls print thin and weak."
+
+finding.setup_plate_too_sticky.title: "Filament sticks too hard"
+finding.setup_plate_too_sticky.one_liner: "Sticks so hard to this plate it can rip chunks out on removal."
+finding.setup_plate_too_sticky.one_liner_mat: "{material} on {plate} can rip pieces out of the build plate."
+
+finding.vase_mode_possible.title: "Could print in vase mode"
+finding.vase_mode_possible.one_liner: "Open container prints faster with no seam as a single-line wall."
+finding.vase_mode_possible.one_liner_time: "Prints seamless in ~{vase} min (instead of {normal}); one-line wall."
+
+finding.coarse_facets.title: "Curves exported too coarse"
+finding.coarse_facets.one_liner: "Coarse STL flats show on curves and throw off round hole fits."
+finding.coarse_facets.one_liner_err: "{width} mm flat strips are {err} mm off round; fits may miss."
+
+finding.shallow_slope_stairs.title: "Shallow slope shows steps"
+finding.shallow_slope_stairs.one_liner: "Shallow slope prints as wide stair-steps; finer layers smooth it."
+finding.shallow_slope_stairs.one_liner_step: "{deg}° slope prints {step} mm steps; finer layers smooth it."
+
+finding.pause_to_insert.title: "Closed pocket needs pause"
+finding.pause_to_insert.one_liner: "Pause before the roof closes so you can drop the insert inside."
+finding.pause_to_insert.one_liner_layer: "Pause at layer {layer} (z {z} mm) to drop in your insert."
+finding.pause_to_insert.one_liner_long: "Pause at layer {layer} to drop insert; {span} mm roof may sag."
+
+finding.modelled_thread.title: "Printed thread may bind"
+finding.modelled_thread.one_liner: "Layer steps make printed threads rough; add ~0.3 mm clearance."
+finding.modelled_thread.one_liner_lying: "{what} lies on its side; layer steps make it bind."
+finding.modelled_thread.one_liner_small: "{what} is small to print; an insert or nut holds better."
+finding.modelled_thread.one_liner_layers: "{what} gets {layers} layers/turn; use finer layers here."
+finding.modelled_thread.one_liner_ok: "{what} needs ~0.3 mm clearance; work it in before use."
+
+finding.fibre_filled.title: "Fibre filament breaks suddenly"
+finding.fibre_filled.one_liner: "Fibres add stiffness, not layer bond; part snaps without warning."
+
+finding.wall_line_mismatch.title: "Wall width misses lines"
+finding.wall_line_mismatch.one_liner: "Wall falls between whole lines; leaves internal gaps or zigzags."
+finding.wall_line_mismatch.one_liner_size: "{wall} mm wall misses {lw} mm lines; leaves gaps or zigzags."
+
+finding.load_bearing_wall_thin.title: "Wall thin for loads"
+finding.load_bearing_wall_thin.one_liner: "Thin shell flexes and cracks quickly under steady load or clamping."
+finding.load_bearing_wall_thin.one_liner_size: "{wall} mm wall is thin under load; aim for at least {min} mm."
+
+finding.uneven_wall_thickness.title: "Thick next to thin wall"
+finding.uneven_wall_thickness.one_liner: "Thick block cools slower and pulls sink marks or warps thin wall."
+finding.uneven_wall_thickness.one_liner_size: "{thin} mm wall next to {thick} mm block shrinks unevenly."
