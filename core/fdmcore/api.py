@@ -982,6 +982,32 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
     return best
 
 
+def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str = "extended", profile: dict | None = None,
+             owned: list[str] | None = None, materials: list[str] | None = None, nozzles: list[str] | None = None,
+             environment: dict | None = None, constraints: dict | None = None, change: str = "slicer") -> dict:
+    """The new UI's optimizer (T-522, optimizer.py): 2–4 verified options for ``goal`` (strong / balanced / fast /
+    light / quality) over orientation, material, nozzle, layer height and walls / top / infill.
+
+    ``loads`` as for strength (none, or goal quality: no strength solve). ``depth``: fast / extended / complete.
+    ``profile``: printer, nozzle, use_temp_c, constant_load (its material and goal are ignored; lock a material
+    with ``constraints``). ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
+    to consider (nozzles = the ticked sizes). ``environment``: {"temp_c", "touches": [water, food, outdoors,
+    abrasion, oil_fuel, solvent, skin]}. ``constraints`` ("Your choices", hard limits): material, nozzle,
+    layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both."""
+    from . import optimizer
+
+    s = _require()
+    d = dict(profile or {})
+    d.pop("goal", None)
+    base = Profile.from_dict(d)
+    env = dict(environment or {})
+    env.setdefault("temp_c", base.use_temp_c)
+    return optimizer.optimize(s.mesh, goal=goal, loads=loads or None, depth=depth, base=base, owned=owned, materials=materials,
+                              nozzles=nozzles, environment=env, constraints=constraints, change=change,
+                              load_case=_load_case, climb=lambda cases, up, p, target, mesh: _climb(cases, up, p, target, mesh),
+                              grams_minutes=_grams_minutes_of, evaluate=_evaluate, orientation_settings=orientation_settings)
+
+
 def _stressed_for(s: Session, model, up, p: Profile) -> tuple[np.ndarray, np.ndarray] | None:
     """The last strength check's stress (fi, ignore), if it was for this model (the same loads and grid),
     build direction and material; None otherwise."""
@@ -3736,6 +3762,7 @@ METHODS = {
     "stronger_orientation": stronger_orientation,
     "design": design,
     "compare_nozzles": compare_nozzles,
+    "optimize": optimize,
     "topology": topology,
 }
 

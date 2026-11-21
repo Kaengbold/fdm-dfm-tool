@@ -567,6 +567,36 @@ def check_orientation(up: list[float], printer: str = "bambu_p1s", material: str
 
 
 @server.tool()
+def optimize_print(
+    goal: str = "balanced",
+    loads: list[dict] | None = None,
+    depth: str = "extended",
+    printer: str = "bambu_p1s",
+    nozzle: str = "0.4",
+    use_temp_c: float | None = None,
+    constant_load: bool = False,
+    owned: list[str] | None = None,
+    materials: list[str] | None = None,
+    nozzles: list[str] | None = None,
+    touches: list[str] | None = None,
+    constraints: dict | None = None,
+    change: str = "slicer",
+) -> dict:
+    """The best 2–4 ways to print the loaded part for a goal (strong / balanced / fast / light / quality):
+    orientation, material, nozzle, layer height, walls, top/bottom and infill, each checked for strength at its
+    own pose. Safety targets: strong ×5, balanced ×3, fast ×2, light ×1.5 (×3 at least for a load that stays on);
+    quality and no loads skip strength. ``loads`` as for check_strength. ``depth`` fast / extended / complete
+    (extended can take a few minutes). ``owned``: materials the user has; ``materials`` / ``nozzles``: the only
+    ones to consider; ``touches``: water, food, outdoors, abrasion, oil_fuel, solvent, skin. ``constraints``:
+    hard limits (material, nozzle, layer_height, walls, top, bottom, infill, up). ``change``: slicer / design /
+    both. Returns ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the
+    target, ``ways_out``."""
+    profile = {"printer": printer, "nozzle": nozzle, "use_temp_c": use_temp_c, "constant_load": constant_load}
+    return _clean(api.optimize(goal, loads, depth, profile, owned, materials, nozzles, {"temp_c": use_temp_c, "touches": touches or []},
+                               constraints, change))
+
+
+@server.tool()
 def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> list[dict]:
     """The same part with every nozzle size: print time, filament, problems that come with the bigger
     nozzles (``new``) and the detail each one can't print."""
@@ -956,6 +986,7 @@ API_TOOLS = {
     "stronger_orientation": "stronger_orientation",
     "design": "suggest_design_changes",
     "compare_nozzles": "compare_nozzles",
+    "optimize": "optimize_print",
     "topology": "suggest_lighter_shape",
 }
 # Only for the web app: it keeps the engine's state while restarting its worker (Cancel). The MCP
