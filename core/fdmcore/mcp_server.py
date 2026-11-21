@@ -674,6 +674,28 @@ def optimize_gcode_file(up: list[float], gcode_path: str, output_path: str, prin
 
 
 @server.tool()
+def heat_tuning_gcode(kind: str, gcode_path: str, output_path: str) -> dict:
+    """The G-code for a heat tuning print (calibration_part "sag" or "snap"), from the user's sliced test part: sag
+    switches the slicer's slowdown for cooling off, snap steps the fan down every 8 mm. Keep the written file:
+    tune_heat_window reads it with the result."""
+    src = _in(gcode_path, (".gcode", ".gco", ".g"), "G-code file")
+    r = api.tuning_gcode(kind, src.read_bytes())
+    out = _out(output_path, (".gcode",), "G-code path")
+    out.write_bytes(r.pop("data"))
+    return {**r, "path": str(out)}
+
+
+@server.tool()
+def tune_heat_window(kind: str, gcode_path: str, at_mm: float | None = None, printer: str = "bambu_p1s", material: str = "pla",
+                     nozzle: str = "0.4") -> dict:
+    """What a heat tuning print says, from its test G-code (heat_tuning_gcode's file): sag ``at_mm`` where the tallest
+    pin first drooped (None: none did), snap ``at_mm`` below which the wall broke easily (None: it held everywhere).
+    Returns the value (``sag_limit_c`` or ``min_bond``) to save with the material or pass as the profile's heat_tuning."""
+    src = _in(gcode_path, (".gcode", ".gco", ".g"), "G-code file")
+    return api.tune_heat(kind, src.read_bytes(), at_mm, _profile(printer, material, nozzle))
+
+
+@server.tool()
 def spot_importance(up: list[float], loads: list[dict] | None = None, printer: str = "bambu_p1s", material: str = "pla",
                     nozzle: str = "0.4", goal: str = "balanced", intents: list[dict] | None = None) -> dict:
     """How much each spot of the part matters for bonding between layers (weight 0.2–1), which heat_model uses
@@ -1006,6 +1028,8 @@ API_TOOLS = {
     "importance": "spot_importance",
     "optimize_cooling": "optimize_cooling",
     "optimize_gcode": "optimize_gcode_file",
+    "tuning_gcode": "heat_tuning_gcode",
+    "tune_heat": "tune_heat_window",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
     "tolerance": "printer_tolerance",

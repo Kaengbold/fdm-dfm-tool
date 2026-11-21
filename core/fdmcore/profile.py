@@ -114,6 +114,10 @@ MATERIAL_FIELDS = {
     "outer_error_mm": (float, -2, 2),  # measured − modelled outer size of a printed part
     "price_per_kg": (float, 0, 10000),  # what the user pays, any currency: the cost of a print
     "spool_left_g": (float, 0, 100000),  # filament left on the spool now: warns when a print won't fit on it
+    # The heat window tuned on the user's printer (T-482, the sag and snap tests): the temperature above
+    # which a covered spot loses its shape, and the bond between layers the snap test still found solid.
+    "sag_limit_c": (float, 30, 300),
+    "min_bond": (float, 0.02, 1.0),
 }
 ENCLOSURES = ("none", "passive", "heated")
 
@@ -190,6 +194,17 @@ def set_custom_presets(printers: dict | None = None, materials: dict | None = No
 GOALS = ("balanced", "strength", "speed", "material")
 
 
+def _tuning(d: dict, key: str, lo: float, hi: float) -> float | None:
+    """One value of the profile's ``heat_tuning`` ({"sag_limit_c", "min_bond"}), checked; None when not given."""
+    v = (d.get("heat_tuning") or {}).get(key)
+    if v in (None, ""):
+        return None
+    v = float(v)
+    if not lo <= v <= hi:
+        raise ValueError(f"heat_tuning {key} must be between {lo:g} and {hi:g}, got {v:g}")
+    return v
+
+
 @dataclass(frozen=True)
 class Profile:
     printer_id: str = "bambu_p1s"
@@ -202,6 +217,10 @@ class Profile:
     # Layer height override (mm); None follows the nozzle preset. Kept apart from the derived value, so
     # dataclasses.replace(p, nozzle=...) picks up the new nozzle's default instead of a stale height.
     layer_height_mm: float | None = None
+    # The heat window tuned by the sag / snap tests (T-482), carried in the profile so a project file keeps
+    # them; when not given, the material preset's own (My materials) count.
+    tuned_sag_c: float | None = None
+    tuned_bond: float | None = None
 
     def __post_init__(self) -> None:
         lh = self.layer_height_mm
@@ -242,6 +261,14 @@ class Profile:
     def z_strength_factor(self) -> float:
         return self.material["z_strength_factor"][self.enclosure]
 
+    @property
+    def heat_tuning(self) -> dict:
+        """The heat window values the user measured (``sag_limit_c``, ``min_bond``; only the ones known):
+        the profile's first, else the material preset's."""
+        out = {"sag_limit_c": self.tuned_sag_c, "min_bond": self.tuned_bond}
+        return {k: float(v if v is not None else self.material.get(k)) for k, v in out.items()
+                if v is not None or self.material.get(k) is not None}
+
     @classmethod
     def from_dict(cls, d: dict | None) -> "Profile":
         d = d or {}
@@ -261,6 +288,8 @@ class Profile:
             use_temp_c=None if d.get("use_temp_c") in (None, "") else float(d["use_temp_c"]),
             constant_load=bool(d.get("constant_load", False)),
             layer_height_mm=lh,
+            tuned_sag_c=_tuning(d, "sag_limit_c", 30, 300),
+            tuned_bond=_tuning(d, "min_bond", 0.02, 1.0),
         )
         if p.goal not in GOALS:
             raise ValueError(f"Unknown goal: {p.goal} (use one of {', '.join(GOALS)})")

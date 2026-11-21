@@ -208,7 +208,15 @@ const profile = () => ({
   goal: document.querySelector("input[name=goal]:checked").value,
   use_temp_c: useTemp(),
   constant_load: $("constant-load").checked,
+  heat_tuning: heatTuningOf($("material").value),
 });
+/** The heat window the sag / snap tests measured for this material (My materials), carried in the profile so a
+ * saved project keeps it; undefined when neither test was done. */
+function heatTuningOf(id) {
+  const m = state.presets?.materials?.[id] ?? {};
+  const tuned = Object.fromEntries(["sag_limit_c", "min_bond"].filter((k) => m[k] != null).map((k) => [k, m[k]]));
+  return Object.keys(tuned).length ? tuned : undefined;
+}
 const mode = () => document.querySelector("input[name=mode]:checked").value;
 
 /** Where the part is used (°C), or null for room temperature: a choice from the list or the user's own number. */
@@ -4441,8 +4449,30 @@ function tuneTarget() {
   return { mine, key, spec, mat, printer, base: state.presets.materials[spec.based_on] ?? mat };
 }
 
+/** The heat window from the sag / snap test (T-482): the test G-code is made again from the user's sliced
+ * test part, and the heat model says how hot (sag) or how well bonded (snap) the layers were where the user saw
+ * it change. Null when that test wasn't filled in. */
+async function heatTuning(kind) {
+  const none = $(`cal-${kind}-none`).checked, mm = $(`cal-${kind}-mm`).value;
+  if (!none && mm === "") return null;
+  const file = $(`cal-${kind}-file`).files[0];
+  const name = kind === "sag" ? "Sag test" : "Snap test";
+  if (!file) throw new Error(`${name}: choose your sliced test part too (the same file the test G-code came from).`);
+  const test = await call("tuning_gcode", { kind }, new Uint8Array(await file.arrayBuffer()));
+  return (await call("tune_heat", { kind, at_mm: none ? null : Number(mm) }, test.data)).value;
+}
+
+document.querySelectorAll("[data-tuning-gcode]").forEach((b) => (b.onclick = () =>
+  busy("Making the test G-code…", async () => {
+    const kind = b.dataset.tuningGcode, file = $(`cal-${kind}-file`).files[0];
+    if (!file) return setStatus("Choose your sliced test part first (slice the test STL, save the G-code, pick it here).");
+    const test = await call("tuning_gcode", { kind }, new Uint8Array(await file.arrayBuffer()));
+    download(test.data, test.name, "text/x-gcode");
+    setStatus(`Downloaded ${test.name}: print it, then enter what you saw.`);
+  })));
+
 /** The results filled in, as material form values (``mypresets.toSpec``); only the tests that were done. */
-function tuneResults() {
+async function tuneResults() {
   const num = (id) => ($(id).value === "" ? null : Number($(id).value));
   const out = {};
   const [flat, upright] = [num("cal-flat"), num("cal-upright")];
@@ -4462,6 +4492,10 @@ function tuneResults() {
     if (!(m > 0 && x > 0)) throw new Error(`${what} size: enter the modelled and the measured size.`);
     out[key] = (x - m).toFixed(2);
   }
+  for (const [kind, key] of [["sag", "sag_limit_c"], ["snap", "min_bond"]]) {
+    const value = await heatTuning(kind);
+    if (value != null) out[key] = value;
+  }
   return out;
 }
 
@@ -4472,6 +4506,8 @@ const TUNED = [ // what a test sets: name, spec key, the value in words (materia
   ["Overhangs", "max_overhang_deg", (m) => m.max_overhang_deg != null && `clean up to ${m.max_overhang_deg}°`],
   ["Bridges", "max_bridge_mm", (m) => m.max_bridge_mm != null && `up to ${m.max_bridge_mm} mm`],
   ["Sizes", "hole_error_mm", (m) => m.hole_error_mm != null && `holes come out ${m.hole_error_mm > 0 ? "+" : ""}${m.hole_error_mm} mm`],
+  ["Too hot (sag test)", "sag_limit_c", (m) => m.sag_limit_c != null && `keeps its shape up to about ${m.sag_limit_c} °C`],
+  ["Too cold (snap test)", "min_bond", (m) => m.min_bond != null && `layers need about ${Math.round(m.min_bond * 100)} % of a full bond`],
 ];
 
 /** For which material and printer, and per test whether the checks use your result or the typical value. */
@@ -4502,7 +4538,7 @@ $("tune-save").onclick = async () => {
   const fail = (text) => Object.assign($("tune-error"), { textContent: text, hidden: false });
   let results;
   try {
-    results = tuneResults();
+    results = await busy("Reading your results…", tuneResults);
   } catch (err) {
     return fail(err.message);
   }
