@@ -1011,7 +1011,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - **Stored:** with the user's material (My materials fields, saved by "Save my results") and in the profile's `heat_tuning`, which project files keep. `thermal.window` moves both sag limits by the measured one and scales the goals' bonding by the measured bond. `thermal.confidence` → "rough" / "partly tuned" / "tuned" in `heat_model`, `optimize_cooling` and its summary.
     - New MCP tools `heat_tuning_gcode`, `tune_heat_window`.
     - Checks: a stand-in slicer makes both tests; the sag G-code undoes the slowdown on the tall pin, the snap G-code reads back with the fan steps; both results change the window (limit shifted by exactly the measured difference, bond goal = measured) and the label. Pyodide works.
-- [ ] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: —
+- [ ] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: Claude (task/T-483-local-slice)
   - Do: in local mode, slice the 3MF with OrcaSlicer with the layer-time slowdown switched off (everything else kept), so the starting speeds are clean and no slowdown causes need guessing. Run the fine tier there. Later the same through the browser slicer (T-127).
   - Done when: the local MCP tool returns the optimized G-code for a 3MF.
 - [ ] **T-484 P3** [TO] Later. · owner: —
