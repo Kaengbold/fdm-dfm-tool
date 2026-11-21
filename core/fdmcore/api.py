@@ -2195,6 +2195,7 @@ def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dic
     if problems:
         return {"ok": False, "problems": problems}
     return {"ok": True, "data": new.text.encode(), "minutes": [round(m, 1) for m in new.minutes],
+            "too_hot": [r["before"]["too_hot"], r["gcode"]["too_hot"]], "too_cold": [r["before"]["too_cold"], r["gcode"]["too_cold"]],
             "changes": {"speed_lines": new.changed_lines, "fan_commands": new.fan_commands, "park_moves": new.parks,
                         "kept_near_slicer_speeds": new.clamped}}
 

@@ -1011,9 +1011,23 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - **Stored:** with the user's material (My materials fields, saved by "Save my results") and in the profile's `heat_tuning`, which project files keep. `thermal.window` moves both sag limits by the measured one and scales the goals' bonding by the measured bond. `thermal.confidence` → "rough" / "partly tuned" / "tuned" in `heat_model`, `optimize_cooling` and its summary.
     - New MCP tools `heat_tuning_gcode`, `tune_heat_window`.
     - Checks: a stand-in slicer makes both tests; the sag G-code undoes the slowdown on the tall pin, the snap G-code reads back with the fan steps; both results change the window (limit shifted by exactly the measured difference, bond goal = measured) and the label. Pyodide works.
-- [ ] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: Claude (task/T-483-local-slice)
+- [x] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: Claude (task/T-483-local-slice)
   - Do: in local mode, slice the 3MF with OrcaSlicer with the layer-time slowdown switched off (everything else kept), so the starting speeds are clean and no slowdown causes need guessing. Run the fine tier there. Later the same through the browser slicer (T-127).
   - Done when: the local MCP tool returns the optimized G-code for a 3MF.
+  - Outcome: new MCP tool `optimize_print_cooling` (local mode).
+    - **How:** the part is sliced with the installed OrcaSlicer twice. Once as usual, for comparison. Once with only the filament's slowdown for layer cooling switched off (`slicer_cli.without_cooling_slowdown`, in the profile written for the command line; fan logic and everything else kept), so the speeds are the settings' own.
+    - **Then:** the cooling plan on the fine heat model, written and checked like `optimize_gcode`. If it doesn't pass, Orca's own G-code is written and `why` says so; if nothing needs fixing, the clean slice.
+    - **Result:** minutes by the same timing model (and Orca's own estimate), spots too hot in all three versions, and a plain summary. `optimize_gcode` now returns too hot / too cold before and after. The output path is checked before the slow part.
+    - **Fixture part** (block with Ø3 mm pin), fine tier:
+
+      | Version | Time | Spots too hot |
+      |---|---|---|
+      | Orca's own slowdown | 4.8 min | 204 |
+      | Without slowdown | 4.4 min | 2,657 |
+      | Cooling plan (28 parks) | 5.9 min | 0 |
+
+      Slower than Orca here, because cooling the pin takes time; the summary says so. About 1.5 min locally.
+    - The browser slicer half waits for T-127 / T-525.
 - [ ] **T-484 P3** [TO] Later. · owner: —
   - Extra fans (Bambu aux / chamber, `M106 P2/P3`), `.bgcode`, GPU / voxel tier for hot spots.
   - Island reordering (research only): single material, same object, travel-collision checks, seams kept; better as a hint to the slicer than a G-code edit.
