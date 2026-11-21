@@ -329,3 +329,21 @@ def test_environment_temps_touches_suitable_and_lock_conflict(page):
     num_input.fill("110")
     assert page.evaluate("() => fdmUI.store.get().environment.tempC") == 110
     assert "PC" in page.locator("[data-role='suitable']").inner_text()
+
+
+def test_holds_and_loads_reach_the_engine_format():
+    """T-543: holds and loads (stored in N, with edges and load cases) map onto core/fdmcore/strength.py's format."""
+    out = run_js("""
+      const st = { ...S.initialState(), goal: 'balanced',
+        holds: [{ region: 2, type: 'screw' }, { region: 5, edge: 3, edgeKind: 'concave', type: 'clamped' }],
+        loads: [{ region: 7, newtons: 98.1, direction: [0, 0, -1] }, { region: 8, edge: 1, edgeKind: 'feature', newtons: 9.81, direction: [1, 0, 0], case: 2 }],
+        details: { duration: 'always' } };
+      const a = A.optimizeArgs(st);
+      return { loads: a.loads, constant: a.profile.constant_load,
+               none: A.optimizeArgs({ ...st, noLoads: true }).loads, quality: A.optimizeArgs({ ...st, goal: 'quality' }).loads };
+    """)
+    assert out["loads"][0] == {"region": 2, "kind": "fixed", "hold": "screw"}
+    assert out["loads"][1] == {"edge": 3, "edge_kind": "concave", "kind": "fixed", "hold": "clamped"}
+    assert out["loads"][2]["kind"] == "force" and out["loads"][2]["kg"] == pytest.approx(10) and out["loads"][2]["direction"] == [0, 0, -1]
+    assert "case" not in out["loads"][2] and out["loads"][3]["case"] == 2 and out["loads"][3]["edge_kind"] == "feature"
+    assert out["constant"] is True and out["none"] is None and out["quality"] is None

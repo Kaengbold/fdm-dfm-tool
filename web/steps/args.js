@@ -104,6 +104,21 @@ export function evaluateMaterials(catalog, profile, environment) {
  * Map the UI store state into keyword arguments for core/fdmcore/api.py optimize().
  * Locked material / nozzle go into constraints; ticked nozzles go into nozzles; environment carries temp_c & touches.
  */
+const G = 9.81;
+const where = (x) => (x.edge != null ? { edge: x.edge, edge_kind: x.edgeKind ?? "feature" } : { region: x.region });
+
+/** A hold as the strength engine takes it (core/fdmcore/strength.py: kind fixed, hold clamped | resting | screw). */
+export function holdToEngine(hold) {
+  if (hold.kind === "fixed" && !("type" in hold)) return hold; // already in the engine's format (old projects)
+  return { ...where(hold), kind: "fixed", hold: hold.type ?? "clamped" };
+}
+
+/** A load (stored in N) as the engine takes it: kg along a direction vector, with its load case. */
+export function loadToEngine(load) {
+  if (load.kind === "force" && load.kg != null && load.newtons == null) return load; // old projects
+  return { ...where(load), kind: "force", kg: load.newtons / G, direction: load.direction, ...(load.case > 1 ? { case: load.case } : {}) };
+}
+
 export function optimizeArgs(state) {
   const goal = state?.goal || "balanced";
   const depth = state?.depth || "extended";
@@ -137,7 +152,7 @@ export function optimizeArgs(state) {
   const owned = Array.isArray(state?.catalog?.owned) ? [...state.catalog.owned] : [];
   const materials = Array.isArray(state?.materials) && state.materials.length ? [...state.materials] : null;
   const skipStrength = goal === "quality" || Boolean(state?.noLoads);
-  const rawLoads = [...(state?.holds ?? []), ...(state?.loads ?? [])];
+  const rawLoads = [...(state?.holds ?? []).map(holdToEngine), ...(state?.loads ?? []).map(loadToEngine)];
   const loads = skipStrength || !rawLoads.length ? null : rawLoads;
 
   return {

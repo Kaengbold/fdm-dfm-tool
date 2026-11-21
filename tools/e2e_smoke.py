@@ -799,6 +799,73 @@ def check_new_ui_holds(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_loads(browser, port: int) -> str:
+    """The new UI's Loads and Load details steps (T-543): a load in N (Enter), one in MPa (× face area), MPa off on an
+    inside corner, then Load details' three questions and on to Analyse with the loads in the engine's format."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="L-bracket").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        page.evaluate("() => { fdmUI.store.set({ holds: [{ id: 'h1', region: 0, type: 'screw', name: 'Screw hole', kind: 'hole' }] }); fdmUI.go('loads'); }")
+        page.wait_for_function("() => fdmUI.services.picker.enabled && fdmUI.services.picker.data", timeout=120_000)
+        assert page.get_by_role("button", name="Next").is_disabled(), "Next without a load"
+        box = page.locator(".stage-canvas").bounding_box()
+
+        def click_at(fx, fy):
+            x, y = box["x"] + box["width"] * fx, box["y"] + box["height"] * fy
+            page.mouse.move(x, y)
+            page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'face'")
+            page.mouse.click(x, y)
+            page.wait_for_selector(".ui-pop")
+
+        click_at(0.36, 0.42)  # the upright's face
+        page.keyboard.type("50")
+        assert "kg of weight" in page.locator(".ui-pop .ui-num__hint").inner_text()
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".ui-pop", state="detached")
+        click_at(0.55, 0.62)  # the base's top face
+        page.locator(".ui-pop [role=radio]", has_text="MPa").click()
+        page.locator(".ui-pop input").fill("0.5")
+        assert "MPa ×" in page.locator(".ui-pop .ui-num__hint").inner_text()
+        page.get_by_role("button", name="OK").click()
+        page.wait_for_selector(".ui-pop", state="detached")
+        loads = page.evaluate("() => fdmUI.store.get().loads.map((l) => [Math.round(l.newtons), l.unit])")
+        assert loads[0] == [50, "N"] and loads[1][1] == "MPa" and loads[1][0] > 500, loads
+        assert page.locator(".load-label").count() == 2
+        # MPa needs a face: on the inside corner it says so.
+        cx, cy = page.evaluate("""async () => { const THREE = await import('three'); const p = fdmUI.services.picker, st = fdmUI.services.stage;
+          const m = p.data.edges.find((l) => l.kind === 'corner').meta.midpoint, o = st.part.offset;
+          const v = new THREE.Vector3(m[0] + o.x, m[1] + o.y, m[2] + o.z).project(st.camera); const r = st.canvas.getBoundingClientRect();
+          return [(v.x + 1) / 2 * r.width + r.left + 3, (1 - v.y) / 2 * r.height + r.top]; }""")
+        page.mouse.move(cx, cy)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'corner'", timeout=5_000)
+        page.mouse.click(cx, cy)
+        page.wait_for_selector(".ui-pop")
+        page.locator(".ui-pop [role=radio]", has_text="MPa").click()
+        assert "Pick a face" in page.locator(".ui-pop .ui-num__hint").inner_text()
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".ui-pop", state="detached")
+        assert page.locator(".gizmo-row").count() == 0
+        page.get_by_role("button", name="Next").click()
+        assert page.locator("#step-title").inner_text() == "Load details"
+        page.get_by_role("radio", name="All the time").click()
+        page.get_by_role("button", name="Yes").first.click()
+        page.get_by_role("button", name="Next").click()
+        assert page.locator("#step-title").inner_text() == "Analyse"
+        args = page.evaluate("async () => { const m = await import('./steps/args.js'); const a = m.optimizeArgs(fdmUI.store.get()); return [a.profile.constant_load, a.loads.map((l) => l.kind)]; }")
+        assert args == [True, ["fixed", "force", "force"]], args
+        assert not errors, errors
+        return "50 N by Enter, 0.5 MPa × face area, MPa off on a corner, Esc cancels; Load details → Analyse with engine loads"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -850,6 +917,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: direction gizmo", lambda: check_new_ui_gizmo(ui, port))
             run.step("new UI: settings", lambda: check_new_ui_settings(ui, port))
             run.step("new UI: hover picker", lambda: check_new_ui_picker(ui, port))
+            run.step("new UI: loads", lambda: check_new_ui_loads(ui, port))
         finally:
             ui.close()
         if args.quick:

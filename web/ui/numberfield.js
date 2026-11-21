@@ -1,7 +1,7 @@
 // NumberField (§1.5, §8): a number with a unit switch (e.g. N | MPa) and a quiet conversion line under it
 // ("≈ 5.1 kg of weight", "3 MPa × 412 mm² = 1 236 N"). Units the context can't use are disabled with a reason.
 // Enter calls onCommit, Esc onCancel (the force popover uses both). Errors show inline, never as an alert.
-import { h, uid } from "./dom.js";
+import { h, uid, withProps } from "./dom.js";
 import { SegmentedControl } from "./choice.js";
 import { t } from "../i18n.js";
 
@@ -42,5 +42,5 @@ export function NumberField({ label, value = "", units = [], unit = units[0]?.va
   });
   if (autofocus) queueMicrotask(() => { input.focus(); input.select(); });
   update();
-  return Object.assign(el, { input, get value() { return parsed(); }, get unit() { return unit; } });
+  return withProps(el, { input, get value() { return parsed(); }, get unit() { return unit; } });
 }

@@ -11,6 +11,8 @@ import { Picker } from "./viewport/picker.js";
 import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
+import "./steps/loads.js";
+import "./steps/details.js";
 import "./steps/holds.js";
 import { openGizmo } from "./viewport/gizmo.js";
 import { initSettings, openSettingsTab, restoreSettingsToEngine } from "./steps/settings.js";

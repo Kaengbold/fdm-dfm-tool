@@ -1,7 +1,7 @@
 // Select (§1.5, §5): a button that opens a searchable list (combobox + listbox pattern). Optional "Decide later"
 // entry, badges per option ("Owned"), and a clear button when the value is a hard lock. Keyboard: Enter, Space or
 // ArrowDown opens; typing filters; arrows move; Enter picks; Esc closes and returns focus to the button.
-import { h, icon, ICONS, uid } from "./dom.js";
+import { h, icon, ICONS, uid, withProps } from "./dom.js";
 import { t } from "../i18n.js";
 
 export const LATER = "";  // the value of "Decide later"
@@ -83,5 +83,5 @@ export function Select({ label, options, value = LATER, decideLater = false, cle
     else if (e.key === "Tab") close(false);
   });
   render();
-  return Object.assign(el, { get value() { return value; }, set value(v) { value = v; render(); }, open, close });
+  return withProps(el, { get value() { return value; }, set value(v) { value = v; render(); }, open, close });
 }
