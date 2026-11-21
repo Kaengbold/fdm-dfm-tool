@@ -1104,9 +1104,10 @@ Rules for every [UI] task:
 
 ### Phase 3: new shell, first steps, Settings (after T-512 is approved)
 
-- [~] **T-530 P1** [UI] App shell, state, flow. · plan: §1.2, §1.3, §1.6, §1.7, §1.8, §2 · files: `web/state.js`, `web/flow.js`, `web/shell.js` (new), `web/index.html` (new entry), `web/messages/en.js` · owner: Claude (`task/T-530-shell`)
+- [x] **T-530 P1** [UI] App shell, state, flow. · plan: §1.2, §1.3, §1.6, §1.7, §1.8, §2 · files: `web/state.js`, `web/flow.js`, `web/shell.js` (new), `web/index.html` (new entry), `web/messages/en.js` · owner: Claude (`task/T-530-shell`)
   - Do: header (brand, workflow, part pill, Undo/Redo, Export 3MF, Settings & calibration, Help), step rail, stage, right panel with fixed footer (Back / Next always in the same spot), wide mode for Options, `#portal-root`. Store with undo/redo, revisions and stale marking, IndexedDB autosave; declarative step list with `skipWhen` (Quality, "No loads").
   - Done when: an empty flow can be walked with Back/Next; stale marking unit-tested.
+  - Outcome: `web/state.js` (inputs → revisions, results with deps → `isStale`, undo/redo for holds/loads/design/pending, IndexedDB autosave), `web/flow.js` (declarative steps with layout, `uses`, `skipWhen` for Quality / No loads, `canLeave`, `railSteps`), `web/shell.js` + `shell.css` (header row 1 with part pill, Undo/Redo, Export 3MF, Settings & calibration, Help; rail; stage; panel with Back/Next in a fixed spot; wide Options layout; focus to the step title; Ctrl+Z/Y), entry `web/new.html` + `main.js` (index.html stays until T-580); steps plug in with `registerStep`. Tests: `core/tests/test_shell_state.py` (Node units + browser walk).
 - [ ] **T-531 P1** [UI] Start screen and Part step. · plan: §3, §4, §15.4, §16.5 · files: `web/steps/start.js`, `web/steps/part.js` · owner: —
   - Do: two big cards (Optimize; Fix your broken prints = Coming soon, not clickable) + slim Settings & calibration card + recent projects. Part: one big drop zone ("Drop your part here", Choose file, "STL, 3MF or STEP", nothing in brackets) and **one** "Sample parts" button with a thumbnail popover; auto-advance to Setup; multi-body picker, unit bar, damaged-mesh toast, errors.
   - Done when: e2e loads a sample and a STEP and lands on Setup; no other text under the drop zone.

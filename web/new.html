@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FDM Check</title>
+    <link rel="icon" href="data:," />
+    <!-- The new UI (UI revision, plan research/redesign-2026-11/PLAN-COMBINED.md), built here step by step until it
+         replaces index.html at the cut-over (T-580). Same Content Security Policy idea as index.html: scripts only
+         from this site, no inline scripts, no eval. -->
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'" />
+    <link rel="preload" href="fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="ui/base.css" />
+    <link rel="stylesheet" href="ui/components.css" />
+    <link rel="stylesheet" href="shell.css" />
+    <script type="module" src="main.js"></script>
+  </head>
+  <body>
+    <div class="app" id="app"></div>
+    <div id="portal-root"></div>
+  </body>
+</html>
