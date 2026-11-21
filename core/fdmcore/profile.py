@@ -199,20 +199,23 @@ class Profile:
     goal: str = "balanced"  # what orientation and settings optimise for: see GOALS
     use_temp_c: float | None = None  # hottest the part gets in use (sun, car, near a heater); None = room
     constant_load: bool = False  # the load stays on (hangs permanently): plastic slowly creeps
-    layer_height: float | None = None  # override (mm); None uses the nozzle preset's default layer_height
+    # Layer height override (mm); None follows the nozzle preset. Kept apart from the derived value, so
+    # dataclasses.replace(p, nozzle=...) picks up the new nozzle's default instead of a stale height.
+    layer_height_mm: float | None = None
 
     def __post_init__(self) -> None:
-        if self.layer_height is None:
-            nozzle = presets()["nozzles"].get(self.nozzle)
-            if nozzle is not None:
-                object.__setattr__(self, "layer_height", float(nozzle["layer_height"]))
+        lh = self.layer_height_mm
+        if lh is None:
             return
-        if isinstance(self.layer_height, bool) or not isinstance(self.layer_height, (int, float)):
-            raise ValueError(f"layer_height must be a positive number, got {self.layer_height!r}")
-        lh = float(self.layer_height)
-        if not math.isfinite(lh) or lh <= 0:
-            raise ValueError(f"layer_height must be a positive number, got {self.layer_height!r}")
-        object.__setattr__(self, "layer_height", lh)
+        if isinstance(lh, bool) or not isinstance(lh, (int, float)) or not math.isfinite(lh) or lh <= 0:
+            raise ValueError(f"layer_height must be a positive number, got {lh!r}")
+        object.__setattr__(self, "layer_height_mm", float(lh))
+
+    @property
+    def layer_height(self) -> float:
+        if self.layer_height_mm is not None:
+            return self.layer_height_mm
+        return presets()["nozzles"][self.nozzle]["layer_height"]
 
     @property
     def printer(self) -> dict:
@@ -257,7 +260,7 @@ class Profile:
             goal=d.get("goal", "balanced"),
             use_temp_c=None if d.get("use_temp_c") in (None, "") else float(d["use_temp_c"]),
             constant_load=bool(d.get("constant_load", False)),
-            layer_height=lh,
+            layer_height_mm=lh,
         )
         if p.goal not in GOALS:
             raise ValueError(f"Unknown goal: {p.goal} (use one of {', '.join(GOALS)})")

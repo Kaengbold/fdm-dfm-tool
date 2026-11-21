@@ -122,9 +122,12 @@ def test_profile_layer_height_override():
     assert Profile(nozzle="0.6").layer_height == pytest.approx(0.3)
     assert Profile(nozzle="1.0").layer_height == pytest.approx(0.5)
 
-    p = Profile(nozzle="0.4", layer_height=0.16)
+    p = Profile(nozzle="0.4", layer_height_mm=0.16)
     assert p.layer_height == pytest.approx(0.16)
     assert replace(p, use_temp_c=50.0).layer_height == pytest.approx(0.16)
+    # Changing only the nozzle follows the new nozzle's default, never a stale derived height.
+    assert replace(Profile(nozzle="0.4"), nozzle="1.0").layer_height == pytest.approx(0.5)
+    assert replace(p, nozzle="0.6").layer_height == pytest.approx(0.16)  # an explicit override stays
 
     assert Profile.from_dict({"nozzle": "0.4", "layer_height": 0.12}).layer_height == pytest.approx(0.12)
     assert Profile.from_dict({"nozzle": "0.4", "layer_height": "0.28"}).layer_height == pytest.approx(0.28)
@@ -133,7 +136,7 @@ def test_profile_layer_height_override():
 
     for bad in (0, -0.1, float("nan"), float("inf"), True, False):
         with pytest.raises(ValueError):
-            Profile(nozzle="0.4", layer_height=bad)
+            Profile(nozzle="0.4", layer_height_mm=bad)
         with pytest.raises(ValueError):
             Profile.from_dict({"nozzle": "0.4", "layer_height": bad})
     with pytest.raises(ValueError):
@@ -185,9 +188,9 @@ def test_layer_bond_factor_curve_shape_and_cap():
 
 def test_layer_bond_factor_affects_material_and_strength_evaluate():
     """Overriding layer_height on Profile scales Z strength via layer_bond_factor without changing XY."""
-    p_std = Profile(material_id="pla", nozzle="0.4", layer_height=0.20)
-    p_thin = Profile(material_id="pla", nozzle="0.4", layer_height=0.08)
-    p_thick = Profile(material_id="pla", nozzle="0.4", layer_height=0.36)
+    p_std = Profile(material_id="pla", nozzle="0.4", layer_height_mm=0.20)
+    p_thin = Profile(material_id="pla", nozzle="0.4", layer_height_mm=0.08)
+    p_thick = Profile(material_id="pla", nozzle="0.4", layer_height_mm=0.36)
 
     m_std = material_for(p_std)
     m_thin = material_for(p_thin)
