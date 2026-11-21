@@ -1,0 +1,549 @@
+/* Settings & calibration hub (T-533, plan §15.3), matching the approved Style A mockup (design/mocks: settings).
+   Spacing strictly from the --s-* tokens in web/tokens.css (enforced by core/tests/test_css_tokens.py). */
+
+.settings-wrap {
+  display: grid;
+  grid-template-columns: var(--settings-tabs-w) minmax(0, var(--settings-max));
+  gap: var(--s-6);
+  justify-content: center;
+  align-content: start;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ---------- Left navigation rail ---------- */
+.settings-nav {
+  display: grid;
+  gap: var(--s-1);
+  align-content: start;
+}
+.settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  justify-self: start;
+  margin-bottom: var(--s-4);
+  padding: var(--s-1) 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  cursor: pointer;
+}
+.settings-back:hover { text-decoration: underline; }
+.settings-back .ui-icon { width: 16px; height: 16px; }
+
+.settings-tabs {
+  display: grid;
+  gap: var(--s-1);
+}
+.settings-tab {
+  width: 100%;
+  min-height: var(--hit);
+  padding: var(--s-2) var(--s-3);
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.settings-tab:hover {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+.settings-tab[aria-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: var(--fw-bold);
+}
+
+/* ---------- Right content column ---------- */
+.settings-body {
+  display: grid;
+  gap: var(--s-5);
+  align-content: start;
+  min-width: 0;
+}
+.set-head {
+  display: grid;
+  gap: var(--s-1);
+}
+.h-set {
+  font-size: var(--fs-xl);
+  line-height: var(--lh-tight);
+}
+.set-head .hint { margin: 0; }
+
+.set-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.set-section {
+  display: grid;
+  gap: var(--s-3);
+}
+.set-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.set-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+}
+.set-foot .set-foot-right {
+  margin-left: auto;
+}
+
+/* ---------- Cards, forms, inputs ---------- */
+.set-list {
+  display: grid;
+  gap: var(--s-3);
+}
+.set-card {
+  display: grid;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-raised);
+}
+.set-card--editor {
+  border-color: var(--accent);
+}
+.set-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.set-card-title {
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-md);
+}
+.set-card-meta {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.set-card-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.set-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  padding: 0 var(--s-2);
+  min-height: 22px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+.set-badge--measured, .set-badge--good {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.set-badge--typical, .set-badge--builtin {
+  background: var(--surface-sunken);
+  color: var(--text-3);
+}
+.set-badge--imported, .set-badge--custom {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.set-badge--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.set-field {
+  display: grid;
+  gap: var(--s-1);
+}
+.set-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+.set-input:hover { border-color: var(--line-strong); }
+.set-input:focus-visible { border-color: var(--focus); }
+.set-search {
+  max-width: 280px;
+  height: 36px;
+}
+
+.set-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+.set-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+}
+.set-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.set-nozzle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+}
+.set-nozzle-row .ui-label {
+  margin-right: var(--s-2);
+}
+.set-note {
+  padding: var(--s-3);
+  border-radius: var(--r);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.set-note--warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.set-note--error {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+/* ---------- Print profiles ---------- */
+.prof-drop {
+  display: grid;
+  justify-items: center;
+  gap: var(--s-2);
+  padding: var(--s-6) var(--s-5);
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+  text-align: center;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.prof-drop.is-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.prof-drop-title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+}
+.prof-lists {
+  display: grid;
+  gap: var(--s-4);
+}
+.prof-kv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2) var(--s-4);
+}
+.prof-kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: var(--s-1) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+.prof-kv-row span:first-child { color: var(--text-2); }
+.prof-kv-row b { font-variant-numeric: tabular-nums; }
+.prof-bullets {
+  margin: 0;
+  padding-left: var(--s-4);
+  display: grid;
+  gap: var(--s-1);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.prof-bullets--warn { color: var(--warn); }
+
+/* ---------- Materials ---------- */
+.mat-row {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-raised);
+}
+.mat-row-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.mat-row-info {
+  display: grid;
+  gap: 0;
+  flex: 1;
+  min-width: 180px;
+}
+.mat-row-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: var(--fw-bold);
+}
+.mat-row-spool {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Calibration tests grid (matches design/mocks/mock.css) ---------- */
+.cal-context {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.cal-context .ui-select {
+  min-width: 240px;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+.cal-card {
+  display: grid;
+  gap: var(--s-2);
+  align-content: start;
+  justify-items: start;
+  min-height: 132px;
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.cal-card:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+.cal-card b {
+  font-size: var(--fs-md);
+}
+.cal-card-line {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.cal-card-val {
+  font-size: var(--fs-xs);
+  color: var(--good);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Calibration detail page ---------- */
+.cal-detail {
+  display: grid;
+  gap: var(--s-5);
+}
+.cal-detail-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.cal-detail-body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--s-5);
+  align-items: start;
+  padding: var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-raised);
+}
+.cal-diagram {
+  display: grid;
+  place-items: center;
+  padding: var(--s-3);
+  border-radius: var(--r);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+}
+.cal-diagram svg {
+  width: 100%;
+  height: auto;
+}
+.cal-steps {
+  margin: 0;
+  padding-left: var(--s-4);
+  display: grid;
+  gap: var(--s-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* Visual pickers inside Calibration detail */
+.cal-picker-group {
+  display: grid;
+  gap: var(--s-2);
+}
+.cal-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.cal-pick {
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  gap: var(--s-1);
+  min-width: 72px;
+  min-height: 76px;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--t-fast), background var(--t-fast);
+}
+.cal-pick:hover { border-color: var(--line-strong); }
+.cal-pick[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cal-pick-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+}
+.cal-pick-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.cal-pick[aria-checked="true"] .cal-pick-sub { color: var(--accent-text); }
+
+.cal-hole-ring {
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  background: var(--surface-sunken);
+}
+.cal-bar-vis {
+  height: 10px;
+  border-radius: var(--r-sm);
+  background: currentColor;
+  opacity: 0.7;
+}
+.cal-bridge-vis {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+}
+.cal-bridge-pillar {
+  width: 6px;
+  height: 16px;
+  background: currentColor;
+  opacity: 0.7;
+}
+.cal-bridge-span {
+  height: 4px;
+  align-self: flex-start;
+  background: currentColor;
+}
+.cal-ratio-bar {
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.cal-ratio-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--t);
+}
+
+/* ---------- What the checks use table ---------- */
+.active-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+.active-table th,
+.active-table td {
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: var(--fs-sm);
+}
+.active-table th {
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  font-weight: var(--fw-bold);
+}
+.active-table tr:last-child td {
+  border-bottom: 0;
+}
+.active-table .num {
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+}
+.active-table td:last-child,
+.active-table th:last-child {
+  text-align: right;
+}
+
+.expert-grid {
+  display: grid;
+  gap: var(--s-3);
+}
+.expert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.expert-row:last-child { border-bottom: 0; }
+.expert-info {
+  display: grid;
+  gap: 0;
+  flex: 1;
+}
+.expert-val {
+  width: 120px;
+}
