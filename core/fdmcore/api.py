@@ -28,7 +28,7 @@ from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
-from .recommend import goal_plan, grip_settings, print_risk, recommend_settings
+from .recommend import bambu, goal_plan, grip_settings, print_risk, recommend_settings
 from .service import required_safety
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
@@ -3531,6 +3531,8 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
         settings = {**settings, "enable_support": "1", "support_type": "tree(manual)"}
     excluded = set(excluded_settings or ())
     settings = {k: v for k, v in settings.items() if k not in excluded}
+    if bambu(p.printer) and settings.get("brim_type") == "brim_ears":  # e.g. from a finding's fix: Bambu Studio would print no brim
+        settings = {**settings, "brim_type": "outer_only"}
     return export_3mf(orient(s.mesh, rotation), s.name, settings, bed_center=(bed[0] / 2, bed[1] / 2), modifiers=modifiers, layout=slicer,
                       pauses=[{"top": float(z), "layer_height": float(settings.get("layer_height") or p.layer_height),
                                "note": "Put the part into the pocket"} for z in pauses or []],

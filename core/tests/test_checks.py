@@ -118,13 +118,23 @@ def test_brim_ears_when_only_corners_lift():
     from fdmcore.export3mf import prusa_settings
     from fdmcore.recommend import recommend_settings
 
-    p = Profile.from_dict({})
-    brim = lambda findings: {s["key"]: s["value"] for s in recommend_settings(p, findings)}["brim_type"]
+    def brim(findings, printer="creality_k1c"):
+        p = Profile.from_dict({"printer": printer})
+        return {s["key"]: s["value"] for s in recommend_settings(p, findings)}["brim_type"]
+
     assert brim([{"rule": "warping"}]) == "brim_ears"
     # A small footprint or a tall part needs the full brim all round, warping or not.
     assert brim([{"rule": "warping"}, {"rule": "tipping_risk"}]) == "outer_only"
     assert brim([]) == "no_brim"
     assert prusa_settings({"brim_type": "brim_ears"}) == {"brim_type": "outer_only"}
+    # Bambu Studio has no brim ears setting and would print no brim at all (T-493): Bambu Lab printers get
+    # the outer brim, in the advice and in the 3MF even when brim ears come from elsewhere (a finding's fix).
+    assert brim([{"rule": "warping"}], "bambu_p1s") == "outer_only"
+    api.load(to_stl_box([40, 20, 5]), "plate")
+    for printer, want in (("bambu_a1", "outer_only"), ("creality_k1c", "brim_ears")):
+        data = api.export([0, 0, 1], {"printer": printer}, {"brim_type": "brim_ears"})
+        conf = zipfile.ZipFile(io.BytesIO(data)).read("Metadata/model_settings.config").decode()
+        assert f'key="brim_type" value="{want}"' in conf, (printer, conf)
 
 
 def test_scarf_seam_for_round_parts():

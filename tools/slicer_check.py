@@ -317,13 +317,14 @@ def measure_fuzz(gcode: Path) -> float:
     return round(float(np.std(r[np.abs(r - np.median(r)) < 1])), 3)
 
 
-def flat_block(layout: str, settings: dict) -> bytes:
-    """40 × 40 × 10 mm block with sharp corners and a flat top, exported with ``settings`` (ironing, brim, raft)."""
+def flat_block(layout: str, settings: dict, printer: str = "bambu_p1s") -> bytes:
+    """40 × 40 × 10 mm block with sharp corners and a flat top, exported with ``settings`` (ironing, brim, raft)
+    for ``printer`` (the export adapts some settings to it: brim ears)."""
     from fdmcore.additions import extrude
     from shapely.geometry import box
 
     api.load(to_binary_stl(Mesh(extrude(box(0, 0, 40, 40), 0, 10))), "flat_block")
-    return api.export([0, 0, 1], {}, settings, slicer=layout)
+    return api.export([0, 0, 1], {"printer": printer}, settings, slicer=layout)
 
 
 def measure_first_layers(gcode: Path) -> dict:
@@ -468,14 +469,15 @@ def main():
                                 "outer": {"brim_type": "outer_only", "brim_width": "8"}, "ears": {"brim_type": "brim_ears", "brim_width": "8"},
                                 "raft": {"raft_layers": "3", "brim_type": "no_brim"}}.items():
             model = work / f"{name}_flat_{label}.3mf"
-            model.write_bytes(flat_block(layout, settings))
+            # Brim ears are for printers sliced in OrcaSlicer; a Bambu Lab printer gets an outer brim instead (T-493).
+            model.write_bytes(flat_block(layout, settings, "bambu_p1s" if name == "bambu" else "creality_k1c"))
             flat[label] = measure_first_layers(slice_with(name, cfg, model, work / f"{name}_flat_{label}"))
         checks["ironing_type"] = (flat["plain"]["ironing"], flat["ironing"]["ironing"], not flat["plain"]["ironing"] and flat["ironing"]["ironing"])
         ears, full = flat["ears"]["brim_mm"], flat["outer"]["brim_mm"]
         if name == "orca":
             checks["brim_ears"] = (full, ears, 0 < ears < 0.6 * full)
-        elif name == "bambu":  # its ears are a painting tool (1.10+), no brim type: it drops the key and prints no brim (T-493)
-            print(f"note {name}: brim ears from the 3MF give a {ears} mm brim (full brim {full} mm): see T-493")
+        elif name == "bambu":  # its ears are a painting tool (1.10+), no brim type: the export gives it an outer brim (T-493)
+            checks["brim_ears"] = (full, ears, ears > 0)
         # PrusaSlicer has no mouse ears: the export gives it an outer brim (export3mf.prusa_settings)
         lift = (flat["plain"]["wall_z"], flat["raft"]["wall_z"])
         checks["raft_layers"] = (*lift, None not in lift and lift[1] - lift[0] >= 0.5)  # three raft layers and the gap lift the part
