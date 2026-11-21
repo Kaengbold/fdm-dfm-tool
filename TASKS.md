@@ -919,7 +919,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - New `api.importance` / MCP `spot_importance`: per-cube weights, reasons and the important `areas` in plain words.
     - Checks: on the L-bracket pushed at the top of its upright, the upright's root weighs most (0.92); on the feature test part with no loads, the roots of the Ø3 pin and the thin slot walls come first. A sideways hole's side walls aren't taken for ribs.
     - Not done here: putting the fine heat detail only around important spots on big parts (T-583).
-- [ ] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: —
+- [ ] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: Claude (task/T-583-focus-detail)
   - Do: on big parts, run the heat model's fine cells (1 mm, more layers in detail) only around the spots that weigh most (T-475 `importance`) and around hot spots, with the coarse cells elsewhere, so a big part gets the fine answer where it counts at the quick tier's cost.
   - Done when: on a big part with a pin, the pin's covering temperature matches the all-fine run within 5 °C, at no more than twice the quick tier's time.
 - [x] **T-476 P2** [TO] Heat result back into the strength check. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` (`strength_z`), `core/fdmcore/api.py` · owner: Claude (task/T-476-heat-into-strength)
@@ -1011,9 +1011,23 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - **Stored:** with the user's material (My materials fields, saved by "Save my results") and in the profile's `heat_tuning`, which project files keep. `thermal.window` moves both sag limits by the measured one and scales the goals' bonding by the measured bond. `thermal.confidence` → "rough" / "partly tuned" / "tuned" in `heat_model`, `optimize_cooling` and its summary.
     - New MCP tools `heat_tuning_gcode`, `tune_heat_window`.
     - Checks: a stand-in slicer makes both tests; the sag G-code undoes the slowdown on the tall pin, the snap G-code reads back with the fan steps; both results change the window (limit shifted by exactly the measured difference, bond goal = measured) and the label. Pyodide works.
-- [ ] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: Claude (task/T-483-local-slice)
+- [x] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: Claude (task/T-483-local-slice)
   - Do: in local mode, slice the 3MF with OrcaSlicer with the layer-time slowdown switched off (everything else kept), so the starting speeds are clean and no slowdown causes need guessing. Run the fine tier there. Later the same through the browser slicer (T-127).
   - Done when: the local MCP tool returns the optimized G-code for a 3MF.
+  - Outcome: new MCP tool `optimize_print_cooling` (local mode).
+    - **How:** the part is sliced with the installed OrcaSlicer twice. Once as usual, for comparison. Once with only the filament's slowdown for layer cooling switched off (`slicer_cli.without_cooling_slowdown`, in the profile written for the command line; fan logic and everything else kept), so the speeds are the settings' own.
+    - **Then:** the cooling plan on the fine heat model, written and checked like `optimize_gcode`. If it doesn't pass, Orca's own G-code is written and `why` says so; if nothing needs fixing, the clean slice.
+    - **Result:** minutes by the same timing model (and Orca's own estimate), spots too hot in all three versions, and a plain summary. `optimize_gcode` now returns too hot / too cold before and after. The output path is checked before the slow part.
+    - **Fixture part** (block with Ø3 mm pin), fine tier:
+
+      | Version | Time | Spots too hot |
+      |---|---|---|
+      | Orca's own slowdown | 4.8 min | 204 |
+      | Without slowdown | 4.4 min | 2,657 |
+      | Cooling plan (28 parks) | 5.9 min | 0 |
+
+      Slower than Orca here, because cooling the pin takes time; the summary says so. About 1.5 min locally.
+    - The browser slicer half waits for T-127 / T-525.
 - [ ] **T-484 P3** [TO] Later. · owner: —
   - Extra fans (Bambu aux / chamber, `M106 P2/P3`), `.bgcode`, GPU / voxel tier for hot spots.
   - Island reordering (research only): single material, same object, travel-collision checks, seams kept; better as a hint to the slicer than a G-code edit.
@@ -1181,8 +1195,12 @@ Rules for every [UI] task:
 
 ### Phase 5: optimize and choose
 
-- [~] **T-550 P1** [UI] Analyse step. · plan: §10.1 · files: `web/steps/analyse.js`, `web/worker.js` · owner: Claude (`task/T-550-analyse`)
+- [x] **T-550 P1** [UI] Analyse step. · plan: §10.1 · files: `web/steps/analyse.js`, `web/worker.js` · owner: Claude (`task/T-550-analyse`)
   - Do: Fast / Extended (default) / Complete cards with this part's time estimate (Complete disabled with "Allow" link if design can't change; hidden for Quality); stage list, elapsed, estimate, Cancel, **Stop & show best so far**, "Search ended early" + Continue.
+  - Outcome: `web/steps/analyse.js`: summary line, Fast / Extended / Complete cards with this part's browser estimate (`api.estimate_runtime`), Complete off with Allow when only slicer settings may change and hidden for Quality; Start runs `api.optimize` with the T-543 args, progress card on the stage (optimizer stages mapped to the plan's six, elapsed vs estimate, Cancel restarts the engine with the part); the result keeps its input revisions, a change marks it stale and Next waits (`optimized` flag cleared). "Stop & show best so far" and "Search ended early" need partial results from the engine → T-552. e2e `new UI: analyse`.
+- [ ] **T-552 P2** [UI] Partial optimizer results: Stop & show best so far, time budget. · plan: §10.1, §1.7 · files: `core/fdmcore/optimizer.py`, `core/fdmcore/api.py`, `web/worker.js`, `web/steps/analyse.js` · owner: —
+  - Do: the worker can't answer a second call while optimize runs, so stream the best valid options so far with the progress messages (e.g. `progress.report(..., partial=…)` posted by the worker); Stop keeps the latest partial result and cancels; a time budget ends the search early with "Search ended early" + Continue (never "impossible").
+  - Done when: stopping a long Extended run shows its best options so far; a budgeted run says it ended early.
 - [x] **T-551 P1** [UI] Options step. · plan: §11, §10.2 (infeasible), §16.2 · files: `web/steps/options.js` · owner: Claude (`task/T-551-options`)
   - Do: full-width mode with a 3D strip on top; 2–4 aligned columns (pros/cons at the top, the rows from §11); hover pin + click-to-edit; "Your choices" bar with chips, conflicts, Keep all; Re-optimize with my choices; infeasible banner with ways out; a below-target option can be used/exported after a clear warning.
   - Done when: e2e pins PLA, re-optimizes, and every new column uses PLA.
@@ -1193,7 +1211,7 @@ Rules for every [UI] task:
 
 ### Phase 6: simulate, fix, finish
 
-- [ ] **T-560 P1** [UI] Print simulation step. · plan: §12, §16.1 · files: `web/steps/simulate.js` · owner: —
+- [~] **T-560 P1** [UI] Print simulation step. · plan: §12, §16.1 · files: `web/steps/simulate.js` · owner: Claude (`task/T-560-simulate`)
   - Do: chosen-setup strip, prefilled print conditions, background slice with the browser OrcaSlicer (T-525) feeding G-code checks (spot heat, G-code warping), fallback to our slicer; "Have a sliced file?"; Run simulations; status + overlay switch (Heat, Warping actual/exaggerated, Internal stress, Overhangs); hook for the thermal model.
 - [ ] **T-561 P1** [UI] Problems & fixes step. · plan: §13 · files: `web/steps/problems.js`, `web/geometry.js` · owner: —
   - Do: grouped short rows (one per instance), click frames the feature; expanded: fixes first (Slicer/Design/Process, Add / Show steps), then More; design fixes shown even in slicer-only mode with a one-time "changes your model" confirm; **one pending batch** (design ghosts + setting old→new), nothing recomputes while picking; Confirm all changes → safe apply + quick re-check (strength at chosen settings, affected checks/simulations, orientation hint only) or "Apply without re-checking" (results go stale); New badges, Undo batch, Accept issue.

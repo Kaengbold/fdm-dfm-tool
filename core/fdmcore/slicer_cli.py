@@ -293,6 +293,17 @@ def write_profiles(chosen: dict[str, dict], folder: Path) -> dict[str, Path]:
     return out
 
 
+def without_cooling_slowdown(chosen: dict[str, dict]) -> dict[str, dict]:
+    """The profiles with the filament's slowdown for layer cooling switched off, everything else kept (T-483):
+    a local slice for the cooling optimizer, whose speeds are then the settings' own, so no slowdown has to be
+    guessed from the G-code (thermal_opt decides where layers need more time). The fan logic stays the slicer's."""
+    fil = chosen["filament"]
+    data = dict(fil["data"])
+    old = data.get("slow_down_for_layer_cooling", ["1"])
+    data["slow_down_for_layer_cooling"] = ["0"] * len(old) if isinstance(old, list) else "0"
+    return {**chosen, "filament": {**fil, "data": data}}
+
+
 def slice_3mf(model: bytes, chosen: dict[str, dict], orca: Path, timeout: int = 900, keep_gcode: bool = False) -> dict:
     """Slice with OrcaSlicer and ``pick_profiles``' profiles; print time, filament and layers from the
     G-code it writes (and the G-code itself as ``gcode`` with ``keep_gcode``, for the detailed simulation)."""

@@ -12,6 +12,7 @@ import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
 import "./steps/options.js";
+import "./steps/analyse.js";
 import "./steps/loads.js";
 import "./steps/details.js";
 import "./steps/holds.js";

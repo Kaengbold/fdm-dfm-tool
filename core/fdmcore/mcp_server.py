@@ -489,21 +489,23 @@ def slice_with_orcaslicer(
     return _slice(up, printer, material, nozzle, settings)
 
 
-def _slice(up, printer: str, material: str, nozzle: str, settings: dict | None, keep_gcode: bool = False) -> dict:
+def _slice(up, printer: str, material: str, nozzle: str, settings: dict | None, keep_gcode: bool = False,
+           cooling_slowdown: bool = True, goal: str = "balanced") -> dict:
     from .profile import Profile, presets
-    from .slicer_cli import find_orca, pick_profiles, slice_3mf
+    from .slicer_cli import find_orca, pick_profiles, slice_3mf, without_cooling_slowdown
 
     orca = find_orca()
     if orca is None:
         raise RuntimeError("OrcaSlicer not found. Install it, or set ORCA_SLICER to its executable.")
-    prof = _profile(printer, material, nozzle)
+    prof = _profile(printer, material, nozzle, goal)
     result = api.check(up, prof)
     merged = {r["key"]: r["value"] for r in result["settings"]}
     merged.update(settings or {})
     p = Profile.from_dict(prof)
     base_material = presets()["materials"][material].get("based_on", material)  # the user's own presets name one
     matched = pick_profiles(orca, presets()["printers"][printer]["name"], nozzle, base_material, float(merged.get("layer_height", p.layer_height)))
-    sliced = slice_3mf(api.export(up, prof, merged), matched, orca, keep_gcode=keep_gcode)
+    used = matched if cooling_slowdown else without_cooling_slowdown(matched)
+    sliced = slice_3mf(api.export(up, prof, merged), used, orca, keep_gcode=keep_gcode)
     if "filament_cm3" in sliced:
         sliced["filament_g"] = round(sliced["filament_cm3"] * p.material["density_g_cm3"], 1)
     return {
@@ -512,6 +514,54 @@ def _slice(up, printer: str, material: str, nozzle: str, settings: dict | None, 
         "profiles": {k: v["name"] for k, v in matched.items()},
         "settings": merged,
     }
+
+
+@server.tool()
+def optimize_print_cooling(up: list[float], output_path: str, printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4",
+                           goal: str = "balanced", settings: dict[str, str] | None = None, loads: list[dict] | None = None,
+                           intents: list[dict] | None = None, fine: bool = True) -> dict:
+    """Slice the part with the installed OrcaSlicer and write G-code with our cooling plan instead of the slicer's
+    own slowdown for layer cooling: sliced with that slowdown switched off (everything else as recommended, or
+    ``settings``), so its speeds are clean; then the cooling plan (fan ahead of time, slower layers or park moves
+    only where spots stay too hot) on the fine heat model, written and checked like optimize_gcode_file. If the
+    plan doesn't pass its checks, Orca's own G-code (with its slowdown) is written instead, and ``why`` says so.
+    ``minutes`` compares Orca's own G-code, the one without the slowdown and ours by the same timing model
+    (printing only; ``orca_estimate`` is the slicer's own, with its start routine). Takes a minute or more."""
+    import numpy as np
+
+    from .gcode import parse
+    from .kinematics import timing
+
+    out = _out(output_path, (".gcode",), "G-code path")  # before the slow part: a bad path fails at once
+    prof = _profile(printer, material, nozzle, goal)
+    own = _slice(up, printer, material, nozzle, settings, keep_gcode=True, goal=goal)["orcaslicer"]
+    clean = _slice(up, printer, material, nozzle, settings, keep_gcode=True, cooling_slowdown=False, goal=goal)["orcaslicer"]
+    text = clean.pop("gcode")
+    api.load_gcode(text, up, prof)
+    r = api.optimize_gcode(up, text.encode(), prof, loads, intents, fine)
+    moving = lambda g: round(timing(parse(g)).total_s / 60, 1)
+    minutes = {"orca_with_its_slowdown": moving(own["gcode"]), "without_slowdown": moving(text),
+               "orca_estimate": {"with_its_slowdown": own.get("print_time_min"), "without_slowdown": clean.get("print_time_min")}}
+    if r["ok"]:
+        out.write_bytes(r["data"])
+        api.load_gcode(own["gcode"], up, prof)  # how Orca's own slowdown does, by the same heat model
+        orca_hot = int((np.frombuffer(api.heat_model(up, prof, fine, intents, loads)["window"], np.uint8) == 1).sum())
+        hot = {"orca_with_its_slowdown": orca_hot, "without_slowdown": r["too_hot"][0], "with_cooling_plan": r["too_hot"][1]}
+        ours, theirs = r["minutes"][1], minutes["orca_with_its_slowdown"]
+        summary = (f"{ours:.1f} min against {theirs:.1f} with OrcaSlicer's own slowdown, "
+                   + (f"and {hot['with_cooling_plan']} spots too hot instead of {orca_hot}." if hot["with_cooling_plan"] != orca_hot
+                      else f"with the same {orca_hot} spots too hot.")
+                   + (" Slower, because cooling those spots takes time." if ours > theirs and hot["with_cooling_plan"] < orca_hot else ""))
+        return {"path": str(out), "source": "cooling plan", "minutes": {**minutes, "with_cooling_plan": ours},
+                "spots_too_hot": hot, "changes": r["changes"], "summary": summary}
+    heat = api.heat_model(up, prof, fine, intents, loads)
+    if not any(f["rule"] in ("heat_too_hot", "heat_weak_bond") for f in heat["findings"]):
+        out.write_text(text, encoding="utf-8")  # nothing to fix: the clean slice is fine as it is
+        return {"path": str(out), "source": "no slowdown needed", "minutes": minutes,
+                "why": "Every spot stays in its temperature window without the slicer's slowdown."}
+    out.write_text(own["gcode"], encoding="utf-8")
+    return {"path": str(out), "source": "OrcaSlicer's own", "minutes": minutes,
+            "why": "The cooling plan didn't pass its checks: " + "; ".join(r["problems"])}
 
 
 @server.tool()

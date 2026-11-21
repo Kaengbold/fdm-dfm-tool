@@ -866,6 +866,50 @@ def check_new_ui_loads(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_analyse(browser, port: int) -> str:
+    """The new UI's Analyse step (T-550): depth cards with estimates, a Quality run lands on Options with a result,
+    a changed input marks it stale (Next waits), and a long run shows its stages and can be cancelled."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Wall hook").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'quality' }); fdmUI.go('analyse'); }")
+        page.wait_for_function("() => [...document.querySelectorAll('.ui-cards__meta')].filter((e) => e.textContent.trim()).length >= 2", timeout=60_000)
+        assert page.get_by_role("radio", name=re.compile("Complete")).count() == 0, "Complete shown for Quality"
+        assert page.get_by_role("button", name="Next").is_disabled(), "Next before a run"
+        page.get_by_role("button", name="Start optimization").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Options'", timeout=240_000)
+        res = page.evaluate("() => { const r = fdmUI.store.result('optimize'); return [r.goal, r.options.length]; }")
+        assert res[0] == "quality" and res[1] >= 1, res
+        # A changed input: the result goes stale and Analyse waits for a new run.
+        page.evaluate("""async () => {
+          const reg = (await fdmUI.services.engine.call('regions')).regions;
+          const back = reg.reduce((a, r) => (r.normal[1] < a.normal[1] ? r : a)).id;
+          const top = reg.filter((r) => r.normal[2] > 0.99).reduce((a, r) => (r.area_mm2 > a.area_mm2 ? r : a)).id;
+          fdmUI.store.set({ goal: 'balanced', depth: 'extended', holds: [{ region: back, type: 'clamped' }], loads: [{ region: top, newtons: 49, direction: [0, 0, -1] }] });
+          fdmUI.go('analyse'); }""")
+        assert page.evaluate("() => fdmUI.store.isStale('optimize')") and page.locator(".analyse-stale").count() == 1
+        assert page.get_by_role("button", name="Next").is_disabled(), "Next with a stale result"
+        page.get_by_role("button", name="Start optimization").click()
+        page.wait_for_selector(".ui-progress")
+        stages = page.locator(".ui-progress__stages li").count()
+        page.get_by_role("button", name="Cancel").click()
+        page.wait_for_selector(".ui-progress", state="detached")
+        assert page.locator("#step-title").inner_text() == "Analyse"
+        ok = page.evaluate("async () => (await fdmUI.services.engine.call('estimate_runtime', { depth: 'fast' })).seconds > 0")
+        assert ok, "engine not usable after Cancel"
+        assert not errors, errors
+        return f"Quality run → Options ({res[1]} option); stale after a change, Next waits; {stages} stages shown, Cancel left a working engine"
+    finally:
+        page.close()
+
+
 def check_new_ui_options(browser, port: int) -> str:
     """The new UI's Options step (T-551): aligned columns from a real optimizer run; pin PLA, re-optimize, every new
     column uses PLA; an option below the target warns before it can be used."""
@@ -972,6 +1016,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: settings", lambda: check_new_ui_settings(ui, port))
             run.step("new UI: hover picker", lambda: check_new_ui_picker(ui, port))
             run.step("new UI: loads", lambda: check_new_ui_loads(ui, port))
+            run.step("new UI: analyse", lambda: check_new_ui_analyse(ui, port))
             run.step("new UI: options", lambda: check_new_ui_options(ui, port))
         finally:
             ui.close()

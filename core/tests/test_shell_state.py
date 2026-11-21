@@ -146,7 +146,7 @@ def test_walk_the_empty_flow(page):
     assert page.get_by_role("button", name="Next").is_disabled(), "Next works without a part"
     # What the later steps will set (T-531 …): a part, a printer, a hold, a load, a picked option.
     page.evaluate("""() => fdmUI.store.set({ part: { name: "hook.stl", size: [20, 34, 50] }, profile: { printer: "bambu_p1s", material: "", nozzle: "", nozzles: [] },
-      holds: [{ region: 1 }], loads: [{ region: 2, kg: 5 }], option: { id: 1 } })""")
+      holds: [{ region: 1 }], loads: [{ region: 2, kg: 5 }], optimized: 1, option: { id: 1 } })""")
     seen = []
     foot = []
     for _ in range(12):

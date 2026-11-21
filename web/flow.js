@@ -46,6 +46,7 @@ export function canLeave(id, state) {
     case "setup": return state.profile.printer ? null : "step.setup.needPrinter";
     case "holds": return state.holds.length || state.noLoads ? null : "step.holds.needHold";
     case "loads": return state.loads.length ? null : "step.loads.needLoad";
+    case "analyse": return state.optimized ? null : "step.analyse.needRun";
     case "options": return state.option ? null : "step.options.needOption";
     default: return null;
   }
