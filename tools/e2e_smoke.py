@@ -23,6 +23,7 @@ import threading
 import time
 from pathlib import Path
 
+import yaml
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -890,7 +891,8 @@ def _run_suite(port: int, args) -> Run:
             run.act(lambda: click_sample(page, "detail_plate"))
             run.act(lambda: page.click("#nozzle-block > summary"))
             rows = page.locator("#nozzle-table tr").count() - 1
-            assert rows == 4, f"expected 4 nozzle rows, got {rows}"
+            nozzles = len(yaml.safe_load((ROOT / "core/fdmcore/data/presets.yaml").read_text(encoding="utf-8"))["nozzles"])
+            assert rows == nozzles, f"expected {nozzles} nozzle rows (one per nozzle preset), got {rows}"
             run.act(lambda: page.click("input[name=goal][value=strength] >> xpath=.."))
             walls = page.evaluate("() => fdm.state.check.settings.find(s => s.key === 'wall_loops').value")
             run.act(lambda: page.click("input[name=goal][value=balanced] >> xpath=.."))
