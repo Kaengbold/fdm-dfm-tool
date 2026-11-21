@@ -17,6 +17,7 @@
  "features.py",
  "formats.py",
  "gcode.py",
+ "gcode_rewrite.py",
  "heat.py",
  "holes.py",
  "importance.py",

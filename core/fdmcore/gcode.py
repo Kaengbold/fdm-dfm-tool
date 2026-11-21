@@ -66,9 +66,21 @@ class Toolpath:
     travel: dict  # moves without plastic: {"p0", "p1", "t0", "t1", "speed", "line"}
     firmware: str  # marlin / klipper / rrf / bambu
     settings: dict  # the slicer's settings block, key -> text
+    src: np.ndarray | None = None  # (N,) int32 text line each extruded line comes from (0-based, _line_blocks' split)
 
     def part(self) -> np.ndarray:
         return np.isin(self.kind, PART_KINDS)
+
+
+def flow_cap(tp: "Toolpath") -> np.ndarray:
+    """Per line, the most plastic per second its filament / the printer may melt (mm³/s; inf: not known):
+    ``filament_max_volumetric_speed`` per extruder and PrusaSlicer's ``max_volumetric_speed``."""
+    s, tools = tp.settings, int(tp.tool.max(initial=0)) + 1
+    caps = []
+    for i in range(tools):
+        known = [v for v in (_number(s.get("filament_max_volumetric_speed"), 0, i), _number(s.get("max_volumetric_speed"), 0)) if v > 0]
+        caps.append(min(known) if known else np.inf)
+    return np.asarray(caps, float)[np.minimum(tp.tool, tools - 1)]
 
 
 # Why a line is slower than its feature's speed setting. Only LAYER_TIME (the slicer slowing a whole
@@ -191,7 +203,7 @@ class _Columns:
 
 
 # x0 y0 z0 x1 y1 z1, filament mm, t0, t1, feed mm/min, state (index into the (kind, feature, object, tool, fan) table)
-_LINE_COLS = ("f4",) * 6 + ("f8", "f8", "f8", "f4", "i4")
+_LINE_COLS = ("f4",) * 6 + ("f8", "f8", "f8", "f4", "i4", "i4")  # x0 … z1, E, t0, t1, feed, state, text line
 _TRAVEL_COLS = ("f4",) * 6 + ("f8", "f8", "f4", "i4")  # x0 … z1, t0, t1, feed, next line
 _MOVES = {"G0": False, "G1": False, "G2": True, "G3": True}  # value: an arc
 
@@ -233,12 +245,14 @@ def parse(source, settings: dict | None = None) -> Toolpath:
         return ids[name]
 
     state = state_of()
+    src = -1  # text line (0-based, as _line_blocks splits them), so gcode_rewrite can find each move again
     # Plain floats in the loop: a big print has millions of moves (and Pyodide is ~3× slower).
     for block in _line_blocks(source):
         lines.flush()
         travel.flush()
         add_line, add_travel = lines.rows.append, travel.rows.append
         for line in block:
+            src += 1
             if not line:
                 continue
             c = line[0]
@@ -314,14 +328,14 @@ def parse(source, settings: dict | None = None) -> Toolpath:
                     if de > 0 and total > 1e-6:
                         ts = t + np.concatenate([[0], np.cumsum(lengths)]) / total * dt
                         for k in range(len(lengths)):
-                            add_line((*pts[k], *pts[k + 1], de * lengths[k] / total, ts[k], ts[k + 1], feed, state))
+                            add_line((*pts[k], *pts[k + 1], de * lengths[k] / total, ts[k], ts[k + 1], feed, state, src))
                     elif total > 1e-6:
                         add_travel((x, y, z, nx, ny, nz, t, t + dt, feed, len(lines)))
                 else:
                     total = ((nx - x) ** 2 + (ny - y) ** 2 + (nz - z) ** 2) ** 0.5
                     dt = (total if total > 0 else abs(de)) / feed * 60
                     if de > 0 and total > 1e-6:
-                        add_line((x, y, z, nx, ny, nz, de, t, t + dt, feed, state))
+                        add_line((x, y, z, nx, ny, nz, de, t, t + dt, feed, state, src))
                     elif total > 1e-6:
                         add_travel((x, y, z, nx, ny, nz, t, t + dt, feed, len(lines)))
                 if de != 0 and not (de > 0 and total > 1e-6):  # pulled back / pushed again (also while wiping)
@@ -417,7 +431,7 @@ def parse(source, settings: dict | None = None) -> Toolpath:
             elif cmd in ("M620", "M621", "M1002"):
                 flags.add("bambu")
 
-    p0x, p0y, p0z, p1x, p1y, p1z, fil, t0, t1, feeds, state_of_line = lines.columns()
+    p0x, p0y, p0z, p1x, p1y, p1z, fil, t0, t1, feeds, state_of_line, src_of = lines.columns()
     if not len(fil):
         raise ValueError("No printed lines found: is this a G-code file from a slicer?")
     table = np.array(states, dtype=float).reshape(-1, 4)  # feature, object, tool, part fan
@@ -476,7 +490,7 @@ def parse(source, settings: dict | None = None) -> Toolpath:
                             "key": motion[:, 2].astype(np.uint8), "value": motion[:, 3]},
                     travel={"p0": np.column_stack(tr[0:3]), "p1": np.column_stack(tr[3:6]), "t0": tr[6] * scale,
                             "t1": tr[7] * scale, "speed": tr[8] / 60, "line": tr[9]},
-                    firmware=_firmware(found, flags), settings=found)
+                    firmware=_firmware(found, flags), settings=found, src=src_of)
 
 
 def _arc(p0: np.ndarray, p1: np.ndarray, i: float, j: float, clockwise: bool) -> np.ndarray:

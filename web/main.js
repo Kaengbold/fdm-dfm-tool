@@ -7,6 +7,8 @@ import { autosave, createStore } from "./state.js";
 import { createEngine } from "./engine.js";
 import { Stage, cameraBar, thumbnail } from "./viewport/stage.js";
 import { t } from "./i18n.js";
+import { Picker } from "./viewport/picker.js";
+import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
 
@@ -47,11 +49,37 @@ const services = {
   cameraBar: () => cameraBar(services.stage, { title: t("camera.title"), iso: t("camera.iso"), top: t("camera.top"), front: t("camera.front"), fit: t("camera.fit") }),
   loadPart: (name, bytes) => loadPart({ name, bytes, store, go: app.go, services, rerender: () => services.rerender() }),
 };
+// What the picker's badge says for a hovered face, edge or inside corner (§7).
+const pickLabel = (hit) => {
+  const i = hit.info ?? {};
+  const mm = (v) => (Math.round(v * 10) / 10).toString();
+  if (hit.kind === "edge") return t("picker.edge", { length: mm(i.length_mm) });
+  if (hit.kind === "corner") return t("picker.corner", { length: mm(i.length_mm) });
+  if (i.kind === "hole") return t("picker.hole", { d: mm(i.hole_diameter) });
+  if (i.kind === "cylinder") return t("picker.cylinder", { d: mm(i.diameter) });
+  if (i.kind === "curved") return t("picker.curved", { area: Math.round(i.area_mm2) });
+  return t("picker.flat", { area: Math.round(i.area_mm2) });
+};
+services.picker = new Picker(services.stage, { label: pickLabel });
+attachKeyboard(services.stage, services.picker, { label: pickLabel, placeholder: t("picker.search"), title: t("picker.title") });
+// Picking happens on Holds and Loads (T-541, T-543); the face regions come once per part.
+const PICK_STEPS = new Set(["holds", "loads"]);
+let regionsFor = null;
+async function preparePicker() {
+  const s = store.get();
+  const on = Boolean(s.part) && PICK_STEPS.has(s.step) && app.route === "flow";
+  if (on && regionsFor !== s.part) {
+    regionsFor = s.part;
+    services.picker.setData(await engine.call("regions"));
+  }
+  services.picker.enable(on);
+}
 const app = startShell(document.getElementById("app"), { store, saving, services });
 // What Setup and Environment choose from (printers, materials, nozzles): ready once the engine is.
 engine.call("presets").then((catalog) => store.set({ catalog }, { undoable: false })).catch(() => {});
 store.subscribe((_, changed) => {
   if (changed.includes("part") && services.stage.part) saving.putExtra("thumb", thumbnail(services.stage.part.geo.attributes.position.array));
 });
+store.subscribe((_, changed) => { if (changed.includes("step") || changed.includes("part")) preparePicker(); });
 globalThis.fdmUI = app; // for the browser tests and for agents driving the page
 document.body.dataset.ready = "1";

@@ -657,6 +657,23 @@ def optimize_cooling(up: list[float], printer: str = "bambu_p1s", material: str 
 
 
 @server.tool()
+def optimize_gcode_file(up: list[float], gcode_path: str, output_path: str, printer: str = "bambu_p1s", material: str = "pla",
+                        nozzle: str = "0.4", goal: str = "balanced", loads: list[dict] | None = None,
+                        intents: list[dict] | None = None) -> dict:
+    """Write the cooling plan (optimize_cooling's ``gcode`` plan) into a copy of a plain .gcode file: only speeds,
+    part fan commands and short park moves change; the original stays as it is. The copy is read back and
+    simulated first and only written when nothing got worse; else ``problems`` says why. Load the same file
+    with load_gcode first."""
+    src = _in(gcode_path, (".gcode", ".gco", ".g"), "G-code file")
+    r = api.optimize_gcode(up, src.read_bytes(), _profile(printer, material, nozzle, goal), loads, intents)
+    if not r["ok"]:
+        return {"ok": False, "problems": r["problems"]}
+    out = _out(output_path, (".gcode",), "G-code path")
+    out.write_bytes(r.pop("data"))
+    return {**_clean(r), "path": str(out)}
+
+
+@server.tool()
 def spot_importance(up: list[float], loads: list[dict] | None = None, printer: str = "bambu_p1s", material: str = "pla",
                     nozzle: str = "0.4", goal: str = "balanced", intents: list[dict] | None = None) -> dict:
     """How much each spot of the part matters for bonding between layers (weight 0.2–1), which heat_model uses
@@ -988,6 +1005,7 @@ API_TOOLS = {
     "heat_model": "heat_model",
     "importance": "spot_importance",
     "optimize_cooling": "optimize_cooling",
+    "optimize_gcode": "optimize_gcode_file",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
     "tolerance": "printer_tolerance",
