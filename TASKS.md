@@ -1140,13 +1140,13 @@ Rules for every [UI] task:
 - [~] **T-532 P1** [UI] Setup and Environment steps. · plan: §5, §6, §16.4, §16.7 · files: `web/steps/setup.js`, `web/steps/environment.js` · owner: Gemini Neon (`task/T-532-setup-env`), review: Claude
   - Do: printer (searchable, Manage → Settings and back), material and nozzle default "Decide later" (a pick = hard lock with ✕), **nozzle checkboxes for the printer's sizes, all ticked by default**; goal cards Balanced/Strong/Fast/Light/Quality; "What can you change?" Slicer settings/The design/Both; **warning suggesting a STEP file** when design changes are chosen on an STL/3MF (warning only). Environment: temperature cards, contact chips, live "Suitable: …" line, locked-material conflict card.
   - Done when: e2e sets each control; the optimizer receives them.
-- [ ] **T-533 P1** [UI] Settings & calibration hub. · plan: §15.3 · files: `web/steps/settings.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: —
+- [~] **T-533 P1** [UI] Settings & calibration hub. · plan: §15.3 · files: `web/steps/settings.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: Gemini Neon (`task/T-533-settings`), review: Claude
   - Do: tabs Printers (presets, OrcaSlicer catalogue, "isn't listed", nozzles available), Print profiles (import with preview of recognised/missing/conflicting values), Materials (owned checklist, custom, price, grams left), Calibration tests (card → one line, Download model, 3–5 steps with a picture, visual result picker, saved in the browser), What the checks use now (+ JSON export/import). Back returns to the part with work intact.
   - Done when: a calibration result changes what the checks use; settings survive reload and export/import.
 
 ### Phase 4: 3D interaction
 
-- [ ] **T-540 P1** [UI] Hover picker. · plan: §7 (hover), §1.8 · files: `web/viewport/picker.js` (new), `web/viewer.js` · owner: —
+- [~] **T-540 P1** [UI] Hover picker. · plan: §7 (hover), §1.8 · files: `web/viewport/picker.js` (new), `web/viewer.js` · owner: Claude (`task/T-540-picker`)
   - Do: frame-throttled raycast; edge/inside corner within ~6 px wins, else the face region; tint + outline + small badge ("Ø5 mm hole"); nothing selected on hover; X-ray; keyboard feature list. Fast on 500k-triangle parts.
 - [ ] **T-541 P1** [UI] Holds step. · plan: §7, §16.3 · files: `web/steps/holds.js` · owner: —
   - Do: click → radial menu at the cursor (hold face / edge / inside corner / screw hole, Cancel); blue lock markers; type auto (screw/clamped), changeable in the list row; many holds, toast at the 4th or > 30 % surface; list with hover-pulse and ✕; no "keep clean"/"on the bed". **"No loads, skip strength"** option: skips straight on for Fast/Light; for **Strong/Balanced** a warning offers switching to Fast, Quality or Light, or going back.
