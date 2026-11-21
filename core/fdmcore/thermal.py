@@ -486,6 +486,13 @@ def bond_strength(bond: np.ndarray, most: float | None = None) -> np.ndarray:
     return np.clip(np.nan_to_num(np.asarray(bond, float) / float(cfg["usual_bond"]), nan=1.0), float(cfg["min_share"]), top)
 
 
+def confidence(profile: Profile) -> str:
+    """"tuned" when the sag and snap tests were done for this material, "partly tuned" with one of them,
+    else "rough" (the estimates in thermal.yaml)."""
+    n = len(profile.heat_tuning)
+    return "tuned" if n == 2 else "partly tuned" if n == 1 else "rough"
+
+
 INTENTS = ("cosmetic", "dimension_critical", "load_bearing")
 
 
@@ -507,14 +514,19 @@ def window(h: Heat, profile: Profile, intents: dict | None = None, weight: np.nd
     goal = win["goals"][profile.goal]
     mat = data["materials"].get(h.material, data["materials"]["pla"])
     supported = float(profile.material["softening_c"]) + float(load_data("thresholds")["cooling"]["hot_margin_c"])
+    tuned = profile.heat_tuning
+    shift = tuned["sag_limit_c"] - supported if "sag_limit_c" in tuned else 0.0  # the sag test moves both limits
     spans = h.overhang >= win["overhang_share"]
-    limit = np.where(spans, _value(mat["no_sag_c"]), supported) + goal["sag_shift_c"]
+    limit = np.where(spans, _value(mat["no_sag_c"]), supported) + shift + goal["sag_shift_c"]
     weight = np.full(len(h.layer), float(importance.settings()["ordinary"])) if weight is None else np.asarray(weight, float)
     for kind, mask in (intents or {}).items():
         limit = limit + np.where(mask, win["intents"][kind]["sag_shift_c"], 0.0)
         if kind == "load_bearing":
             weight = np.where(mask, 1.0, weight)
-    min_bond = importance.bond_goal(float(goal["min_bond"]), weight)
+    goal_bond = float(goal["min_bond"])
+    if "min_bond" in tuned:  # the snap test sets the balanced goal; the other goals keep their ratio to it
+        goal_bond *= tuned["min_bond"] / float(win["goals"]["balanced"]["min_bond"])
+    min_bond = importance.bond_goal(goal_bond, weight)
 
     band = h.column.astype(np.int64) * (int(h.layer.max()) + 1) + h.layer // int(win["band_layers"])
     keys, inv = np.unique(band, return_inverse=True)

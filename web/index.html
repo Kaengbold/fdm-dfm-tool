@@ -777,6 +777,30 @@
               </div>
             </section>
             <section class="tune-test">
+              <h4>Too hot: the sag test <button type="button" class="link" data-calibration="sag">the test part (STL)</button></h4>
+              <p class="hint" data-calibration-how="sag"></p>
+              <div class="row">
+                <label>Your sliced test part <input id="cal-sag-file" type="file" accept=".gcode,.gco,.g" /></label>
+                <button type="button" class="link" data-tuning-gcode="sag">Download the test G-code</button>
+              </div>
+              <div class="row">
+                <label>Tallest pin droops from <input id="cal-sag-mm" type="number" step="0.5" min="0" /> mm</label>
+                <label><input id="cal-sag-none" type="checkbox" /> none drooped</label>
+              </div>
+            </section>
+            <section class="tune-test">
+              <h4>Too cold: the snap test <button type="button" class="link" data-calibration="snap">the test part (STL)</button></h4>
+              <p class="hint" data-calibration-how="snap"></p>
+              <div class="row">
+                <label>Your sliced test part <input id="cal-snap-file" type="file" accept=".gcode,.gco,.g" /></label>
+                <button type="button" class="link" data-tuning-gcode="snap">Download the test G-code</button>
+              </div>
+              <div class="row">
+                <label>Breaks easily below <input id="cal-snap-mm" type="number" step="0.5" min="0" /> mm</label>
+                <label><input id="cal-snap-none" type="checkbox" /> held everywhere</label>
+              </div>
+            </section>
+            <section class="tune-test">
               <h4>Sizes <small>any print, measured with calipers</small></h4>
               <p class="hint">A hole and an outside size: the 3MF then corrects holes and outlines for this printer and filament.</p>
               <div class="row">

@@ -1000,9 +1000,17 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - The flow cap is also enforced in the optimizer now (`gcode.flow_cap`): undoing a slowdown never needs more plastic per second than the filament melts. The first try failed the check because of this.
     - **Results:** OrcaSlicer fixture: pin 40 spots too hot → 0, 4.7 → 5.7 min, 1,107 lines' speed, 19 parks, all checks pass. A tampered E, a moved path or a speed above the limit is refused. Pyodide: 16 s.
     - **Not done:** vibration-band check (no VFA data yet); `.gcode.3mf` repack (waits for a real-printer test); printing the result (T-477). The "Optimize my G-code directly" button belongs to the new UI (moved to T-478).
-- [ ] **T-482 P2** [TO] Tuning prints the user can do. · files: `tools/` or `core/fdmcore/` (test part), `web/app.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: Claude (task/T-482-tuning-prints)
+- [x] **T-482 P2** [TO] Tuning prints the user can do. · files: `tools/` or `core/fdmcore/` (test part), `web/app.js`, `web/mypresets.js`, `web/project.js`, `core/fdmcore/project.py` · owner: Claude (task/T-482-tuning-prints)
   - Do: two printable tests, no lab gear: a **sag test** (pins at falling layer times → the "too hot" limit) and a **snap test** (thin tower at stepped fan speeds, broken by hand → the "too cold" limit). The user enters the result; it is stored with their presets and in the project file, and the confidence changes from "rough" to "tuned".
   - Done when: entering a result changes the window and the confidence label.
+  - Outcome: two heat tuning prints in "Tune to my printer" (`calibration_part("sag" | "snap")`).
+    - **Sag test:** five Ø3 mm pins, 10–40 mm, each height written by it. Fewer pins higher up, so faster, hotter layers.
+    - **Snap test:** a wall 80 × 1.2 × 40 mm on a foot.
+    - **Test G-code:** the user slices the part, and `tuning_gcode` writes the test G-code with the T-481 rewriter (checked the same way). Sag: the slicer's slowdown for cooling off. Snap: part fan 100 → 20 % in 8 mm steps.
+    - **Result:** the user enters the height where the tallest pin first droops (or none), or below which the wall snaps easily (or never). `tune_heat` simulates the test G-code and turns that into `sag_limit_c` (covering temperature there) or `min_bond` (bond there).
+    - **Stored:** with the user's material (My materials fields, saved by "Save my results") and in the profile's `heat_tuning`, which project files keep. `thermal.window` moves both sag limits by the measured one and scales the goals' bonding by the measured bond. `thermal.confidence` → "rough" / "partly tuned" / "tuned" in `heat_model`, `optimize_cooling` and its summary.
+    - New MCP tools `heat_tuning_gcode`, `tune_heat_window`.
+    - Checks: a stand-in slicer makes both tests; the sag G-code undoes the slowdown on the tall pin, the snap G-code reads back with the fan steps; both results change the window (limit shifted by exactly the measured difference, bond goal = measured) and the label. Pyodide works.
 - [ ] **T-483 P3** [TO] Local mode and the browser slicer: we slice it ourselves. · files: `core/fdmcore/slicer_cli.py`, `core/fdmcore/mcp_server.py` · owner: —
   - Do: in local mode, slice the 3MF with OrcaSlicer with the layer-time slowdown switched off (everything else kept), so the starting speeds are clean and no slowdown causes need guessing. Run the fine tier there. Later the same through the browser slicer (T-127).
   - Done when: the local MCP tool returns the optimized G-code for a 3MF.

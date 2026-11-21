@@ -173,7 +173,7 @@ def set_expert(values: dict[str, float]) -> dict:
     return expert_settings()
 
 
-CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "all")
+CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "all")
 # What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
 CALIBRATION_HOW = {
     "layer_strength": "A 98 mm dog-bone: thin in the middle, wide with a hole at each end. Print one lying flat and one "
@@ -187,6 +187,13 @@ CALIBRATION_HOW = {
                 "the steepest one that's still clean is how far this material can lean out.",
     "bridge": "Bridges 10 … 50 mm long between pillars, printed without support: "
               "the longest one that doesn't sag is how far it can bridge.",
+    "sag": "Five Ø3 mm pins on a plate, 10 to 40 mm tall (the height is written by each). The higher it goes, the fewer "
+           "pins are left, so each layer prints faster and stays hotter. Slice it, load the G-code here and download the "
+           "test G-code (it switches the slicer's slowdown for cooling off), print it, then note the height where the "
+           "tallest pin first droops or blobs (or that none does).",
+    "snap": "A thin wall 80 mm long and 40 mm tall. Slice it, load the G-code here and download the test G-code: it "
+            "turns the fan down step by step, every 8 mm from 100 % at the bottom to 20 % at the top. Print it, then "
+            "snap pieces off by hand from the top down: note the height below which it breaks easily along a layer.",
     "all": "Every test on one plate (about 170 × 175 mm): the warping bars, two dog-bones (one lies flat, one stands on "
            "its end: give it a brim), the fit gauge with its peg, the overhang blocks and the bridges. Each piece has its "
            "size written on it (the fit holes: 6 mm plus the number). Print it without support, then read each test as below.",
@@ -314,6 +321,104 @@ def _warping_test(pitch: float = 20) -> list[np.ndarray]:
     return out
 
 
+SAG_PINS_MM = (10, 17.5, 25, 32.5, 40)  # pin heights of the sag test: fewer pins, faster layers, higher up
+SNAP_BAND_MM, SNAP_FANS = 8.0, (1.0, 0.8, 0.6, 0.4, 0.2)  # the snap test's fan steps, from the bottom
+
+
+def _sag_test() -> list[np.ndarray]:
+    """A 54 × 14 × 2 mm plate with five Ø3 mm pins, 10 … 40 mm tall, each height written in front of it."""
+    from shapely.geometry import Point, box
+
+    from .additions import extrude
+
+    out = [extrude(box(0, 0, 54, 14), 0, 2)]
+    for i, height in enumerate(SAG_PINS_MM):
+        x = 6 + 10.5 * i
+        out += [extrude(Point(x, 10).buffer(1.5, 32), 1.9, height), _label(f"{height:g}", x - 4, 1.5, 2, 4)]
+    return out
+
+
+def _snap_test() -> list[np.ndarray]:
+    """A wall 80 mm long, 1.2 mm thick and 40 mm tall on a 6 mm wide foot (so it stands while it prints)."""
+    from shapely.geometry import box
+
+    from .additions import extrude
+
+    return [extrude(box(0, -2.4, 80, 3.6), 0, 1.0), extrude(box(0, 0, 80, 1.2), 0.9, 40)]
+
+
+def tuning_gcode(kind: str, data: bytes) -> dict:
+    """The G-code for a heat tuning print (``kind`` "sag" or "snap"), from the user's own sliced test part
+    (plain .gcode). Sag: the slicer's slowdown for layer cooling is switched off, so the layers really get
+    faster with height. Snap: the part fan steps down every ``SNAP_BAND_MM`` (``SNAP_FANS``). Written and
+    checked like optimize_gcode. Keep the file: tune_heat reads it with the result."""
+    from .gcode import parse
+    from .gcode_rewrite import check, rewrite
+    from .thermal_opt import Plan
+
+    if kind not in ("sag", "snap"):
+        raise ValueError("kind must be sag or snap")
+    tp = parse(data)
+    plan = Plan.none(int(tp.layer.max()) + 1)
+    if kind == "sag":
+        plan.fast[:] = 100.0  # every layer-time slowdown undone (still never past the set speed or the flow cap)
+        note = "Sag test: the slicer's slowdown for layer cooling is switched off."
+    else:
+        band = np.minimum((np.asarray(tp.layer_z) // SNAP_BAND_MM).astype(int), len(SNAP_FANS) - 1)
+        plan.fan[2:] = np.asarray(SNAP_FANS)[band[2:len(plan.fan)]]
+        note = "Snap test: the part fan steps " + " / ".join(f"{f:.0%}" for f in SNAP_FANS) + f" every {SNAP_BAND_MM:g} mm."
+    new = rewrite(data, tp, plan, [note])
+    problems = check(tp, new.text, new.toolpath)
+    if problems:
+        raise ValueError("The test G-code didn't pass its check: " + "; ".join(problems))
+    return {"data": new.text.encode(), "name": f"{kind}_test_tuning.gcode", "minutes": [round(m, 1) for m in new.minutes]}
+
+
+def tune_heat(kind: str, data: bytes, at_mm: float | None, profile: dict | None = None) -> dict:
+    """The heat window value a tuning print gives, from its test G-code (``data``: tuning_gcode's file) and
+    what the user saw: sag: ``at_mm`` where the tallest pin first drooped (None: none did); snap: ``at_mm``
+    below which it broke easily (None: it held everywhere). The heat model says how hot the spots there were
+    when covered (``sag_limit_c``) or how well they bonded (``min_bond``). Save it with the material (My
+    materials) or pass it in the profile's ``heat_tuning``."""
+    from .gcode import parse
+    from .kinematics import timing
+    from .thermal import simulate
+
+    p = Profile.from_dict(profile)
+    tp = parse(data)
+    if "Sag test" not in str(data[:4000]) and "Snap test" not in str(data[:4000]):
+        raise ValueError("This isn't a test G-code from tuning_gcode: download that one, print it, then enter what you saw")
+    h = simulate(tp, timing(tp), p)
+    z = h.z
+    if kind == "sag":
+        top = h.column[np.argmax(z)]  # the tallest pin
+        pin = (h.column == top) & np.isfinite(h.cover_c)
+        if at_mm is None:
+            value = float(np.nanmax(h.cover_c[pin])) + 5.0  # it held at the hottest: the limit is above that
+            text = f"No pin drooped, so {p.material['name']} holds its shape at least up to about {value:.0f} °C on your printer."
+        else:
+            near = pin & (np.abs(z - float(at_mm)) <= 1.0)
+            if not near.any():
+                raise ValueError(f"The tallest pin has no layers near {at_mm} mm")
+            value = float(np.median(h.cover_c[near]))
+            text = f"The pin drooped from {at_mm:g} mm, where each layer was still about {value:.0f} °C when the next one went on."
+        value = float(np.clip(value, 30, 300))
+        return {"field": "sag_limit_c", "value": round(value), "text": text}
+    if kind == "snap":
+        wall = np.isfinite(h.bond) & (h.layer >= 2)
+        if at_mm is None:
+            value = float(np.nanpercentile(h.bond[wall], 10))
+            text = "It held everywhere: even the coldest band bonds well enough on your printer."
+        else:
+            band = wall & (z >= float(at_mm)) & (z <= float(at_mm) + SNAP_BAND_MM)
+            if not band.any():
+                raise ValueError(f"The wall has no layers just above {at_mm} mm")
+            value = float(np.median(h.bond[band]))
+            text = f"Above {at_mm:g} mm it held: there the layers fused to about {value:.0%} of a full bond (a rough estimate)."
+        return {"field": "min_bond", "value": round(float(np.clip(value, 0.02, 1.0)), 3), "text": text}
+    raise ValueError("kind must be sag or snap")
+
+
 def _all_tests() -> list[np.ndarray]:
     """Every test on one 170 × 175 mm plate (fits a 180 mm bed): warping bars at the front, the dog-bones and the
     fit gauge in the middle, overhang and bridge blocks at the back, the second dog-bone standing on its end."""
@@ -334,7 +439,7 @@ def calibration_part(kind: str) -> dict:
     from .mesh import to_binary_stl
 
     build = {"fit": _fit_test, "overhang": _overhang_test, "bridge": _bridge_test, "layer_strength": lambda: [_dogbone()],
-             "warping": _warping_test, "all": _all_tests}
+             "warping": _warping_test, "sag": _sag_test, "snap": _snap_test, "all": _all_tests}
     if kind not in build:
         raise ValueError(f"kind must be one of {CALIBRATION}")
     name = {"all": "all_tests.stl"}.get(kind, f"{kind}_test.stl")
@@ -1962,7 +2067,7 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     (T_int at each of ``delays_s``), ``importance``; as uint8: ``window`` (0 fine, 1 too hot, 2 too
     cold, 3 needless slowdown) and ``importance_reason`` (index into ``reasons``)."""
     from .importance import REASONS
-    from .thermal import DELAYS_S, window
+    from .thermal import DELAYS_S, confidence, window
 
     p = Profile.from_dict(profile)
     tp = _toolpath_for(up, "heat model")
@@ -1974,7 +2079,7 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     hottest = np.flatnonzero(covered)[np.argsort(-h.cover_c[covered])][:HOT_SPOTS]
     f32 = lambda a: np.asarray(a, np.float32).tobytes()
     return {
-        "tier": h.tier, "spots": int(len(h.layer)), "layers": int(h.layer.max()) + 1, "cell_mm": h.cell_mm,
+        "tier": h.tier, "spots": int(len(h.layer)), "layers": int(h.layer.max()) + 1, "cell_mm": h.cell_mm, "confidence": confidence(p),
         "material": h.material, "tg_c": h.tg_c, "print_min": round(tm.total_s / 60, 1), "seconds": round(h.seconds, 1),
         "cover_c": {"median": round(float(np.median(h.cover_c[covered])), 1) if covered.any() else None,
                     "p95": round(float(np.percentile(h.cover_c[covered], 95)), 1) if covered.any() else None},
@@ -2037,7 +2142,7 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
         return marks[id(h)]
 
     r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
-    return _cooling_view(r, _importance_map(up, p, loads))
+    return _cooling_view(r, _importance_map(up, p, loads), p)
 
 
 def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dict] | None = None,
@@ -2073,7 +2178,7 @@ def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dic
     tier = "fine" if fine else "quick"
     r = optimize(tp, p, weight_at, intents_at, tier)
     if not r["gcode"]["plan"]:
-        return {"ok": False, "problems": ["Nothing to change. " + _cooling_view(r, _importance_map(up, p, loads))["summary"][0]]}
+        return {"ok": False, "problems": ["Nothing to change. " + _cooling_view(r, _importance_map(up, p, loads), p)["summary"][0]]}
     new = rewrite(data, tp, r["plans"]["gcode"], [f"Spots too hot {r['before']['too_hot']} -> {r['gcode']['too_hot']}, "
                                                   f"too cold to bond {r['before']['too_cold']} -> {r['gcode']['too_cold']} (estimated limits)."])
     problems = check(tp, new.text, new.toolpath)
@@ -2094,16 +2199,25 @@ def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dic
                         "kept_near_slicer_speeds": new.clamped}}
 
 
-def _cooling_view(r: dict, imp) -> dict:
+def _cooling_view(r: dict, imp, p: Profile) -> dict:
     """thermal_opt.optimize's result as optimize_cooling shows it."""
+    from .thermal import confidence
+
     def view(part: dict) -> dict:
         return {"print_min": round(part["print_s"] / 60, 1), **{k: part[k] for k in ("too_hot", "too_cold", "needless", "bond_median")},
                 "weighted_too_hot": round(part["weighted_hot"], 1), "weighted_too_cold": round(part["weighted_cold"], 1)}
 
     out = {"before": view(r["before"]), "gcode": {**view(r["gcode"]), "plan": r["gcode"]["plan"]},
-           "slicer": {**view(r["slicer"]), "cooling": r["slicer"]["cooling"]}, "guessed": imp.guessed, "confidence": "rough"}
+           "slicer": {**view(r["slicer"]), "cooling": r["slicer"]["cooling"]}, "guessed": imp.guessed, "confidence": confidence(p)}
     out["summary"] = _cooling_summary(out)
     return out
+
+
+CONFIDENCE_TEXT = {
+    "rough": "Rough: the limits are estimates, not yet tuned to your printer (the sag and snap tests do that).",
+    "partly tuned": "Partly tuned: one of the sag and snap tests is in, the other limit is still an estimate.",
+    "tuned": "Tuned to your printer with the sag and snap tests.",
+}
 
 
 def _cooling_summary(r: dict) -> list[str]:
@@ -2127,7 +2241,7 @@ def _cooling_summary(r: dict) -> list[str]:
     if sl["cooling"]["ranges"] or sl["cooling"].get("tower"):
         lines.append(f"With your slicer's settings only (slower heights{extra}): {sl['print_min']:.1f} min, {spots(sl)}. "
                      "Fan changes and undoing the slicer's slowdown need the G-code.")
-    lines.append("Rough: the limits are estimates, not yet tuned to your printer." + (" Which spots matter is guessed from the shape: add the loads for a real answer." if r["guessed"] else ""))
+    lines.append(CONFIDENCE_TEXT[r["confidence"]] + (" Which spots matter is guessed from the shape: add the loads for a real answer." if r["guessed"] else ""))
     return lines
 
 
@@ -3961,6 +4075,8 @@ METHODS = {
     "importance": importance,
     "optimize_cooling": optimize_cooling,
     "optimize_gcode": optimize_gcode,
+    "tuning_gcode": tuning_gcode,
+    "tune_heat": tune_heat,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
     "tolerance": tolerance,
