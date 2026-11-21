@@ -984,7 +984,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
       - Bambu fixture, guessed weights (pin weighs ~1): 40 → 30 too hot, 0 too cold. The rest can't be fixed without weak bonds.
       Pyodide: 21 s for a 7.5 min print.
     - **Not done:** slowing other islands before the hot one (all adjustable lines of a layer slow together), vibration (VFA) bands, kick-start. The real-print confirmation is T-477.
-- [ ] **T-481 P2** [TO] Option B (opt-in): change the user's G-code directly. · files: `core/fdmcore/gcode_rewrite.py` (new), `core/fdmcore/api.py`, `web/app.js` · owner: —
+- [ ] **T-481 P2** [TO] Option B (opt-in): change the user's G-code directly. · files: `core/fdmcore/gcode_rewrite.py` (new), `core/fdmcore/api.py`, `web/app.js` · owner: Claude (task/T-481-gcode-rewrite)
   - Do: the user picks "Optimize my G-code directly", loads their file, and downloads the result; the original always stays available.
     - Change only speed (F) and add fan commands. Never change positions, extrusion (E) or temperatures. Split a line where the speed must change partway.
     - Re-emit adaptive pressure advance for the new speed (or keep changes within ±X % if there's no PA table). Recompute `M73`. Use each firmware's fan commands (Marlin / Klipper / Bambu). The header names the changes and the time before → after.
