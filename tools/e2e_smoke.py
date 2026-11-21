@@ -866,6 +866,60 @@ def check_new_ui_loads(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_options(browser, port: int) -> str:
+    """The new UI's Options step (T-551): aligned columns from a real optimizer run; pin PLA, re-optimize, every new
+    column uses PLA; an option below the target warns before it can be used."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Wall hook").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""async () => {
+          const e = fdmUI.services.engine;
+          await e.call('set_expert', { values: { 'analysis.strength_voxels': 2500 } });
+          const reg = (await e.call('regions')).regions;
+          const back = reg.reduce((a, r) => (r.normal[1] < a.normal[1] ? r : a)).id;
+          const top = reg.filter((r) => r.normal[2] > 0.99).reduce((a, r) => (r.area_mm2 > a.area_mm2 ? r : a)).id;
+          fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'balanced', depth: 'fast',
+            holds: [{ region: back, type: 'clamped' }], loads: [{ region: top, newtons: 49, direction: [0, 0, -1] }] });
+          const m = await import('./steps/args.js');
+          const deps = fdmUI.store.deps('model', 'profile', 'goal', 'environment', 'loads', 'depth');
+          fdmUI.store.setResult('optimize', await e.call('optimize', m.optimizeArgs(fdmUI.store.get())), deps);
+          fdmUI.go('options'); }""")
+        page.wait_for_selector(".ui-col")
+        n = page.locator(".ui-col").count()
+        assert n >= 2, f"{n} columns"
+        # Rows line up: the same row's cells share one height across all columns.
+        tops = page.evaluate("() => [...document.querySelectorAll('.ui-col')].map((c) => Math.round(c.querySelectorAll('.ui-col__cell')[1].getBoundingClientRect().top))")
+        assert len(set(tops)) == 1, tops
+        mats = page.evaluate("() => fdmUI.store.result('optimize').options.map((o) => o.material)")
+        i = mats.index("pla") if "pla" in mats else 0
+        cell = page.locator(".ui-col").nth(i).locator(".ui-col__cell").nth(1)
+        cell.hover()
+        cell.locator(".ui-col__pin").click()
+        assert "Material:" in page.locator(".ui-constraints").inner_text()
+        pinned = page.evaluate("() => fdmUI.store.get().constraints.material")
+        page.get_by_role("button", name="Re-optimize with my choices").click()
+        page.wait_for_function("(m) => fdmUI.store.result('optimize').options.every((o) => o.material === m)", arg=pinned, timeout=180_000)
+        after = page.evaluate("() => fdmUI.store.result('optimize').options.map((o) => o.material)")
+        # Below the target: a clear warning first, and the warning travels with the option.
+        page.evaluate("() => { const r = fdmUI.store.result('optimize'); r.options[0] = { ...r.options[0], meets_target: false, safety: 1.2, target: 3 }; fdmUI.services.rerender(); }")
+        page.get_by_role("button", name="Use this option").first.click()
+        assert "Below the safety target" in page.locator("dialog.ui-modal").inner_text()
+        page.get_by_role("button", name="Use it anyway").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Simulation'")
+        assert page.evaluate("() => fdmUI.store.get().option.warning") == "below_target"
+        assert not errors, errors
+        return f"{n} aligned columns; pinned {pinned}, re-optimized: {after}; below-target warns and is carried"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -918,6 +972,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: settings", lambda: check_new_ui_settings(ui, port))
             run.step("new UI: hover picker", lambda: check_new_ui_picker(ui, port))
             run.step("new UI: loads", lambda: check_new_ui_loads(ui, port))
+            run.step("new UI: options", lambda: check_new_ui_options(ui, port))
         finally:
             ui.close()
         if args.quick:
