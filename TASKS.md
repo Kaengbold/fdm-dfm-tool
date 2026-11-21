@@ -1146,8 +1146,9 @@ Rules for every [UI] task:
 
 ### Phase 4: 3D interaction
 
-- [~] **T-540 P1** [UI] Hover picker. · plan: §7 (hover), §1.8 · files: `web/viewport/picker.js` (new), `web/viewer.js` · owner: Claude (`task/T-540-picker`)
+- [x] **T-540 P1** [UI] Hover picker. · plan: §7 (hover), §1.8 · files: `web/viewport/picker.js` (new), `web/viewer.js` · owner: Claude (`task/T-540-picker`)
   - Do: frame-throttled raycast; edge/inside corner within ~6 px wins, else the face region; tint + outline + small badge ("Ø5 mm hole"); nothing selected on hover; X-ray; keyboard feature list. Fast on 500k-triangle parts.
+  - Outcome: `web/viewport/picker.js` (GPU id pick: each triangle in its own colour into a 1×1 target at the cursor, 5.5 ms per pick on a 518k-triangle part; edges/inside corners of the hovered face within 6 px win; soft tint + outline + badge; click without drag → `pick` event; nothing selected on hover), `web/viewport/featurelist.js` (stage is one Tab stop; Enter opens a searchable feature list, arrows hover, Enter picks; X x-ray, F fit, 1/2/3 views), stage per-vertex colours + X-ray; active on Holds and Loads (regions loaded once per part). e2e `new UI: hover picker`. `web/viewer.js` (old UI) untouched.
 - [ ] **T-541 P1** [UI] Holds step. · plan: §7, §16.3 · files: `web/steps/holds.js` · owner: —
   - Do: click → radial menu at the cursor (hold face / edge / inside corner / screw hole, Cancel); blue lock markers; type auto (screw/clamped), changeable in the list row; many holds, toast at the 4th or > 30 % surface; list with hover-pulse and ✕; no "keep clean"/"on the bed". **"No loads, skip strength"** option: skips straight on for Fast/Light; for **Strong/Balanced** a warning offers switching to Fast, Quality or Light, or going back.
   - Done when: e2e places a face and an edge hold; the no-load warning appears for Balanced.

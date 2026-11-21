@@ -33,14 +33,21 @@ function partGroup(triangles, colors) {
   geo.computeVertexNormals();
   geo.computeBoundingBox();
   const bb = geo.boundingBox;
-  geo.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z); // centred on the bed, resting on it
+  // Centred on the bed, resting on it; ``offset`` maps part coordinates (the engine's) to shown ones.
+  const offset = new THREE.Vector3(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);
+  geo.translate(offset.x, offset.y, offset.z);
   geo.computeBoundingBox();
   geo.computeBoundingSphere();
+  // Per-vertex colours, so a picker can tint face regions (viewport/picker.js); all the part colour to start.
+  const base = new THREE.Color(colors.part);
+  const col = new Float32Array(triangles.length);
+  for (let i = 0; i < col.length; i += 3) { col[i] = base.r; col[i + 1] = base.g; col[i + 2] = base.b; }
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
   const group = new THREE.Group();
-  group.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: colors.part, roughness: 0.62, metalness: 0.02 })));
+  group.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02 })));
   group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 28),
     new THREE.LineBasicMaterial({ color: colors.edge, transparent: true, opacity: 0.55 })));
-  return { group, geo };
+  return { group, geo, offset, base };
 }
 
 function lights(scene) {
@@ -123,6 +130,33 @@ export class Stage {
     this.view("iso");
   }
 
+  /** Colour every triangle: ``colorOf(triangle index)`` → THREE.Color, or null for the part colour. */
+  paint(colorOf, triangles = null) {
+    if (!this.part) return;
+    const attr = this.part.geo.attributes.color;
+    const base = this.part.base;
+    const list = triangles ?? { length: attr.count / 3 };
+    for (let k = 0; k < list.length; k++) {
+      const t = triangles ? triangles[k] : k;
+      const c = colorOf(t) ?? base;
+      for (let v = 0; v < 3; v++) attr.setXYZ(t * 3 + v, c.r, c.g, c.b);
+    }
+    attr.needsUpdate = true;
+    this.render();
+  }
+
+  /** X-ray: see through the part (holds and loads behind it stay visible). */
+  setXray(on) {
+    if (!this.part) return;
+    const m = this.part.group.children[0].material;
+    m.transparent = on;
+    m.opacity = on ? 0.35 : 1;
+    m.depthWrite = !on;
+    m.needsUpdate = true;
+    this.xray = on;
+    this.render();
+  }
+
   clearPart() {
     if (!this.part) return;
     this.scene.remove(this.part.group);
@@ -152,8 +186,10 @@ export class Stage {
     this.setBed(this.bedSize);
     if (this.part) {
       const c = palette();
-      this.part.group.children[0].material.color.set(c.part);
+      this.part.base.set(c.part);
       this.part.group.children[1].material.color.set(c.edge);
+      this.onRecolor?.(); // a picker re-tints its regions on the new base colour
+      if (!this.onRecolor) this.paint(() => null);
     }
     this.render();
   }

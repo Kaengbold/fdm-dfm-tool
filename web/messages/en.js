@@ -162,4 +162,14 @@ export default {
   "camera.top": "Top",
   "camera.front": "Front",
   "camera.fit": "Fit",
+
+  // Hover picker (T-540).
+  "picker.title": "3D view",
+  "picker.search": "Find a face or edge",
+  "picker.flat": "Flat face · {area} mm²",
+  "picker.curved": "Curved face · {area} mm²",
+  "picker.hole": "Ø{d} mm hole",
+  "picker.cylinder": "Round face Ø{d} mm",
+  "picker.edge": "Edge · {length} mm",
+  "picker.corner": "Inside corner · {length} mm",
 };

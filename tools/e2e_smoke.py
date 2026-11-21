@@ -480,6 +480,81 @@ def check_new_ui(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_picker(browser, port: int) -> str:
+    """The new UI's hover picker (T-540): a face shows its badge, an inside corner wins near its line, the keyboard
+    list finds and picks a hole, and the GPU pick stays fast on a 500k-triangle part."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="L-bracket").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        page.evaluate("() => fdmUI.go('holds')")
+        page.wait_for_function("() => fdmUI.services.picker.enabled && fdmUI.services.picker.data", timeout=120_000)
+        box = page.locator(".stage-canvas").bounding_box()
+        page.mouse.move(box["x"] + box["width"] * 0.55, box["y"] + box["height"] * 0.62)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'face'")
+        face = page.locator(".pick-badge").inner_text()
+        assert face.startswith("Flat face"), face
+        # The bracket's inside corner: put the cursor 3 px off its projected middle.
+        x, y = page.evaluate("""async () => {
+          const THREE = await import('three');
+          const p = fdmUI.services.picker, st = fdmUI.services.stage;
+          const line = p.data.edges.find((l) => l.kind === 'corner');
+          const m = line.meta.midpoint, o = st.part.offset;
+          const v = new THREE.Vector3(m[0] + o.x, m[1] + o.y, m[2] + o.z).project(st.camera);
+          const r = st.canvas.getBoundingClientRect();
+          return [(v.x + 1) / 2 * r.width + r.left + 3, (1 - v.y) / 2 * r.height + r.top];
+        }""")
+        page.mouse.move(x, y)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'corner'", timeout=5_000)
+        corner = page.locator(".pick-badge").inner_text()
+        assert corner.startswith("Inside corner"), corner
+        page.mouse.move(box["x"] + 5, box["y"] + 5)
+        # Keyboard: Tab-able stage, Enter opens the feature list, typing filters, Enter picks.
+        page.locator(".stage-canvas").focus()
+        page.keyboard.press("Enter")
+        page.keyboard.type("hole")
+        assert page.locator(".pick-badge").inner_text().endswith("mm hole")
+        picked = page.evaluate("""() => new Promise((resolve) => {
+          const off = fdmUI.services.picker.on('pick', (h) => { off(); resolve(h.info.kind); });
+          document.querySelector('.feature-search').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        })""")
+        assert picked == "hole", picked
+        # Big part: the pick reads one pixel from the GPU, whatever the triangle count.
+        perf = page.evaluate("""async () => {
+          const THREE = await import('three');
+          const g = new THREE.IcosahedronGeometry(40, 160).toNonIndexed();
+          const tris = new Float32Array(g.attributes.position.array), n = tris.length / 9;
+          fdmUI.services.stage.showPart(tris);
+          const fr = new Uint32Array(n).map((_, i) => i % 64);
+          fdmUI.services.picker.setData({ face_regions: new Uint8Array(fr.buffer),
+            regions: Array.from({ length: 64 }, (_, i) => ({ id: i, kind: 'curved', area_mm2: 100, centroid: [0, 0, 40] })) });
+          const c = fdmUI.services.stage.canvas.getBoundingClientRect();
+          const t0 = performance.now();
+          let hits = 0;
+          for (let i = 0; i < 30; i++) if (fdmUI.services.picker.pickAt(c.left + c.width * (0.4 + i / 150), c.top + c.height * 0.5)) hits++;
+          const gl = fdmUI.services.stage.renderer.getContext();
+          const info = gl.getExtension('WEBGL_debug_renderer_info');
+          const gpu = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+          return { n, ms: (performance.now() - t0) / 30, hits, gpu };
+        }""")
+        assert perf["hits"] == 30, perf
+        # The pick costs one GPU draw: fast on a real graphics card. CI runners have none (SwiftShader / llvmpipe
+        # draw in software, ~75 ms here), so the time limit applies only on real hardware.
+        software = any(k in str(perf["gpu"]).lower() for k in ("swiftshader", "llvmpipe", "software"))
+        assert software or perf["ms"] < 40, perf
+        assert not errors, errors
+        where = "software renderer, not timed" if software else "GPU"
+        return f"{face}; {corner}; keyboard picked a hole; {perf['n']} triangles: {perf['ms']:.1f} ms per pick ({where})"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -525,6 +600,7 @@ def _run_suite(port: int, args) -> Run:
         page.goto(f"http://127.0.0.1:{port}/web/")
         run.step("engine boots", run.booted)
         run.step("new UI: sample and STEP land on Setup", lambda: check_new_ui(browser, port))
+        run.step("new UI: hover picker", lambda: check_new_ui_picker(browser, port))
         if args.quick:
             run_quick(run)
             run_extra_parts(run, args.parts)
