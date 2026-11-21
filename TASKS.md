@@ -1016,7 +1016,7 @@ Rules for every [UI] task:
 
 ### Phase 1: design system and style mockups (owner approval gate)
 
-- [ ] **T-510 P1** [UI] Design tokens, new base CSS, spacing lint. · plan: §1.5, §1.6, §16.6 · files: `web/tokens.css` (new), new base stylesheet, `core/tests/test_css_tokens.py` (new) · owner: —
+- [~] **T-510 P1** [UI] Design tokens, new base CSS, spacing lint. · plan: §1.5, §1.6, §16.6 · files: `web/tokens.css` (new), new base stylesheet, `core/tests/test_css_tokens.py` (new) · owner: Claude (`task/T-510-tokens`)
   - Do: tokens for colour (light **and dark** values; light default, a dark switch), spacing 4/8/12/16/24/32/48, type 12–28 px, two weights, radii, focus ring; layout grids from §1.6 (`216 rail │ stage │ 384 panel`, wide Options mode, full-canvas Start/Settings, `#portal-root`).
   - Done when: the lint test fails on any raw px in margin/padding/gap outside the token file; both themes render.
 - [ ] **T-511 P1** [UI] Component library and gallery. · plan: §1.5 (component list), §1.8 · files: `web/ui/*.js` (new), `design/gallery.html` (new) · owner: —
@@ -1028,7 +1028,7 @@ Rules for every [UI] task:
 
 ### Phase 2: engine foundations (parallel to Phase 1)
 
-- [ ] **T-520 P1** [UI] Material environment data, 1.0 nozzle, layer height, layer bonding. · plan: §6, §10.3 (point 4) · files: `core/fdmcore/data/presets.yaml`, `core/fdmcore/profile.py`, `core/fdmcore/strength.py`, tests · owner: —
+- [~] **T-520 P1** [UI] Material environment data, 1.0 nozzle, layer height, layer bonding. · plan: §6, §10.3 (point 4) · files: `core/fdmcore/data/presets.yaml`, `core/fdmcore/profile.py`, `core/fdmcore/strength.py`, tests · owner: Gemini Neon (`task/T-520-materials`), review: Claude
   - Do: sourced material fields `water`, `food_notes`, `abrasion`, `oil_fuel`, `solvent`, `skin` (unknown stays unknown); a `1.0` nozzle preset; `Profile` accepts a layer-height override; a sourced, capped `layer_bond_factor(layer_height, nozzle)` (bonding rises to ~0.5–0.6 × nozzle, falls above ~0.7 ×; no bonus without a source). Sources go in the PR description.
   - Done when: tests cover the new fields and the curve; `node tools/pyodide_check.mjs` passes.
 - [ ] **T-521 P1** [UI] Regions, feature edges and inside corners for 3D picking. · plan: §7 (on entering), §8 · files: `core/fdmcore/regions.py`, `core/fdmcore/features.py`, `core/fdmcore/api.py`, `core/fdmcore/mcp_server.py`, tests · owner: —
