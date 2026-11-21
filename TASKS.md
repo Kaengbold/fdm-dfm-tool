@@ -1193,7 +1193,7 @@ Rules for every [UI] task:
 
 ### Phase 6: simulate, fix, finish
 
-- [ ] **T-560 P1** [UI] Print simulation step. · plan: §12, §16.1 · files: `web/steps/simulate.js` · owner: —
+- [~] **T-560 P1** [UI] Print simulation step. · plan: §12, §16.1 · files: `web/steps/simulate.js` · owner: Claude (`task/T-560-simulate`)
   - Do: chosen-setup strip, prefilled print conditions, background slice with the browser OrcaSlicer (T-525) feeding G-code checks (spot heat, G-code warping), fallback to our slicer; "Have a sliced file?"; Run simulations; status + overlay switch (Heat, Warping actual/exaggerated, Internal stress, Overhangs); hook for the thermal model.
 - [ ] **T-561 P1** [UI] Problems & fixes step. · plan: §13 · files: `web/steps/problems.js`, `web/geometry.js` · owner: —
   - Do: grouped short rows (one per instance), click frames the feature; expanded: fixes first (Slicer/Design/Process, Add / Show steps), then More; design fixes shown even in slicer-only mode with a one-time "changes your model" confirm; **one pending batch** (design ghosts + setting old→new), nothing recomputes while picking; Confirm all changes → safe apply + quick re-check (strength at chosen settings, affected checks/simulations, orientation hint only) or "Apply without re-checking" (results go stale); New badges, Undo batch, Accept issue.
