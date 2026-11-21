@@ -26,6 +26,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from .heat import layer_heat
 from .holes import horizontal_holes
 from .mesh import Mesh
+from .messages import summarize_finding
 from .profile import Profile, load_data
 from .progress import report
 from .recommend import goal_plan, shape_plan
@@ -202,11 +203,12 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     plan, _ = shape_plan(profile, stats, findings)
     stats.update(_estimate(layers, profile, plan))
 
+    del stats["layer_times"]
+    findings += vase_findings(layers, tracker, profile, T, stats)
     for f in findings:
         f["impact"] = RULE_IMPACT.get(f["rule"], "info")
     findings.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
-    del stats["layer_times"]
-    findings += vase_findings(layers, tracker, profile, T, stats)
+    findings = [summarize_finding(f, profile) for f in findings]
     stats.update(
         round_share=_round_share(layers, T["seam"]["round_min"]),
         layer_heat={"z": [l.z for l in layers], "temp_c": heat.round(1).tolist(), "softening_c": profile.material["softening_c"]},
@@ -762,11 +764,13 @@ def _support_findings(layers, tracker: Tracker, profile: Profile, T: dict) -> li
         span = r.metrics["span"]
         if span > max_bridge:
             out.append(_finding("long_bridge", "warn",
-                                f"{span:.0f} mm bridge at {r.z0:.1f} mm will sag (comfortable for {profile.material['name']}: ≤ {max_bridge} mm)", r, profile))
+                                f"{span:.0f} mm bridge at {r.z0:.1f} mm will sag (comfortable for {profile.material['name']}: ≤ {max_bridge} mm)", r, profile,
+                                max_bridge_mm=max_bridge))
         elif span >= B["sag_from_mm"]:
             lo, hi = B["sag_mm"] if span < B["large_sag_from_mm"] else (0.4, 1.0)
             out.append(_finding("bridge_sag", "info",
-                                f"{span:.0f} mm wide hole/slot top at {r.z0:.1f} mm sags about {lo}–{hi} mm", r, profile))
+                                f"{span:.0f} mm wide hole/slot top at {r.z0:.1f} mm sags about {lo}–{hi} mm", r, profile,
+                                sag_mm=[lo, hi]))
     return out
 
 
@@ -826,13 +830,13 @@ def _feature_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]
             continue
         out.append(_finding("too_thin_to_print", "problem",
                             f"About {r.metrics['width']:.2f} mm thin at {_zrange(r)} — too thin for a {profile.nozzle} mm nozzle "
-                            f"(needs more than ~{F['vanish_below_nozzle'] * nozzle:.2f} mm), it won't print", r, profile))
+                            f"(needs more than ~{F['vanish_below_nozzle'] * nozzle:.2f} mm), it won't print", r, profile, nozzle=nozzle))
     for r in tracker.of("rough"):
         if r.volume < 1.0 or r.z1 - r.z0 < 2 * profile.layer_height:
             continue
         out.append(_finding("fine_detail_rough", "info",
                             f"Detail about {r.metrics['width']:.2f} mm wide at {_zrange(r)} prints rough or incomplete "
-                            f"(under {F['rough_below_nozzle'] * nozzle:.2f} mm)", r, profile))
+                            f"(under {F['rough_below_nozzle'] * nozzle:.2f} mm)", r, profile, nozzle=nozzle))
     for r in tracker.of("single_wall"):
         if r.z1 - r.z0 < F["single_wall_min_height_mm"]:
             continue
@@ -881,7 +885,7 @@ def _hole_findings(tracker: Tracker, profile: Profile, T: dict) -> list[dict]:
         d = r.metrics["min_d"]
         if d < min_d:
             out.append(_finding("hole_closes", "problem",
-                                f"Ø{d:.1f} mm hole at {_zrange(r)} — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up", r, profile))
+                                f"Ø{d:.1f} mm hole at {_zrange(r)} — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up", r, profile, nozzle=nozzle))
         else:
             out.append(_finding("small_hole_undersized", "warn",
                                 f"Ø{d:.1f} mm hole prints about {lo}–{hi} mm too small — a screw or pin of that size won't fit without drilling"
@@ -1043,7 +1047,9 @@ def setup_findings(profile: Profile, settings: dict | None = None, T: dict | Non
     if mat.get("abrasive") and not prn.get("hardened_nozzle"):
         out.append(_finding("hardened_nozzle_required", "problem",
                             f"{mat['name']} wears out the standard {prn['name']} nozzle — fit a hardened one first"))
-    return out
+    for f in out:
+        f.setdefault("impact", RULE_IMPACT.get(f["rule"], "info"))
+    return [summarize_finding(f, profile) for f in out]
 
 
 def vase_findings(layers: list[Layer], tracker: Tracker, profile: Profile, T: dict, stats: dict) -> list[dict]:
@@ -1268,7 +1274,7 @@ def _sideways_hole_findings(mesh: Mesh, profile: Profile, T: dict, findings: lis
         if d < min_d:
             out.append(_finding("hole_closes", "problem",
                                 f"Sideways Ø{d:.1f} mm hole {where} — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up",
-                                bbox=h["bbox"], **metrics))
+                                bbox=h["bbox"], nozzle=nozzle, **metrics))
         elif d < B["sag_from_mm"]:
             lo, hi = H["typical_undersize_mm"]
             out.append(_finding("small_hole_undersized", "warn",
@@ -1642,7 +1648,8 @@ def _bed_findings(layers: list[Layer], profile: Profile, T: dict, above=None) ->
                             f"Only {first.area:.0f} mm² touches the bed (largest layer {max_area:.0f} mm²)", bbox=bed_bbox, bed_area=first.area))
     width = _min_width(first.convex_hull)
     if width > 0 and height / width > S["tip_aspect"]:
-        out.append(_finding("tipping_risk", "warn", f"{height:.0f} mm tall on a base only {width:.0f} mm wide", bbox=bed_bbox))
+        out.append(_finding("tipping_risk", "warn", f"{height:.0f} mm tall on a base only {width:.0f} mm wide", bbox=bed_bbox,
+                            height_mm=round(height, 1), base_width_mm=round(width, 1)))
 
     # Warping: long footprints in shrinking materials lift at their corners.
     W = T["warping"]
@@ -1697,10 +1704,10 @@ def _weak_findings(layers: list[Layer], tracker: Tracker, profile: Profile, T: d
     for r in tracker.of("slender"):
         h, w = r.z1 - r.z0, r.metrics["width"]
         if h >= P["wobble_aspect"] * w and h > 10:
-            out.append(_finding("tall_thin_feature", "warn", f"Slender feature ~{w:.1f} mm wide and {h:.0f} mm tall wobbles while printing", r, profile))
+            out.append(_finding("tall_thin_feature", "warn", f"Slender feature ~{w:.1f} mm wide and {h:.0f} mm tall wobbles while printing", r, profile, height_mm=round(h, 1)))
         if h >= P["min_aspect"] * w and r.metrics["length"] < 2 * P["max_width_mm"] and _free_top(r, layers):
             out.append(_finding("weak_upright_pin", "warn",
-                                f"Pin/post ~{w:.1f} mm wide stands {h:.0f} mm upright — the layers run across it, so it snaps easily", r, profile))
+                                f"Pin/post ~{w:.1f} mm wide stands {h:.0f} mm upright — the layers run across it, so it snaps easily", r, profile, height_mm=round(h, 1)))
     # Necks: a layer much smaller than the part above and below it.
     areas = np.array([l.geom.area for l in layers])
     zs = np.array([l.z for l in layers])
@@ -1715,7 +1722,8 @@ def _weak_findings(layers: list[Layer], tracker: Tracker, profile: Profile, T: d
         g = layers[i].geom
         out.append(_finding("thin_neck", "warn",
                             f"Narrow neck at {zs[i]:.1f} mm ({areas[i]:.0f} mm² between bigger sections) — everything above hangs on a few layers",
-                            bbox=_layer_bbox(g, layers[run[0]].z, layers[run[-1]].z)))
+                            bbox=_layer_bbox(g, layers[run[0]].z, layers[run[-1]].z),
+                            area_mm2=round(float(areas[i]), 1), z_mm=round(float(zs[i]), 1)))
     return out
 
 

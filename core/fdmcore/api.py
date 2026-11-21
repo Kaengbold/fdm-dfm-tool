@@ -23,6 +23,7 @@ from .checks import RULE_IMPACT, orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh, mesh_health, to_binary_stl
+from .messages import summarize_finding
 from .orientation import OrientationResult, OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
 from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
@@ -2116,7 +2117,9 @@ def _heat_findings(tp, h, w: dict, pts: np.ndarray, p: Profile, load_bearing, re
                             "detail": f"{where} each new layer lands on plastic that has cooled a lot, so the layers fuse only "
                                       f"partly (a rough estimate: about {bond:.0%} of a full bond). The part is weaker along its "
                                       f"layers here" + (", where it carries load." if carrying else ".") + why + guess})
-    return out
+    for f in out:
+        f.setdefault("impact", RULE_IMPACT.get(f["rule"], "info"))
+    return [summarize_finding(f, p) for f in out]
 
 
 def _printed(model):
@@ -3218,8 +3221,10 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         result["findings"].append({"rule": "print_may_fail", "severity": "warn", "bbox": None,
                                    "metrics": {"score": risk["score"], "hold": risk["hold"]},
                                    "detail": "The print may come loose or fall over on the bed: " + "; ".join(risk["reasons"])})
-    for f in result["findings"]:  # findings built here, outside run_checks, need one too
+    for i, f in enumerate(result["findings"]):  # findings built here, outside run_checks, need impact + short text
         f.setdefault("impact", RULE_IMPACT.get(f["rule"], "info"))
+        if "finding_id" not in f:
+            result["findings"][i] = summarize_finding(f, p)
     findings = [explain_finding(f, mode) for f in result["findings"]]
     findings = emphasize_for_goal(findings, p.goal)
     return {
@@ -3380,7 +3385,8 @@ def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotati
             continue
         pts = placed[hit].reshape(-1, 3)
         out.append({"rule": "support_marks", "severity": "problem", "impact": "surface",
-                    "bbox": [pts.min(axis=0).tolist(), pts.max(axis=0).tolist()], "metrics": {"area": float(areas[hit].sum())},
+                    "bbox": [pts.min(axis=0).tolist(), pts.max(axis=0).tolist()],
+                    "metrics": {"area": float(areas[hit].sum()), "clean_face": True},
                     "detail": f"Supports would touch the face you want clean (~{areas[hit].sum():.0f} mm²) — pick another orientation or accept marks there"})
     return out
 
@@ -3477,15 +3483,21 @@ def setup_check(profile: dict | None = None, settings: dict | None = None) -> di
 
 
 def explain_finding(finding: dict, mode: str = "both") -> dict:
-    rule = load_data("rules")["rules"].get(finding["rule"], {})
+    has_id = bool(finding.get("finding_id"))
+    base = finding if ("message" in finding and has_id) else summarize_finding(finding)
+    rule = load_data("rules")["rules"].get(base["rule"], {})
     domains = MODES[mode]
     all_fixes = rule.get("fixes", [])
-    fixes = [f for f in all_fixes if f["domain"] in domains]
+    fixes = [dict(f) for f in all_fixes if f["domain"] in domains]
     if mode == "print":
         fixes.sort(key=lambda f: {"slicer": 0, "process": 1}[f["domain"]])
+    if has_id:
+        fid = base["finding_id"]
+        for fx in fixes:
+            fx["finding_id"] = fid
     return {
-        **finding,
-        "title": rule.get("title", finding["rule"]),
+        **base,
+        "title": rule.get("title", base["rule"]),
         "why": rule.get("why", ""),
         "fixes": fixes,
         # Fix kinds left out by the mode, so the UI can say "more fixes if you can change the model".
@@ -3657,7 +3669,12 @@ def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
             "nozzle": nozzle,
             "print_time_min": r["stats"]["print_time_min"],
             "filament_g": r["stats"]["filament_g"],
-            "issues": [{"rule": f["rule"], "title": f["title"], "detail": f["detail"]} for f in issues],
+            "issues": [{
+                "rule": f["rule"], "title": f["title"], "detail": f["detail"],
+                "finding_id": f["finding_id"], "short_title": f["short_title"],
+                "one_liner": f["one_liner"], "instance_label": f["instance_label"],
+                "message": f["message"],
+            } for f in issues],
             "current": nozzle == base.nozzle,
             "walls": goal_plan(p)["walls"],
             **lost_detail(detail_layers, float(nozzle)),
