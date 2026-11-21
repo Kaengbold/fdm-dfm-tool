@@ -17,6 +17,7 @@
  "gcode.py",
  "heat.py",
  "holes.py",
+ "importance.py",
  "kinematics.py",
  "mesh.py",
  "orientation.py",

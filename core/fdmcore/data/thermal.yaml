@@ -146,6 +146,26 @@ window:
     balanced: {sag_shift_c: 0, min_bond: 0.25}
     strength: {sag_shift_c: 0, min_bond: 0.4}     # bonding, not shape: the sag limit stays
   intents:                   # regions the user marks
-    cosmetic:           {sag_shift_c: -10, min_bond_shift: 0}
-    dimension_critical: {sag_shift_c: -10, min_bond_shift: 0}
-    load_bearing:       {sag_shift_c: 0, min_bond_shift: 0.35}
+    cosmetic:           {sag_shift_c: -10}
+    dimension_critical: {sag_shift_c: -10}
+    load_bearing:       {sag_shift_c: 0}           # and importance weight 1 (the strictest bonding goal)
+
+# How much each spot matters (importance.py, T-475): a weight from floor to 1 that moves only the bonding
+# goal of the window (the sag limit stays for every spot). Estimated, not tuned; T-477 tunes them.
+importance:
+  floor: 0.2                 # no spot weighs less
+  ordinary: 0.5              # an outer wall with nothing special: the goal's own min_bond
+  bond_relax: 0.5            # at the floor the bonding goal is this share of the goal's min_bond
+  bond_strict_shift: 0.35    # at weight 1 it is this much above it
+  guess:                     # no loads entered: guessed from the shape
+    weights: {inside: 0.2, wall: 0.5, hole: 0.7, corner: 0.7, pin: 0.9, root: 1.0}
+    voxels: 60000            # grid size for the guess
+    thin_mm: 5               # a section at most this thick ...
+    thin_area_mm2: 150       # ... and this big is a thin feature (pin, peg, rib, fin)
+    tall_ratio: 1            # it sticks up (a pin, peg or rib) when it runs at least its thickness ...
+    min_tall_mm: 2           # ... and this far
+    free_share: 0.9          # ... and almost all of it ends in the air (a hole's side walls don't)
+    root_mm: 3               # its root: this far up the feature and down into what it stands on
+    wall_mm: 1.2             # outer walls: plastic this close to the surface
+    hole_radius_mm: [0.75, 3.5]  # screw and insert holes (M1.5 to about M6 / insert size)
+    hole_ring_mm: 2          # the plastic this far around such a hole holds the screw

@@ -543,14 +543,25 @@ def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str =
 
 @server.tool()
 def heat_model(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", fine: bool = False,
-               goal: str = "balanced", intents: list[dict] | None = None) -> dict:
+               goal: str = "balanced", intents: list[dict] | None = None, loads: list[dict] | None = None) -> dict:
     """Heat simulation over the G-code from load_gcode: how hot each spot still is when the next layer covers it
     and how well each joint between layers bonds. ``findings``: spots that stay too hot (sag, blobs), joints too
     cold to bond well, and slowdowns for cooling that aren't needed. ``goal`` (balanced / strength / speed /
     material) moves the limits; ``intents`` = [{"kind": "cosmetic" | "dimension_critical" | "load_bearing",
-    "point": [x, y, z], "radius": mm}] tightens them where they are. ``hottest`` lists the worst spots;
-    ``fine`` is slower and more exact."""
-    return _clean(api.heat_model(up, _profile(printer, material, nozzle, goal), fine, intents))
+    "point": [x, y, z], "radius": mm}] tightens them where they are. ``loads`` (as for check_strength) say
+    where the layers must bond well; without them that is guessed from the shape (``guessed``, see
+    spot_importance). ``hottest`` lists the worst spots; ``fine`` is slower and more exact."""
+    return _clean(api.heat_model(up, _profile(printer, material, nozzle, goal), fine, intents, loads))
+
+
+@server.tool()
+def spot_importance(up: list[float], loads: list[dict] | None = None, printer: str = "bambu_p1s", material: str = "pla",
+                    nozzle: str = "0.4", goal: str = "balanced", intents: list[dict] | None = None) -> dict:
+    """How much each spot of the part matters for bonding between layers (weight 0.2–1), which heat_model uses
+    to be strict where it counts. From ``loads`` (as for check_strength) when given, else guessed from the shape
+    (``guessed``: pins, ribs and their roots, sharp inside corners, screw holes, outer walls). ``areas`` lists the
+    important spots with the reason in plain words; per-spot arrays come as bytes."""
+    return _clean(api.importance(up, loads, _profile(printer, material, nozzle, goal), intents))
 
 
 @server.tool()
@@ -873,6 +884,7 @@ API_TOOLS = {
     "set_cad_checks": "set_cad_checks",
     "load_gcode": "load_gcode",
     "heat_model": "heat_model",
+    "importance": "spot_importance",
     "pause_gcode": "add_pause_to_gcode",
     "setup_check": "check_setup",
     "tolerance": "printer_tolerance",

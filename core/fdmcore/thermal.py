@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import progress
+from . import importance, progress
 from .gcode import LAYER_TIME, PART_KINDS, SOLID, SUPPORT, WALL, Toolpath, _role
 from .kinematics import Timing, nozzle_at
 from .profile import Profile, load_data
@@ -479,7 +479,7 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
 INTENTS = ("cosmetic", "dimension_critical", "load_bearing")
 
 
-def window(h: Heat, profile: Profile, intents: dict | None = None) -> dict:
+def window(h: Heat, profile: Profile, intents: dict | None = None, weight: np.ndarray | None = None) -> dict:
     """The temperature window of every node, and which parts of the print leave it:
 
     - too hot: the node is above its sag limit when the next layer lands (stricter on bridges and
@@ -488,6 +488,8 @@ def window(h: Heat, profile: Profile, intents: dict | None = None) -> dict:
     - needless slowdown: too cold where the slicer slowed the layer down for cooling.
 
     The profile's goal and the user's design intents (``intents``: kind -> node mask) move the limits.
+    ``weight`` (importance.py, per node; default: every spot ordinary) sets how strict the bonding goal
+    is: relaxed where a spot hardly matters, stricter where it does; spots marked load-bearing weigh 1.
     Each column of the part is judged in bands of a few layers by the band's median, so a single cell
     doesn't raise an alarm; every node of a failing band is flagged."""
     data = load_data("thermal")
@@ -497,11 +499,12 @@ def window(h: Heat, profile: Profile, intents: dict | None = None) -> dict:
     supported = float(profile.material["softening_c"]) + float(load_data("thresholds")["cooling"]["hot_margin_c"])
     spans = h.overhang >= win["overhang_share"]
     limit = np.where(spans, _value(mat["no_sag_c"]), supported) + goal["sag_shift_c"]
-    min_bond = np.full(len(h.layer), float(goal["min_bond"]))
+    weight = np.full(len(h.layer), float(importance.settings()["ordinary"])) if weight is None else np.asarray(weight, float)
     for kind, mask in (intents or {}).items():
-        shift = win["intents"][kind]
-        limit = limit + np.where(mask, shift["sag_shift_c"], 0.0)
-        min_bond = min_bond + np.where(mask, shift["min_bond_shift"], 0.0)
+        limit = limit + np.where(mask, win["intents"][kind]["sag_shift_c"], 0.0)
+        if kind == "load_bearing":
+            weight = np.where(mask, 1.0, weight)
+    min_bond = importance.bond_goal(float(goal["min_bond"]), weight)
 
     band = h.column.astype(np.int64) * (int(h.layer.max()) + 1) + h.layer // int(win["band_layers"])
     keys, inv = np.unique(band, return_inverse=True)
@@ -526,4 +529,4 @@ def window(h: Heat, profile: Profile, intents: dict | None = None) -> dict:
     too_hot = np.nan_to_num(hot_margin, nan=-1.0) > 0
     too_cold = (np.nan_to_num(bond_short, nan=1.0) < 0) | brief
     needless = too_cold & (band_median(h.cooled) >= 0.5)
-    return {"limit_c": limit, "min_bond": min_bond, "too_hot": too_hot, "too_cold": too_cold, "needless": needless}
+    return {"limit_c": limit, "min_bond": min_bond, "weight": weight, "too_hot": too_hot, "too_cold": too_cold, "needless": needless}
