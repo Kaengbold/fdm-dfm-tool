@@ -1815,14 +1815,19 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
 HOT_SPOTS = 20  # heat_model lists this many of the hottest spots
 
 
-def heat_model(up, profile: dict | None = None, fine: bool = False) -> dict:
+def heat_model(up, profile: dict | None = None, fine: bool = False, intents: list[dict] | None = None,
+               loads: list[dict] | None = None) -> dict:
     """Heat network over the loaded G-code (thermal.py): how hot every spot is when the next layer
-    covers it, and how long each joint between layers stays above the glass transition. ``fine``:
-    smaller cells and more layers in full detail (slower). Per spot, as float32 bytes in the oriented
-    part's frame: ``points`` (x, y, z), ``cover_c``, ``cover_s``, ``above_tg_s`` and ``joint_c``
-    (T_int at each of ``delays_s`` after the joint formed)."""
+    covers it, how well each joint between layers bonds, and where that leaves the temperature window
+    (``findings``: too hot, too cold to bond, or slowed down for cooling it doesn't need). The profile's
+    goal moves the window; ``intents`` = [{"kind": cosmetic / dimension_critical / load_bearing,
+    "point", "radius"}] (oriented part's frame) tighten it where they are, and the strength check's
+    ``loads`` count as load-bearing. ``fine``: smaller cells and more layers in full detail (slower).
+    Per spot, as float32 bytes in the oriented part's frame: ``points`` (x, y, z), ``cover_c_all``,
+    ``cover_s``, ``above_tg_s``, ``bond``, ``joint_c`` (T_int at each of ``delays_s``) and ``window``
+    (uint8: 0 fine, 1 too hot, 2 too cold, 3 needless slowdown)."""
     from .kinematics import timing
-    from .thermal import DELAYS_S, simulate
+    from .thermal import DELAYS_S, INTENTS, simulate, window
 
     s = _require()
     p = Profile.from_dict(profile)
@@ -1836,6 +1841,15 @@ def heat_model(up, profile: dict | None = None, fine: bool = False) -> dict:
     with progress.stage(0.05, 1):
         h = simulate(tp, tm, p, "fine" if fine else "quick")
     pts = _gcode_to_oriented(s.gcode["rot"])(np.column_stack([h.xy, h.z]))
+    marks = [*(intents or []), *({"kind": "load_bearing", "point": ld["point"], "radius": ld.get("radius", 5.0)} for ld in loads or [])]
+    masks = {}
+    for mark in marks:
+        if mark["kind"] not in INTENTS:
+            raise ValueError(f"Unknown design intent: {mark['kind']} (use one of {', '.join(INTENTS)})")
+        near = np.linalg.norm(pts - np.asarray(mark["point"], float), axis=1) <= float(mark.get("radius", 5.0)) + h.cell_mm
+        masks[mark["kind"]] = masks.get(mark["kind"], np.zeros(len(pts), bool)) | near
+    w = window(h, p, masks)
+    state = np.select([w["too_hot"], w["needless"], w["too_cold"]], [1, 3, 2], 0)
     covered = np.isfinite(h.cover_c)
     hottest = np.flatnonzero(covered)[np.argsort(-h.cover_c[covered])][:HOT_SPOTS]
     f32 = lambda a: np.asarray(a, np.float32).tobytes()
@@ -1848,8 +1862,50 @@ def heat_model(up, profile: dict | None = None, fine: bool = False) -> dict:
                      "cover_s": round(float(h.cover_s[i]), 1)} for i in hottest],
         "delays_s": list(DELAYS_S),
         "points": f32(pts), "cover_c_all": f32(h.cover_c), "cover_s": f32(h.cover_s), "above_tg_s": f32(h.above_tg_s),
-        "joint_c": f32(h.joint_c),
+        "joint_c": f32(h.joint_c), "bond": f32(h.bond), "window": np.asarray(state, np.uint8).tobytes(),
+        "findings": _heat_findings(tp, h, w, pts, p, masks.get("load_bearing")),
     }
+
+
+def _heat_findings(tp, h, w: dict, pts: np.ndarray, p: Profile, load_bearing) -> list[dict]:
+    """One finding per stretch of a column (layers in a row) that leaves the window, in plain words."""
+    from .gcode import LAYER_TIME
+
+    name = p.material["name"]
+    out = []
+    for rule, flag in (("heat_too_hot", w["too_hot"]), ("heat_needless_slowdown", w["needless"]),
+                       ("heat_weak_bond", w["too_cold"] & ~w["needless"])):
+        for col in np.unique(h.column[flag]):
+            nodes = np.flatnonzero(flag & (h.column == col))
+            layers = np.unique(h.layer[nodes])
+            for run in np.split(layers, np.flatnonzero(np.diff(layers) > 1) + 1):
+                m = nodes[np.isin(h.layer[nodes], run)]
+                lo, hi = pts[m].min(axis=0), pts[m].max(axis=0)
+                half = h.cell_mm / 2
+                bbox = [[float(lo[0] - half), float(lo[1] - half), float(lo[2])], [float(hi[0] + half), float(hi[1] + half), float(hi[2])]]
+                where = f"At {lo[2]:.1f}–{hi[2]:.1f} mm" if hi[2] - lo[2] >= 0.05 else f"At {lo[2]:.1f} mm"
+                if rule == "heat_too_hot":
+                    t, limit = float(np.nanmax(h.cover_c[m])), float(np.median(w["limit_c"][m]))
+                    out.append({"rule": rule, "severity": "warn", "bbox": bbox, "metrics": {"temp_c": round(t), "limit_c": round(limit)},
+                                "detail": f"{where} this spot is still about {t:.0f} °C when the next layer goes on. {name} holds its "
+                                          f"shape there only up to about {limit:.0f} °C, so it can sag or blob."})
+                    continue
+                bond = float(np.nanmedian(h.bond[m]))
+                metrics = {"bond": round(bond, 2), "min_bond": round(float(np.median(w["min_bond"][m])), 2)}
+                if rule == "heat_needless_slowdown":
+                    lines = np.isin(tp.layer, run) & (tp.cause == LAYER_TIME)
+                    length = np.linalg.norm(tp.p1[lines] - tp.p0[lines], axis=1)
+                    minutes = float(np.sum(length / tp.speed[lines] - length / tp.set_speed[lines])) / 60
+                    out.append({"rule": rule, "severity": "info", "bbox": bbox, "metrics": {**metrics, "minutes": round(minutes, 1)},
+                                "detail": f"{where} the slicer slows down so the layers can cool (about {minutes:.1f} min), but they "
+                                          f"already end up too cool to bond well. Print these layers faster, or with less fan."})
+                    continue
+                carrying = load_bearing is not None and bool(load_bearing[m].any())
+                out.append({"rule": rule, "severity": "warn" if carrying else "info", "bbox": bbox, "metrics": metrics,
+                            "detail": f"{where} each new layer lands on plastic that has cooled a lot, so the layers fuse only "
+                                      f"partly (a rough estimate: about {bond:.0%} of a full bond). The part is weaker along its "
+                                      f"layers here" + (", where it carries load." if carrying else ".")})
+    return out
 
 
 def _printed(model):
