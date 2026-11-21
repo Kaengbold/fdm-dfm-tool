@@ -2037,8 +2037,65 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
         return marks[id(h)]
 
     r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
-    imp = _importance_map(up, p, loads)
+    return _cooling_view(r, _importance_map(up, p, loads))
 
+
+def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dict] | None = None,
+                   intents: list[dict] | None = None, fine: bool = False) -> dict:
+    """Option B (opt-in): the cooling plan written into the user's own G-code (gcode_rewrite.py): only speeds,
+    part fan commands and cooling park moves change; the original file stays theirs. ``data``: the plain
+    G-code loaded with load_gcode. Before it is offered it is read back and checked (same paths and plastic
+    per layer, machine speed and flow limits) and simulated again: no spot may end up outside its window that
+    wasn't before. ``ok`` False: no ``data``, and ``problems`` says why. Else ``data`` (the new G-code),
+    ``minutes`` (before, after) and ``changes``."""
+    from .gcode import parse
+    from .gcode_rewrite import check, rewrite
+    from .kinematics import timing
+    from .thermal import simulate, window
+    from .thermal_opt import _same, optimize
+
+    p = Profile.from_dict(profile)
+    loaded = _toolpath_for(up, "G-code optimization")
+    if isinstance(data, (bytes, bytearray)) and data[:2] == b"PK":
+        raise ValueError("Plain .gcode only for now: export the G-code from the slicer (not the .gcode.3mf project)")
+    tp = parse(data, loaded.settings)
+    if len(tp.p0) != len(loaded.p0) or not np.allclose(tp.p0, loaded.p0, atol=1e-3):
+        raise ValueError("This isn't the G-code that is loaded: load it first (load_gcode)")
+    marks = {}
+
+    def mark(h):
+        if id(h) not in marks:
+            marks.clear()
+            marks[id(h)] = _spot_marks(h, up, p, intents, loads)
+        return marks[id(h)]
+
+    weight_at, intents_at = (lambda h: mark(h)[2]), (lambda h: mark(h)[1])
+    tier = "fine" if fine else "quick"
+    r = optimize(tp, p, weight_at, intents_at, tier)
+    if not r["gcode"]["plan"]:
+        return {"ok": False, "problems": ["Nothing to change. " + _cooling_view(r, _importance_map(up, p, loads))["summary"][0]]}
+    new = rewrite(data, tp, r["plans"]["gcode"], [f"Spots too hot {r['before']['too_hot']} -> {r['gcode']['too_hot']}, "
+                                                  f"too cold to bond {r['before']['too_cold']} -> {r['gcode']['too_cold']} (estimated limits)."])
+    problems = check(tp, new.text, new.toolpath)
+    if not problems:
+        back = parse(new.text, loaded.settings)
+        h = simulate(back, timing(back), p, tier)
+        before, win0 = r["heat"]["before"], r["windows"]["before"]
+        win = window(h, p, intents_at(h), weight_at(h))
+        worse_hot = win["too_hot"] & ~_same(win0["too_hot"], h, before)
+        worse_cold = win["too_cold"] & ~_same(win0["too_cold"], h, before)
+        if worse_hot.any() or worse_cold.any():
+            problems.append(f"The heat check of the new file finds {int(worse_hot.sum())} spots newly too hot and "
+                            f"{int(worse_cold.sum())} newly too cold to bond")
+    if problems:
+        return {"ok": False, "problems": problems}
+    return {"ok": True, "data": new.text.encode(), "minutes": [round(m, 1) for m in new.minutes],
+            "changes": {"speed_lines": new.changed_lines, "fan_commands": new.fan_commands, "park_moves": new.parks,
+                        "kept_near_slicer_speeds": new.clamped}}
+
+
+def _cooling_view(r: dict, imp) -> dict:
+    """thermal_opt.optimize's result as optimize_cooling shows it."""
     def view(part: dict) -> dict:
         return {"print_min": round(part["print_s"] / 60, 1), **{k: part[k] for k in ("too_hot", "too_cold", "needless", "bond_median")},
                 "weighted_too_hot": round(part["weighted_hot"], 1), "weighted_too_cold": round(part["weighted_cold"], 1)}
@@ -3903,6 +3960,7 @@ METHODS = {
     "heat_model": heat_model,
     "importance": importance,
     "optimize_cooling": optimize_cooling,
+    "optimize_gcode": optimize_gcode,
     "pause_gcode": pause_gcode,
     "setup_check": setup_check,
     "tolerance": tolerance,
