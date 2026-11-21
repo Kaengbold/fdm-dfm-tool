@@ -894,7 +894,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Goals: **Fastest / Balanced / Strongest**, which move the window. Design-intent tags (cosmetic / load-bearing / dimension-critical) adjust it per region.
   - New findings ("spot stays too hot", "spot is overcooled, weak bonding", "slowdown that isn't needed") need `rules.yaml` entries, each with a slicer or process fix, in plain words.
   - Done when: the thin pin is flagged too hot, a thick load-bearing wall under 100 % fan is flagged too cold, and a block passes.
-- [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: —
+- [ ] **T-475 P2** [TO] Strength guides the priorities. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py` (`failure_indices`), `core/fdmcore/api.py` · owner: Claude (task/T-475-strength-priorities)
   - Do: a weight for each node from three inputs:
     - the strength check's "Layer" index (tension across layers, shear along them) for the user's loads;
     - design-intent tags;
