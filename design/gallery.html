@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Component gallery</title>
+<!-- T-511: every component of the new UI (web/ui/) in style A, with its states. ?theme=dark for dark, ?demo=1 opens the
+     radial menu, popover and a toast at load (for screenshots: tools/screenshot_gallery.py). Keyboard works as in the app. -->
+<link rel="stylesheet" href="../web/tokens.css">
+<link rel="stylesheet" href="../web/ui/base.css">
+<link rel="stylesheet" href="../web/ui/components.css">
+<style>
+  body { height: auto; min-height: 100%; }
+  .gallery { max-width: 1180px; margin: 0 auto; padding: var(--s-6); display: grid; gap: var(--s-6); }
+  .gallery > header { display: flex; align-items: baseline; gap: var(--s-4); }
+  .sec { display: grid; gap: var(--s-3); padding: var(--s-5); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+  .sec h2 { font-size: var(--fs-lg); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); }
+  .cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-5); align-items: start; }
+  .cols .panel-w, .two .panel-w { width: auto; }
+  .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-5); align-items: start; }
+  .panel-w { width: var(--panel-w); display: grid; gap: var(--s-3); }
+  .stagebox { position: relative; height: 260px; border-radius: var(--r); background: linear-gradient(var(--stage-top), var(--stage-bottom)); }
+  .opts { display: grid; grid-template-columns: 120px repeat(3, minmax(200px, 1fr)); gap: var(--s-3); }
+  .opts .labels { display: grid; grid-template-rows: 112px repeat(4, 33px); align-items: center; font-size: var(--fs-sm); color: var(--text-3); }
+  .opts .labels span:first-child { visibility: hidden; }
+  .force-hint { font-size: var(--fs-xs); }
+</style>
+</head>
+<body>
+<main class="gallery" id="gallery">
+  <header><h1>Components</h1><span class="hint">Style A · Workbench · light and dark (?theme=dark)</span></header>
+</main>
+<script type="module">
+import { h } from "../web/ui/dom.js";
+import { Button } from "../web/ui/button.js";
+import { ChoiceCards, SegmentedControl } from "../web/ui/choice.js";
+import { ToggleChip, ValueChip } from "../web/ui/chip.js";
+import { Select } from "../web/ui/select.js";
+import { NumberField } from "../web/ui/numberfield.js";
+import { Disclosure } from "../web/ui/disclosure.js";
+import { openRadialMenu } from "../web/ui/radialmenu.js";
+import { openPopover3D } from "../web/ui/popover3d.js";
+import { OptionColumn, ConstraintsBar } from "../web/ui/options.js";
+import { FindingRow, PendingBar } from "../web/ui/finding.js";
+import { ProgressCard } from "../web/ui/progress.js";
+import { showToast, openModal } from "../web/ui/overlay.js";
+import { StepRail } from "../web/ui/steprail.js";
+
+const Q = new URLSearchParams(location.search);
+document.documentElement.dataset.theme = Q.get("theme") === "dark" ? "dark" : "light";
+const root = document.getElementById("gallery");
+const section = (title, ...children) => { const s = h("section", { class: "sec", "aria-label": title }, h("h2", {}, title), ...children); root.append(s); return s; };
+
+// Buttons, every variant and state.
+const hover = Button({ label: "Hover", variant: "secondary" }); hover.style.borderColor = "var(--line-strong)";
+section("Button",
+  h("div", { class: "row" }, Button({ label: "Next", variant: "primary" }), Button({ label: "Manage", variant: "secondary" }),
+    Button({ label: "Back", variant: "ghost" }), Button({ label: "Delete all", variant: "danger" }), Button({ label: "Small", size: "small" }),
+    Button({ iconPath: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z", title: "Dark mode", variant: "ghost" })),
+  h("div", { class: "row" }, hover, Button({ label: "Disabled", variant: "primary", disabled: true }), Button({ label: "Disabled", disabled: true })));
+
+// ChoiceCards and SegmentedControl.
+section("ChoiceCard · SegmentedControl",
+  h("div", { class: "two" },
+    h("div", { class: "panel-w" }, h("span", { class: "ui-label" }, "What matters most?"),
+      ChoiceCards({ label: "What matters most?", value: "balanced", options: [
+        { value: "balanced", title: "Balanced", line: "Strong enough, least plastic." }, { value: "strong", title: "Strong" },
+        { value: "fast", title: "Fast" }, { value: "light", title: "Light" }, { value: "quality", title: "Quality" }, { value: "x", title: "Disabled", disabled: true }] })),
+    h("div", { class: "panel-w" }, h("span", { class: "ui-label" }, "What can you change?"),
+      SegmentedControl({ label: "What can you change?", value: "slicer", options: [{ value: "slicer", label: "Slicer settings" }, { value: "design", label: "The design" }, { value: "both", label: "Both" }] }),
+      h("span", { class: "ui-label" }, "Temperature"),
+      ChoiceCards({ label: "Temperature", columns: 3, value: "sun", options: [
+        { value: "in", title: "Indoors", meta: "~20 °C" }, { value: "warm", title: "Warm room", meta: "~40 °C" }, { value: "sun", title: "Sun", meta: "~50 °C" }] }))));
+
+// Chips.
+section("Chip",
+  h("div", { class: "row" }, ...["Water", "Food or drinks", "Sun and rain", "Oil and fuel", "None of these"].map((l, i) => ToggleChip({ label: l, pressed: i === 0 || i === 2 }))),
+  h("div", { class: "row" }, ValueChip({ label: "Material: PLA" }), ValueChip({ label: "Nozzle: 0.4" })));
+
+// Select: decide later, value with badge and clear, disabled, plus an open one for the screenshot.
+const materials = [{ value: "pla", label: "PLA", badge: "Owned" }, { value: "petg", label: "PETG", badge: "Owned" }, { value: "asa", label: "ASA" },
+  { value: "pc", label: "PC" }, { value: "pa_cf", label: "PA-CF", hint: "hardened nozzle" }, { value: "tpu", label: "TPU 95A" }];
+const openSelect = Select({ label: "Material", options: materials, value: "petg", decideLater: true, clearable: true });
+section("Select",
+  h("div", { class: "cols" },
+    h("div", { class: "panel-w" }, h("span", { class: "ui-label" }, "Material · decide later"), Select({ label: "Material", options: materials, decideLater: true })),
+    h("div", { class: "panel-w" }, h("span", { class: "ui-label" }, "Locked · clearable"), openSelect),
+    h("div", { class: "panel-w" }, h("span", { class: "ui-label" }, "Disabled"), Select({ label: "Printer", options: [{ value: "p1s", label: "Bambu Lab P1S" }], value: "p1s", disabled: true }))),
+  h("div", { style: { height: "250px" } }));
+
+// NumberField: N with weight hint, MPa with area, an error.
+const kg = (n, u) => u === "N" ? `≈ ${(n / 9.81).toFixed(1)} kg of weight` : `${n} MPa × 412 mm² = ${Math.round(n * 412).toLocaleString()} N`;
+section("NumberField",
+  h("div", { class: "cols" },
+    NumberField({ label: "Force", value: 50, units: [{ value: "N", label: "N" }, { value: "MPa", label: "MPa" }], convert: kg }),
+    NumberField({ label: "Force on an edge", value: 50, units: [{ value: "N", label: "N" }, { value: "MPa", label: "MPa", reason: "Pick a face to use MPa" }], unit: "MPa", convert: kg }),
+    NumberField({ label: "Temperature", value: "-300", units: [{ value: "C", label: "°C" }], min: -50, max: 200 })));
+
+// Disclosure.
+section("Disclosure",
+  h("div", { class: "panel-w" },
+    Disclosure({ label: "Print conditions", summary: "Open · bed 80 · room 22 °C", content: "Values come from the printer and material." }),
+    Disclosure({ label: "More", open: true, content: "The top of a sideways hole sags because it's printed in the air; a teardrop top or hole compensation fixes it." })));
+
+// RadialMenu and Popover3D (opened inside their stage boxes on ?demo=1).
+const radialStage = h("div", { class: "stagebox", tabindex: "0", "aria-label": "3D stage (click to open the menu)" });
+const popStage = h("div", { class: "stagebox", tabindex: "0", "aria-label": "3D stage (click to open the force box)" });
+section("RadialMenu · Popover3D", h("div", { class: "two" }, radialStage, popStage));
+const radialItems = [{ label: "Hold this face", primary: true }, { label: "Hold this edge" }, { label: "Cancel" }, { label: "Hold inside corner" }];
+const openRadial = (x, y) => openRadialMenu({ x, y, items: radialItems, label: "Hold options", bounds: radialStage.getBoundingClientRect() });
+radialStage.addEventListener("click", (e) => openRadial(e.clientX, e.clientY));
+radialStage.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const r = radialStage.getBoundingClientRect(); openRadial(r.left + r.width / 2, r.top + r.height / 2); } });
+const openPop = () => {
+  const r = popStage.getBoundingClientRect();
+  return openPopover3D({ anchor: [r.left + 120, r.top + 130], project: ([x, y]) => ({ x, y }), bounds: () => popStage.getBoundingClientRect(), title: "Push in",
+    content: NumberField({ label: "Force", value: 50, units: [{ value: "N", label: "N" }, { value: "MPa", label: "MPa" }], convert: kg, autofocus: true }) });
+};
+popStage.addEventListener("click", openPop);
+popStage.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); openPop(); } });
+
+// OptionColumn and ConstraintsBar.
+const labels = { material: "Material", nozzle: "Nozzle", time: "Print time", safety: "Safety" };
+const col = (badge, rows, extra = {}) => ({ badge, pros: extra.pros ?? [], cons: extra.cons ?? [], recommended: extra.rec,
+  rows: [{ key: "material", value: rows[0], pinned: extra.pin }, { key: "nozzle", value: rows[1], pinned: extra.pin }, { key: "time", value: rows[2], pinnable: false }, { key: "safety", value: rows[3], pinnable: false, tone: rows[4] }] });
+section("OptionColumn · ConstraintsBar",
+  h("div", { class: "opts" }, h("div", { class: "labels" }, h("span", {}, "-"), ...Object.values(labels).map((l) => h("span", {}, l))),
+    OptionColumn({ option: col("Recommended", ["PETG", "0.4", "2 h 05", "Enough · ×3.4", "good"], { rec: true, pin: true, pros: ["Least support"], cons: ["Needs PETG"] }), labels }),
+    OptionColumn({ option: col("PLA only", ["PLA", "0.4", "2 h 12", "Low · ×2.6", "warn"], { pros: ["On your shelf"], cons: ["Weak above 50 °C"] }), labels }),
+    OptionColumn({ option: col("Fastest", ["PETG", "0.6", "1 h 10", "Enough · ×3.1", "good"], { pros: ["1 h 10"], cons: ["Needs a 0.6 nozzle"] }), labels, needsRecheck: true })),
+  ConstraintsBar({ choices: [{ key: "material", label: "Material: PETG" }, { key: "nozzle", label: "Nozzle: 0.4" }] }),
+  ConstraintsBar({ choices: [] }));
+
+// FindingRow and PendingBar.
+section("FindingRow · PendingBar",
+  h("div", { class: "two" },
+    h("div", { class: "panel-w" },
+      FindingRow({ expanded: true, finding: { title: "Side hole prints oval", place: "Ø6 · side", line: "Top sags ~0.3 mm; an M6 bolt won't fit.", severity: "warn",
+        fixes: [{ tag: "slicer", text: "Hole size +0.15 mm", added: true }, { tag: "design", text: "Teardrop top" }, { tag: "process", text: "Drill it to size", steps: true }] } }),
+      FindingRow({ finding: { title: "Bend is the weakest spot", place: "×3.4", severity: "bad", fixes: [] } }),
+      FindingRow({ finding: { title: "Seam on the front", severity: "info", state: "fixed", fixes: [] } }),
+      FindingRow({ finding: { title: "Wall too thin", place: "0.6 mm", severity: "warn", state: "new", fixes: [] } })),
+    h("div", { class: "panel-w" }, PendingBar({ count: 2 }), PendingBar({ count: 3, conflicts: 1 }), PendingBar({ count: 1 }))));
+
+// ProgressCard.
+const progress = ProgressCard({ title: "Finding your best options", stages: ["Finding orientations", "Checking strength", "Measuring support", "Trying nozzles, layers and settings", "Picking options"] });
+progress.set({ done: 3, share: 0.58, elapsed: 72, estimate: 120, canStop: true });
+section("ProgressCard", progress);
+
+// StepRail: full and collapsed, with a stale step.
+const steps = [{ id: "part", label: "Part", state: "done" }, { id: "setup", label: "Setup", state: "done" }, { id: "env", label: "Environment", state: "done", stale: true },
+  { id: "holds", label: "Holds", state: "current" }, { id: "loads", label: "Loads", state: "upcoming" }, { id: "x", label: "Skipped", state: "skipped" }, { id: "analyse", label: "Analyse", state: "upcoming" }];
+section("StepRail", h("div", { class: "row", style: { alignItems: "start" } },
+  h("div", { style: { width: "var(--rail-w)" } }, StepRail({ steps, label: "Steps" })),
+  h("div", { style: { width: "var(--rail-w-collapsed)" } }, StepRail({ steps, label: "Steps", collapsed: true }))));
+
+// Toast and Modal.
+section("Toast · Modal", h("div", { class: "row" },
+  Button({ label: "Show a toast", onClick: () => showToast({ message: "Hold only where it's really fixed. Too many holds hide weak spots.", tone: "warn" }) }),
+  Button({ label: "Toast with action", onClick: () => showToast({ message: "Your changes caused 2 new problems.", tone: "bad", action: { label: "Undo batch" } }) }),
+  Button({ label: "Open a modal", onClick: () => openModal({ title: "Strong needs loads", body: "Without loads, switch to Fast, Light or Quality.",
+    actions: [{ label: "Go back and add loads", variant: "ghost" }, { label: "Switch to Fast", variant: "primary" }] }) })));
+
+if (Q.get("demo")) {
+  openSelect.open();
+  const r = radialStage.getBoundingClientRect();
+  openRadial(r.left + r.width / 2, r.top + r.height / 2);
+  openPop();
+  showToast({ message: "Hold only where it's really fixed. Too many holds hide weak spots.", tone: "warn", timeout: 0 });
+}
+document.body.dataset.ready = "1";
+</script>
+</body>
+</html>
