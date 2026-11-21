@@ -1,9 +1,9 @@
 // Offline support: after a visit, the app, the Python engine and the libraries it downloaded
-// (Pyodide packages, three.js, manifold, OpenCascade) come from this cache when the network is gone.
-// Library files have their version in the URL (on the CDN, or same-origin under /vendor/ on the
-// self-hosted build), and engine files carry their content hash in ?v=<hash>, so unchanged files
-// are served cache-first; the app's own files and manifest.json are fetched fresh when online so
-// updates show up immediately.
+// (Pyodide packages, three.js, manifold, OpenCascade, the Muon3D browser slicer) come from this
+// cache when the network is gone. Library files have their version in the URL (on the CDN, or
+// same-origin under /vendor/ on the self-hosted build), and engine files carry their content hash
+// in ?v=<hash>, so unchanged files are served cache-first; the app's own files and manifest.json
+// are fetched fresh when online so updates show up immediately.
 const CDN = "fdm-cdn-v1";
 const ENGINE = "fdm-engine-v1";
 const APP = "fdm-app-v1";
@@ -34,7 +34,8 @@ self.addEventListener("fetch", (e) => {
 });
 
 // The same versioned file without its version or content hash: "npm/three/build/three.module.js",
-// "pyodide/full/pyodide.asm.wasm", "engine/checks.py". null for URLs that carry no version.
+// "pyodide/full/pyodide.asm.wasm", "vendor/muon3d-slicer-engine/engine-st.wasm",
+// "vendor/muon3d-slicer-engine/host.js", "engine/checks.py". null for URLs that carry no version.
 function unversioned(url) {
   const u = new URL(url);
   const path = u.pathname;
@@ -42,6 +43,8 @@ function unversioned(url) {
   if (npm) return "npm/" + npm[1] + npm[2];
   const py = path.match(/\/pyodide\/v[^/]+(\/.*)$/);
   if (py) return "pyodide" + py[1];
+  const vend = path.match(/\/vendor\/([^/@]+)@[^/]+(\/.*)$/);
+  if (vend) return "vendor/" + vend[1] + vend[2].replace(/\.[0-9a-f]{12,}\.js$/, ".js");
   const eng = u.searchParams.get("v") && path.match(/\/core\/fdmcore\/(.+)$/);
   return eng ? "engine/" + eng[1] : null;
 }
