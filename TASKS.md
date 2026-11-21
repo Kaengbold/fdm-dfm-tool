@@ -1151,7 +1151,7 @@ Rules for every [UI] task:
 - [ ] **T-541 P1** [UI] Holds step. · plan: §7, §16.3 · files: `web/steps/holds.js` · owner: —
   - Do: click → radial menu at the cursor (hold face / edge / inside corner / screw hole, Cancel); blue lock markers; type auto (screw/clamped), changeable in the list row; many holds, toast at the 4th or > 30 % surface; list with hover-pulse and ✕; no "keep clean"/"on the bed". **"No loads, skip strength"** option: skips straight on for Fast/Light; for **Strong/Balanced** a warning offers switching to Fast, Quality or Light, or going back.
   - Done when: e2e places a face and an edge hold; the no-load warning appears for Balanced.
-- [~] **T-542 P1** [UI] Direction gizmo. · plan: §8 (point 2) · files: `web/viewport/gizmo.js` (new), `web/viewer.js` · owner: Gemini Neon (`task/T-542-gizmo`), review: Claude
+- [~] **T-542 P1** [UI] Direction gizmo. · plan: §8 (point 2) · files: `web/viewport/gizmo.js` (new), `web/viewer.js` · owner: Claude (`task/T-542-gizmo-claude`)
   - Do: arrows for Push in / Pull out (normal) and ±X ±Y ±Z, rotation rings like a slicer's rotate tool (15° snap, Shift free), read-only angle label, no angle inputs; keyboard nudging.
 - [ ] **T-543 P1** [UI] Loads and Load details steps. · plan: §8, §9 · files: `web/steps/loads.js`, `web/steps/load-details.js` · owner: —
   - Do: click → gizmo → force popover at the arrow tip (N | MPa; MPa × face area shown; MPa off for edges/points; ≈ kg hint); capped log-length arrows with labels, click to edit; list; loads act together, "+ Separate load case"; old kg projects convert. Details: how long (creep raises the target), temperature confirm from Environment, shaking/knocks.
