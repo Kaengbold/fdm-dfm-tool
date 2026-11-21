@@ -1010,9 +1010,10 @@ Rules for every [UI] task:
 
 ### Phase 0: triage on today's UI
 
-- [~] **T-500 P1** [UI] Quick triage: header on top, phone layout out, Expert off. · plan: §1.1, §1.2, §1.3 · files: `web/style.css`, `web/index.html`, `web/app.js`, `web/steps.js`, `tools/e2e_smoke.py`, `PRODUCT.md` · owner: Claude (`task/T-500-triage`)
+- [x] **T-500 P1** [UI] Quick triage: header on top, phone layout out, Expert off. · plan: §1.1, §1.2, §1.3 · files: `web/style.css`, `web/index.html`, `web/app.js`, `web/steps.js`, `tools/e2e_smoke.py`, `PRODUCT.md` · owner: Claude (`task/T-500-triage`)
   - Do: keep the header in its own grid row (done in T-491), delete every `@media (max-width: …)` rule and phone-only markup/JS, drop the phone passes in `e2e_smoke.py`, hide the level switch and remove the Expert scroll page, rewrite PRODUCT.md "Operating Context" as desktop only.
   - Done when: header stays on top even with an element injected before it; no `max-width` media query left; e2e passes at 1280×720.
+  - Outcome: phone layout, menu, view-size fold and level switch gone; everyone gets the Advanced flow with a header of All settings / Explain / Guide, and the guide offers one "Check my part" path. The old levels stay reachable only through `?level=` / `fdm-test-level` for the old browser test until T-580. Also fixed a race in `renderCopies` when a new part loads mid-plate. Full e2e green.
 
 ### Phase 1: design system and style mockups (owner approval gate)
 
