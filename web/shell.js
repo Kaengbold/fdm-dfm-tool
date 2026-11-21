@@ -52,8 +52,12 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
 
   function render(moved = false) {
     const s = store.get();
-    // A re-render replaces the panel: keep focus where the keyboard user was (on the step title, §1.8).
-    const hadFocus = screen.contains(document.activeElement) || document.activeElement === document.body;
+    // A re-render replaces the panel: keep focus on the active control when staying on the step, or move to the
+    // step title when navigating (§1.8).
+    const active = document.activeElement;
+    const focusKey = !moved && screen.contains(active) ? active?.dataset?.focusKey : null;
+    const sel = focusKey && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+    const hadFocus = screen.contains(active) || active === document.body;
     header.update(s, route);
     if (route !== "flow") {
       screen.dataset.layout = "full";
@@ -85,7 +89,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
       back ? Button({ label: t("shell.back"), variant: "ghost", onClick: () => go(back) }) : h("span"),
       next ? Button({ label: t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => go(next) }) : h("span"));
     const head = h("div", { class: "panel-head" }, title, h("p", { class: "hint" }, t(`step.${s.step}.purpose`)));
-    (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, services });
+    (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, openRoute, services });
     if (def.layout === "part") {
       screen.replaceChildren(rail, stageEl);
       stageUi.prepend(head);
@@ -98,7 +102,13 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     }
     services.stage?.attach(stageEl);
     if (s.part && def.layout !== "part" && services.cameraBar) stageUi.append(services.cameraBar());
-    if (moved || hadFocus) title.focus();  // focus moves to each new step title (§1.8)
+    const keep = focusKey && screen.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
+    if (keep) {
+      keep.focus();
+      if (sel && "setSelectionRange" in keep) try { keep.setSelectionRange(sel[0], sel[1]); } catch { /* non-selectable */ }
+    } else if (moved || hadFocus) {
+      title.focus();  // focus moves to each new step title (§1.8)
+    }
   }
 
   function startPlaceholder() {

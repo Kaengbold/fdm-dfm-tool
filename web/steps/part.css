@@ -65,3 +65,15 @@ button.big-card { cursor: pointer; }
 .stage-camera { display: flex; gap: var(--s-1); padding: var(--s-1); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-pop); }
 .stage-camera button { padding: var(--s-1) var(--s-3); border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
 .stage-camera button.is-on { background: var(--accent-soft); color: var(--accent-text); font-weight: var(--fw-bold); }
+
+/* Hover picker badge and the keyboard feature list (T-540). */
+.pick-badge { position: absolute; z-index: 5; padding: var(--s-1) var(--s-2); border-radius: var(--r-sm); background: var(--text); color: var(--surface-raised);
+  font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums; }
+.stage-canvas:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.feature-panel { position: absolute; z-index: 6; top: var(--s-4); left: var(--s-4); width: 280px; display: grid; gap: var(--s-1); padding: var(--s-2);
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); box-shadow: var(--shadow-pop); }
+.feature-panel[hidden] { display: none; }
+.feature-search { height: 36px; padding: 0 var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; }
+.feature-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; }
+.feature-item { padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); font-size: var(--fs-sm); cursor: pointer; }
+.feature-item[aria-selected="true"], .feature-item:hover { background: var(--accent-soft); color: var(--accent-text); }
