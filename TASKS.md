@@ -1173,7 +1173,7 @@ Rules for every [UI] task:
 - [x] **T-542 P1** [UI] Direction gizmo. · plan: §8 (point 2) · files: `web/viewport/gizmo.js` (new), `web/viewer.js` · owner: Claude (`task/T-542-gizmo-claude`)
   - Do: arrows for Push in / Pull out (normal) and ±X ±Y ±Z, rotation rings like a slicer's rotate tool (15° snap, Shift free), read-only angle label, no angle inputs; keyboard nudging.
   - Outcome (Claude, after Gemini stopped): `web/viewport/gizmo.js` `openGizmo(stage, {point, normal, onChange, onDone, onCancel})`: violet arrow kept outside the part (push ends at the spot, pull starts there) at a constant screen size, axis triad, two rotation rings (15° snap, Shift free) with a read-only angle label, one-click Push in / Pull out / ±X ±Y ±Z (second click flips), keys ←→↑↓ (15°, Shift 5°), P/O, X/Y/Z, Enter, Esc; pure math tested under Node (`core/tests/test_gizmo.py`); dev hook `fdmUI.services.openGizmo`; e2e `new UI: direction gizmo`. `web/viewer.js` (old UI) untouched.
-- [ ] **T-543 P1** [UI] Loads and Load details steps. · plan: §8, §9 · files: `web/steps/loads.js`, `web/steps/load-details.js` · owner: —
+- [~] **T-543 P1** [UI] Loads and Load details steps. · plan: §8, §9 · files: `web/steps/loads.js`, `web/steps/load-details.js` · owner: Claude (`task/T-543-loads`)
   - Do: click → gizmo → force popover at the arrow tip (N | MPa; MPa × face area shown; MPa off for edges/points; ≈ kg hint); capped log-length arrows with labels, click to edit; list; loads act together, "+ Separate load case"; old kg projects convert. Details: how long (creep raises the target), temperature confirm from Environment, shaking/knocks.
   - Done when: e2e adds a load in N and one in MPa and reaches Analyse.
 
