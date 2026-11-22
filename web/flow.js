@@ -16,6 +16,7 @@ export const STEPS = [
   { id: "done", layout: "work", uses: ["model", "option"] },
   // Extras opened from Done (§15.1): in the rail only while open; Back returns to Done.
   { id: "tolerances", layout: "work", uses: ["model", "option"], skipWhen: (s) => s.step !== "tolerances" },
+  { id: "tools", layout: "work", uses: ["model", "option"], skipWhen: (s) => s.step !== "tools" },
 ];
 const byId = Object.fromEntries(STEPS.map((s) => [s.id, s]));
 

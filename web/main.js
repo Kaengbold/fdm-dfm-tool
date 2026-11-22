@@ -20,6 +20,7 @@ import "./steps/simulate.js";
 import "./steps/heat.js";
 import { openExport } from "./steps/done.js";
 import "./steps/tolerances.js";
+import "./steps/tools.js";
 import "./steps/problems.js";
 import { openGizmo } from "./viewport/gizmo.js";
 import { initSettings, openSettingsTab, restoreSettingsToEngine } from "./steps/settings.js";
@@ -88,7 +89,7 @@ attachKeyboard(services.stage, services.picker, { label: pickLabel, placeholder:
 // Picking happens on Holds and Loads (T-541, T-543); the face regions come once per part.
 const PICK_STEPS = new Set(["holds", "loads"]);
 // Quality marks its show faces on Analyse (T-563).
-const picks = (s) => PICK_STEPS.has(s.step) || s.step === "tolerances" || (s.step === "analyse" && s.goal === "quality");
+const picks = (s) => PICK_STEPS.has(s.step) || s.step === "tolerances" || s.step === "tools" || (s.step === "analyse" && s.goal === "quality");
 let regionsFor = null;
 async function preparePicker() {
   const s = store.get();
