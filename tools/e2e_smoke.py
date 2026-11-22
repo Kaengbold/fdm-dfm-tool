@@ -1260,18 +1260,10 @@ def check_new_ui_tools(browser, port: int) -> str:
 
 
 def _extras_parts() -> tuple[bytes, bytes]:
-    """A 40 × 30 × 10 mm plate with a Ø8.4 hole and a 3 mm slot, and a Ø8.2 peg standing in the hole (one assembly)."""
-    import sys
-
-    sys.path.insert(0, str(ROOT / "core"))
-    from shapely.geometry import Point, box
-
-    from fdmcore.additions import extrude
-    from fdmcore.mesh import Mesh, to_binary_stl
-
-    plate = box(0, 0, 40, 30).difference(Point(12, 15).buffer(4.2, quad_segs=64)).difference(box(28, 5, 31, 25))
-    peg = Point(12, 15).buffer(4.1, quad_segs=64)
-    return to_binary_stl(Mesh(extrude(plate, 0, 10))), to_binary_stl(Mesh(extrude(peg, -5, 15)))
+    """A 40 × 30 × 10 mm plate with a Ø8.4 hole and a 3 mm slot, and a Ø8.2 peg standing in the hole (one assembly).
+    Fixture files (made with fdmcore's extrude): the browser test runs without the engine's Python packages."""
+    fixtures = ROOT / "tools" / "fixtures"
+    return (fixtures / "slot_plate.stl").read_bytes(), (fixtures / "slot_plate_peg.stl").read_bytes()
 
 
 def check_new_ui_later_extras(browser, port: int) -> str:
