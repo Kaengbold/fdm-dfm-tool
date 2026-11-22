@@ -111,7 +111,10 @@ def main() -> None:
             page = browser.new_page()  # a fresh page per part: its memory is that part's alone
             page.goto(f"http://127.0.0.1:{port}/tools/brep_bench.html")
             page.evaluate("() => window.benchReady")
-            r = page.evaluate("([s, e]) => window.runPart(s, e)", [base64.b64encode(step).decode(), [plain(e) for e in edits]])
+            try:
+                r = page.evaluate("([s, e]) => window.runPart(s, e)", [base64.b64encode(step).decode(), [plain(e) for e in edits]])
+            except Exception as err:  # OpenCascade aborted (out of memory, uncaught C++ exception): record it, go on
+                r = {"faces": 0, "readMs": 0, "one": [], "together": {"error": str(err).splitlines()[0]}, "heapMb": None}
             page.close()
             results[part.name] = r
             print(part.name, r["faces"], "faces;", " ".join(f"{x['id']}:{x['how']}" for x in r["one"]), "| together", r["together"].get("valid"), f"{r['heapMb']} MB", flush=True)
@@ -120,14 +123,31 @@ def main() -> None:
 
 
 KINDS = ["hole_resize", "teardrop", "slab", "void", "rib", "fillet", "chamfer"]
+SOURCES = ("The parts: `nist_*` are the eleven NIST MBE PMI validation and conformance test parts (CTC 1–5, FTC 6–11; "
+           "from NIST's MBE PMI Validation and Conformance Testing project; US government work, public domain), "
+           "geometry-only AP203 files, gzipped; `occt_screw` is "
+           "OpenCascade's screw sample (LGPL-2.1 with exception, from the OCCT data folder); `gen_*` are made by "
+           "`tools/make_step_corpus.mjs`.")
+RELIABLE = 0.9  # exact this often and never left out: on by default
+
+
+def verdict(kind: str, k: dict) -> str:
+    n = k["exact"] + k["mesh"] + k["skipped"] + k["error"]
+    left = k["skipped"] + k["error"]
+    if not left and k["exact"] >= RELIABLE * n:
+        return "on by default: exact almost always, never left out"
+    if not left:
+        return "on by default: always in the file, sometimes faceted"
+    return f"exact when it works, else left out of the STEP file and named in the status ({left} of {n} here)"
 
 
 def write_report(results: dict) -> None:
-    per = defaultdict(lambda: {"exact": 0, "mesh": 0, "skipped": 0, "error": 0, "ms": [], "why": defaultdict(int)})
+    per = defaultdict(lambda: {"exact": 0, "smaller": 0, "mesh": 0, "skipped": 0, "error": 0, "ms": [], "why": defaultdict(int)})
     for r in results.values():
         for x in r["one"]:
             k = per[x["kind"]]
             k[x["how"] if x["how"] in k else "error"] += 1
+            k["smaller"] += bool(x.get("scale"))
             k["ms"].append(x["ms"])
             if x.get("why") and x["how"] != "exact":
                 k["why"][x["why"]] += 1
@@ -137,27 +157,33 @@ def write_report(results: dict) -> None:
              "void, ribs), each applied alone by `web/brep.js` in headless Edge as the STEP write-back worker does it: exact, or "
              "faceted (its triangle pieces) when the exact edit fails, or left out. Then all together.", "",
              "## By kind of edit", "",
-             "| Edit | Tried | Exact | Faceted instead | Left out | Median time | Slowest |", "|---|---|---|---|---|---|---|"]
+             "| Edit | Tried | Exact | of them smaller | Faceted instead | Left out | Median time | Slowest |", "|---|---|---|---|---|---|---|---|"]
     for kind in KINDS:
         k = per.get(kind)
         if not k:
-            lines.append(f"| {kind} | 0 | – | – | – | – | – |")
+            lines.append(f"| {kind} | 0 | – | – | – | – | – | – |")
             continue
         n = k["exact"] + k["mesh"] + k["skipped"] + k["error"]
-        lines.append(f"| {kind} | {n} | {k['exact']} ({100 * k['exact'] // n} %) | {k['mesh']} | {k['skipped'] + k['error']} | "
+        lines.append(f"| {kind} | {n} | {k['exact']} ({100 * k['exact'] // n} %) | {k['smaller']} | {k['mesh']} | {k['skipped'] + k['error']} | "
                      f"{statistics.median(k['ms']):.0f} ms | {max(k['ms'])} ms |")
+    lines += ["", "## Verdict", "", f"An edit kind is on by default when it came out exact at least {RELIABLE:.0%} of the time "
+              "and was never left out. Every kind stays on: what can't be made in the STEP file is named in the status, and "
+              "the STL / 3MF export always has every change.", ""]
+    lines += [f"- **{kind}**: {verdict(kind, per[kind])}." for kind in KINDS if kind in per]
     lines += ["", "## By part", "", "| Part | Faces | Read | Edits: exact / faceted / left out | All together | OpenCascade memory |",
               "|---|---|---|---|---|---|"]
     for name, r in results.items():
         hows = [x["how"] for x in r["one"]]
         t = r["together"]
+        mem = f"{r['heapMb']} MB" if r["heapMb"] else "–"
         both = f"valid, {t['faces']} faces, {t['ms']} ms" if t.get("valid") else f"not valid ({t.get('error', 'invalid solid')})"
         lines.append(f"| {name} | {r['faces']} | {r['readMs']} ms | {hows.count('exact')} / {hows.count('mesh')} / "
-                     f"{len(hows) - hows.count('exact') - hows.count('mesh')} | {both} | {r['heapMb']} MB |")
+                     f"{len(hows) - hows.count('exact') - hows.count('mesh')} | {both} | {mem} |")
     reasons = [(kind, why, n) for kind, k in per.items() for why, n in k["why"].items()]
     if reasons:
         lines += ["", "## Why exact edits fell back", "", "| Edit | Why | Times |", "|---|---|---|"]
         lines += [f"| {kind} | {why} | {n} |" for kind, why, n in sorted(reasons)]
+    lines += ["", "## Sources", "", SOURCES]
     REPORT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     (REPORT.with_suffix(".json")).write_text(json.dumps(results, indent=1), encoding="utf-8")
     print(f"wrote {REPORT}")

@@ -5243,7 +5243,9 @@ $("dl-step").onclick = () =>
     // Changes that couldn't be made with exact CAD faces are still in, faceted; one that failed both ways isn't.
     const faceted = notes.filter((n) => n.how === "mesh").map((n) => n.title);
     const left = notes.filter((n) => n.how === "skipped").map((n) => n.title);
-    setStatus([left.length ? t("stepfile.skipped", { list: left }) : "", faceted.length ? t("stepfile.faceted", { list: faceted }) : "", state.summary].filter(Boolean).join(" "));
+    const smaller = notes.filter((n) => n.how === "exact" && n.scale).map((n) => n.title);
+    setStatus([left.length ? t("stepfile.skipped", { list: left }) : "", faceted.length ? t("stepfile.faceted", { list: faceted }) : "",
+      smaller.length ? t("stepfile.smaller", { list: smaller }) : "", state.summary].filter(Boolean).join(" "));
   });
 
 $("copy-report").onclick = async () => {

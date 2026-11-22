@@ -42,8 +42,9 @@
         let together;
         try {
           const { shape, notes } = B.applyEdits(oc, solid, list);
+          const valid = B.isValid(oc, shape); // before meshing: BRepCheck can trip over the triangles it adds
           const mesh = B.tessellate(oc, shape);
-          together = { valid: B.isValid(oc, shape), faces: B.faces(oc, shape).length, triangles: mesh.faceIds.length,
+          together = { valid, faces: B.faces(oc, shape).length, triangles: mesh.faceIds.length,
             how: notes.map((n) => n.how), ms: Math.round(performance.now() - t) };
         } catch (err) {
           together = { error: String(err?.message ?? err), ms: Math.round(performance.now() - t) };

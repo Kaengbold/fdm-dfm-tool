@@ -51,10 +51,10 @@ def applied(tmp_path_factory):
     picked += api.volume_solid(UP, [{"kind": "add_solid", "lo": [0, -10, 5], "hi": [20, 10, 7]},
                                     {"kind": "cut_solid", "lo": [5, -5, 1], "hi": [15, 5, 3]}])
     picked.append(gusset())
-    broken = dict(picked[2], id="too-big-round")  # a round far bigger than the corner: OpenCascade can't make it
+    broken = dict(picked[2], id="too-big-round")  # a round far bigger than the part: OpenCascade can't make it, even smaller
     broken["intent"] = json.loads(json.dumps(picked[2]["intent"]))
     for item in broken["intent"]["refs"]["edges"]:
-        item["size"] = 60.0
+        item["size"] = 600.0
     picked.append(broken)
     path = tmp_path_factory.mktemp("brep") / "edits.json"
     path.write_text(json.dumps([plain(e) for e in picked]))
@@ -94,3 +94,4 @@ def test_all_together_write_one_valid_step(applied):
     assert every["valid"] and {n["how"] for n in every["notes"] if n["id"] != "too-big-round"} == {"exact"}
     assert applied["written"] == {"solids": 1, "faces": every["faces"], "valid": True}
     assert every["meshFaces"] == every["faces"] and every["triangles"] > 0  # shown and re-checked with its face ids
+

@@ -66,9 +66,9 @@ def test_upside_down_the_corner_is_a_real_chamfer(tmp_path):
     assert len(kinds(r["surfaces"], "plane")) == len(kinds(out["before"]["surfaces"], "plane")) + 1
 
 
-def test_where_opencascade_cant_round_the_corner_the_wedge_goes_in(tmp_path):
-    """The block's pocket: its own corner rounds exactly; one far wider than the pocket can't be made, so the faceted
-    wedge goes in instead and the note says why."""
+def test_a_round_too_wide_for_the_pocket_is_made_smaller(tmp_path):
+    """The block's pocket: its own corner rounds exactly; one nearly as wide as the pocket can't be made at that size,
+    so it is made smaller (still exact) and the note says by how much (T-535)."""
     edit = corner_edit("gen_block", (4.4, 0.0, 12.4), [0, 0, 1])
     assert all(e.get("faces") for e in edit["intent"]["refs"]["edges"])
     wide = json.loads(json.dumps({k: v for k, v in edit.items() if k != "mesh"}))
@@ -76,7 +76,7 @@ def test_where_opencascade_cant_round_the_corner_the_wedge_goes_in(tmp_path):
     for item in wide["intent"]["refs"]["edges"]:
         item["size"] = 9.0  # the pocket is 10 mm wide
     out = apply(ROOT / "core" / "tests" / "corpus_step" / "gen_block.step", [edit, wide], tmp_path)
-    fine, failed = out["edits"]["stress-chamfer"]["exact"], out["edits"]["too-wide"]["exact"]
-    assert [n["how"] for n in fine["notes"]] == ["exact"] and fine["valid"]
-    (note,) = failed["notes"]
-    assert note["how"] == "mesh" and "could not" in note["why"] and failed["valid"] and failed["dV"] > 0
+    fine, smaller = out["edits"]["stress-chamfer"]["exact"], out["edits"]["too-wide"]["exact"]
+    assert [n["how"] for n in fine["notes"]] == ["exact"] and "scale" not in fine["notes"][0] and fine["valid"]
+    (note,) = smaller["notes"]
+    assert note["how"] == "exact" and note["scale"] in (0.5, 0.25) and smaller["valid"] and smaller["dV"] > 0
