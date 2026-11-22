@@ -4,8 +4,9 @@
 // print checks and the warping use its real layer times and spot heat; without it (slicer still loading, failed,
 // too big, unknown printer) our own slicer stands in, and the panel says so. A G-code the user brings ("Have a sliced
 // file?") works the same way. Results stay here first: a three-line status and an overlay switch on the part (Heat,
-// Warping true size / exaggerated, Internal stress, Overhangs). Later simulations (the thermal model, T-473…) join the
-// same button through registerSimulation.
+// Warping true size / exaggerated, Internal stress, Overhangs). Later simulations join the same button through
+// registerSimulation: the heat model and the cooling plan (web/steps/heat.js, T-478) add their status line, a panel
+// section and their own Heat view.
 import { h } from "../ui/dom.js";
 import { Button } from "../ui/button.js";
 import { SegmentedControl } from "../ui/choice.js";
@@ -29,9 +30,13 @@ let warpSize = "true";
 let shown = null; // what the 3D view shows now (key), so a re-render doesn't rebuild it
 const extra = [];
 
-/** A later simulation joins Run simulations (the thermal model, T-473…): ``sim({engine, up, profile, detailed,
- * check, warp})`` resolves to ``{status: {label, value, tone}}`` or nothing. */
+/** A later simulation joins Run simulations. ``sim``: {name, stage (message key sim.stage.<stage> shown while it
+ * runs), run({engine, up, profile, detailed, check, warp, state, gcode}) → its result (``status``: {label, value,
+ * tone} for the status list) or nothing; optional panel({body, store, services, value, overlay}) adds a section
+ * under the status, and showHeat({services, value}) → true draws the Heat view itself (clearHeat(services) takes it
+ * away again)}. ``gcode``: the G-code bytes the run read, if any. */
 export function registerSimulation(sim) { extra.push(sim); }
+const extraValue = (result, sim) => result?.extra?.find((x) => x.name === sim.name)?.value;
 
 /** The engine profile for the chosen option: the user's printer and use conditions with the option's material, nozzle
  * and layer height. */
@@ -126,10 +131,11 @@ async function runSimulations(store, services) {
     if (slice?.state === "slicing") await slice.promise;
     let gcode = null;
     let gcodeError = null;
+    let data = null;
     if (slice?.state === "ready") {
       run.stage = "gcode";
       services.rerender();
-      const data = typeof slice.gcode === "string" ? new TextEncoder().encode(slice.gcode) : slice.gcode;
+      data = typeof slice.gcode === "string" ? new TextEncoder().encode(slice.gcode) : slice.gcode;
       try {
         gcode = await engine.call("load_gcode", { up: o.up, profile }, data);
       } catch (e) {
@@ -145,8 +151,13 @@ async function runSimulations(store, services) {
     services.rerender();
     const warp = await engine.call("warping", { up: o.up, profile, detailed });
     const more = [];
-    for (const sim of extra) more.push(await sim({ engine, up: o.up, profile, detailed, check, warp }));
-    store.setResult("simulate", { check, warp, gcode, gcodeError, detailed, source: detailed ? slice.source : "ours", extra: more.filter(Boolean) },
+    for (const sim of extra) {
+      run.stage = sim.stage ?? run.stage;
+      services.rerender();
+      const value = await sim.run({ engine, up: o.up, profile, detailed, check, warp, state: s, gcode: detailed ? data : null });
+      if (value) more.push({ name: sim.name, value, status: value.status });
+    }
+    store.setResult("simulate", { check, warp, gcode, gcodeError, detailed, source: detailed ? slice.source : "ours", extra: more },
       store.deps(...DEPENDS));
   } catch (e) {
     if (!(e instanceof Cancelled)) lastError = e.message;
@@ -200,6 +211,10 @@ function showOverlay(store, services, legend) {
     }
     legend.append(h("b", {}, stress ? t("sim.legend.stress", { max: warp.stress_max.toFixed(1) }) : t("sim.legend.warp", { max: warp.max_mm.toFixed(2) })),
       h("span", {}, stress ? t("sim.legend.stressNote") : warpSize === "big" ? t("sim.legend.big") : t("sim.legend.true")));
+  } else if (overlay === "heat" && result && extra.some((sim) => sim.showHeat?.({ services, value: extraValue(result, sim) }))) {
+    stage.hideField(); // a later simulation draws its own heat view (and its key in the panel)
+    shown = null;
+    return;
   } else if (shown !== key) {
     stage.hideField();
     if (overlay === "heat" && result?.check?.face_temp) {
@@ -219,6 +234,7 @@ function showOverlay(store, services, legend) {
 }
 
 function clearOverlay(services) {
+  for (const sim of extra) sim.clearHeat?.(services);
   if (shown == null) return;
   services.stage.hideField();
   services.stage.paint(() => null);
@@ -279,6 +295,7 @@ registerStep("sim", {
       body.append(list, h("p", { class: "ui-hint" }, result.detailed
         ? t(result.source === "file" ? "sim.basis.file" : "sim.basis.orca", { minutes: Math.round(result.gcode.print_time_min) })
         : result.gcodeError ? t("sim.basis.wrongFile", { reason: result.gcodeError }) : t("sim.basis.ours")));
+      for (const sim of extra) sim.panel?.({ body, store, services, value: extraValue(result, sim), overlay });
     } else {
       body.append(h("p", { class: "ui-hint" }, t("sim.skipNote")));
     }
@@ -288,6 +305,7 @@ registerStep("sim", {
     if (fresh) choices.push({ value: "heat", label: t("sim.view.heat") }, { value: "warp", label: t("sim.view.warp") }, { value: "stress", label: t("sim.view.stress") });
     choices.push({ value: "overhang", label: t("sim.view.overhang") });
     if (!choices.some((c) => c.value === overlay)) overlay = "normal";
+    if (overlay !== "heat") for (const sim of extra) sim.clearHeat?.(services);
     const legend = h("div", { class: "sim-legend" });
     const bar = h("div", { class: "sim-views" },
       SegmentedControl({ label: t("sim.view.label"), size: "small", options: choices, value: overlay, onChange: (v) => { overlay = v; services.rerender(); } }));

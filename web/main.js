@@ -17,6 +17,7 @@ import "./steps/loads.js";
 import "./steps/details.js";
 import "./steps/holds.js";
 import "./steps/simulate.js";
+import "./steps/heat.js";
 import { openExport } from "./steps/done.js";
 import "./steps/tolerances.js";
 import "./steps/lighter.js";
