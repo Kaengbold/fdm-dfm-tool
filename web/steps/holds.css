@@ -17,3 +17,5 @@
 .hold-x:hover { background: var(--surface-sunken); color: var(--bad); }
 .hold-x .ui-icon { width: 14px; height: 14px; }
 .hold-skip { padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.hold-brush { display: grid; gap: var(--s-2); justify-items: start; padding: var(--s-3); border: 1px solid var(--accent); border-radius: var(--r); }
+.hold-brush p { margin: 0; }

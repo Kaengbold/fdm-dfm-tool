@@ -1,5 +1,5 @@
-// Entry of the new UI (web/new.html, T-530/T-531): the engine, the 3D stage and the shell, plus the steps.
-// The theme follows the saved switch (light by default, §16.6).
+// Entry of the app (web/index.html, T-530/T-531, the only UI since T-580): the engine, the 3D stage and the shell,
+// plus the steps. The theme follows the saved switch (light by default, §16.6). sw.js keeps it working offline.
 import { startShell } from "./shell.js";
 import "./steps/setup.js";
 import "./steps/environment.js";
@@ -17,6 +17,12 @@ import "./steps/loads.js";
 import "./steps/details.js";
 import "./steps/holds.js";
 import "./steps/simulate.js";
+import "./steps/heat.js";
+import { openExport } from "./steps/done.js";
+import "./steps/tolerances.js";
+import "./steps/tools.js";
+import "./steps/lighter.js";
+import "./steps/tuned.js";
 import "./steps/problems.js";
 import { openGizmo } from "./viewport/gizmo.js";
 import { initSettings, openSettingsTab, restoreSettingsToEngine } from "./steps/settings.js";
@@ -28,7 +34,8 @@ try {
 const store = createStore();
 const saving = autosave(store);
 let source = null; // the part's file: {name, bytes, faceIds, kind}, to give a restarted engine the part again
-const engine = createEngine({ onProgress: ({ fraction, text }) => services.onProgress?.(fraction, text) });
+const engine = createEngine({ onProgress: ({ fraction, text }) => services.onProgress?.(fraction, text),
+  onPartial: ({ result }) => services.onPartial?.(result) });
 engine.onRestore(async (post) => {
   await restoreSettingsToEngine(post);
   if (source) await post("load", { name: source.name, face_ids: source.faceIds }, source.bytes);
@@ -43,6 +50,7 @@ const services = {
     saving.putExtra("thumb", null);
   },
   getPart: () => source,
+  openExport: () => openExport(store, services),
   restoreLast: async () => {
     const last = await saving.restore();
     if (!last?.state?.part) return null;
@@ -83,13 +91,16 @@ services.picker = new Picker(services.stage, { label: pickLabel });
 attachKeyboard(services.stage, services.picker, { label: pickLabel, placeholder: t("picker.search"), title: t("picker.title") });
 // Picking happens on Holds and Loads (T-541, T-543); the face regions come once per part.
 const PICK_STEPS = new Set(["holds", "loads"]);
+// Quality marks its show faces on Analyse (T-563).
+const picks = (s) => PICK_STEPS.has(s.step) || s.step === "tolerances" || s.step === "tools" || (s.step === "analyse" && s.goal === "quality");
 let regionsFor = null;
 async function preparePicker() {
   const s = store.get();
-  const on = Boolean(s.part) && PICK_STEPS.has(s.step) && app.route === "flow";
+  const on = Boolean(s.part) && picks(s) && app.route === "flow";
   if (on && regionsFor !== s.part) {
     regionsFor = s.part;
     services.picker.setData(await engine.call("regions"));
+    services.rerender(); // steps tint their faces once the regions are there
   }
   services.picker.enable(on);
   if (s.step !== "options" && services.stage.oriented) services.stage.orient(null);
@@ -100,6 +111,7 @@ initSettings({ store, saving, engine, services });
 store.subscribe((_, changed) => {
   if (changed.includes("part") && services.stage.part) saving.putExtra("thumb", thumbnail(services.stage.part.geo.attributes.position.array));
 });
-store.subscribe((_, changed) => { if (changed.includes("step") || changed.includes("part")) preparePicker(); });
+store.subscribe((_, changed) => { if (changed.includes("step") || changed.includes("part") || changed.includes("goal")) preparePicker(); });
 globalThis.fdmUI = app; // for the browser tests and for agents driving the page
 document.body.dataset.ready = "1";
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js");

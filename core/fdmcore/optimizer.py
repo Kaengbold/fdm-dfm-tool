@@ -26,6 +26,7 @@ Pyodide-safe: numpy + scipy (lazy) + shapely (lazy, only for winning edit meshes
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -387,10 +388,16 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
              base: Profile, owned: list[str] | None = None, materials: list[str] | None = None,
              nozzles: list[str] | None = None, environment: dict | None = None, constraints: dict | None = None,
              change: str = "slicer", load_case=None, climb=None, grams_minutes=None, evaluate=None,
-             orientation_settings=None, zone_info=None, unit_shape=None) -> dict:
+             orientation_settings=None, zone_info=None, unit_shape=None, mark_faces=None, budget_s: float | None = None) -> dict:
     """See module docstring. ``load_case``/``climb``/``grams_minutes``/``evaluate``/``orientation_settings``/
     ``zone_info``/``unit_shape`` are the session-bound helpers from api.py (api.optimize passes them), so
-    the strength model is shared and cached."""
+    the strength model is shared and cached. ``mark_faces(results, settings)`` (api._pose_marks) adds the marked
+    faces' penalties to the orientation scores (Quality: support on faces people see).
+
+    ``budget_s``: a time budget. Once it's spent the search skips what's left (more poses, recipe searches, nozzles,
+    reinforcements) and picks from what it checked: the result says ``ended_early`` (with the stage it stopped in) and,
+    when nothing checked reaches the target, offers "Continue the search" first, never "impossible". While it runs,
+    the best options so far go out as partial results (progress.partial, ``partial: True``) after each stage."""
     from .checks import orient
     from .orientation import candidate_directions, evaluate as evaluate_pose, find_orientations
     from .placement import print_rotation
@@ -403,6 +410,15 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
         raise ValueError(f"Unknown depth: {depth} (use one of {', '.join(DEPTHS)})")
     if change not in CHANGES:
         raise ValueError(f"Unknown change: {change} (use one of {', '.join(CHANGES)})")
+    started = time.monotonic()
+    ended_at: list[str] = []  # the stage the time budget ran out in (at most one)
+
+    def over(stage: str) -> bool:
+        """The budget is spent: remember where, and skip the rest."""
+        if not ended_at and budget_s is not None and time.monotonic() - started > budget_s:
+            ended_at.append(stage)
+        return bool(ended_at)
+
     lock = dict(constraints or {})
     env = dict(environment or {})
     owned = list(owned or [])
@@ -434,6 +450,8 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
     found = find_orientations(mesh, settings, top=2 * n_poses)
     as_loaded = evaluate_pose(mesh, [0, 0, 1], settings)
     pool = found + [as_loaded]
+    if mark_faces:
+        mark_faces(pool, settings)
     cases = load_case(loads) if strength_on else None
     if strength_on:
         from .strength import cases_safety
@@ -617,10 +635,53 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
                     q = prof(mid, nozzle, lh)
                     option(i, q, sh, _material_safety(r["case_fi"], p_ref_s, q), gm_for(i))
 
+    nozzle_notes: list[dict] = []
+
+    def result(partial: bool = False) -> dict:
+        """The options from the candidates checked so far (pick_options copies them, so this can run again)."""
+        picks = pick_options(cands, goal, owned)
+        feasible = bool(picks)
+        out = {"goal": goal, "depth": depth, "target": target, "feasible": feasible, "skipped": list(skipped),
+               "materials_skipped": mat_skipped, "nozzles_skipped": list(nozzle_notes), "candidates_checked": len(cands)}
+        if partial:
+            out["partial"] = True
+        if ended_at:
+            out["ended_early"] = True
+            out["ended_at"] = ended_at[0]
+        if not feasible:
+            best = max(cands, key=lambda c: c["safety"] or 0.0) if cands else None
+            if best is not None:
+                picks = [dict(best, badge="Best reachable", recommended=True, below_target=True)]
+            out["ways_out"] = ways_out(change, bool(lock.get("material")) or bool(materials), best and best["safety"], target)
+            if ended_at or partial:  # not everything was tried: never "impossible" (plan §10.1)
+                out["ways_out"].insert(0, {"id": "continue", "label": "Continue the search"})
+                out["explanation"] = (f"Search ended early: none of the options checked so far reaches ×{target:g}"
+                                      + (f" (best ×{best['safety']:.1f})" if best and best["safety"] else "")
+                                      + ". Continue the search to try the rest.")
+            else:
+                out["explanation"] = (f"None of the options we checked reached ×{target:g}. Best: ×{best['safety']:.1f}" if best and best["safety"]
+                                      else "Nothing could be checked.")
+        elif ended_at:
+            out["explanation"] = "Search ended early: these are the best options it found in the time. Continue the search to try the rest."
+        for o in picks:
+            o.pop("reinforcement_kind", None)
+            pros_cons(o, picks[0], mat_cons)
+            o["settings"] = _slicer_settings(o)
+        out["options"] = picks
+        return out
+
+    def emit() -> None:
+        """The best options so far, for "Stop & show best so far"."""
+        if cands and progress.wants_partial():
+            progress.partial(result(partial=True))
+
     # Phase A: every pose once (cheap). Phase B: the recipe search only on the most promising poses.
     for i in range(len(poses)):
+        if i and over("strength"):  # at least one pose, so there is something to show
+            break
         progress.report(0.15 + 0.30 * i / max(len(poses), 1), "Checking strength" if strength_on else "Measuring support")
         scan(i, noz[0])
+    emit()
 
     ranked_poses = list(range(len(poses)))
     if cands:
@@ -632,8 +693,11 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
     if strength_on and not recipe_fixed:
         top = ranked_poses[:REFINE_POSES[depth]]
         for k, i in enumerate(top):
+            if over("settings"):
+                break
             progress.report(0.45 + 0.25 * k / len(top), "Trying walls, top layers and infill")
             refine(i, noz[0], own_climbs=k == 0)  # other materials' own search only on the best pose
+            emit()
         if cands:
             ref_c = min(cands, key=lambda c: c["minutes"])
             ranked_poses = sorted(range(len(poses)), key=lambda i: min(
@@ -641,12 +705,13 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
                  for c in cands if c["up"] == [round(float(x), 6) for x in poses[i].up]), default=1e9))
 
     # ---------- 4. Bigger nozzles: only if the part still prints with them and the gain is significant. ----------
-    nozzle_notes: list[dict] = []
-    if bigger and cands:
+    if bigger and cands and not over("nozzles"):
         best_i = _pose_index(poses, min((c for c in cands if c["meets_target"]), key=lambda c: c["minutes"], default=cands[0])["up"])
         base_rows = [c for c in cands if c["up"] == [round(float(x), 6) for x in poses[best_i].up] and c["nozzle"] == noz[0]]
         nozzle_ctx: dict = {"oriented": _oriented(best_i)[0]}
         for idx_n, n in enumerate(bigger):
+            if idx_n and over("nozzles"):
+                break
             progress.report(0.70 + 0.08 * idx_n / max(len(bigger), 1), "Trying nozzles")
             lost = _nozzle_blockers(mesh, poses[best_i].up, prof(mats[0], n), bed, moving, ctx=nozzle_ctx)
             if lost:
@@ -659,11 +724,12 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
             if not gain:
                 del cands[before:]
                 nozzle_notes.append({"nozzle": n, "why": f"{n} mm skipped: not much faster or stronger than 0.4 on this part"})
+        emit()
 
     # ---------- 7. Local reinforcements (Complete depth, and design-only at every depth). ----------
     run_zones = strength_on and depth == "complete" and change in ("slicer", "both")
     run_design = strength_on and ((depth == "complete" and change in ("design", "both")) or change == "design")
-    if run_zones or run_design:
+    if (run_zones or run_design) and not over("reinforce"):
         progress.report(0.78, "Testing local reinforcements")
         reinf_poses = ranked_poses[:REINF_POSES[depth]]
         added = _test_reinforcements(
@@ -685,22 +751,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
 
     # ---------- 8. Pick 2–4 distinct options; honest result when nothing reaches the target. ----------
     progress.report(0.92, "Picking options")
-    picks = pick_options(cands, goal, owned)
-    feasible = bool(picks)
-    out = {"goal": goal, "depth": depth, "target": target, "feasible": feasible, "skipped": skipped,
-           "materials_skipped": mat_skipped, "nozzles_skipped": nozzle_notes, "candidates_checked": len(cands)}
-    if not feasible:
-        best = max(cands, key=lambda c: c["safety"] or 0.0) if cands else None
-        if best is not None:
-            picks = [dict(best, badge="Best reachable", recommended=True, below_target=True)]
-        out["ways_out"] = ways_out(change, bool(lock.get("material")) or bool(materials), best and best["safety"], target)
-        out["explanation"] = (f"None of the options we checked reached ×{target:g}. Best: ×{best['safety']:.1f}" if best and best["safety"]
-                              else "Nothing could be checked.")
-    for o in picks:
-        o.pop("reinforcement_kind", None)
-        pros_cons(o, picks[0], mat_cons)
-        o["settings"] = _slicer_settings(o)
-    out["options"] = picks
+    out = result()
     progress.report(1.0, "Picking options")
     return out
 
