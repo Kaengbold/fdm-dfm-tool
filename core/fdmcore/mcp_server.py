@@ -622,15 +622,22 @@ def set_custom_presets(printers: dict | None = None, materials: dict | None = No
 
 
 @server.tool()
-def calibration_part(kind: str, output_path: str) -> dict:
-    """Save a test print as STL for measuring the user's own material on their printer. ``kind``:
-    "layer_strength", "warping", "fit", "overhang", "bridge" or "all" (every test on one plate);
-    each piece has its size written on it. ``how`` says what to print and measure.
-    The measured numbers go into a custom material (set_custom_presets)."""
-    r = api.calibration_part(kind)
-    out = _out(output_path, (".stl",), "STL path")
-    out.write_bytes(r["stl"])
-    return {"saved": str(out), "how": r["how"]}
+def calibration_part(kind: str, output_path: str, material: str = "pla") -> dict:
+    """Save a test print for measuring the user's own material on their printer. ``kind``:
+    "layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "temp" (a temperature tower for
+    ``material``: then heat_tuning_gcode "temp" on its sliced G-code), "ironing" (save it as .3mf: each step's
+    ironing flow is set in it) or "all" (every test on one plate); each piece has its size written on it.
+    ``how`` says what to print and measure. The measured numbers go into a custom material (set_custom_presets:
+    nozzle_temp_c from the tower, ironing_flow_pct from the ironing test)."""
+    r = api.calibration_part(kind, {"material": material})
+    if kind == "ironing" and str(output_path).lower().endswith(".3mf"):
+        out = _out(output_path, (".3mf",), "3MF path")
+        out.write_bytes(r["3mf"])
+    else:
+        out = _out(output_path, (".stl",), "STL path")
+        out.write_bytes(r["stl"])
+    extra = {k: r[k] for k in ("temps", "flows") if k in r}
+    return {"saved": str(out), "how": r["how"], **extra}
 
 
 @server.tool()
@@ -746,12 +753,13 @@ def optimize_gcode_file(up: list[float], gcode_path: str, output_path: str, prin
 
 
 @server.tool()
-def heat_tuning_gcode(kind: str, gcode_path: str, output_path: str) -> dict:
-    """The G-code for a heat tuning print (calibration_part "sag" or "snap"), from the user's sliced test part: sag
-    switches the slicer's slowdown for cooling off, snap steps the fan down every 8 mm. Keep the written file:
-    tune_heat_window reads it with the result."""
+def heat_tuning_gcode(kind: str, gcode_path: str, output_path: str, material: str = "pla") -> dict:
+    """The G-code for a tuning print (calibration_part "sag", "snap" or "temp"), from the user's sliced test part: sag
+    switches the slicer's slowdown for cooling off, snap steps the fan down every 8 mm, temp sets each block of the
+    temperature tower to its temperature (``material``'s, as on the tower). Keep the written file: tune_heat_window
+    reads it with the result (sag, snap)."""
     src = _in(gcode_path, (".gcode", ".gco", ".g"), "G-code file")
-    r = api.tuning_gcode(kind, src.read_bytes())
+    r = api.tuning_gcode(kind, src.read_bytes(), {"material": material})
     out = _out(output_path, (".gcode",), "G-code path")
     out.write_bytes(r.pop("data"))
     return {**r, "path": str(out)}

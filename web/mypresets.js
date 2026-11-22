@@ -72,6 +72,8 @@ export const MATERIAL_FIELDS = [
   ["outer_error_mm", "Outer sizes come out (mm, measured − modelled, from a print below)", "number", 0.01],
   ["sag_limit_c", "Too hot to keep its shape above (°C, from the sag test)", "number", 1],
   ["min_bond", "Layer bond it needs (0–1, from the snap test)", "number", 0.01],
+  ["nozzle_temp_c", "Nozzle temperature (°C, from the temperature tower)", "number", 1],
+  ["ironing_flow_pct", "Ironing flow (%, from the ironing test)", "number", 1],
   ["price_per_kg", "Price per kg (your currency, for the cost of a print)", "number", 0.01],
   ["spool_left_g", "Grams left on the spool (warns when a print won't fit)", "number", 1],
 ];
