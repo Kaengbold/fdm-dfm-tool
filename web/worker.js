@@ -1,6 +1,7 @@
 // Runs the Python engine (fdmcore) inside Pyodide, off the UI thread.
 // Protocol: {id, method, args, data?} -> {id, result} | {id, error}; plus {type: "ready"} once booted
-// and {type: "progress", id, fraction, text} while a call runs. To cancel, the page kills the worker.
+// and {type: "progress", id, fraction, text} while a call runs, and {type: "partial", id, result} when the call has a
+// usable result before it ends (the optimizer's best options so far, T-552). To cancel, the page kills the worker.
 import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.mjs";
 
 const ENGINE = new URL("../core/fdmcore/", import.meta.url);
@@ -36,6 +37,7 @@ async function boot() {
   }
   py.runPython("import sys; sys.path.insert(0, '/home/pyodide')");
   py.pyimport("fdmcore.progress").set_sink(progress);
+  py.pyimport("fdmcore.progress").set_partial_sink(partial);
   return { py, dispatch: py.pyimport("fdmcore.api").dispatch };
 }
 
@@ -48,6 +50,12 @@ function progress(fraction, text) {
   if (now - lastPost < 100) return;
   lastPost = now;
   postMessage({ type: "progress", id: current, fraction, text });
+}
+
+/** Called from Python with a result that is usable before the call ends; never throttled (each one counts). */
+function partial(proxy) {
+  const result = proxy?.toJs ? proxy.toJs({ dict_converter: Object.fromEntries }) : proxy;
+  postMessage({ type: "partial", id: current, result });
 }
 
 const ready = boot();

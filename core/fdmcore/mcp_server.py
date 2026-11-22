@@ -656,6 +656,7 @@ def optimize_print(
     constraints: dict | None = None,
     change: str = "slicer",
     faces: dict | None = None,
+    budget_seconds: float | None = None,
 ) -> dict:
     """The best 2–4 ways to print the loaded part for a goal (strong / balanced / fast / light / quality):
     orientation, material, nozzle, layer height, walls, top/bottom and infill, each checked for strength at its
@@ -666,10 +667,12 @@ def optimize_print(
     hard limits (material, nozzle, layer_height, walls, top, bottom, infill, up). ``change``: slicer / design /
     both. ``faces`` as in find_orientations, or ``{"clean": "visible"}`` for the faces people see as guessed by
     guess_visible_faces (what the app does for quality): orientations with support on them rank lower. Returns
-    ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the target, ``ways_out``."""
+    ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the target, ``ways_out``.
+    ``budget_seconds``: stop searching after about that long and pick from what was checked (``ended_early``; run it
+    again without a budget to search the rest)."""
     profile = {"printer": printer, "nozzle": nozzle, "use_temp_c": use_temp_c, "constant_load": constant_load}
     return _clean(api.optimize(goal, loads, depth, profile, owned, materials, nozzles, {"temp_c": use_temp_c, "touches": touches or []},
-                               constraints, change, faces))
+                               constraints, change, faces, budget_seconds))
 
 
 @server.tool()

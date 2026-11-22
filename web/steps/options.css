@@ -8,6 +8,8 @@
 .options-banner { display: grid; gap: var(--s-2); padding: var(--s-3) var(--s-4); border-radius: var(--r); background: var(--warn-soft); color: var(--text); }
 .options-banner b { color: var(--warn); }
 .options-banner .row { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.options-banner.is-early { background: var(--surface-sunken); }
+.options-banner.is-early b { color: var(--text); }
 .app-screen[data-layout="options"] > .compare .panel-body { gap: var(--s-4); }
 /* A compact title row on Options: the comparison needs the height (the mockup has no panel head). */
 .app-screen[data-layout="options"] > .compare .panel-head { padding: var(--s-3) var(--s-5) var(--s-2); border-bottom: 0; grid-template-columns: auto 1fr; align-items: baseline; gap: var(--s-3); }
