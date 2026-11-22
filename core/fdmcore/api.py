@@ -1301,6 +1301,8 @@ def volume_move(up, box: dict, by, profile: dict | None = None) -> dict:
 def volume_solid(up, boxes: list[dict]) -> list[dict]:
     """The "add plastic" / "cut away" boxes (volume_at) as design edits in part coordinates, for the
     web app to apply like any design change (a new version of the model)."""
+    from .features import _intent, _prism_shape
+
     r0 = rotation_to_z(up)
     unit = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float)
     faces = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]])
@@ -1312,9 +1314,12 @@ def volume_solid(up, boxes: list[dict]) -> list[dict]:
         tris = ((unit * (hi - lo) + lo)[faces]) @ r0  # build frame -> part
         add = b["kind"] == "add_solid"
         size = " × ".join(f"{v:.0f}" for v in hi - lo)
+        bottom = (unit[:4] * (hi - lo) + lo) @ r0
         out.append({"id": f"solid-{i}", "rule": "design_change", "title": f"{'Add' if add else 'Cut away'} a {size} mm block",
                     "description": "Placed under Advanced design changes.", "op": "add" if add else "cut", "param": None,
-                    "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)], "placed_by_user": True})
+                    "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)], "placed_by_user": True,
+                    "intent": _cad_refs(_intent("slab" if add else "void", {"size_mm": (hi - lo).tolist()},
+                                                [_prism_shape(bottom, np.array([0, 0, hi[2] - lo[2]]) @ r0, add=add)]))})
     return out
 
 
@@ -1818,6 +1823,19 @@ def _edges() -> tuple[dict, dict]:
                 if m["regions"] and None not in faces:
                     m["faces"] = faces
     return s.edges
+
+
+def _cad_refs(intent: dict) -> dict:
+    """On a STEP part, an edit intent's regions also by their B-rep face ids (``faces``), for the CAD engine."""
+    refs = intent.get("refs", {})
+    faces = [_cad_face(r) for r in refs.get("regions", [])]
+    if refs.get("regions") and None not in faces:
+        refs["faces"] = faces
+    for e in refs.get("edges", []):
+        pair = [_cad_face(r) for r in e.get("regions", [])]
+        if e.get("regions") and None not in pair:
+            e["faces"] = pair
+    return intent
 
 
 def _cad_face(region: int) -> int | None:
@@ -3214,6 +3232,9 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
                          strength_verdict=s.strength_verdict, findings=findings, to_print=to_print)
     if not s.cad_checks:  # an organic shape (T-408), until the user turns the CAD checks back on
         edits = [e for e in edits if not e["id"].startswith(CAD_ONLY_EDITS)]
+    for e in edits:
+        if "intent" in e:
+            _cad_refs(e["intent"])
     edits = link_to_findings(edits, findings, to_print)
     feats = _features()
     advice = design_advice(s.mesh, edits, findings, p, to_print, from_print, features=feats, up=up)

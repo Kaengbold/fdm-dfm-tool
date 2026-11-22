@@ -387,16 +387,17 @@ def thicken_walls(mesh: Mesh, profile: Profile, lines: float, max_layers: int = 
             if not other.is_empty:
                 grown = _safe_diff(grown, other.buffer(fuse + lw / 2, quad_segs=QUAD))
             stack.append((i, grown))
-        slabs = _slabs(stack, layers, region, verts, height)
+        slabs, prisms = _slabs(stack, layers, region, verts, height)
         if slabs:
             out.append({"z0": region.z0, "z1": region.z1, "width": region.metrics["min_width"], "target": target,
-                        "pieces": slabs, "bbox": region.bounds})
+                        "pieces": slabs, "prisms": prisms, "bbox": region.bounds})
     return out
 
 
-def _slabs(stack, layers, region, verts, height) -> list[np.ndarray]:
+def _slabs(stack, layers, region, verts, height) -> tuple[list[np.ndarray], list[tuple]]:
     """Prisms for consecutive layers with the same grown outline. The first and last reach to the
-    wall's real bottom and top (mesh vertices in its footprint), or one layer past it into the part."""
+    wall's real bottom and top (mesh vertices in its footprint), or one layer past it into the part.
+    Also each as (polygon, z0, z1), for the exact edit (features.py, edit intents)."""
     groups: list[list] = []
     for i, g in stack:
         key = shapely.normalize(g.simplify(0.01))
@@ -406,7 +407,7 @@ def _slabs(stack, layers, region, verts, height) -> list[np.ndarray]:
             groups.append([i, i, key, g])
     first, last = stack[0][0], stack[-1][0]
     foot = shapely.union_all([g for _, g in stack]).buffer(0.1, quad_segs=QUAD)
-    out = []
+    out, prisms = [], []
     for i0, i1, _, g in groups:
         z0 = (layers[i0 - 1].z + layers[i0].z) / 2 if i0 > 0 else 0.0
         z1 = (layers[i1].z + layers[i1 + 1].z) / 2 if i1 + 1 < len(layers) else height
@@ -422,7 +423,8 @@ def _slabs(stack, layers, region, verts, height) -> list[np.ndarray]:
             prism = extrude(poly, z0, z1)
             if prism is not None:
                 out.append(prism)
-    return out
+                prisms.append((poly, z0, z1))
+    return out, prisms
 
 
 def _end_height(verts, foot, lo: float, hi: float, low: bool) -> float:
