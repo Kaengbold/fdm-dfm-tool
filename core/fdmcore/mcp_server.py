@@ -185,6 +185,15 @@ def guess_visible_faces() -> dict:
 
 
 @server.tool()
+def list_round_features(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Round holes and pegs the user can set a fit on: region id, kind (hole / peg), diameter, axis, centre, the
+    regions of the same size (``same``), the fit or fastener already set, and ``printed_mm``: the size it comes
+    out at on this printer (measured with the fit test, or typical). ``tolerance``: the fit gaps in use. Then
+    ``set_fit`` / ``set_fastener`` on a region, and ``suggest_design_changes`` offers the resize."""
+    return _clean(api.round_features(up, _profile(printer, material, nozzle)))
+
+
+@server.tool()
 def list_edges(radius_mm: float = 2.0) -> dict:
     """Sharp outer feature edges (``feature_edges``) and inside corners (``concave_edges``) of the part.
     Each entry has ``id``, ``closed``, ``length_mm``, ``midpoint``, ``normal``, ``regions``, ``points``
@@ -1101,6 +1110,7 @@ API_TOOLS = {
     "warping": "check_warping",
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",
+    "round_features": "list_round_features",
     "fastener_suggestions": "fastener_suggestions",
     "split": "split_part",
     "plate": "plan_plate",

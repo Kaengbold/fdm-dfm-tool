@@ -87,6 +87,9 @@ const upAngle = (a, b) => {
   return (Math.acos(Math.min(1, Math.max(-1, (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb)))) * 180) / Math.PI;
 };
 
+/** A pending design change's edits: carried along (from Tolerances, T-570) or looked up in the check's design result. */
+const editsOf = (p, res) => p.edits ?? p.editIds.map((id) => res?.design?.edits.find((e) => e.id === id)).filter(Boolean);
+
 // ---------- confirming the batch ----------
 
 async function confirmBatch(store, services, recheck) {
@@ -100,7 +103,7 @@ async function confirmBatch(store, services, recheck) {
   error = null;
   try {
     const designItems = s.pending.filter((p) => p.kind === "design");
-    const edits = designItems.flatMap((p) => p.editIds.map((id) => res?.design?.edits.find((e) => e.id === id)).filter(Boolean));
+    const edits = designItems.flatMap((p) => editsOf(p, res));
     const patch = { pending: [] };
     if (edits.length) {
       work = { text: t("problems.applying") };
@@ -256,7 +259,7 @@ function showGhosts(store, services) {
   const key = JSON.stringify([s.pending.map((p) => p.id), store.deps(...DEPENDS)]);
   if (key === ghostKey) return;
   ghostKey = key;
-  const edits = s.pending.filter((p) => p.kind === "design").flatMap((p) => p.editIds.map((id) => res?.design?.edits.find((e) => e.id === id)).filter(Boolean));
+  const edits = s.pending.filter((p) => p.kind === "design").flatMap((p) => editsOf(p, res));
   services.stage.showGhosts(edits.flatMap((e) => {
     let start = 0;
     return e.pieces.map((n, i) => {

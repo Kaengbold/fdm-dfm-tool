@@ -1,0 +1,13 @@
+/* Tolerances & fits (T-570, plan §15.2). */
+.tol-list { display: grid; gap: var(--s-2); }
+.tol-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--surface-raised); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tol-row:hover { border-color: var(--line-strong); }
+.tol-row.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.tol-card { display: grid; gap: var(--s-3); justify-items: start; padding: var(--s-3); border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface-raised); }
+.tol-card .ui-num { justify-self: stretch; }
+.tol-verdict { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r); font-size: var(--fs-sm); justify-self: stretch; }
+.tol-verdict.is-jam { background: var(--bad-soft); color: var(--bad); }
+.tol-verdict.is-tight, .tol-verdict.is-loose { background: var(--warn-soft); color: var(--warn); }
+.tol-verdict.is-fits { background: var(--good-soft); color: var(--good); }
+.tol-printed-label { align-self: center; font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--text-2); }

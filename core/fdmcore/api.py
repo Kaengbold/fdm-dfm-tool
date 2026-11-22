@@ -3317,6 +3317,47 @@ def fastener_suggestions(up, profile: dict | None = None) -> dict:
     return {"suggestions": suggest_fasteners(s.mesh, _features(), up, Profile.from_dict(profile))}
 
 
+SAME_SIZE_MM = 0.05  # round features this close in diameter (and of one kind) count as the same, for "apply to all"
+
+
+def round_features(up, profile: dict | None = None) -> dict:
+    """Every round hole and peg the user can set a fit on (the Tolerances step, T-570): ``features`` with region,
+    ``kind`` (hole / peg), diameter, axis, centre, length (part coordinates), ``same`` (regions of the same kind and
+    size, for "apply to all"), what is set on it (``fit``: partner_mm + fit, or ``fastener``: size + use) and
+    ``printed_mm``, the size it comes out at on this printer: the user's measured hole / outer error when they
+    measured it (``printed_from``: "measured"), else the typical undersize of small holes ("typical"). Plus
+    ``tolerance`` (the fit gaps in use, see tolerance())."""
+    from .features import accepted
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    p = Profile.from_dict(profile)
+    holes_t = load_data("thresholds")["holes"]
+    typical = float(np.mean(holes_t["typical_undersize_mm"]))
+    hole_err, outer_err = p.material.get("hole_error_mm"), p.material.get("outer_error_mm")
+    feats = [f for f in accepted(_features()) if f["type"] in ("hole", "boss") and f.get("full_circle")]
+    out = []
+    for f in feats:
+        hole = f["type"] == "hole"
+        d = float(f["diameter"])
+        if hole and hole_err is not None:
+            printed, source = d + float(hole_err), "measured"
+        elif not hole and outer_err is not None:
+            printed, source = d + float(outer_err), "measured"
+        elif hole and d <= holes_t["undersize_up_to_mm"]:
+            printed, source = d - typical, "typical"
+        else:
+            printed, source = d, "typical"
+        same = [g["region"] for g in feats if g["type"] == f["type"] and abs(float(g["diameter"]) - d) <= SAME_SIZE_MM]
+        out.append({"region": int(f["region"]), "kind": "hole" if hole else "peg", "diameter": round(d, 2),
+                    "axis": [float(x) for x in f["axis"]], "center": [float(x) for x in f["center"]], "length": round(float(f["length"]), 2),
+                    "same": same, "fit": s.fits.get(f["region"]), "fastener": s.fasteners.get(f["region"]),
+                    "printed_mm": round(printed, 2), "printed_from": source})
+    return {"features": out, "tolerance": tolerance(profile)}
+
+
 def _coarse_note(region: int) -> str:
     """A warning to add when the hole / post ``region`` was exported with too few facets (coarse_facets):
     its measured size, and so the advice, is off by about the facets' error."""
@@ -4228,6 +4269,7 @@ METHODS = {
     "set_fit": set_fit,
     "set_fastener": set_fastener,
     "fastener_suggestions": fastener_suggestions,
+    "round_features": round_features,
     "split": split,
     "set_gap": set_gap,
     "volume_solid": volume_solid,
