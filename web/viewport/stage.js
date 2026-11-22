@@ -14,6 +14,14 @@ function palette() {
     : { part: "#C9CED6", edge: "#4B5563", bed: "#DCE1E7", grid: "#9AA3AF" };
 }
 
+const FIELD_BANDS = 10;
+/** Banded rainbow for results (blue low … red high), the same scale as the old viewer's FEA view. */
+export function fieldColor(v, c = new THREE.Color()) {
+  const top = FIELD_BANDS - 1;
+  const band = Math.min(top, Math.max(0, Math.floor(v * FIELD_BANDS)));
+  return c.setHSL((0.66 * (top - band)) / top, 0.85, 0.5);
+}
+
 /** A binary or ASCII STL as a flat Float32Array of triangle corners (9 per triangle). */
 export function parseStl(buffer) {
   const view = new DataView(buffer);
@@ -124,6 +132,7 @@ export class Stage {
 
   /** Show ``triangles`` (Float32Array, part coordinates, as loaded) standing on the bed, and frame it. */
   showPart(triangles) {
+    this.hideField();
     if (this.part) { this.scene.remove(this.part.group); this.part.geo.dispose(); }
     this.part = partGroup(triangles, palette());
     this.scene.add(this.part.group);
@@ -176,10 +185,55 @@ export class Stage {
   }
 
   clearPart() {
+    this.hideField();
     if (!this.part) return;
     this.scene.remove(this.part.group);
     this.part.geo.dispose();
     this.part = null;
+    this.render();
+  }
+
+  /** A result on the part (T-560): the engine's refined surface ``triangles`` (part coordinates) coloured per corner by
+   * ``values`` from 0 to ``max`` in bands, like FEA software. ``disp`` (3 per corner, mm) lets ``setDeformation`` show
+   * the curled shape. Lives in the part's group, so it turns with the part; hides the plain part until ``hideField``. */
+  showField({ triangles, values, disp = null, max }) {
+    this.hideField();
+    if (!this.part) return;
+    const { offset } = this.part;
+    const pos = new Float32Array(triangles.length);
+    for (let i = 0; i < pos.length; i += 3) { pos[i] = triangles[i] + offset.x; pos[i + 1] = triangles[i + 1] + offset.y; pos[i + 2] = triangles[i + 2] + offset.z; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const col = new Float32Array(pos.length);
+    const c = new THREE.Color();
+    for (let i = 0; i < values.length; i++) { fieldColor(values[i] / (max || 1), c); col.set([c.r, c.g, c.b], i * 3); }
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide }));
+    this.field = { mesh, base: pos.slice(), disp };
+    for (const child of this.part.group.children) child.visible = false;
+    this.part.group.add(mesh);
+    this.render();
+  }
+
+  hideField() {
+    if (!this.field) return;
+    this.field.mesh.removeFromParent();
+    this.field.mesh.geometry.dispose();
+    this.field.mesh.material.dispose();
+    this.field = null;
+    if (this.part) for (const child of this.part.group.children) child.visible = true;
+    this.render();
+  }
+
+  /** Bend the shown result by ``scale`` × its displacement (1 = true size; FEA software exaggerates it). */
+  setDeformation(scale) {
+    if (!this.field?.disp) return;
+    const attr = this.field.mesh.geometry.attributes.position;
+    const { base, disp } = this.field;
+    for (let i = 0; i < base.length; i++) attr.array[i] = base[i] + scale * disp[i];
+    attr.needsUpdate = true;
+    this.field.mesh.geometry.computeVertexNormals();
     this.render();
   }
 

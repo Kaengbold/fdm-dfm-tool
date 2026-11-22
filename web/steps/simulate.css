@@ -1,0 +1,18 @@
+/* Simulation step (T-560): the chosen-setup strip, the slicer line, the status list and the overlay switch on the
+   stage. Spacing only from the --s-* tokens (core/tests/test_css_tokens.py). */
+.sim-setup { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s-2);
+  padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r); font-weight: var(--fw-bold); }
+.sim-cond { display: grid; grid-template-columns: auto 1fr; gap: var(--s-1) var(--s-3); margin: 0; font-size: var(--fs-sm); }
+.sim-cond dt { color: var(--text-3); }
+.sim-cond dd { margin: 0; }
+.sim-cond small { color: var(--text-3); }
+.sim-slice { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2); font-size: var(--fs-sm); color: var(--text-2); }
+.sim-running { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); font-size: var(--fs-sm); }
+.sim-status { display: grid; gap: var(--s-1); margin: 0; padding: 0; list-style: none; }
+.sim-status__item { display: flex; justify-content: space-between; gap: var(--s-2); padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--surface-sunken); }
+.sim-status__item.is-ok b { color: var(--good); }
+.sim-status__item.is-warn b { color: var(--warn); }
+.sim-views { position: absolute; top: var(--s-3); left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-2); pointer-events: auto; }
+.sim-legend { position: absolute; bottom: var(--s-6); left: var(--s-3); display: grid; gap: var(--s-1); max-width: 320px;
+  padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: var(--fs-sm); pointer-events: auto; }
+.sim-legend span { color: var(--text-3); }
