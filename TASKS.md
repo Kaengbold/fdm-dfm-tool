@@ -1230,7 +1230,7 @@ Rules for every [UI] task:
 - [~] **T-561 P1** [UI] Problems & fixes step. · plan: §13 · files: `web/steps/problems.js`, `web/geometry.js` · owner: Claude (`task/T-561-problems`)
   - Do: grouped short rows (one per instance), click frames the feature; expanded: fixes first (Slicer/Design/Process, Add / Show steps), then More; design fixes shown even in slicer-only mode with a one-time "changes your model" confirm; **one pending batch** (design ghosts + setting old→new), nothing recomputes while picking; Confirm all changes → safe apply + quick re-check (strength at chosen settings, affected checks/simulations, orientation hint only) or "Apply without re-checking" (results go stale); New badges, Undo batch, Accept issue.
   - Done when: e2e adds a teardrop and a slicer fix, confirms, and sees the re-check result.
-- [ ] **T-562 P1** [UI] Done step and export. · plan: §15.1, §16.9 · files: `web/steps/done.js`, `web/report.js` · owner: —
+- [~] **T-562 P1** [UI] Done step and export. · plan: §15.1, §16.9 · files: `web/steps/done.js`, `web/report.js` · owner: Claude (`task/T-562-done`)
   - Do: summary, slicer-changes diff with ticks, Export 3MF (target slicer remembered), modified STL/STEP, **Download G-code** when T-525 works, save/share/CAD checklist; header Export summary of what goes out; extras cards; **More tools** (manual zones/hidden gaps, split, copies, electronics-box heat, versions/A-B).
 - [ ] **T-563 P1** [UI] Quality path end to end. · plan: §14, §16.10 · files: `web/flow.js`, steps as needed · owner: —
   - Do: Quality skips Holds/Loads/Load details and every strength result; Analyse Fast/Extended only; visible faces guessed (outer faces), optional "mark show face"; Done hides Lighter and design additions, keeps Tolerances.
