@@ -1251,7 +1251,7 @@ Rules for every [UI] task:
 
 ### Phase 8: cut-over
 
-- [ ] **T-580 P1** [UI] Switch to the new app and delete the old one. · plan: §17 · files: `web/` · owner: —
+- [~] **T-580 P1** [UI] Switch to the new app and delete the old one. · plan: §17 · files: `web/` · owner: Claude (`task/T-580-cutover`)
   - Do: `index.html` serves the new shell; delete the old `app.js`, `steps.js`, panes and CSS; old projects still open.
 - [ ] **T-581 P1** [UI] New browser smoke test. · plan: §17 · files: `tools/e2e_smoke.py` · owner: —
   - Do: 1280×720 and 1440×900: Start → sample + STEP → Setup → Environment → Holds (face, edge, toast) → Loads (gizmo, N/MPa) → details → Analyse → Options (pin PLA, re-optimize) → Simulation → Problems (pending + Confirm all) → Export → Tolerances → Quality path → Settings → Cancel and Undo; dark theme screenshot.
