@@ -71,3 +71,13 @@ export function arrowIndex(e, index, count, { vertical = true, horizontal = true
   e.preventDefault();
   return move();
 }
+
+/** Hand the viewer a file to save (bytes or text). */
+export function download(data, filename, mime = "application/octet-stream") {
+  const url = URL.createObjectURL(new Blob([data], { type: mime }));
+  const a = h("a", { href: url, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

@@ -1018,6 +1018,80 @@ def check_new_ui_simulation(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_done(browser, port: int) -> str:
+    """The new UI's Done step (T-562): summary of the chosen option, slicer changes with ticks (an unticked one stays out
+    of the export), Export 3MF for the remembered slicer, Save project, Share report, Download G-code from the browser
+    OrcaSlicer, and the header's Export 3MF saying what goes out."""
+    import io
+    import json
+    import zipfile
+
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Hole block").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => {
+          fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'fast', optimized: 1, noLoads: true,
+            option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2,
+              walls: 3, top: 4, bottom: 3, infill: 0.15, minutes: 41, part_g: 12, total_g: 12, support_g: 0,
+              settings: { wall_loops: '3', top_shell_layers: '4', bottom_shell_layers: '3', sparse_infill_density: '15%', layer_height: '0.20' } } });
+          fdmUI.go('done'); }""")
+        page.wait_for_selector(".done-grid")
+        grid = " ".join(page.locator(".done-grid").inner_text().split())
+        assert "PLA" in grid and "41 min" in grid, grid
+        page.wait_for_selector(".done-rows .ui-disc__head", timeout=120_000)
+        page.locator(".done-rows .ui-disc__head").click()
+        labels = page.locator(".done-settings li").all_inner_texts()
+        assert any("Thin layers" in x for x in labels), labels
+        row = page.locator(".done-settings li", has_text="ironing")
+        row.locator("input[type=checkbox]").uncheck()
+        assert page.evaluate("() => fdmUI.store.get().exportOff") == ["ironing_type"]
+        page.locator(".done-export-row").get_by_role("radio", name="PrusaSlicer").click()
+        with page.expect_download(timeout=120_000) as dl:
+            page.locator(".done-export-row").get_by_role("button", name="Export 3MF").click()
+        mf = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read()))
+        config = " ".join(mf.read(n).decode("utf-8", "replace") for n in mf.namelist() if n.lower().endswith((".config", ".ini")))
+        assert dl.value.suggested_filename == "hole_block.3mf", dl.value.suggested_filename
+        assert "elefant_foot_compensation" in config and "ironing_type" not in config, config[:400]
+        assert page.evaluate("() => localStorage.getItem('fdm-target-slicer')") == "prusa"
+        with page.expect_download(timeout=120_000) as dl:
+            page.get_by_role("button", name="Save project").click()
+        project = json.loads(open(dl.value.path(), encoding="utf-8").read())
+        assert project["format"] == "fdm-check-project" and project["up"] == [0, 0, 1] and "ironing_type" in project["excluded_settings"], project.keys()
+        with page.expect_download(timeout=120_000) as dl:
+            page.get_by_role("button", name="Share report").click()
+        report = open(dl.value.path(), encoding="utf-8").read()
+        assert "Print check: hole_block.stl" in report and "fdm-check-project" in report
+        # The browser OrcaSlicer is there only after tools/vendor.py (local runs, the Pages build), not in CI.
+        if any((ROOT / "vendor").glob("muon3d-slicer-engine@*/engine-st.mjs")):
+            with page.expect_download(timeout=300_000) as dl:
+                page.get_by_role("button", name="Download G-code").click()
+            gcode = open(dl.value.path(), "rb").read()
+            assert dl.value.suggested_filename == "hole_block.gcode" and b"G1 " in gcode, len(gcode)
+            got = f"G-code ({len(gcode) // 1024} kB)"
+        else:
+            page.get_by_role("button", name="Download G-code").click()
+            page.wait_for_selector(".drop-error", timeout=120_000)
+            got = page.locator(".drop-error").inner_text()
+            assert "isn't available" in got, got
+        page.locator(".app-header").get_by_role("button", name="Export 3MF").click()
+        what = page.locator("dialog.ui-modal").inner_text()
+        assert "Chosen option: Flat" in what, what
+        with page.expect_download(timeout=120_000) as dl:
+            page.locator("dialog.ui-modal").get_by_role("button", name="Export 3MF").click()
+        assert dl.value.suggested_filename.endswith(".3mf")
+        assert not errors, errors
+        return f"{grid}; {len(labels)} slicer changes, unticked ironing stays out; 3MF for PrusaSlicer remembered; project, report, {got}; header export"
+    finally:
+        page.close()
+
+
 def check_new_ui_problems(browser, port: int) -> str:
     """The new UI's Problems & fixes step (T-561): grouped rows; opening one frames it and shows its fixes; a teardrop
     (design, with the one-time "changes your model" confirm) and a slicer fix go into one pending batch with a ghost;
@@ -1141,6 +1215,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: analyse", lambda: check_new_ui_analyse(ui, port))
             run.step("new UI: options", lambda: check_new_ui_options(ui, port))
             run.step("new UI: simulation", lambda: check_new_ui_simulation(ui, port))
+            run.step("new UI: done", lambda: check_new_ui_done(ui, port))
             run.step("new UI: problems", lambda: check_new_ui_problems(ui, port))
         finally:
             ui.close()

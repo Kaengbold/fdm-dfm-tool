@@ -39,6 +39,7 @@ export function initialState() {
     depth: "extended",
     option: null,
     pending: [], // fixes waiting in the Problems batch (T-561)
+    exportOff: [], // slicer changes the user unticked on Done (left to their own profile)
     accepted: [], // finding ids the user accepted as they are
   };
 }
