@@ -21,6 +21,8 @@ import "./steps/heat.js";
 import { openExport } from "./steps/done.js";
 import "./steps/tolerances.js";
 import "./steps/tools.js";
+import "./steps/lighter.js";
+import "./steps/tuned.js";
 import "./steps/problems.js";
 import { openGizmo } from "./viewport/gizmo.js";
 import { initSettings, openSettingsTab, restoreSettingsToEngine } from "./steps/settings.js";

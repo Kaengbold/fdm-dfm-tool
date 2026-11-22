@@ -104,8 +104,10 @@ export async function export3mf(store, services, slicer = targetSlicer()) {
     up: upOf(s), profile: profileOf(s), settings, excluded_settings: rows.filter((r) => off.has(r.key) && r.key !== "fine_layers").map((r) => r.key),
     slicer: slicer === "prusa" ? "prusa" : "orca", fine_layers: off.has("fine_layers") ? [] : fineLayers(check),
     faces: markedFaces(s), // Quality's show faces: the slicer keeps the seam off them
-    zones: exportZones(s), // zones and hidden gaps from More tools, for this orientation
+    // stronger zones from Make it lighter, and the zones and hidden gaps from More tools (for this orientation)
+    zones: [...(s.option?.zones ?? []), ...exportZones(s)],
     copies: s.copies ?? 1, pauses: s.pauses ?? [],
+    cooling: s.option?.cooling ?? null, // slower hot heights from Tuned settings
   });
   // The below-target warning travels with the export (§16.2): in the file name, too.
   const warn = s.option?.warning === "below_target" ? "_below_target" : "";
@@ -291,14 +293,15 @@ registerStep("done", {
     if (busy) body.append(h("div", { class: "sim-running", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, busy.text)));
     if (error) body.append(h("p", { class: "drop-error", role: "alert" }, error));
 
-    // Extras (§15.1): what works now, and what the next tasks add.
+    // Extras (§15.1): Tuned settings, Tolerances, Make it lighter; then More tools.
     const card = (title, text, action) => h("div", { class: "done-card" }, h("b", {}, title), h("span", {}, text), action);
-    const soon = h("span", { class: "done-soon" }, t("done.soon"));
     const extras = h("div", { class: "done-cards" },
-      card(t("done.tuned.title"), t("done.tuned.text"),
-        Button({ label: t("done.gcode"), size: "small", disabled: Boolean(busy), onClick: () => run("gcode", t("done.slicing"), () => downloadGcode(store, services), services) })),
+      card(t("done.tuned.title"), o.cooling ? t("done.tuned.on") : t("done.tuned.text"), h("div", { class: "row" },
+        Button({ label: t("done.gcode"), size: "small", disabled: Boolean(busy), onClick: () => run("gcode", t("done.slicing"), () => downloadGcode(store, services), services) }),
+        Button({ label: t("done.tuned.open"), size: "small", variant: "ghost", onClick: () => go("tuned") }))),
       card(t("done.tol.title"), t("done.tol.text"), Button({ label: t("done.tol.open"), size: "small", onClick: () => go("tolerances") })),
-      s.goal === "quality" ? null : card(t("done.lighter.title"), t("done.lighter.text"), soon.cloneNode(true)));
+      s.goal === "quality" ? null : card(t("done.lighter.title"), o.lighter ? t("done.lighter.on") : t("done.lighter.text"),
+        Button({ label: t("done.lighter.open"), size: "small", onClick: () => go("lighter") })));
     body.append(h("h3", { class: "done-h" }, t("done.extras")), extras);
     const tools = ["zones", "split", "copies", "box", "versions"].map((k) => h("li", {},
       h("div", {}, h("b", {}, t(`done.tool.${k}`)), " ", h("span", {}, t(`done.tool.${k}.text`))),

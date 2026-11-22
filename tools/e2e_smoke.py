@@ -1043,6 +1043,91 @@ def check_new_ui_tolerances(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_lighter_tuned(browser, port: int) -> str:
+    """Make it lighter and Tuned settings (T-571), from Done's cards. Lighter: settings that still reach the option's
+    target sit beside it and are used after a confirm; the lighter-shape guide shows on the part and downloads.
+    Tuned: from a sliced G-code (the test fixture, as "Have a sliced file?"), the cooling plan's slicer part goes into
+    the option and the 3MF."""
+    import gzip
+
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    done = []
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Hole block").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""async () => {
+          const reg = (await fdmUI.services.engine.call('regions')).regions;
+          const bottom = reg.reduce((a, r) => (r.normal[2] < a.normal[2] ? r : a)).id;
+          const top = reg.reduce((a, r) => (r.normal[2] > a.normal[2] ? r : a)).id;
+          fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'balanced', optimized: 1,
+            holds: [{ id: 'h1', region: bottom, type: 'clamped' }], loads: [{ id: 'l1', region: top, newtons: 100, direction: [0, 0, -1] }],
+            option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2,
+              walls: 4, top: 5, bottom: 4, infill: 0.4, safety: 30, target: 3, settings: { wall_loops: '4', sparse_infill_density: '40%' } } });
+          fdmUI.go('done'); }""")
+        page.get_by_role("button", name="Find lighter settings").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Make it lighter'")
+        page.get_by_role("button", name="Find lighter settings").click()
+        page.wait_for_selector(".light-col.is-way", timeout=300_000)
+        cols = page.locator(".light-col").count()
+        page.get_by_role("button", name="Use these").first.click()
+        assert "Strength" in page.locator("dialog.ui-modal").inner_text()
+        page.locator("dialog.ui-modal").get_by_role("button", name="Use these").click()
+        o = page.evaluate("() => { const o = fdmUI.store.get().option; return [o.lighter, o.walls, o.infill, o.safety, o.target]; }")
+        assert o[0] and (o[1] < 4 or o[2] < 0.4) and o[3] >= o[4], o
+        done.append(f"lighter: walls {o[1]}, infill {round(o[2] * 100)} %, ×{o[3]} ({cols - 1} ways)")
+        page.get_by_role("button", name="Show the lighter shape").click()
+        with page.expect_download(timeout=300_000) as dl:
+            page.get_by_role("button", name="Download the guide (STL)").click()
+        assert dl.value.suggested_filename == "hole_block_lighter_guide.stl"
+        assert page.evaluate("() => fdmUI.services.stage.ghosts.length") == 1
+        page.locator(".panel-foot").get_by_role("button", name="Back").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Done'")
+        assert "Lighter settings in use" in page.locator(".done-card", has_text="Want it even lighter").inner_text()
+        assert page.evaluate("() => fdmUI.services.stage.ghosts.length") == 0
+        done.append("shape guide shown and downloaded")
+        # Tuned settings need a G-code: without one they say so; with the fixture's, the cooling plan goes in.
+        page.get_by_role("button", name="Slower hot layers").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Tuned settings'")
+        assert "needs the G-code" in page.locator(".panel").inner_text()
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        part = ROOT / "core" / "tests" / "gcode"
+        page.set_input_files(".drop-wrap input[type=file]", str(part / "part.stl"))
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'fast', optimized: 1, noLoads: true,
+          option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2, walls: 2, top: 4, bottom: 3,
+            infill: 0.15, settings: { wall_loops: '2' } } }); fdmUI.go('sim'); }""")
+        page.set_input_files(".sim-slice input[type=file]", files=[{"name": "part.gcode", "mimeType": "text/plain",
+                                                                   "buffer": gzip.decompress((part / "orca.gcode.gz").read_bytes())}])
+        page.get_by_role("button", name="Run simulations").click()
+        page.wait_for_selector(".sim-status", timeout=300_000)
+        page.evaluate("() => fdmUI.go('tuned')")
+        page.get_by_role("button", name="Work out slower layers").click()
+        page.wait_for_selector(".tuned-summary", timeout=300_000)
+        lines = page.locator(".tuned-ranges li").all_inner_texts()
+        assert any("cooling tower" in x for x in lines), lines
+        page.get_by_role("button", name="Put these in the 3MF").click()
+        assert page.evaluate("() => fdmUI.store.get().option.cooling?.tower?.height") > 0
+        page.locator(".panel-foot").get_by_role("button", name="Back").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Done'")
+        assert "cooling plan goes into the 3MF" in page.locator(".done-card", has_text="Tuned settings").inner_text()
+        with page.expect_download(timeout=120_000) as dl:
+            page.locator(".done-export-row").get_by_role("button", name="Export 3MF").click()
+        assert dl.value.suggested_filename.endswith(".3mf")
+        done.append(f"tuned: {lines[0][:40]} into the 3MF")
+        assert not errors, errors
+        return "; ".join(done)
+    finally:
+        page.close()
+
+
 def _bar_stl(x: float, y: float, z: float) -> bytes:
     """A plain box as binary STL (for a part too big for the bed)."""
     import struct
@@ -1391,6 +1476,7 @@ CHECKS = [
     ("problems", "check_new_ui_problems"),
     ("done", "check_new_ui_done"),
     ("tolerances", "check_new_ui_tolerances"),
+    ("lighter and tuned settings", "check_new_ui_lighter_tuned"),
     ("more tools", "check_new_ui_tools"),
 ]
 

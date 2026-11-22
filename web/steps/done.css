@@ -12,7 +12,6 @@
 .done-cards { display: grid; gap: var(--s-2); }
 .done-card { display: grid; gap: var(--s-1); justify-items: start; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r); font-size: var(--fs-sm); }
 .done-card > span { color: var(--text-2); }
-.done-soon { padding: 0 var(--s-2); border-radius: var(--r-pill); background: var(--surface-sunken); color: var(--text-3); font-size: var(--fs-xs); font-weight: var(--fw-bold); }
 .done-tools { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
 .done-tools li { display: flex; gap: var(--s-2); align-items: center; justify-content: space-between; }
 .done-tools span { color: var(--text-2); }
