@@ -959,6 +959,90 @@ def check_new_ui_done(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_tolerances(browser, port: int) -> str:
+    """Tolerances & fits (T-570), from Done's card: the electronics box's round holes and pegs are listed; heat-set
+    inserts in all four screw holes (a ghost goes in, the hole is resized) go into Problems' batch through the
+    one-time "changes your model" confirm; a snug fit on a peg with a Ø7 hole jams (red), and the printed-size overlay
+    shows; a peg clicked on the part selects it; Problems confirms the batch."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Electronics box").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'fast', optimized: 1, noLoads: true,
+          option: { up: [0, 0, 1], orientation: 'As loaded', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2, walls: 2, top: 4, bottom: 3,
+            infill: 0.15, settings: { wall_loops: '2' } } }); fdmUI.go('done'); }""")
+        page.get_by_role("button", name="Check the fits").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Tolerances & fits'")
+        page.wait_for_selector(".tol-row", timeout=120_000)
+        rows = page.locator(".tol-row").all_inner_texts()
+        assert any("4 × Ø2.8 mm holes" in r for r in rows) and any("4 × Ø7 mm pegs" in r for r in rows), rows
+        assert "Tolerances & fits" in page.locator(".ui-rail").inner_text()
+        # Inserts in the screw holes.
+        page.locator(".tol-row", has_text="Ø2.8 mm holes").click()
+        page.get_by_role("radio", name="Screw / insert").click()
+        page.get_by_role("radio", name="Heat-set insert").click()
+        page.wait_for_function("() => /Model this hole Ø4/.test(document.querySelector('.tol-verdict')?.textContent ?? '')", timeout=60_000)
+        assert page.evaluate("() => fdmUI.services.stage.part.group.getObjectByName('tol-mate') != null"), "no ghost"
+        page.get_by_role("button", name="Change the model").click()
+        assert "changes your model" in page.locator("dialog.ui-modal").inner_text().lower()
+        page.locator("dialog.ui-modal").get_by_role("button", name="Add").click()
+        page.wait_for_function("() => fdmUI.store.get().pending.some((p) => p.id.startsWith('tol:'))", timeout=120_000)
+        item = page.evaluate("() => { const p = fdmUI.store.get().pending.find((p) => p.id.startsWith('tol:')); return [p.title, p.edits.length]; }")
+        assert "M3" in item[0] and "4 the same" in item[0] and item[1] >= 4, item
+        # A snug sleeve on a Ø7 peg: no gap left, it jams.
+        page.locator(".tol-row", has_text="Ø7 mm pegs").click()
+        page.get_by_role("radio", name="Snug").click()
+        verdict = page.locator(".tol-verdict").inner_text()
+        assert verdict.startswith("Will jam") and "typical PLA" in verdict, verdict
+        page.locator(".sim-views").get_by_role("radio", name="×10").click()
+        circles = page.evaluate("() => fdmUI.services.stage.part.group.getObjectByName('tol-printed').children.length")
+        assert circles == 2 * 8, circles  # a grey (modelled) and an orange (printed) circle per hole and peg
+        # Clicking a peg on the part selects it (here: back to the holes first, then a peg's top).
+        page.locator(".tol-row", has_text="Ø2.8 mm holes").click()
+        # A cylinder's centroid is on its axis, inside the peg: aim at the middle of its triangle that faces the camera most.
+        spots = page.evaluate("""() => { const p = fdmUI.services.picker, st = fdmUI.services.stage, pos = st.partTriangles();
+          const cam = st.camera.position.clone().sub(st.controls.target).normalize();
+          return [1, 9, 13, 17].map((r) => { let best = null, bestDot = 0.3;
+            for (const t of p.trianglesOf(r)) { const v = pos.subarray(t * 9, t * 9 + 9);
+              const a = [v[3] - v[0], v[4] - v[1], v[5] - v[2]], b = [v[6] - v[0], v[7] - v[1], v[8] - v[2]];
+              const n = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], l = Math.hypot(...n) || 1;
+              const d = (n[0] * cam.x + n[1] * cam.y + n[2] * cam.z) / l;
+              if (d > bestDot) { bestDot = d; best = [(v[0] + v[3] + v[6]) / 3, (v[1] + v[4] + v[7]) / 3, (v[2] + v[5] + v[8]) / 3]; } }
+            if (!best) return null; const c = p.toClient(best); return [c.x, c.y, r]; }).filter(Boolean); }""")
+        for x, y, region in spots:
+            page.mouse.move(x, y)
+            try:
+                page.wait_for_function("(r) => fdmUI.services.picker.hit?.region === r", arg=region, timeout=3_000)
+                break
+            except Exception:  # noqa: BLE001 - this peg is behind a wall from here: the next one
+                continue
+        else:
+            raise AssertionError(f"no peg to click among {spots}")
+        page.mouse.click(x, y)
+        page.wait_for_function("() => /Ø7 mm pegs/.test(document.querySelector('.tol-row.is-selected')?.textContent ?? '')", timeout=10_000)
+        hit = page.locator(".tol-row.is-selected b").inner_text()
+        assert "Ø7 mm pegs" in hit, hit
+        # Problems confirms the batch with the inserts.
+        page.get_by_role("button", name="Review changes").first.click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Problems'", timeout=60_000)
+        vol0 = page.evaluate("() => fdmUI.store.get().part.volume")
+        page.get_by_role("button", name="Confirm all changes").click()
+        page.wait_for_selector(".prob-batch", timeout=300_000)
+        vol1 = page.evaluate("() => fdmUI.store.get().part.volume")
+        assert vol1 != vol0 and page.evaluate("() => fdmUI.store.get().design.length") == 1, (vol0, vol1)
+        assert page.evaluate("() => fdmUI.services.stage.part.group.getObjectByName('tol-mate')") is None
+        assert not errors, errors
+        return f"rows {rows}; M3 inserts ×4 added and confirmed (volume {vol0:.0f} → {vol1:.0f} mm³); snug Ø7 peg: {verdict[:40]}; ×10 overlay; clicked on the part: {hit}"
+    finally:
+        page.close()
+
+
 def check_old_project(browser, port: int) -> str:
     """Projects from before the cut-over (T-580) still open: an old-style project (goal "strength", a load in kg
     pointing "down") and a shared report with a project inside land on Setup with the part, its holds and loads."""
@@ -1125,8 +1209,12 @@ def check_journey(browser, port: int, viewport=(1280, 720)) -> str:
         with page.expect_download(timeout=120_000) as dl:
             page.locator(".done-export-row").get_by_role("button", name="Export 3MF").click()
         assert dl.value.suggested_filename.endswith(".3mf")
-        assert page.locator(".done-card", has_text="Tolerances & fits").count() == 1
-        done.append("3MF exported")
+        page.get_by_role("button", name="Check the fits").click()
+        wait_step("Tolerances & fits")
+        page.wait_for_selector(".tol-row, .tol-list:empty", state="attached", timeout=120_000)
+        page.locator(".panel-foot").get_by_role("button", name="Back").click()
+        wait_step("Done")
+        done.append("3MF exported, Tolerances opened")
         page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
         page.get_by_role("button", name="Back to your part").click()
         wait_step("Done")
@@ -1171,6 +1259,7 @@ CHECKS = [
     ("quality", "check_new_ui_quality"),
     ("problems", "check_new_ui_problems"),
     ("done", "check_new_ui_done"),
+    ("tolerances", "check_new_ui_tolerances"),
 ]
 
 

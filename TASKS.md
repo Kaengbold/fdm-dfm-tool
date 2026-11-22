@@ -1232,7 +1232,7 @@ Rules for every [UI] task:
 
 ### Phase 7: extras
 
-- [~] **T-570 P2** [UI] Tolerances & fits in 3D. · plan: §15.2, §16.8 · files: `web/steps/tolerances.js`, `web/viewport/tolerances3d.js` · owner: Claude (`task/T-570-tolerances`)
+- [x] **T-570 P2** [UI] Tolerances & fits in 3D. · plan: §15.2, §16.8 · files: `web/steps/tolerances.js`, `web/viewport/tolerances3d.js` · owner: Claude (`task/T-570-tolerances`)
   - Do: first the ghost mate (click hole/peg → pin slides in, clearance ring red/amber/green, Press/Snug/Loose, screw/insert tab, apply to identical holes), then the printed-vs-CAD overlay. Output as hole compensation (slicer) or pending design change.
 - [~] **T-571 P2** [UI] Make it lighter + Tuned settings view. · plan: §15.1 · files: `web/steps/lighter.js`, `web/steps/tuned.js` · owner: Claude (`task/T-571-lighter`)
   - Do: lighter with the goal's target locked (hidden for Quality); tuned settings as 3MF height ranges now, hooks for T-479/T-481.

@@ -282,7 +282,7 @@ registerStep("done", {
     const extras = h("div", { class: "done-cards" },
       card(t("done.tuned.title"), t("done.tuned.text"),
         Button({ label: t("done.gcode"), size: "small", disabled: Boolean(busy), onClick: () => run("gcode", t("done.slicing"), () => downloadGcode(store, services), services) })),
-      card(t("done.tol.title"), t("done.tol.text"), soon.cloneNode(true)),
+      card(t("done.tol.title"), t("done.tol.text"), Button({ label: t("done.tol.open"), size: "small", onClick: () => go("tolerances") })),
       s.goal === "quality" ? null : card(t("done.lighter.title"), t("done.lighter.text"), soon.cloneNode(true)));
     body.append(h("h3", { class: "done-h" }, t("done.extras")), extras);
     const tools = ["zones", "split", "copies", "box", "versions"].map((k) => h("li", {}, h("b", {}, t(`done.tool.${k}`)), " ", h("span", {}, t(`done.tool.${k}.text`)), " ", soon.cloneNode(true)));
