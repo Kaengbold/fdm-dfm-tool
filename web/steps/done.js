@@ -12,7 +12,7 @@ import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { t } from "../i18n.js";
 import { thumbnail } from "../viewport/stage.js";
-import { holdToEngine, loadToEngine, optimizeArgs } from "./args.js";
+import { holdToEngine, loadToEngine, markedFaces, optimizeArgs } from "./args.js";
 import { optionGcode, setupLine, simProfile } from "./simulate.js";
 
 const SLICERS = ["orca", "bambu", "prusa"];
@@ -101,6 +101,7 @@ export async function export3mf(store, services, slicer = targetSlicer()) {
   const bytes = await services.engine.call("export", {
     up: upOf(s), profile: profileOf(s), settings, excluded_settings: rows.filter((r) => off.has(r.key) && r.key !== "fine_layers").map((r) => r.key),
     slicer: slicer === "prusa" ? "prusa" : "orca", fine_layers: off.has("fine_layers") ? [] : fineLayers(check),
+    faces: markedFaces(s), // Quality's show faces: the slicer keeps the seam off them
   });
   // The below-target warning travels with the export (§16.2): in the file name, too.
   const warn = s.option?.warning === "below_target" ? "_below_target" : "";
@@ -147,7 +148,7 @@ async function projectText(store, services) {
   const loads = s.noLoads || s.goal === "quality" ? [] : [...s.holds.map(holdToEngine), ...s.loads.map(loadToEngine)];
   return writeProject({
     name: `${baseName(s)}.stl`, stl: await partStl(services), faceIds: s.design?.length ? null : services.getPart?.()?.faceIds,
-    profile: profileOf(s), up: upOf(s), loads,
+    profile: profileOf(s), up: upOf(s), loads, faces: markedFaces(s),
     settings: Object.fromEntries(rows.filter((r) => !off.has(r.key)).map((r) => [r.key, r.value])),
     excluded_settings: rows.filter((r) => off.has(r.key)).map((r) => r.key),
   });

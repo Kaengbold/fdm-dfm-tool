@@ -4,3 +4,4 @@
 .analyse-allow { display: flex; align-items: baseline; gap: var(--s-1); }
 .analyse-stale { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--warn-soft); color: var(--warn); font-size: var(--fs-sm); }
 .ui-cards__item .ui-cards__meta { justify-self: end; }
+.showfaces { display: grid; gap: var(--s-1); justify-items: start; padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--surface-sunken); font-size: var(--fs-sm); }

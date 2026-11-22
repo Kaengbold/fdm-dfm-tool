@@ -14,7 +14,7 @@ import { openModal } from "../ui/overlay.js";
 import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { t } from "../i18n.js";
-import { holdToEngine, loadToEngine } from "./args.js";
+import { holdToEngine, loadToEngine, markedFaces } from "./args.js";
 import { setupLine, simProfile } from "./simulate.js";
 import { trianglesOf } from "./part.js";
 import * as F from "./fixes.js";
@@ -49,7 +49,7 @@ function slimDesign(design) {
 
 async function checkAndDesign(engine, s, given = null) {
   const profile = profileOf(s);
-  const check = given ?? await engine.call("check", { up: s.option.up, profile });
+  const check = given ?? await engine.call("check", { up: s.option.up, profile, faces: markedFaces(s) });
   const design = await engine.call("design", { up: s.option.up, profile, findings: check.findings });
   return { check, design: slimDesign(design) };
 }
