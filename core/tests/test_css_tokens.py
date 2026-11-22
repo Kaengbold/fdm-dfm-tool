@@ -13,8 +13,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 TOKENS = ROOT / "web" / "tokens.css"
-# The old stylesheet is replaced at cut-over (T-580), not fixed; everything else under web/ and design/ is linted.
-EXEMPT = {TOKENS, ROOT / "web" / "style.css"}
+# Everything under web/ and design/ is linted except the tokens themselves (the old style.css went at the cut-over, T-580).
+EXEMPT = {TOKENS}
 SCALE = {4, 8, 12, 16, 24, 32, 48}
 
 SPACING_PROPS = re.compile(r"^(margin|padding|gap|row-gap|column-gap|grid-gap|inset|scroll-margin|scroll-padding)(-[a-z-]+)?$")
