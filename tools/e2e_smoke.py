@@ -1068,10 +1068,18 @@ def check_new_ui_done(browser, port: int) -> str:
             page.get_by_role("button", name="Share report").click()
         report = open(dl.value.path(), encoding="utf-8").read()
         assert "Print check: hole_block.stl" in report and "fdm-check-project" in report
-        with page.expect_download(timeout=300_000) as dl:
+        # The browser OrcaSlicer is there only after tools/vendor.py (local runs, the Pages build), not in CI.
+        if any((ROOT / "vendor").glob("muon3d-slicer-engine@*/engine-st.mjs")):
+            with page.expect_download(timeout=300_000) as dl:
+                page.get_by_role("button", name="Download G-code").click()
+            gcode = open(dl.value.path(), "rb").read()
+            assert dl.value.suggested_filename == "hole_block.gcode" and b"G1 " in gcode, len(gcode)
+            got = f"G-code ({len(gcode) // 1024} kB)"
+        else:
             page.get_by_role("button", name="Download G-code").click()
-        gcode = open(dl.value.path(), "rb").read()
-        assert dl.value.suggested_filename == "hole_block.gcode" and b"G1 " in gcode, len(gcode)
+            page.wait_for_selector(".drop-error", timeout=120_000)
+            got = page.locator(".drop-error").inner_text()
+            assert "isn't available" in got, got
         page.locator(".app-header").get_by_role("button", name="Export 3MF").click()
         what = page.locator("dialog.ui-modal").inner_text()
         assert "Chosen option: Flat" in what, what
@@ -1079,7 +1087,7 @@ def check_new_ui_done(browser, port: int) -> str:
             page.locator("dialog.ui-modal").get_by_role("button", name="Export 3MF").click()
         assert dl.value.suggested_filename.endswith(".3mf")
         assert not errors, errors
-        return f"{grid}; {len(labels)} slicer changes, unticked ironing stays out; 3MF for PrusaSlicer remembered; project, report, G-code ({len(gcode) // 1024} kB); header export"
+        return f"{grid}; {len(labels)} slicer changes, unticked ironing stays out; 3MF for PrusaSlicer remembered; project, report, {got}; header export"
     finally:
         page.close()
 
