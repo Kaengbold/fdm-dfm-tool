@@ -1232,7 +1232,7 @@ Rules for every [UI] task:
   - Done when: e2e adds a teardrop and a slicer fix, confirms, and sees the re-check result.
 - [~] **T-562 P1** [UI] Done step and export. · plan: §15.1, §16.9 · files: `web/steps/done.js`, `web/report.js` · owner: Claude (`task/T-562-done`)
   - Do: summary, slicer-changes diff with ticks, Export 3MF (target slicer remembered), modified STL/STEP, **Download G-code** when T-525 works, save/share/CAD checklist; header Export summary of what goes out; extras cards; **More tools** (manual zones/hidden gaps, split, copies, electronics-box heat, versions/A-B).
-- [ ] **T-563 P1** [UI] Quality path end to end. · plan: §14, §16.10 · files: `web/flow.js`, steps as needed · owner: —
+- [~] **T-563 P1** [UI] Quality path end to end. · plan: §14, §16.10 · files: `web/flow.js`, steps as needed · owner: Claude (`task/T-563-quality`)
   - Do: Quality skips Holds/Loads/Load details and every strength result; Analyse Fast/Extended only; visible faces guessed (outer faces), optional "mark show face"; Done hides Lighter and design additions, keeps Tolerances.
 
 ### Phase 7: extras
