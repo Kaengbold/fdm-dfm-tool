@@ -2259,7 +2259,7 @@ def _spot_marks(h, up, p: Profile, intents: list[dict] | None, loads: list[dict]
 
 
 def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None = None, intents: list[dict] | None = None,
-                     fine: bool = False) -> dict:
+                     fine: bool = False, detail: bool = False) -> dict:
     """A cooling plan for the loaded G-code (thermal_opt.py): fan ahead of time, slower layers or short park
     moves where spots stay too hot, and the slicer's layer-time slowdown undone where it only made the layers
     too cold to bond (at most ``max_speedup`` of the print time), each spot weighed by how much it matters
@@ -2267,7 +2267,9 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
     and speeds per layer; for editing the G-code) and ``slicer`` (what the user's own slicer can take from
     the 3MF: slower heights and a cooling tower; pass its ``cooling`` to ``export``). ``before`` / ``gcode`` /
     ``slicer``: print minutes, spots too hot / too cold (weighted too), median bond. ``summary``: plain words.
-    All limits are estimates (``confidence`` "rough") until real prints tune them."""
+    All limits are estimates (``confidence`` "rough") until real prints tune them. ``detail``: also what the
+    screen shows before and after the G-code plan (``_cooling_detail``: every spot, a timeline per layer, the
+    lines whose speed changes)."""
     from .thermal_opt import optimize
 
     p = Profile.from_dict(profile)
@@ -2281,7 +2283,119 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
         return marks[id(h)]
 
     r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
-    return _cooling_view(r, _importance_map(up, p, loads), p)
+    out = _cooling_view(r, _importance_map(up, p, loads), p)
+    return {**out, **_cooling_detail(tp, r, up, p, mark)} if detail else out
+
+
+DETAIL_MAX_LINES = 300_000  # the lines view sends at most this many (every changed one, then evenly spaced others)
+
+
+def _match_nodes(a, b) -> np.ndarray:
+    """For each heat node of ``a``, the node of ``b`` at the same layer and cell (-1: none). The plan only
+    changes timing and fan, so the runs normally match one to one."""
+    if len(a.layer) == len(b.layer) and np.array_equal(a.layer, b.layer) and np.allclose(a.xy, b.xy):
+        return np.arange(len(a.layer))
+    key = lambda x: (x.layer.astype(np.int64) << 32) + (np.round(x.xy[:, 0] / x.cell_mm).astype(np.int64) << 16) + np.round(x.xy[:, 1] / x.cell_mm).astype(np.int64)
+    ka, kb = key(a), key(b)
+    order = np.argsort(kb)
+    at = np.minimum(np.searchsorted(kb[order], ka), len(kb) - 1)
+    return np.where(kb[order][at] == ka, order[at], -1)
+
+
+def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
+    """What the simulation step shows (T-478), before and after the G-code plan. ``spots`` (heat nodes as
+    sliced, in the oriented part's frame; the after values are the same spots in the planned run): ``points``,
+    ``layer`` (int32), ``cover_c`` / ``cover_s`` / ``bond`` (before, after), ``window`` (uint8: 0 fine, 1 too
+    hot, 2 too cold, 3 needless slowdown), ``limit_c`` (too hot above this), ``importance`` and its
+    ``reason``. ``timeline`` per layer: height, seconds until the next layer, part fan (0–1), median covering
+    temperature (before, after) and the sag limit; ``tg_c`` is the window's cold side. ``lines``: the part's
+    lines (``segments``: x0 y0 z0 x1 y1 z1) with ``factor`` (new speed / old) and ``layer``; ``fan_marks``
+    where the plan changes the fan. ``slowdown_min``: minutes each slicer slowdown cause costs (what limits
+    the print). ``rotation``: the oriented frame (part @ rotation.T, centred, on z = 0)."""
+    from .gcode import CAUSE_NAMES, time_lost
+    from .importance import REASONS
+    from .kinematics import timing
+    from .thermal_opt import apply
+
+    base, after = r["heat"]["before"], r["heat"]["gcode"]
+    plan = r["plans"]["gcode"]
+    pts, _, weight, reason, _ = mark(base)
+    idx = _match_nodes(base, after)
+    hit = idx >= 0
+
+    def moved(values: np.ndarray, fill=np.nan) -> np.ndarray:
+        out = np.full(len(idx), fill, dtype=np.result_type(values, np.asarray(fill)))
+        out[hit] = values[idx[hit]]
+        return out
+
+    def state(win: dict) -> np.ndarray:
+        return np.select([win["too_hot"], win["needless"], win["too_cold"]], [1, 3, 2], 0).astype(np.uint8)
+
+    f32 = lambda a: np.asarray(a, np.float32).tobytes()
+    win0, win1 = r["windows"]["before"], r["windows"]["gcode"]
+    spots = {"points": f32(pts), "layer": np.asarray(base.layer, np.int32).tobytes(),
+             "cover_c": [f32(base.cover_c), f32(moved(after.cover_c))], "cover_s": [f32(base.cover_s), f32(moved(after.cover_s))],
+             "bond": [f32(base.bond), f32(moved(after.bond))],
+             "window": [state(win0).tobytes(), moved(state(win1), np.uint8(0)).tobytes()],
+             "limit_c": f32(win0["limit_c"]), "importance": f32(weight), "reason": np.asarray(reason, np.uint8).tobytes(),
+             "reasons": list(REASONS), "cell_mm": base.cell_mm}
+
+    planned = apply(tp, plan)
+    layers = int(tp.layer.max()) + 1
+
+    def per_layer(path) -> tuple[np.ndarray, np.ndarray]:
+        tm = timing(path)
+        start = np.full(layers, np.inf)
+        np.minimum.at(start, path.layer, tm.t0)
+        start = np.minimum.accumulate(start[::-1])[::-1]  # a layer without lines starts with the next one
+        seconds = np.diff(np.concatenate([start, [tm.total_s]]))
+        part = path.part()
+        fan = np.full(layers, np.nan)
+        sums = np.bincount(path.layer[part].astype(np.intp), path.part_fan[part], minlength=layers)
+        counts = np.bincount(path.layer[part].astype(np.intp), minlength=layers)
+        fan[counts > 0] = sums[counts > 0] / counts[counts > 0]
+        return seconds, fan
+
+    def layer_median(values: np.ndarray, layer: np.ndarray) -> np.ndarray:
+        out = np.full(layers, np.nan)
+        ok = np.isfinite(values)
+        for k in np.unique(layer[ok]):
+            if k < layers:
+                out[k] = np.median(values[ok & (layer == k)])
+        return out
+
+    s0, fan0 = per_layer(tp)
+    s1, fan1 = per_layer(planned)
+    z = np.asarray(tp.layer_z[:layers], float)
+    timeline = {"z": f32(np.concatenate([z, np.full(layers - len(z), z[-1] if len(z) else 0.0)])),
+                "seconds": [f32(s0), f32(s1)], "fan": [f32(fan0), f32(fan1)],
+                "cover_c": [f32(layer_median(base.cover_c, base.layer)), f32(layer_median(after.cover_c, after.layer))],
+                "limit_c": f32(layer_median(win0["limit_c"], base.layer)), "tg_c": base.tg_c}
+
+    rot = _orientation(up, p)[0]
+    to_oriented = _gcode_to_oriented(_require().gcode["rot"])
+    part = np.flatnonzero(tp.part())
+    factor = planned.speed[part] / np.maximum(tp.speed[part], 1e-6)
+    keep = np.abs(factor - 1) > 0.01
+    if len(part) > DETAIL_MAX_LINES:
+        rest = np.flatnonzero(~keep)
+        room = max(DETAIL_MAX_LINES - int(keep.sum()), 0)
+        keep[rest[:: max(1, len(rest) // max(room, 1))][:room]] = True
+    else:
+        keep[:] = True
+    chosen = part[keep]
+    seg = np.column_stack([to_oriented(np.asarray(tp.p0[chosen], float)), to_oriented(np.asarray(tp.p1[chosen], float))])
+    # Where the plan sets a fan the slicer didn't: the first line of each stretch with a new value.
+    new_fan = np.abs(planned.part_fan - tp.part_fan) > 0.01
+    starts = np.flatnonzero(new_fan & (np.concatenate([[True], np.abs(np.diff(planned.part_fan)) > 0.01]) | ~np.concatenate([[False], new_fan[:-1]])))
+    fan_marks = [{"layer": int(tp.layer[i]), "point": to_oriented(np.asarray(tp.p0[i], float)[None])[0].round(2).tolist(),
+                  "fan": round(float(planned.part_fan[i]), 2)} for i in starts[tp.part()[starts]][:200]]
+    lost = time_lost(tp)
+    return {"spots": spots, "timeline": timeline, "rotation": np.round(rot, 6).tolist(),
+            "lines": {"segments": f32(seg), "factor": f32(factor[keep]), "layer": np.asarray(tp.layer[chosen], np.int32).tobytes(),
+                      "all": int(len(part))},
+            "fan_marks": fan_marks,
+            "slowdown_min": {CAUSE_NAMES[c]: round(float(lost[c]) / 60, 1) for c in range(1, len(CAUSE_NAMES)) if lost[c] >= 3}}
 
 
 def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dict] | None = None,
