@@ -948,7 +948,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Do: print a thin + thick pin pair, a thick base narrowing to a thin tip, a part with several branches, and one big part limited by flow (as the control). Measure temperature where possible (IR / thermocouple), sag, snap strength between layers, and print time. Compare the T-473 model with `spot_heat` and `heat.py`. Estimate the time saved against OrcaSlicer's own cooling slowdown.
   - Tune the T-470 defaults with the results (confidence `tuned`).
   - Done when: model error and achievable savings are written down, with a go / pivot / stop decision. T-480 and later only on "go".
-- [ ] **T-478 P2** [TO] Show the results so users understand them. · files: `web/app.js`, `web/viewer.js`, `web/index.html`, `core/fdmcore/charts.py`, `core/fdmcore/api.py` · owner: Claude (task/T-478-show-heat)
+- [~] **T-478 P2** [TO] Show the results so users understand them. · files: `web/app.js`, `web/viewer.js`, `web/index.html`, `core/fdmcore/charts.py`, `core/fdmcore/api.py` · owner: Claude (task/T-478-show-heat)
   - Do (reuse the "Show heat while printing" colours):
     - **Window map on the part:** blue = too cold / weak bond, green = OK, red = too hot / may sag; Before / After toggle.
     - **Layer playback:** a slider and play button showing heat building up.
@@ -961,6 +961,7 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
   - Plain language. The new API calls appear as MCP tools automatically (T-261).
   - Also (from T-481): an opt-in "Optimize my G-code directly" button: `api.optimize_gcode` with the loaded G-code, download the result, or show its `problems` when it is refused. The original always stays available.
   - Done when: e2e smoke covers the assess view with a sample G-code; a hobbyist can tell from the screen what changed and why.
+  - Status: built on `task/T-478-show-heat` (heat.js / heatlogic.js / viewport/heatview.js, `optimize_cooling(detail)`; its browser check passes on the Orca fixture: 40 too-hot spots → 0). Waits for T-560 to merge, then the heat section moves into T-560's Simulation step (its `registerSimulation` hook) instead of the stand-in step, and the PR opens.
 - [x] **T-479 P2** [TO] Option A (default): settings for the user's own slicer. · files: `core/fdmcore/export3mf.py`, `core/fdmcore/recommend.py`, `tools/slicer_check.py` · owner: Claude (task/T-479-slicer-height-ranges)
   - Do: turn the optimizer's fixes into things the slicer applies: height-range modifiers (fan, minimum layer time, speed), an added cooling tower object, or several copies at once. Export them in the 3MF; check with `slicer_check.py` that Orca, Bambu Studio and PrusaSlicer apply them. Don't switch off the layer-time slowdown in exports.
   - Done when: the pin-pair part's exported 3MF gives the planned settings per height range in OrcaSlicer.
