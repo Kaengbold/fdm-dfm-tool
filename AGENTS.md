@@ -54,6 +54,7 @@ python tools/e2e_smoke.py                      # browser test in headless Edge (
 python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini screenshot review
 node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)
 node tools/make_step_fixture.mjs               # regenerate the STEP test part (once: npm install --no-save --prefix tools replicad-opencascadejs@1.1.0)
+node tools/check_step_faces.mjs                # STEP face ids: importer vs OpenCascade (once: npm install --no-save --no-package-lock --prefix tools replicad-opencascadejs@1.1.0 occt-import-js@0.0.23)
 python tools/slicer_check.py                   # do installed OrcaSlicer / Bambu Studio / PrusaSlicer apply our 3MF settings?
 python tools/orca_profiles.py                  # regenerate the OrcaSlicer profiles local slicing ships with (pinned OrcaSlicer version)
 python tools/orca_printers.py                  # regenerate the list of other printers OrcaSlicer knows ("My printer isn't listed")

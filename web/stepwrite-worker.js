@@ -6,6 +6,7 @@
 // the page's Content Security Policy forbids (T-327); a worker started from a file of this site
 // doesn't take on the page's policy.
 import { answerJobs, checkedFetch } from "./jobworker.js";
+import { solids } from "./brep.js";
 
 // Resolved against this module, so the self-hosted build can swap in a relative "../vendor/..." path.
 const OC_URL = new URL("https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js", import.meta.url).href;
@@ -41,14 +42,6 @@ function volume(oc, shape) {
   const v = props.Mass();
   props.delete();
   return v;
-}
-
-function solids(oc, shape) {
-  const out = [];
-  for (const ex = new oc.TopExp_Explorer(shape, oc.TopAbs_ShapeEnum.TopAbs_SOLID, oc.TopAbs_ShapeEnum.TopAbs_SHAPE); ex.More(); ex.Next()) {
-    out.push(oc.TopoDS.Solid(ex.Current()));
-  }
-  return out;
 }
 
 /** A closed triangle soup (Float32Array, 9 floats per triangle) as an OpenCascade solid. */
