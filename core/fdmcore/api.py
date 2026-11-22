@@ -1992,6 +1992,18 @@ def pause_gcode(data: bytes | str, pauses: list[float]) -> dict:
     return {"data": out.getvalue(), "pauses": where}
 
 
+def print_mesh(up, profile: dict | None = None) -> dict:
+    """The part turned and placed as it prints (the same turn on the bed as ``check`` and ``export``), centred on
+    x = y = 0 and resting on z = 0: input for a slicer that takes a mesh, like the browser OrcaSlicer
+    (web/slicer-worker.js, which moves it to the bed's centre). ``load_gcode`` then finds it again in that G-code."""
+    s = _require()
+    p = Profile.from_dict(profile)
+    rotation, _ = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
+    tri = orient(s.mesh, rotation).triangles.reshape(-1, 3)
+    return {"triangles": tri.astype(np.float32).tobytes(), "count": int(len(tri) // 3),
+            "size_mm": [round(float(v), 2) for v in np.ptp(tri, axis=0)], "rotation": rotation.tolist()}
+
+
 def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
     """Read the G-code the part was sliced to (from our 3MF, in this orientation ``up``) for the
     detailed level: strength with the real walls, infill and line directions. Checks that it is this
@@ -4072,6 +4084,7 @@ METHODS = {
     "load": load,
     "set_cad_checks": set_cad_checks,
     "load_gcode": load_gcode,
+    "print_mesh": print_mesh,
     "heat_model": heat_model,
     "importance": importance,
     "optimize_cooling": optimize_cooling,

@@ -31,6 +31,11 @@ SAMPLES = ["mushroom", "l_bracket", "hook", "test_block", "detail_plate"]
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
+    # Windows' registry maps .mjs to text/plain, and browsers refuse to import a module served
+    # that way: the browser slicer (engine-st.mjs) would then always fall back to our own slicer.
+    extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map,
+                      ".mjs": "text/javascript", ".js": "text/javascript", ".wasm": "application/wasm"}
+
     def log_message(self, *args):
         pass
 
@@ -964,6 +969,55 @@ def check_new_ui_options(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_simulation(browser, port: int) -> str:
+    """The new UI's Simulation step (T-560): the chosen option is sliced in the background (browser OrcaSlicer when
+    it's there, else our own slicer, said so), Run simulations gives the status lines, the overlay switch shows heat,
+    warping (true size and exaggerated), internal stress and overhangs, Next names the problems, leaving clears the view."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Wall hook").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => {
+          fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'fast', optimized: 1,
+            option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2,
+              walls: 3, top: 4, bottom: 3, infill: 0.15, safety: 2.4, target: 2,
+              settings: { wall_loops: '3', top_shell_layers: '4', bottom_shell_layers: '3', sparse_infill_density: '15%', layer_height: '0.20' } } });
+          fdmUI.go('sim'); }""")
+        assert "Flat · PLA · 0.4 mm · 3 walls · 15 % infill" in page.locator(".sim-setup").inner_text()
+        assert page.get_by_role("button", name="Next").count() == 1, "Next before a run (skipping is allowed)"
+        page.wait_for_function("() => !/Slicing|Getting ready/.test(document.querySelector('.sim-slice__text')?.textContent ?? 'Slicing')", timeout=180_000)
+        sliced = page.locator(".sim-slice__text").inner_text()
+        page.get_by_role("button", name="Run simulations").click()
+        page.wait_for_selector(".sim-status", timeout=300_000)
+        status = page.locator(".sim-status").inner_text().replace("\n", " ")
+        basis = page.locator(".sim-status + .ui-hint").inner_text()
+        if "OrcaSlicer in" in sliced:
+            assert "G-code from OrcaSlicer" in basis, basis
+        seen = []
+        for name in ("Heat", "Warping", "Internal stress", "Overhangs"):
+            page.locator(".sim-views").get_by_role("radio", name=name).click()
+            seen.append(page.evaluate("() => Boolean(fdmUI.services.stage.field)"))
+            if name == "Warping":
+                page.locator(".sim-views").get_by_role("radio", name="Exaggerated").click()
+                assert "exaggerated" in page.locator(".sim-legend").inner_text()
+        assert seen == [False, True, True, False], seen
+        painted = page.evaluate("() => { const c = fdmUI.services.stage.part.geo.attributes.color.array; return new Set(Array.from(c.slice(0, 30000), (v) => v.toFixed(2))).size > 3; }")
+        nxt = page.locator(".panel-foot .ui-btn--primary").inner_text()
+        assert re.match(r"Review \d+ problems?|All clear: Done", nxt), nxt
+        page.locator(".panel-foot .ui-btn--primary").click()
+        assert page.evaluate("() => fdmUI.services.stage.field === null || fdmUI.services.stage.field === undefined")
+        assert not errors, errors
+        return f"{sliced} {status}; overlays shown (overhang paint: {painted}); footer '{nxt}', leaving cleared the view"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -1018,6 +1072,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: loads", lambda: check_new_ui_loads(ui, port))
             run.step("new UI: analyse", lambda: check_new_ui_analyse(ui, port))
             run.step("new UI: options", lambda: check_new_ui_options(ui, port))
+            run.step("new UI: simulation", lambda: check_new_ui_simulation(ui, port))
         finally:
             ui.close()
         if args.quick:

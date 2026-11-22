@@ -17,7 +17,9 @@ const REDO = ["m15 14 5-5-5-5", "M20 9H10a6 6 0 0 0 0 12h3"];
 const steps = new Map(); // id -> {render({body, stage, store, go, services})}
 const screens = new Map(); // start | settings -> render({root, store, go, openRoute, services})
 /** A step's content. ``render`` fills the panel body and the stage's overlay layer (``stage``; the 3D view itself
- * is ``services.stage``); it runs again when the state changes. */
+ * is ``services.stage``); it runs again when the state changes. ``next({store, state})`` (optional) returns
+ * ``{label, to}`` for the Next button, or nothing for the usual one; ``leave({store, services})`` (optional) runs when
+ * another step or screen takes over. */
 export function registerStep(id, def) {
   step(id);
   steps.set(id, def);
@@ -50,6 +52,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     render(true);
   }
 
+  let shownStep = null;
   function render(moved = false) {
     const s = store.get();
     // A re-render replaces the panel: keep focus on the active control when staying on the step, or move to the
@@ -59,6 +62,9 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const sel = focusKey && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
     const hadFocus = screen.contains(active) || active === document.body;
     header.update(s, route);
+    // The step being left tidies what it put on the shared 3D view (Simulation's colours and result surface).
+    const showing = route === "flow" ? s.step : null;
+    if (shownStep !== showing) { steps.get(shownStep)?.leave?.({ store, services }); shownStep = showing; }
     if (route !== "flow") {
       screen.dataset.layout = "full";
       const own = screens.get(route);
@@ -84,10 +90,12 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     stageEl.className = "stage";
     const blocked = canLeave(s.step, s);
     const back = prevStep(s.step, s);
-    const next = nextStep(s.step, s);
+    // A step may name its own way on (Simulation: "Review problems (4)" or "All clear: Done"), still in Next's spot.
+    const own = steps.get(s.step)?.next?.({ store, state: s });
+    const next = own?.to ?? nextStep(s.step, s);
     const foot = h("div", { class: "panel-foot" },
       back ? Button({ label: t("shell.back"), variant: "ghost", onClick: () => go(back) }) : h("span"),
-      next ? Button({ label: t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => go(next) }) : h("span"));
+      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => go(next) }) : h("span"));
     const head = h("div", { class: "panel-head" }, title, h("p", { class: "hint" }, t(`step.${s.step}.purpose`)));
     (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, openRoute, services });
     if (def.layout === "part") {
