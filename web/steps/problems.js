@@ -14,10 +14,11 @@ import { openModal } from "../ui/overlay.js";
 import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { t } from "../i18n.js";
-import { holdToEngine, loadToEngine } from "./args.js";
+import { holdToEngine, loadToEngine, markedFaces } from "./args.js";
 import { setupLine, simProfile } from "./simulate.js";
 import { trianglesOf } from "./part.js";
 import * as F from "./fixes.js";
+import { openTool } from "./tools.js";
 
 const DEPENDS = ["model", "option"];
 const f32 = (b) => new Float32Array(new Uint8Array(b).slice().buffer);
@@ -29,6 +30,7 @@ let skipped = null; // the input revisions when the user applied without re-chec
 let batch = null; // the last confirmed batch: {undo, summary}
 let ghostKey = null;
 let designOk = false; // "This changes your model" was confirmed once
+let framed = false; // the camera is close on one feature: the whole part again when the step is left
 let svc = null; // the shell's services and go, kept from the last render for Next's confirm and the batch card
 let goTo = null;
 
@@ -48,7 +50,7 @@ function slimDesign(design) {
 
 async function checkAndDesign(engine, s, given = null) {
   const profile = profileOf(s);
-  const check = given ?? await engine.call("check", { up: s.option.up, profile });
+  const check = given ?? await engine.call("check", { up: s.option.up, profile, faces: markedFaces(s) });
   const design = await engine.call("design", { up: s.option.up, profile, findings: check.findings });
   return { check, design: slimDesign(design) };
 }
@@ -86,6 +88,9 @@ const upAngle = (a, b) => {
   return (Math.acos(Math.min(1, Math.max(-1, (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb)))) * 180) / Math.PI;
 };
 
+/** A pending design change's edits: carried along (from Tolerances, T-570) or looked up in the check's design result. */
+const editsOf = (p, res) => p.edits ?? p.editIds.map((id) => res?.design?.edits.find((e) => e.id === id)).filter(Boolean);
+
 // ---------- confirming the batch ----------
 
 async function confirmBatch(store, services, recheck) {
@@ -99,7 +104,7 @@ async function confirmBatch(store, services, recheck) {
   error = null;
   try {
     const designItems = s.pending.filter((p) => p.kind === "design");
-    const edits = designItems.flatMap((p) => p.editIds.map((id) => res?.design?.edits.find((e) => e.id === id)).filter(Boolean));
+    const edits = designItems.flatMap((p) => editsOf(p, res));
     const patch = { pending: [] };
     if (edits.length) {
       work = { text: t("problems.applying") };
@@ -201,8 +206,21 @@ async function undoBatch(store, services) {
 
 // ---------- the list ----------
 
+/** Fixes that open a tool instead of going into the batch (T-564): split a part too big for the printer, and a
+ * pause in the 3MF before a closed pocket's roof (OrcaSlicer and PrusaSlicer take it; Bambu Studio ignores it). */
+function toolFixes(f, s) {
+  if (f.rule === "exceeds_build_volume") return [{ id: `tool:split:${f.finding_id}`, tag: "design", tool: "split", text: t("problems.splitFix"), action: t("problems.splitOpen") }];
+  const z = f.metrics?.top_z;
+  if (f.rule === "pause_to_insert" && z != null) {
+    return [{ id: `tool:pause:${f.finding_id}`, tag: "process", tool: "pause", z, text: t("problems.pauseFix", { z }), added: (s.pauses ?? []).includes(z) }];
+  }
+  return [];
+}
+
 function addFix(fix, finding, store) {
   const s = store.get();
+  if (fix.tool === "split") { openTool("split", goTo); return; }
+  if (fix.tool === "pause") { store.set({ pauses: [...new Set([...(s.pauses ?? []), fix.z])].sort((a, b) => a - b) }); return; }
   if (fix.steps) {
     openModal({ title: fix.cad ? t("problems.cadTitle") : t("problems.stepsTitle"), body: h("p", {}, fix.text), actions: [{ label: t("ui.close"), variant: "primary" }] });
     return;
@@ -246,6 +264,7 @@ function frameFinding(f, res, services) {
   if (!f.bbox || !rotation || !stage.part) return;
   const [lo, hi] = F.turnedBounds(stage.partTriangles(), rotation);
   stage.frameBox(F.boxToPart(f.bbox, rotation, lo, hi));
+  framed = true;
 }
 
 function showGhosts(store, services) {
@@ -254,7 +273,7 @@ function showGhosts(store, services) {
   const key = JSON.stringify([s.pending.map((p) => p.id), store.deps(...DEPENDS)]);
   if (key === ghostKey) return;
   ghostKey = key;
-  const edits = s.pending.filter((p) => p.kind === "design").flatMap((p) => p.editIds.map((id) => res?.design?.edits.find((e) => e.id === id)).filter(Boolean));
+  const edits = s.pending.filter((p) => p.kind === "design").flatMap((p) => editsOf(p, res));
   services.stage.showGhosts(edits.flatMap((e) => {
     let start = 0;
     return e.pieces.map((n, i) => {
@@ -324,12 +343,12 @@ registerStep("problems", {
       finding: {
         title: f.short_title ?? f.title, place: f.instance_label, line: f.one_liner ?? f.detail, severity: F.severityOf(f),
         state: ((st) => (st === "open" ? "pending" : st))(F.statusOf(f, ctx)),
-        fixes: F.fixesFor(f, res.design, { modelLocked }).map((fx) => ({ ...fx, added: s.pending.some((p) => p.id === fx.id),
-          text: fx.changesModel ? t("problems.changesModel", { text: fx.text }) : fx.text })),
+        fixes: [...F.fixesFor(f, res.design, { modelLocked }).map((fx) => ({ ...fx, added: s.pending.some((p) => p.id === fx.id),
+          text: fx.changesModel ? t("problems.changesModel", { text: fx.text }) : fx.text })), ...toolFixes(f, s)],
       },
       expanded: openId === f.finding_id,
       onFocus: () => { openId = f.finding_id; frameFinding(f, res, services); },
-      onAdd: (fx) => addFix(F.fixesFor(f, res.design, { modelLocked }).find((x) => x.id === fx.id), f, store),
+      onAdd: (fx) => addFix([...F.fixesFor(f, res.design, { modelLocked }), ...toolFixes(f, s)].find((x) => x.id === fx.id), f, store),
       onAccept: () => store.set({ accepted: [...new Set([...(s.accepted ?? []), f.finding_id])] }),
       onMore: () => showMore(f),
     });
@@ -378,5 +397,7 @@ registerStep("problems", {
   leave({ services }) {
     services.stage.clearGhosts();
     ghostKey = null;
+    if (framed) services.stage.view("iso");
+    framed = false;
   },
 });

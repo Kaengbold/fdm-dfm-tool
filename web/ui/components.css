@@ -141,6 +141,12 @@
 .ui-col__cell:hover .ui-col__pin, .ui-col__pin:focus-visible, .ui-col__pin[aria-pressed="true"] { opacity: 1; }
 .ui-col__pin[aria-pressed="true"] { color: var(--accent); }
 .ui-col__pin .ui-icon { width: 15px; height: 15px; }
+.ui-col__edit { padding: 0; border: 0; border-bottom: 1px dashed var(--line-strong); background: none; color: inherit; font: inherit; cursor: pointer; }
+.ui-col__edit:hover, .ui-col__edit:focus-visible { border-bottom-color: var(--accent); color: var(--accent); }
+.ui-col__value.is-edited { font-weight: var(--fw-bold); color: var(--accent); }
+.ui-col__cell.is-editing { position: relative; overflow: visible; z-index: 5; }
+.ui-col__cell.is-editing > * { position: absolute; top: 0; left: calc(-1 * var(--s-2)); right: calc(-1 * var(--s-2)); display: grid; gap: var(--s-2); padding: var(--s-2);
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); box-shadow: var(--shadow-pop); }
 .ui-col__cell.is-pinned { background: linear-gradient(90deg, var(--accent-soft), transparent); }
 .ui-col__foot { padding: var(--s-3) 0; display: grid; }
 .ui-constraints { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); }

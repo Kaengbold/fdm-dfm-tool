@@ -174,7 +174,7 @@ def set_expert(values: dict[str, float]) -> dict:
     return expert_settings()
 
 
-CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "all")
+CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "temp", "ironing", "all")
 # What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
 CALIBRATION_HOW = {
     "layer_strength": "A 98 mm dog-bone: thin in the middle, wide with a hole at each end. Print one lying flat and one "
@@ -195,6 +195,13 @@ CALIBRATION_HOW = {
     "snap": "A thin wall 80 mm long and 40 mm tall. Slice it, load the G-code here and download the test G-code: it "
             "turns the fan down step by step, every 8 mm from 100 % at the bottom to 20 % at the top. Print it, then "
             "snap pieces off by hand from the top down: note the height below which it breaks easily along a layer.",
+    "temp": "A tower of six blocks, each printed at its own temperature (written on its front, hottest at the bottom): "
+            "slice it, load the G-code here and download the test G-code (it sets each block's temperature), print it, "
+            "then pick the block with the cleanest overhang and sharpest corners, without strings or a rough, dull surface. "
+            "OrcaSlicer and Bambu Studio also make their own (Calibration, Temperature).",
+    "ironing": "Five steps, each top ironed with a different flow (written on it, in %). Open the 3MF in OrcaSlicer or "
+               "Bambu Studio and print it as it is (the flows are already set for each height), then pick the smoothest "
+               "top: too little flow leaves lines, too much leaves ridges and blobs.",
     "all": "Every test on one plate (about 170 × 175 mm): the warping bars, two dog-bones (one lies flat, one stands on "
            "its end: give it a brim), the fit gauge with its peg, the overhang blocks and the bridges. Each piece has its "
            "size written on it (the fit holes: 6 mm plus the number). Print it without support, then read each test as below.",
@@ -322,6 +329,62 @@ def _warping_test(pitch: float = 20) -> list[np.ndarray]:
     return out
 
 
+TEMP_TOWER_STEPS_C = (10, 5, 0, -5, -10, -15)  # the tower's blocks against the material's usual temperature, bottom first
+TEMP_BLOCK_MM = 8.0
+TEMP_BASE_MM = 1.0
+IRONING_TEST_PCT = (6, 9, 12, 15, 18)  # ironing flows of the five steps (common starting points 8–15 %: thresholds looks)
+IRONING_STEP_MM = 1.6
+
+
+def _front_label(text: str, x: float, z: float, height: float) -> np.ndarray:
+    """Raised digits on a front face (y = 0), reading from the front: the flat label turned up (a rotation about x)."""
+    flat = _label(text, x, z, 0.0, height)  # drawn at y = z, standing on z = 0
+    return np.stack([flat[..., 0], -flat[..., 2], flat[..., 1]], axis=-1)
+
+
+def tower_temps(profile: dict | None = None) -> list[int]:
+    """The temperature tower's block temperatures, bottom first: the material's usual nozzle temperature plus TEMP_TOWER_STEPS_C."""
+    base = float(Profile.from_dict(profile).material["nozzle_temp_c"])
+    return [int(round(base + d)) for d in TEMP_TOWER_STEPS_C]
+
+
+def _temp_tower(temps: list[int]) -> list[np.ndarray]:
+    """Six 20 × 10 × 8 mm blocks on a base, each with a 45° overhang on its right and its temperature on its front."""
+    from shapely.geometry import Polygon, box as sbox
+
+    from .additions import extrude
+
+    out = [extrude(sbox(-3, -3, 31, 13), 0, TEMP_BASE_MM)]
+    for i, t in enumerate(temps):
+        z0 = TEMP_BASE_MM + i * TEMP_BLOCK_MM
+        out.append(_lying(Polygon([(0, z0), (20, z0), (28, z0 + TEMP_BLOCK_MM - 1), (0, z0 + TEMP_BLOCK_MM - 1)]), 0, 10))
+        out.append(extrude(sbox(1, 1, 19, 9), z0 + TEMP_BLOCK_MM - 1.05, z0 + TEMP_BLOCK_MM))  # a narrow waist: the bands show
+        out.append(_front_label(str(t), 4, z0 + 1.5, 4.5))
+    return out
+
+
+def _ironing_test() -> list[np.ndarray]:
+    """Five 20 × 22 mm steps rising to the left, each flow written in the front strip of its top."""
+    from shapely.geometry import box as sbox
+
+    from .additions import extrude
+
+    out = []
+    n = len(IRONING_TEST_PCT)
+    for i, pct in enumerate(IRONING_TEST_PCT):
+        top = IRONING_STEP_MM * (n - i)
+        out.append(extrude(sbox(20 * i, 0, 20 * i + 20, 22), 0, top))
+        out.append(_label(str(pct), 20 * i + 3, 1.5, top, 4))
+    return out
+
+
+def ironing_ranges() -> list[dict]:
+    """The ironing test's flows as height ranges: each step's top layers get their own (export3mf ranges)."""
+    n = len(IRONING_TEST_PCT)
+    return [{"z0": round(IRONING_STEP_MM * (n - i) - IRONING_STEP_MM / 2, 3), "z1": round(IRONING_STEP_MM * (n - i) + 0.05, 3),
+             "ironing_flow": f"{pct}%"} for i, pct in enumerate(IRONING_TEST_PCT)]
+
+
 SAG_PINS_MM = (10, 17.5, 25, 32.5, 40)  # pin heights of the sag test: fewer pins, faster layers, higher up
 SNAP_BAND_MM, SNAP_FANS = 8.0, (1.0, 0.8, 0.6, 0.4, 0.2)  # the snap test's fan steps, from the bottom
 
@@ -348,17 +411,25 @@ def _snap_test() -> list[np.ndarray]:
     return [extrude(box(0, -2.4, 80, 3.6), 0, 1.0), extrude(box(0, 0, 80, 1.2), 0.9, 40)]
 
 
-def tuning_gcode(kind: str, data: bytes) -> dict:
-    """The G-code for a heat tuning print (``kind`` "sag" or "snap"), from the user's own sliced test part
-    (plain .gcode). Sag: the slicer's slowdown for layer cooling is switched off, so the layers really get
+def tuning_gcode(kind: str, data: bytes, profile: dict | None = None) -> dict:
+    """The G-code for a tuning print (``kind`` "sag", "snap" or "temp"), from the user's own sliced test part
+    (plain .gcode). Temp: each block of the temperature tower at its temperature (tower_temps for ``profile``'s
+    material), see gcode.add_temperatures. Sag: the slicer's slowdown for layer cooling is switched off, so the layers really get
     faster with height. Snap: the part fan steps down every ``SNAP_BAND_MM`` (``SNAP_FANS``). Written and
     checked like optimize_gcode. Keep the file: tune_heat reads it with the result."""
     from .gcode import parse
     from .gcode_rewrite import check, rewrite
     from .thermal_opt import Plan
 
+    if kind == "temp":
+        from .gcode import add_temperatures
+
+        temps = tower_temps(profile)
+        text = data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else str(data)
+        new, where = add_temperatures(text, [(TEMP_BASE_MM + i * TEMP_BLOCK_MM, t) for i, t in enumerate(temps)])
+        return {"data": new.encode(), "name": "temp_tower_tuning.gcode", "temps": temps, "bands": where}
     if kind not in ("sag", "snap"):
-        raise ValueError("kind must be sag or snap")
+        raise ValueError("kind must be sag, snap or temp")
     tp = parse(data)
     plan = Plan.none(int(tp.layer.max()) + 1)
     if kind == "sag":
@@ -431,13 +502,31 @@ def _all_tests() -> list[np.ndarray]:
             standing + [124, 110, 0]]
 
 
-def calibration_part(kind: str) -> dict:
+def calibration_part(kind: str, profile: dict | None = None) -> dict:
     """Test print for measuring the user's own material on their printer, as STL bytes, with ``how``
     (``CALIBRATION_HOW``: what to print and measure). Upright / flat break weight is the layer strength
     factor, the longest flat warping bar the warping length, the fit holes the fit gaps, the steepest
     clean block the max overhang, the longest straight bridge the max bridge. Each piece has its size
-    written on it; ``all`` puts every test on one plate (T-388)."""
+    written on it; ``all`` puts every test on one plate (T-388). ``temp``: the temperature tower for ``profile``'s
+    material (``temps``, bottom first); ``ironing``: the ironing steps, also as a 3MF (``3mf``) with each step's flow
+    set for its height (OrcaSlicer / Bambu Studio height ranges)."""
     from .mesh import to_binary_stl
+
+    if kind == "temp":
+        temps = tower_temps(profile)
+        return {"stl": to_binary_stl(Mesh(np.concatenate(_temp_tower(temps)))), "name": "temp_tower.stl", "how": CALIBRATION_HOW[kind], "temps": temps}
+    if kind == "ironing":
+        from .export3mf import export_3mf
+
+        tris = np.concatenate(_ironing_test())
+        lo, hi = tris.reshape(-1, 3).min(axis=0), tris.reshape(-1, 3).max(axis=0)
+        mesh = Mesh(tris - [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])  # export_3mf: centred, on z = 0
+        t = load_data("thresholds")["looks"]
+        settings = {"ironing_type": "top", "ironing_spacing": str(t["ironing_spacing_mm"]), "layer_height": "0.2",
+                    "top_shell_layers": "4", "enable_support": "0"}
+        threemf = export_3mf(mesh, "ironing_test", settings, ranges=ironing_ranges())
+        return {"stl": to_binary_stl(mesh), "3mf": threemf, "name": "ironing_test.stl", "name_3mf": "ironing_test.3mf",
+                "how": CALIBRATION_HOW[kind], "flows": list(IRONING_TEST_PCT)}
 
     build = {"fit": _fit_test, "overhang": _overhang_test, "bridge": _bridge_test, "layer_strength": lambda: [_dogbone()],
              "warping": _warping_test, "sag": _sag_test, "snap": _snap_test, "all": _all_tests}
@@ -725,7 +814,8 @@ MARK_KINDS = ("clean", "bed", "vertical")
 
 
 def _marked_faces(faces: dict | None) -> dict | None:
-    """Triangle masks for the user's marked faces (regions), or None if nothing is marked."""
+    """Triangle masks for the user's marked faces (regions), or None if nothing is marked. ``"clean": "visible"``
+    stands for our guess of the faces people see (visible_faces), as one mask: ``guessed`` is then True."""
     if not faces or not any(faces.get(k) for k in MARK_KINDS):
         return None
     from .regions import find_regions
@@ -733,7 +823,26 @@ def _marked_faces(faces: dict | None) -> dict | None:
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
+    if faces.get("clean") == "visible":
+        seen = np.isin(s.regions, visible_faces()["regions"])
+        return {"clean": [seen] if seen.any() else [], "guessed": True,
+                **{k: [s.regions == r for r in faces.get(k, [])] for k in ("bed", "vertical")}}
     return {kind: [s.regions == r for r in faces.get(kind, [])] for kind in MARK_KINDS}
+
+
+def visible_faces() -> dict:
+    """The faces people will see, guessed (plan §14, decision 10): the outer ones, on the part's convex hull. Hole
+    walls, pockets and slots are left out, so support there doesn't count as a mark. The Quality goal starts from
+    this guess (``faces={"clean": "visible"}`` in optimize, check and orientations) until the user marks show faces."""
+    from .regions import find_regions, outer_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    ids = outer_regions(s.mesh, s.regions)
+    _, areas = s.mesh.normals_and_areas()
+    share = float(areas[np.isin(s.regions, ids)].sum() / max(areas.sum(), 1e-12))
+    return {"regions": [int(r) for r in ids], "share": round(share, 3)}
 
 
 def _normal_spread(mesh: Mesh, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1092,7 +1201,8 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
 
 def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str = "extended", profile: dict | None = None,
              owned: list[str] | None = None, materials: list[str] | None = None, nozzles: list[str] | None = None,
-             environment: dict | None = None, constraints: dict | None = None, change: str = "slicer") -> dict:
+             environment: dict | None = None, constraints: dict | None = None, change: str = "slicer",
+             faces: dict | None = None, budget_s: float | None = None) -> dict:
     """The new UI's optimizer (optimizer.py): 2–4 verified options for ``goal`` (strong / balanced / fast /
     light / quality) over orientation, material, nozzle, layer height and walls / top / infill, plus local
     reinforcements at Complete depth (or whenever ``change="design"``).
@@ -1102,7 +1212,11 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
     with ``constraints``). ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
     to consider (nozzles = the ticked sizes). ``environment``: {"temp_c", "touches": [water, food, outdoors,
     abrasion, oil_fuel, solvent, skin]}. ``constraints`` ("Your choices", hard limits): material, nozzle,
-    layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both."""
+    layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both. ``faces`` as in orientations
+    (``{"clean": "visible"}``: the guessed faces people see, the Quality goal's default): orientations that put
+    support on them rank lower. ``budget_s``: a time budget in seconds; when it runs out the search stops and picks from
+    what it checked (``ended_early``, and "Continue the search" first among the ways out). While it runs, the best
+    options so far go to progress.partial (the web worker posts them for "Stop & show best so far")."""
     from . import optimizer
 
     s = _require()
@@ -1115,7 +1229,16 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
                               nozzles=nozzles, environment=env, constraints=constraints, change=change,
                               load_case=_load_case, climb=_climb, grams_minutes=_grams_minutes_of,
                               evaluate=_evaluate, orientation_settings=orientation_settings,
-                              zone_info=_zone_info, unit_shape=_unit_shape)
+                              zone_info=_zone_info, unit_shape=_unit_shape, mark_faces=_pose_marks(faces), budget_s=budget_s)
+
+
+def _pose_marks(faces: dict | None):
+    """For optimize: score candidate orientations against the marked faces, as orientations() does."""
+    marked = _marked_faces(faces)
+    if not marked:
+        return None
+    s = _require()
+    return lambda results, settings: [_face_penalty(s.mesh, r, marked, settings) for r in results]
 
 
 def estimate_runtime(depth: str = "extended", loads: list[dict] | None = None, profile: dict | None = None,
@@ -2245,7 +2368,7 @@ def _spot_marks(h, up, p: Profile, intents: list[dict] | None, loads: list[dict]
 
 
 def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None = None, intents: list[dict] | None = None,
-                     fine: bool = False) -> dict:
+                     fine: bool = False, detail: bool = False) -> dict:
     """A cooling plan for the loaded G-code (thermal_opt.py): fan ahead of time, slower layers or short park
     moves where spots stay too hot, and the slicer's layer-time slowdown undone where it only made the layers
     too cold to bond (at most ``max_speedup`` of the print time), each spot weighed by how much it matters
@@ -2253,7 +2376,9 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
     and speeds per layer; for editing the G-code) and ``slicer`` (what the user's own slicer can take from
     the 3MF: slower heights and a cooling tower; pass its ``cooling`` to ``export``). ``before`` / ``gcode`` /
     ``slicer``: print minutes, spots too hot / too cold (weighted too), median bond. ``summary``: plain words.
-    All limits are estimates (``confidence`` "rough") until real prints tune them."""
+    All limits are estimates (``confidence`` "rough") until real prints tune them. ``detail``: also what the
+    screen shows before and after the G-code plan (``_cooling_detail``: every spot, a timeline per layer, the
+    lines whose speed changes)."""
     from .thermal_opt import optimize
 
     p = Profile.from_dict(profile)
@@ -2267,7 +2392,119 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
         return marks[id(h)]
 
     r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
-    return _cooling_view(r, _importance_map(up, p, loads), p)
+    out = _cooling_view(r, _importance_map(up, p, loads), p)
+    return {**out, **_cooling_detail(tp, r, up, p, mark)} if detail else out
+
+
+DETAIL_MAX_LINES = 300_000  # the lines view sends at most this many (every changed one, then evenly spaced others)
+
+
+def _match_nodes(a, b) -> np.ndarray:
+    """For each heat node of ``a``, the node of ``b`` at the same layer and cell (-1: none). The plan only
+    changes timing and fan, so the runs normally match one to one."""
+    if len(a.layer) == len(b.layer) and np.array_equal(a.layer, b.layer) and np.allclose(a.xy, b.xy):
+        return np.arange(len(a.layer))
+    key = lambda x: (x.layer.astype(np.int64) << 32) + (np.round(x.xy[:, 0] / x.cell_mm).astype(np.int64) << 16) + np.round(x.xy[:, 1] / x.cell_mm).astype(np.int64)
+    ka, kb = key(a), key(b)
+    order = np.argsort(kb)
+    at = np.minimum(np.searchsorted(kb[order], ka), len(kb) - 1)
+    return np.where(kb[order][at] == ka, order[at], -1)
+
+
+def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
+    """What the simulation step shows (T-478), before and after the G-code plan. ``spots`` (heat nodes as
+    sliced, in the oriented part's frame; the after values are the same spots in the planned run): ``points``,
+    ``layer`` (int32), ``cover_c`` / ``cover_s`` / ``bond`` (before, after), ``window`` (uint8: 0 fine, 1 too
+    hot, 2 too cold, 3 needless slowdown), ``limit_c`` (too hot above this), ``importance`` and its
+    ``reason``. ``timeline`` per layer: height, seconds until the next layer, part fan (0–1), median covering
+    temperature (before, after) and the sag limit; ``tg_c`` is the window's cold side. ``lines``: the part's
+    lines (``segments``: x0 y0 z0 x1 y1 z1) with ``factor`` (new speed / old) and ``layer``; ``fan_marks``
+    where the plan changes the fan. ``slowdown_min``: minutes each slicer slowdown cause costs (what limits
+    the print). ``rotation``: the oriented frame (part @ rotation.T, centred, on z = 0)."""
+    from .gcode import CAUSE_NAMES, time_lost
+    from .importance import REASONS
+    from .kinematics import timing
+    from .thermal_opt import apply
+
+    base, after = r["heat"]["before"], r["heat"]["gcode"]
+    plan = r["plans"]["gcode"]
+    pts, _, weight, reason, _ = mark(base)
+    idx = _match_nodes(base, after)
+    hit = idx >= 0
+
+    def moved(values: np.ndarray, fill=np.nan) -> np.ndarray:
+        out = np.full(len(idx), fill, dtype=np.result_type(values, np.asarray(fill)))
+        out[hit] = values[idx[hit]]
+        return out
+
+    def state(win: dict) -> np.ndarray:
+        return np.select([win["too_hot"], win["needless"], win["too_cold"]], [1, 3, 2], 0).astype(np.uint8)
+
+    f32 = lambda a: np.asarray(a, np.float32).tobytes()
+    win0, win1 = r["windows"]["before"], r["windows"]["gcode"]
+    spots = {"points": f32(pts), "layer": np.asarray(base.layer, np.int32).tobytes(),
+             "cover_c": [f32(base.cover_c), f32(moved(after.cover_c))], "cover_s": [f32(base.cover_s), f32(moved(after.cover_s))],
+             "bond": [f32(base.bond), f32(moved(after.bond))],
+             "window": [state(win0).tobytes(), moved(state(win1), np.uint8(0)).tobytes()],
+             "limit_c": f32(win0["limit_c"]), "importance": f32(weight), "reason": np.asarray(reason, np.uint8).tobytes(),
+             "reasons": list(REASONS), "cell_mm": base.cell_mm}
+
+    planned = apply(tp, plan)
+    layers = int(tp.layer.max()) + 1
+
+    def per_layer(path) -> tuple[np.ndarray, np.ndarray]:
+        tm = timing(path)
+        start = np.full(layers, np.inf)
+        np.minimum.at(start, path.layer, tm.t0)
+        start = np.minimum.accumulate(start[::-1])[::-1]  # a layer without lines starts with the next one
+        seconds = np.diff(np.concatenate([start, [tm.total_s]]))
+        part = path.part()
+        fan = np.full(layers, np.nan)
+        sums = np.bincount(path.layer[part].astype(np.intp), path.part_fan[part], minlength=layers)
+        counts = np.bincount(path.layer[part].astype(np.intp), minlength=layers)
+        fan[counts > 0] = sums[counts > 0] / counts[counts > 0]
+        return seconds, fan
+
+    def layer_median(values: np.ndarray, layer: np.ndarray) -> np.ndarray:
+        out = np.full(layers, np.nan)
+        ok = np.isfinite(values)
+        for k in np.unique(layer[ok]):
+            if k < layers:
+                out[k] = np.median(values[ok & (layer == k)])
+        return out
+
+    s0, fan0 = per_layer(tp)
+    s1, fan1 = per_layer(planned)
+    z = np.asarray(tp.layer_z[:layers], float)
+    timeline = {"z": f32(np.concatenate([z, np.full(layers - len(z), z[-1] if len(z) else 0.0)])),
+                "seconds": [f32(s0), f32(s1)], "fan": [f32(fan0), f32(fan1)],
+                "cover_c": [f32(layer_median(base.cover_c, base.layer)), f32(layer_median(after.cover_c, after.layer))],
+                "limit_c": f32(layer_median(win0["limit_c"], base.layer)), "tg_c": base.tg_c}
+
+    rot = _orientation(up, p)[0]
+    to_oriented = _gcode_to_oriented(_require().gcode["rot"])
+    part = np.flatnonzero(tp.part())
+    factor = planned.speed[part] / np.maximum(tp.speed[part], 1e-6)
+    keep = np.abs(factor - 1) > 0.01
+    if len(part) > DETAIL_MAX_LINES:
+        rest = np.flatnonzero(~keep)
+        room = max(DETAIL_MAX_LINES - int(keep.sum()), 0)
+        keep[rest[:: max(1, len(rest) // max(room, 1))][:room]] = True
+    else:
+        keep[:] = True
+    chosen = part[keep]
+    seg = np.column_stack([to_oriented(np.asarray(tp.p0[chosen], float)), to_oriented(np.asarray(tp.p1[chosen], float))])
+    # Where the plan sets a fan the slicer didn't: the first line of each stretch with a new value.
+    new_fan = np.abs(planned.part_fan - tp.part_fan) > 0.01
+    starts = np.flatnonzero(new_fan & (np.concatenate([[True], np.abs(np.diff(planned.part_fan)) > 0.01]) | ~np.concatenate([[False], new_fan[:-1]])))
+    fan_marks = [{"layer": int(tp.layer[i]), "point": to_oriented(np.asarray(tp.p0[i], float)[None])[0].round(2).tolist(),
+                  "fan": round(float(planned.part_fan[i]), 2)} for i in starts[tp.part()[starts]][:200]]
+    lost = time_lost(tp)
+    return {"spots": spots, "timeline": timeline, "rotation": np.round(rot, 6).tolist(),
+            "lines": {"segments": f32(seg), "factor": f32(factor[keep]), "layer": np.asarray(tp.layer[chosen], np.int32).tobytes(),
+                      "all": int(len(part))},
+            "fan_marks": fan_marks,
+            "slowdown_min": {CAUSE_NAMES[c]: round(float(lost[c]) / 60, 1) for c in range(1, len(CAUSE_NAMES)) if lost[c] >= 3}}
 
 
 def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dict] | None = None,
@@ -3306,6 +3543,47 @@ def fastener_suggestions(up, profile: dict | None = None) -> dict:
     return {"suggestions": suggest_fasteners(s.mesh, _features(), up, Profile.from_dict(profile))}
 
 
+SAME_SIZE_MM = 0.05  # round features this close in diameter (and of one kind) count as the same, for "apply to all"
+
+
+def round_features(up, profile: dict | None = None) -> dict:
+    """Every round hole and peg the user can set a fit on (the Tolerances step, T-570): ``features`` with region,
+    ``kind`` (hole / peg), diameter, axis, centre, length (part coordinates), ``same`` (regions of the same kind and
+    size, for "apply to all"), what is set on it (``fit``: partner_mm + fit, or ``fastener``: size + use) and
+    ``printed_mm``, the size it comes out at on this printer: the user's measured hole / outer error when they
+    measured it (``printed_from``: "measured"), else the typical undersize of small holes ("typical"). Plus
+    ``tolerance`` (the fit gaps in use, see tolerance())."""
+    from .features import accepted
+    from .regions import find_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    p = Profile.from_dict(profile)
+    holes_t = load_data("thresholds")["holes"]
+    typical = float(np.mean(holes_t["typical_undersize_mm"]))
+    hole_err, outer_err = p.material.get("hole_error_mm"), p.material.get("outer_error_mm")
+    feats = [f for f in accepted(_features()) if f["type"] in ("hole", "boss") and f.get("full_circle")]
+    out = []
+    for f in feats:
+        hole = f["type"] == "hole"
+        d = float(f["diameter"])
+        if hole and hole_err is not None:
+            printed, source = d + float(hole_err), "measured"
+        elif not hole and outer_err is not None:
+            printed, source = d + float(outer_err), "measured"
+        elif hole and d <= holes_t["undersize_up_to_mm"]:
+            printed, source = d - typical, "typical"
+        else:
+            printed, source = d, "typical"
+        same = [g["region"] for g in feats if g["type"] == f["type"] and abs(float(g["diameter"]) - d) <= SAME_SIZE_MM]
+        out.append({"region": int(f["region"]), "kind": "hole" if hole else "peg", "diameter": round(d, 2),
+                    "axis": [float(x) for x in f["axis"]], "center": [float(x) for x in f["center"]], "length": round(float(f["length"]), 2),
+                    "same": same, "fit": s.fits.get(f["region"]), "fastener": s.fasteners.get(f["region"]),
+                    "printed_mm": round(printed, 2), "printed_from": source})
+    return {"features": out, "tolerance": tolerance(profile)}
+
+
 def _coarse_note(region: int) -> str:
     """A warning to add when the hole / post ``region`` was exported with too few facets (coarse_facets):
     its measured size, and so the advice, is off by about the facets' error."""
@@ -3798,8 +4076,9 @@ def _thread_findings(oriented: Mesh, rotation: np.ndarray, p: Profile) -> list[d
 
 
 def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotation: np.ndarray) -> list[dict]:
-    """Support marks on a face the user wants clean: the one place they matter most."""
-    if not marked or not marked["clean"]:
+    """Support marks on a face the user wants clean: the one place they matter most. Our guess of the faces people
+    see (``guessed``) only steers the orientation; the usual support_marks finding already names those marks."""
+    if not marked or not marked["clean"] or marked.get("guessed"):
         return []
     from .orientation import NEEDS_SUPPORT
 
@@ -3842,6 +4121,35 @@ def diagnose(symptom: str | None = None, up=None, profile: dict | None = None, f
 
 FIT_WORDS = {"press": "press together tightly", "snug": "push together snugly", "sliding": "slide and turn",
              "loose": "move freely with some play"}
+
+
+CLEARANCE_MAP_MM = 1.0  # the heat map's range: touching (red) to this far apart (cool)
+
+
+def clearance_map(data: bytes, profile: dict | None = None) -> dict:
+    """The mating part heat map (T-573, plan §15.2 idea 3): ``clearance``'s answer, plus the gap painted on the loaded
+    part: a finer copy of its surface (``field_triangles``, float32) with the gap to the mating part at every corner
+    (``vertex_gap_mm``, float32, negative where they overlap, ``CLEARANCE_MAP_MM`` and more counts as free), the
+    tightest spot on this part (``tight_at``) and the mating part itself (``mate_triangles``) to show beside it."""
+    from .clearance import signed_distance
+    from .formats import read_bodies
+    from .strength import refine
+
+    out = clearance(data, profile)
+    s = _require()
+    mate = Mesh(np.concatenate([m.triangles for _, m in read_bodies(data)]))
+    fine = refine(s.mesh.triangles, max(float(np.ptp(s.mesh.triangles.reshape(-1, 3), axis=0).max()) / 40, 1.0))
+    corners = fine.reshape(-1, 3)
+    uniq, back = np.unique(corners.round(4), axis=0, return_inverse=True)  # each corner is shared by several triangles
+    d = signed_distance(uniq, mate)[0][np.ravel(back)]
+    d = np.minimum(d, 10 * CLEARANCE_MAP_MM)
+    # A fit is often equally tight all round (a peg in a hole): of the tightest spots the highest, at the mouth where
+    # one looks in, not one at the bottom seen through the part.
+    tight = np.flatnonzero(d <= d.min() + 0.02)
+    i = int(tight[np.argmax(corners[tight, 2])])
+    return {**out, "field_triangles": fine.astype(np.float32).tobytes(), "vertex_gap_mm": d.astype(np.float32).tobytes(),
+            "tight_at": corners[i].round(3).tolist(), "tight_mm": round(float(d[i]), 3), "range_mm": CLEARANCE_MAP_MM,
+            "mate_triangles": mate.triangles.astype(np.float32).tobytes()}
 
 
 def clearance(data: bytes, profile: dict | None = None) -> dict:
@@ -4211,11 +4519,13 @@ METHODS = {
     "setup_check": setup_check,
     "tolerance": tolerance,
     "clearance": clearance,
+    "clearance_map": clearance_map,
     "diagnose": diagnose,
     "warping": warping,
     "set_fit": set_fit,
     "set_fastener": set_fastener,
     "fastener_suggestions": fastener_suggestions,
+    "round_features": round_features,
     "split": split,
     "set_gap": set_gap,
     "volume_solid": volume_solid,
@@ -4226,6 +4536,7 @@ METHODS = {
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,
+    "visible_faces": visible_faces,
     "orientation": orientation,
     "check": check,
     "export": export,

@@ -14,6 +14,11 @@ export const STEPS = [
   { id: "sim", layout: "work", uses: ["model", "option"], result: "simulate" },
   { id: "problems", layout: "work", uses: ["model", "option"], result: "check" },
   { id: "done", layout: "work", uses: ["model", "option"] },
+  // Extras opened from Done (§15.1): in the rail only while open; Back returns to Done.
+  { id: "tolerances", layout: "work", uses: ["model", "option"], skipWhen: (s) => s.step !== "tolerances" },
+  { id: "tools", layout: "work", uses: ["model", "option"], skipWhen: (s) => s.step !== "tools" },
+  { id: "lighter", layout: "work", uses: ["model", "option", "loads"], skipWhen: (s) => s.step !== "lighter" },
+  { id: "tuned", layout: "work", uses: ["model", "option"], skipWhen: (s) => s.step !== "tuned" },
 ];
 const byId = Object.fromEntries(STEPS.map((s) => [s.id, s]));
 

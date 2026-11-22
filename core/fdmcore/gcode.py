@@ -902,6 +902,47 @@ def pause_command(text: str) -> str:
     return BAMBU_PAUSE if "BambuStudio" in text[:4000] else "M601"
 
 
+_SET_TEMP = re.compile(r"^(M10[49])\b([^;]*)", re.I)
+_S_VALUE = re.compile(r"\bS[\d.]+", re.I)
+
+
+def add_temperatures(text: str, bands: list[tuple[float, float]]) -> tuple[str, list[dict]]:
+    """``text`` (a sliced temperature tower) with the nozzle set to each band's temperature from the first layer above
+    its start (``bands``: (z_from mm, °C), lowest first; a layer's mark gives its top, so the layer ending at z_from is
+    still the band below): an M104 right after that layer's mark, and the slicer's own nozzle temperature changes after
+    the first band starts (its second-layer temperature) set to the band's too, so they don't undo it. Turning the
+    heater off (S0, the end of the print) is left alone. Returns the new text and where each band starts: {"z", "temp_c"}."""
+    todo = sorted((float(z), float(t)) for z, t in bands)
+    out, done = [], []
+    nl = "\r\n" if "\r\n" in text[:20000] else "\n"
+    marked = seen_mark = False
+    current = None
+    for line in text.split(nl):
+        s = line.strip()
+        m = _SET_TEMP.match(s)
+        s_val = _S_VALUE.search(m.group(2)) if m else None
+        heater_off = s_val is not None and float(s_val.group(0)[1:]) == 0
+        if current is not None and m and not heater_off and " T1" not in m.group(2).upper():  # the slicer's own change: this band's instead
+            line = f"{m.group(1).upper()} {_S_VALUE.sub(f'S{current:g}', m.group(2).strip()) if _S_VALUE.search(m.group(2)) else f'S{current:g}'}".rstrip()
+        out.append(line)
+        if _LAYER_MARK.match(s):
+            marked = seen_mark = True
+        elif marked and (mz := _LAYER_Z.match(s)) is not None:
+            marked = False
+            z = float(mz.group(1))
+            due = [b for b in todo[len(done):] if z > b[0] + 1e-4]
+            if due:
+                current = due[-1][1]
+                done += [{"z": z, "temp_c": t} for _, t in due]
+                out.append(f"M104 S{current:g} ; temperature tower: {current:g} °C from here")
+    if not seen_mark:
+        raise ValueError("This G-code has no layer marks (; CHANGE_LAYER or ;LAYER_CHANGE): slice the tower in "
+                         "Bambu Studio, OrcaSlicer or PrusaSlicer")
+    if len(done) < len(todo):
+        raise ValueError(f"The print ends below {todo[len(done)][0]:.1f} mm, where a band starts: is this the temperature tower's G-code?")
+    return nl.join(out), done
+
+
 def add_pauses(text: str, tops: list[float]) -> tuple[str, list[dict]]:
     """``text`` with a pause before the first layer above each pocket top in ``tops`` (mm, the ``top_z``
     of pause_to_insert), placed like the slicers place their own: after the move up to that layer

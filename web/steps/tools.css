@@ -1,0 +1,18 @@
+/* More tools (T-564). */
+.tools-list { display: grid; gap: var(--s-1); margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
+.tools-list li { display: flex; gap: var(--s-2); align-items: center; }
+.tools-list li.is-off { opacity: 0.6; }
+.tools-list__text { flex: 1; min-width: 0; color: var(--text-2); }
+.tools-tabs .ui-seg { flex-wrap: wrap; max-width: 100%; }
+.tools-count { display: flex; gap: var(--s-2); align-items: center; }
+.tools-plate { position: relative; width: 100%; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-sunken); }
+.tools-plate__part { position: absolute; border: 1px solid var(--accent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.tools-fields { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+.tools-verdict { display: grid; gap: var(--s-1); padding: var(--s-3); border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--r); font-size: var(--fs-sm); }
+.tools-verdict.is-fine { border-left-color: var(--good); }
+.tools-verdict.is-warm { border-left-color: var(--warn); }
+.tools-verdict.is-too-hot { border-left-color: var(--bad); }
+.tools-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.tools-table th, .tools-table td { padding: var(--s-1); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.tools-sub { display: block; color: var(--text-3); }
+.tools-delta { color: var(--text-2); }
