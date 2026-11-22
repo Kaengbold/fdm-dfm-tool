@@ -85,13 +85,16 @@ services.picker = new Picker(services.stage, { label: pickLabel });
 attachKeyboard(services.stage, services.picker, { label: pickLabel, placeholder: t("picker.search"), title: t("picker.title") });
 // Picking happens on Holds and Loads (T-541, T-543); the face regions come once per part.
 const PICK_STEPS = new Set(["holds", "loads"]);
+// Quality marks its show faces on Analyse (T-563).
+const picks = (s) => PICK_STEPS.has(s.step) || (s.step === "analyse" && s.goal === "quality");
 let regionsFor = null;
 async function preparePicker() {
   const s = store.get();
-  const on = Boolean(s.part) && PICK_STEPS.has(s.step) && app.route === "flow";
+  const on = Boolean(s.part) && picks(s) && app.route === "flow";
   if (on && regionsFor !== s.part) {
     regionsFor = s.part;
     services.picker.setData(await engine.call("regions"));
+    services.rerender(); // steps tint their faces once the regions are there
   }
   services.picker.enable(on);
   if (s.step !== "options" && services.stage.oriented) services.stage.orient(null);
@@ -102,6 +105,6 @@ initSettings({ store, saving, engine, services });
 store.subscribe((_, changed) => {
   if (changed.includes("part") && services.stage.part) saving.putExtra("thumb", thumbnail(services.stage.part.geo.attributes.position.array));
 });
-store.subscribe((_, changed) => { if (changed.includes("step") || changed.includes("part")) preparePicker(); });
+store.subscribe((_, changed) => { if (changed.includes("step") || changed.includes("part") || changed.includes("goal")) preparePicker(); });
 globalThis.fdmUI = app; // for the browser tests and for agents driving the page
 document.body.dataset.ready = "1";

@@ -142,11 +142,12 @@ def find_orientations(
     material: str = "pla",
     nozzle: str = "0.4",
     loads: list[dict] | None = None,
-    faces: dict[str, list[int]] | None = None,
+    faces: dict[str, list[int] | str] | None = None,
 ) -> dict:
     """Rank print orientations. With loads (see check_strength), strength is included in the ranking.
     ``faces`` marks faces (ids from list_faces) the user cares about: {"clean": [...] no support marks,
-    "bed": [...] on the bed, "vertical": [...] upright, e.g. a hole that must come out round}."""
+    "bed": [...] on the bed, "vertical": [...] upright, e.g. a hole that must come out round}; "clean": "visible"
+    stands for the faces people see (guess_visible_faces)."""
     return _clean(api.orientations(_profile(printer, material, nozzle), loads=loads or None, faces=faces))
 
 
@@ -157,7 +158,7 @@ def check_print(
     material: str = "pla",
     nozzle: str = "0.4",
     mode: str = "both",
-    faces: dict[str, list[int]] | None = None,
+    faces: dict[str, list[int] | str] | None = None,
     use_temp_c: float | None = None,
 ) -> dict:
     """Printability findings, rough print time/filament and recommended slicer settings for one orientation.
@@ -172,6 +173,15 @@ def list_faces() -> list[dict]:
     """Faces (regions) of the part with id, kind (flat / cylinder / hole / curved), area_mm2,
     normal, centroid and hole_diameter (on holes) — use ids for loads."""
     return api.regions()["regions"]
+
+
+@server.tool()
+def guess_visible_faces() -> dict:
+    """The faces people will see, guessed: the outer ones (on the part's convex hull), so hole walls, pockets and
+    slots are left out. ``regions``: face ids (as list_faces), ``share``: their part of the surface. For a part that
+    should look good, keep support off them: ``faces={"clean": "visible"}`` in optimize_print / check_print, or
+    mark the one face that matters as {"clean": [id]}."""
+    return api.visible_faces()
 
 
 @server.tool()
@@ -636,6 +646,7 @@ def optimize_print(
     touches: list[str] | None = None,
     constraints: dict | None = None,
     change: str = "slicer",
+    faces: dict | None = None,
 ) -> dict:
     """The best 2–4 ways to print the loaded part for a goal (strong / balanced / fast / light / quality):
     orientation, material, nozzle, layer height, walls, top/bottom and infill, each checked for strength at its
@@ -644,11 +655,12 @@ def optimize_print(
     (extended can take a few minutes). ``owned``: materials the user has; ``materials`` / ``nozzles``: the only
     ones to consider; ``touches``: water, food, outdoors, abrasion, oil_fuel, solvent, skin. ``constraints``:
     hard limits (material, nozzle, layer_height, walls, top, bottom, infill, up). ``change``: slicer / design /
-    both. Returns ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the
-    target, ``ways_out``."""
+    both. ``faces`` as in find_orientations, or ``{"clean": "visible"}`` for the faces people see as guessed by
+    guess_visible_faces (what the app does for quality): orientations with support on them rank lower. Returns
+    ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the target, ``ways_out``."""
     profile = {"printer": printer, "nozzle": nozzle, "use_temp_c": use_temp_c, "constant_load": constant_load}
     return _clean(api.optimize(goal, loads, depth, profile, owned, materials, nozzles, {"temp_c": use_temp_c, "touches": touches or []},
-                               constraints, change))
+                               constraints, change, faces))
 
 
 @server.tool()
@@ -1106,6 +1118,7 @@ API_TOOLS = {
     "export": "export_3mf",
     "report": "get_report",
     "regions": "list_faces",
+    "visible_faces": "guess_visible_faces",
     "optimise_strength": "optimise_strength",
     "expert_settings": "expert_settings",
     "set_expert": "set_expert_settings",
