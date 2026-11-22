@@ -5,7 +5,7 @@
 
 Starts its own static server, drives the app (web/index.html) like a user, and prints one line per check plus every
 console error. Screenshots go to ./e2e-output/ (the page as each check left it). Exit code 1 on failure.
---quick runs the same checks (they are the short set already; the full journey comes with T-581).
+Without --quick it also walks the whole app as one user journey at 1280×720 and 1440×900 (T-581).
 With --gemini-review, the Gemini CLI looks at each screenshot for visual problems and writes its notes to
 e2e-output/gemini-review.md (it only gets the image, no shell access).
 """
@@ -874,6 +874,167 @@ def check_old_project(browser, port: int) -> str:
         page.close()
 
 
+def _face_on_screen(page, exclude=()) -> tuple[int, float, float]:
+    """A big flat face turned towards the camera, and where its middle is on screen, confirmed by hovering it there
+    (the picker must report that face). Works at any window size, unlike fixed fractions of the canvas."""
+    cands = page.evaluate("""(exclude) => { const p = fdmUI.services.picker, st = fdmUI.services.stage;
+      const cam = st.camera.position.clone().sub(st.controls.target).normalize();
+      return p.data.regions.filter((r) => r.kind === 'flat' && !exclude.includes(r.id) && r.normal[0] * cam.x + r.normal[1] * cam.y + r.normal[2] * cam.z > 0.25)
+        .sort((a, b) => b.area_mm2 - a.area_mm2).slice(0, 6).map((r) => { const c = p.toClient(r.centroid); return [r.id, c.x, c.y]; }); }""", list(exclude))
+    for region, x, y in cands:
+        page.mouse.move(x, y)
+        try:
+            page.wait_for_function("(r) => fdmUI.services.picker.hit?.kind === 'face' && fdmUI.services.picker.hit.region === r", arg=region, timeout=3_000)
+            return region, x, y
+        except Exception:  # noqa: BLE001 - hidden behind another face from here: try the next one
+            continue
+    raise AssertionError(f"no face to click among {cands}")
+
+
+def check_journey(browser, port: int, viewport=(1280, 720)) -> str:
+    """The whole app like a user (T-581): Start → sample → Setup (printer) → Environment → Holds (a face and the inside
+    corner) → Loads (N, then MPa) → Load details → Analyse (Cancel, then Fast) → Options (pin PLA, re-optimize, use)
+    → Simulation → Problems (a slicer fix, Confirm all changes) → Done (Export 3MF, Tolerances) → Settings and back →
+    Undo / Redo → the Quality path → the dark theme (screenshot)."""
+    w, h = viewport
+    page = browser.new_page(viewport={"width": w, "height": h})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    title = lambda: page.locator("#step-title").inner_text()  # noqa: E731
+    wait_step = lambda name, t=240_000: page.wait_for_function("(n) => document.getElementById('step-title')?.textContent === n", arg=name, timeout=t)  # noqa: E731
+    nxt = lambda: page.locator(".panel-foot .ui-btn--primary").click()  # noqa: E731
+    done = []
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="L-bracket").click()
+        wait_step("Setup")
+        page.wait_for_function("() => fdmUI.store.get().catalog")
+        page.get_by_role("button", name="Printer").click()
+        page.locator(".ui-select__pop:not([hidden]) .ui-select__search").fill("P1S")
+        page.locator(".ui-select__pop:not([hidden]) .ui-select__option", has_text="Bambu Lab P1S").click()
+        nxt()
+        wait_step("Environment")
+        nxt()
+        wait_step("Holds")
+        page.wait_for_function("() => fdmUI.services.picker.enabled && fdmUI.services.picker.data", timeout=120_000)
+        held, x, y = _face_on_screen(page)
+        page.mouse.click(x, y)
+        page.get_by_role("menuitem", name="Hold this face").click()
+        cx, cy = page.evaluate("""() => { const p = fdmUI.services.picker, c = p.toClient(p.data.edges.find((l) => l.kind === 'corner').meta.midpoint);
+          return [c.x + 3, c.y]; }""")
+        page.mouse.move(cx, cy)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'corner'", timeout=5_000)
+        page.mouse.click(cx, cy)
+        page.get_by_role("menuitem", name="Hold inside corner").click()
+        assert page.evaluate("() => fdmUI.store.get().holds.map((x) => x.kind)") == ["face", "corner"]
+        done.append("2 holds")
+        nxt()
+        wait_step("Loads")
+        page.wait_for_function("() => fdmUI.services.picker.enabled", timeout=60_000)
+        pushed, x, y = _face_on_screen(page, exclude=[held])
+        page.mouse.click(x, y)
+        page.wait_for_selector(".ui-pop")
+        page.keyboard.type("50")
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".ui-pop", state="detached")
+        _, x, y = _face_on_screen(page, exclude=[held, pushed])
+        page.mouse.click(x, y)
+        page.wait_for_selector(".ui-pop")
+        page.locator(".ui-pop [role=radio]", has_text="MPa").click()
+        page.locator(".ui-pop input").fill("0.05")
+        page.get_by_role("button", name="OK").click()
+        page.wait_for_selector(".ui-pop", state="detached")
+        units = page.evaluate("() => fdmUI.store.get().loads.map((l) => l.unit)")
+        assert units == ["N", "MPa"], units
+        # Undo takes the last load back, Redo puts it there again (the header buttons, §1.7).
+        page.locator(".app-header button[title^='Undo']").click()
+        assert page.evaluate("() => fdmUI.store.get().loads.length") == 1
+        page.locator(".app-header button[title^='Redo']").click()
+        assert page.evaluate("() => fdmUI.store.get().loads.length") == 2
+        done.append("loads in N and MPa, undo/redo")
+        nxt()
+        wait_step("Load details")
+        nxt()
+        wait_step("Analyse")
+        page.get_by_role("radio", name=re.compile("Extended")).click()
+        page.get_by_role("button", name="Start optimization").click()
+        page.wait_for_selector(".ui-progress")
+        page.locator(".ui-progress").get_by_role("button", name="Cancel").click()
+        page.wait_for_selector(".ui-progress", state="detached", timeout=120_000)
+        assert title() == "Analyse"
+        page.get_by_role("radio", name=re.compile("Fast")).click()
+        page.get_by_role("button", name="Start optimization").click()
+        wait_step("Options", 600_000)
+        done.append("analysis cancelled, then Fast")
+        page.wait_for_selector(".ui-col")
+        mats = page.evaluate("() => fdmUI.store.result('optimize').options.map((o) => o.material)")
+        cell = page.locator(".ui-col").nth(mats.index("pla") if "pla" in mats else 0).locator(".ui-col__cell").nth(1)
+        cell.hover()
+        cell.locator(".ui-col__pin").click()
+        pinned = page.evaluate("() => fdmUI.store.get().constraints.material")
+        page.get_by_role("button", name="Re-optimize with my choices").click()
+        page.wait_for_function("(m) => !document.querySelector('.ui-progress') && fdmUI.store.result('optimize').options.every((o) => o.material === m)", arg=pinned, timeout=600_000)
+        page.get_by_role("button", name="Use this option").first.click()
+        if page.locator("dialog.ui-modal").count():
+            page.get_by_role("button", name="Use it anyway").click()
+        wait_step("Simulation")
+        done.append(f"options pinned to {pinned}")
+        page.get_by_role("button", name="Run simulations").click()
+        page.wait_for_selector(".sim-status", timeout=300_000)
+        nxt()
+        page.wait_for_function("() => ['Problems', 'Done'].includes(document.getElementById('step-title')?.textContent)", timeout=60_000)
+        if title() == "Problems":
+            page.wait_for_selector(".prob-list .ui-find, .prob-clear", timeout=180_000)
+            for i in range(page.locator(".ui-find").count()):
+                row = page.locator(".ui-find").nth(i)
+                row.locator(".ui-find__head").click()
+                add = row.locator(".ui-fix", has=page.locator(".ui-tag.is-slicer")).get_by_role("button", name="Add")
+                if add.count():
+                    add.first.click()
+                    break
+            if page.locator(".ui-pending").count():
+                page.get_by_role("button", name="Confirm all changes").click()
+                page.wait_for_selector(".prob-batch", timeout=300_000)
+                done.append("a slicer fix confirmed and re-checked")
+            nxt()
+            wait_step("Done")
+        page.wait_for_selector(".done-grid")
+        with page.expect_download(timeout=120_000) as dl:
+            page.locator(".done-export-row").get_by_role("button", name="Export 3MF").click()
+        assert dl.value.suggested_filename.endswith(".3mf")
+        assert page.locator(".done-card", has_text="Tolerances & fits").count() == 1
+        done.append("3MF exported")
+        page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
+        page.get_by_role("button", name="Back to your part").click()
+        wait_step("Done")
+        # The Quality path: no holds, loads or load details, and Analyse offers Fast and Extended only.
+        page.locator(".ui-rail").get_by_role("button", name="Setup").click()
+        wait_step("Setup")
+        page.get_by_role("radio", name=re.compile("Quality")).click()
+        rail = page.locator(".ui-rail").inner_text()
+        assert not any(x in rail for x in ("Holds", "Loads", "Load details")), rail
+        nxt()
+        wait_step("Environment")
+        nxt()
+        wait_step("Analyse")  # straight from Environment: Quality has no holds or loads
+        assert page.get_by_role("radio", name=re.compile("Complete")).count() == 0, "Complete offered for Quality"
+        done.append("Quality path")
+        page.locator(".app-header").get_by_role("button", name="Dark theme").click()
+        page.wait_for_timeout(500)  # colours fade over --t (200 ms)
+        bg = page.evaluate("() => getComputedStyle(document.body).backgroundColor.match(/\\d+/g).slice(0, 3).map(Number)")
+        assert sum(bg) < 200, bg
+        page.screenshot(path=str(OUT / f"journey_dark_{w}x{h}.png"))
+        page.locator(".app-header").get_by_role("button", name="Dark theme").click()
+        done.append("dark theme")
+        assert not errors, errors
+        return f"{w}×{h}: " + ", ".join(done)
+    finally:
+        page.close()
+
+
 CHECKS = [
     ("sample and STEP land on Setup", "check_new_ui"),
     ("old projects and shared reports open", "check_old_project"),
@@ -899,6 +1060,9 @@ def _run_suite(port: int, args) -> Run:
         try:
             for name, fn in CHECKS:
                 run.step(name, lambda fn=fn: globals()[fn](ui, port))
+            if not args.quick:  # the whole journey, at both desktop sizes the plan designs for (§1.1)
+                for size in ((1280, 720), (1440, 900)):
+                    run.step(f"journey {size[0]}x{size[1]}", lambda size=size: check_journey(ui, port, size))
         finally:
             ui.close()
             browser.close()
@@ -908,7 +1072,7 @@ def _run_suite(port: int, args) -> Run:
 def main():
     sys.stdout.reconfigure(errors="replace")  # results quote UI text (×, →); Windows consoles may not have them
     ap = argparse.ArgumentParser()
-    ap.add_argument("--quick", action="store_true", help="the short set (today the same checks; CI runs this)")
+    ap.add_argument("--quick", action="store_true", help="the checks only, without the two full journeys (CI runs this)")
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--browser", default="msedge", choices=["msedge", "chrome", "chromium"],
                     help="chromium = Playwright's own build (CI: playwright install chromium)")

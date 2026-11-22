@@ -29,6 +29,7 @@ let skipped = null; // the input revisions when the user applied without re-chec
 let batch = null; // the last confirmed batch: {undo, summary}
 let ghostKey = null;
 let designOk = false; // "This changes your model" was confirmed once
+let framed = false; // the camera is close on one feature: the whole part again when the step is left
 let svc = null; // the shell's services and go, kept from the last render for Next's confirm and the batch card
 let goTo = null;
 
@@ -246,6 +247,7 @@ function frameFinding(f, res, services) {
   if (!f.bbox || !rotation || !stage.part) return;
   const [lo, hi] = F.turnedBounds(stage.partTriangles(), rotation);
   stage.frameBox(F.boxToPart(f.bbox, rotation, lo, hi));
+  framed = true;
 }
 
 function showGhosts(store, services) {
@@ -378,5 +380,7 @@ registerStep("problems", {
   leave({ services }) {
     services.stage.clearGhosts();
     ghostKey = null;
+    if (framed) services.stage.view("iso");
+    framed = false;
   },
 });

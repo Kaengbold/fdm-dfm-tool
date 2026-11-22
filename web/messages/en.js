@@ -111,6 +111,7 @@ export default {
   "shell.export": "Export 3MF",
   "shell.settings": "Settings & calibration",
   "shell.help": "Help",
+  "shell.theme": "Dark theme",
   "shell.steps": "Steps",
   "shell.stage": "3D view",
   "shell.back": "Back",
