@@ -11,7 +11,7 @@
 
       const ready = Module();
       const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-      const heapMb = (oc) => Math.round(oc.HEAP8.length / 2 ** 20);
+      const heapMb = (oc) => Math.round(oc.wasmMemory.buffer.byteLength / 2 ** 20); // the WASM memory only grows: the peak so far
 
       /** One part: every edit alone (exact, falling back as in the app), then all together. */
       window.runPart = async (stepB64, edits) => {
