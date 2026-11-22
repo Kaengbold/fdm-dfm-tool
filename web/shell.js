@@ -18,7 +18,8 @@ const steps = new Map(); // id -> {render({body, stage, store, go, services})}
 const screens = new Map(); // start | settings -> render({root, store, go, openRoute, services})
 /** A step's content. ``render`` fills the panel body and the stage's overlay layer (``stage``; the 3D view itself
  * is ``services.stage``); it runs again when the state changes. ``next({store, state})`` (optional) returns
- * ``{label, to}`` for the Next button, or nothing for the usual one; ``leave({store, services})`` (optional) runs when
+ * ``{label, to, confirm?}`` for the Next button, or nothing for the usual one (``confirm(go)`` runs instead of going
+ * straight on, so a step can ask first: Problems with changes still pending); ``leave({store, services})`` (optional) runs when
  * another step or screen takes over. */
 export function registerStep(id, def) {
   step(id);
@@ -95,7 +96,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const next = own?.to ?? nextStep(s.step, s);
     const foot = h("div", { class: "panel-foot" },
       back ? Button({ label: t("shell.back"), variant: "ghost", onClick: () => go(back) }) : h("span"),
-      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => go(next) }) : h("span"));
+      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => (own?.confirm ? own.confirm(() => go(next)) : go(next)) }) : h("span"));
     const head = h("div", { class: "panel-head" }, title, h("p", { class: "hint" }, t(`step.${s.step}.purpose`)));
     (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, openRoute, services });
     if (def.layout === "part") {

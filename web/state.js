@@ -38,7 +38,8 @@ export function initialState() {
     details: { duration: "often", vibration: "no" },
     depth: "extended",
     option: null,
-    pending: [],
+    pending: [], // fixes waiting in the Problems batch (T-561)
+    accepted: [], // finding ids the user accepted as they are
   };
 }
 
