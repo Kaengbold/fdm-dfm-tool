@@ -1255,7 +1255,7 @@ Rules for every [UI] task:
   - Do: `index.html` serves the new shell; delete the old `app.js`, `steps.js`, panes and CSS; old projects still open.
 - [~] **T-581 P1** [UI] New browser smoke test. · plan: §17 · files: `tools/e2e_smoke.py` · owner: Claude (`task/T-581-smoke`, on top of T-580's branch)
   - Do: 1280×720 and 1440×900: Start → sample + STEP → Setup → Environment → Holds (face, edge, toast) → Loads (gizmo, N/MPa) → details → Analyse → Options (pin PLA, re-optimize) → Simulation → Problems (pending + Confirm all) → Export → Tolerances → Quality path → Settings → Cancel and Undo; dark theme screenshot.
-- [ ] **T-582 P2** [UI] Docs. · plan: §16, §17 · files: `PRODUCT.md`, `DESIGN.md`, `PLAN.md`, `README.md`, `agents/` · owner: —
+- [~] **T-582 P2** [UI] Docs. · plan: §16, §17 · files: `PRODUCT.md`, `DESIGN.md`, `PLAN.md`, `README.md`, `agents/` · owner: Claude (`task/T-582-docs`)
   - Do: describe the new flow, desktop only, the `optimize` tool for agents, the new design system.
 
 ## Done
