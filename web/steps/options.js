@@ -4,13 +4,18 @@
 // ask Replace or Cancel); "Keep all" pins a column's whole recipe; "Re-optimize with my choices" reruns with the
 // chips as hard limits. Nothing reaches the target → a banner with the ways out; an option below the target can
 // still be used after a clear warning, which travels with it. "Use this option" moves on to Simulation.
+// Click a value (material, nozzle, layer, walls, infill) to edit it in the column (T-553): the value becomes a chip in
+// Your choices, and that column says "Needs a re-check" (it can't be used) until Re-optimize, which uses the value.
+// Removing the chip takes the edit back.
 import { h } from "../ui/dom.js";
 import { Button } from "../ui/button.js";
 import { OptionColumn, ConstraintsBar } from "../ui/options.js";
+import { NumberField } from "../ui/numberfield.js";
+import { Select } from "../ui/select.js";
 import { openModal } from "../ui/overlay.js";
 import { registerStep } from "../shell.js";
 import { t } from "../i18n.js";
-import { optimizeArgs } from "./args.js";
+import { activeNozzles, optimizeArgs, orderedMaterials } from "./args.js";
 
 // The rows of §11 in order: [key, label key, pin key in the optimizer's constraints (null = a result, not pinnable)].
 export const ROWS = [
@@ -44,6 +49,24 @@ export function optionRows(o, constraints = {}) {
   ];
 }
 
+/** What editing a value can change: row key → the constraint it sets. */
+export const EDITABLE = { material: "material", nozzle: "nozzle", layer: "layer_height", walls: "walls", infill: "infill" };
+
+/** The option as edited in its column: the edited values (``edits``: constraint key → value) in place, for display. */
+export function editedOption(o, edits = {}, catalog = null) {
+  const out = { ...o };
+  for (const [key, value] of Object.entries(edits)) {
+    if (key === "material") Object.assign(out, { material: value, material_name: catalog?.materials?.[value]?.name ?? value, owned: catalog?.owned?.includes(value) });
+    else out[key] = value;
+  }
+  return out;
+}
+
+/** The edits that still stand: an edit lasts while its chip in Your choices holds the same value. */
+export function standingEdits(edits = {}, constraints = {}) {
+  return Object.fromEntries(Object.entries(edits).filter(([k, v]) => JSON.stringify(constraints[k]) === JSON.stringify(v)));
+}
+
 /** A chip's words: "Material: PETG", "Nozzle: 0.6 mm", "Orientation: On its side". */
 function chipLabel(key, value, options) {
   const label = t(`options.pin.${key}`);
@@ -56,6 +79,8 @@ function chipLabel(key, value, options) {
 
 let busy = false;
 let focused = 0;
+let editing = null; // {col, key} while a value is being edited
+let edits = { result: null, cols: {} }; // per column: constraint key → edited value, for the result they were made on
 
 async function reoptimize(services, store) {
   busy = true;
@@ -75,9 +100,10 @@ async function reoptimize(services, store) {
 }
 let showError = null;
 
-function setPin(store, key, value, options) {
+function setPin(store, key, value, options, { toggle = true } = {}) {
   const constraints = { ...(store.get().constraints ?? {}) };
   if (JSON.stringify(constraints[key]) === JSON.stringify(value)) {
+    if (!toggle) return;
     delete constraints[key];
     store.set({ constraints });
   } else if (constraints[key] != null) {
@@ -87,6 +113,42 @@ function setPin(store, key, value, options) {
   } else {
     store.set({ constraints: { ...constraints, [key]: value } });
   }
+}
+
+/** The editor for one value in column ``i``: a list for material and nozzle, a number for the rest. */
+function valueEditor(store, services, options, i, key) {
+  const s = store.get();
+  const o = editedOption(options[i], edits.cols[i], s.catalog);
+  const cancel = () => { editing = null; services.rerender(); };
+  const commit = (value) => {
+    if (value == null) return;
+    const pinKey = EDITABLE[key];
+    edits.cols[i] = { ...(edits.cols[i] ?? {}), [pinKey]: value };
+    editing = null;
+    setPin(store, pinKey, value, options, { toggle: false });
+    services.rerender();
+  };
+  const label = t(`options.row.${key}`);
+  if (key === "material" || key === "nozzle") {
+    const list = key === "material"
+      ? orderedMaterials(s.catalog).map((m) => ({ value: m.id, label: m.name ?? m.id, badge: m.owned ? t("options.owned") : null }))
+      : activeNozzles(s.catalog, s.profile).map((n) => ({ value: n, label: `${n} mm` }));
+    const pick = Select({ label, options: list, value: key === "material" ? o.material : String(o.nozzle), onChange: commit });
+    return h("div", { class: "options-edit" }, pick, Button({ label: t("ui.cancel"), size: "small", variant: "ghost", onClick: cancel }));
+  }
+  const spec = {
+    layer: { value: o.layer_height, unit: "mm", min: 0.04, max: Math.round(Number(o.nozzle) * 0.8 * 100) / 100, to: (v) => Math.round(v * 100) / 100 },
+    walls: { value: o.walls, unit: "", min: 1, max: 12, to: (v) => Math.round(v) },
+    infill: { value: Math.round(o.infill * 100), unit: "%", min: 0, max: 100, to: (v) => Math.round(v) / 100 },
+  }[key];
+  const field = NumberField({ label, value: spec.value, units: spec.unit ? [{ value: spec.unit, label: spec.unit }] : [], min: spec.min, max: spec.max,
+    autofocus: true, onCommit: (v) => commit(spec.to(v)), onCancel: cancel });
+  return h("div", { class: "options-edit" }, field, h("div", { class: "row" },
+    Button({ label: t("options.set"), size: "small", variant: "primary", onClick: () => {
+      const v = field.value;
+      if (v != null && v >= spec.min && v <= spec.max) commit(spec.to(v));
+    } }),
+    Button({ label: t("ui.cancel"), size: "small", variant: "ghost", onClick: cancel })));
 }
 
 function use(store, go, o) {
@@ -107,6 +169,7 @@ registerStep("options", {
       return;
     }
     const options = result.options ?? [];
+    if (edits.result !== result) { edits = { result, cols: {} }; editing = null; } // a new run: the edits went into it
     focused = Math.min(focused, Math.max(options.length - 1, 0));
     services.stage?.orient(options[focused]?.up ?? null);
     const constraints = s.constraints ?? {};
@@ -129,11 +192,17 @@ registerStep("options", {
     const labels = Object.fromEntries(shown.map(([k, label]) => [k, t(label)]));
     const cols = h("div", { class: "options-cols" },
       h("div", { class: "options-labels", "aria-hidden": "true" }, h("span", { class: "options-labels__head" }), shown.map(([, label]) => h("span", {}, t(label)))),
-      options.map((o, i) => {
-        const col = OptionColumn({ option: { ...o, rows: rowsOf(o) }, labels, needsRecheck: stale,
+      options.map((o0, i) => {
+        const mine = standingEdits(edits.cols[i], constraints);
+        const edited = Object.keys(mine).length > 0;
+        const o = editedOption(o0, mine, s.catalog);
+        const rows = rowsOf(o).map((r) => ({ ...r, editable: r.key in EDITABLE && !busy, edited: EDITABLE[r.key] in mine }));
+        const col = OptionColumn({ option: { ...o, rows }, labels, needsRecheck: stale || edited,
+          editing: editing?.col === i ? editing.key : null, editor: editing?.col === i ? valueEditor(store, services, options, i, editing.key) : null,
+          onEdit: (row) => { editing = { col: i, key: row.key }; services.rerender(); },
           onPin: (row) => setPin(store, row.pinKey, row.pinValue, options),
           onKeepAll: () => store.set({ constraints: { ...constraints, ...Object.fromEntries(optionRows(o).filter((r) => r.pinKey).map((r) => [r.pinKey, r.pinValue])) } }),
-          onUse: () => use(store, go, o) });
+          onUse: () => use(store, go, o0) });
         col.addEventListener("mouseenter", () => services.stage?.orient(o.up));
         col.addEventListener("mouseleave", () => services.stage?.orient(options[focused]?.up ?? null));
         col.addEventListener("focusin", () => { focused = i; services.stage?.orient(o.up); });

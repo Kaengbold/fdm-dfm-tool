@@ -596,7 +596,8 @@ def check_new_ui_analyse(browser, port: int) -> str:
 
 def check_new_ui_options(browser, port: int) -> str:
     """The new UI's Options step (T-551): aligned columns from a real optimizer run; pin PLA, re-optimize, every new
-    column uses PLA; an option below the target warns before it can be used."""
+    column uses PLA; an option below the target warns before it can be used. T-553: walls edited inside a column
+    become a chip, that column needs a re-check (no Use), Esc cancels an edit, and re-optimize uses the value."""
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -635,6 +636,25 @@ def check_new_ui_options(browser, port: int) -> str:
         page.get_by_role("button", name="Re-optimize with my choices").click()
         page.wait_for_function("(m) => fdmUI.store.result('optimize').options.every((o) => o.material === m)", arg=pinned, timeout=180_000)
         after = page.evaluate("() => fdmUI.store.result('optimize').options.map((o) => o.material)")
+        # Edit walls in the last column: a chip, the column needs a re-check; re-optimize uses the value.
+        col = page.locator(".ui-col").last
+        walls_now = page.evaluate("() => fdmUI.store.result('optimize').options.at(-1).walls")
+        want = 6 if walls_now != 6 else 5
+        col.get_by_role("button", name=re.compile("^Change Walls")).click()
+        page.keyboard.press("Escape")
+        assert col.locator(".ui-col__cell.is-editing").count() == 0, "Esc didn't cancel"
+        col.get_by_role("button", name=re.compile("^Change Walls")).click()
+        field = col.locator(".ui-col__cell.is-editing input")
+        field.fill(str(want))
+        field.press("Enter")
+        assert page.evaluate("() => fdmUI.store.get().constraints.walls") == want
+        assert f"Walls: {want}" in page.locator(".ui-constraints").inner_text()
+        assert "Needs a re-check" in col.inner_text() and col.get_by_role("button", name="Use this option").count() == 0
+        assert col.locator(".ui-col__value.is-edited").inner_text() == str(want)
+        assert page.locator(".ui-col").first.get_by_role("button", name="Use this option").count() == 1, "other columns stay usable"
+        page.get_by_role("button", name="Re-optimize with my choices").click()
+        page.wait_for_function("(w) => fdmUI.store.result('optimize').options.every((o) => o.walls === w)", arg=want, timeout=180_000)
+        assert page.locator(".ui-col__value.is-edited").count() == 0 and "Needs a re-check" not in page.locator(".options-cols").inner_text()
         # Below the target: a clear warning first, and the warning travels with the option.
         page.evaluate("() => { const r = fdmUI.store.result('optimize'); r.options[0] = { ...r.options[0], meets_target: false, safety: 1.2, target: 3 }; fdmUI.services.rerender(); }")
         page.get_by_role("button", name="Use this option").first.click()
@@ -643,7 +663,7 @@ def check_new_ui_options(browser, port: int) -> str:
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Simulation'")
         assert page.evaluate("() => fdmUI.store.get().option.warning") == "below_target"
         assert not errors, errors
-        return f"{n} aligned columns; pinned {pinned}, re-optimized: {after}; below-target warns and is carried"
+        return f"{n} aligned columns; pinned {pinned}, re-optimized: {after}; walls edited to {want} in a column, re-optimized with it; below-target warns and is carried"
     finally:
         page.close()
 
@@ -1082,6 +1102,7 @@ def check_new_ui_lighter_tuned(browser, port: int) -> str:
         assert o[0] and (o[1] < 4 or o[2] < 0.4) and o[3] >= o[4], o
         done.append(f"lighter: walls {o[1]}, infill {round(o[2] * 100)} %, ×{o[3]} ({cols - 1} ways)")
         page.get_by_role("button", name="Show the lighter shape").click()
+        page.get_by_role("button", name="Download the guide (STL)").wait_for(timeout=300_000)  # the shape takes a while late in a long run
         with page.expect_download(timeout=300_000) as dl:
             page.get_by_role("button", name="Download the guide (STL)").click()
         assert dl.value.suggested_filename == "hole_block_lighter_guide.stl"
