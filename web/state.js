@@ -17,6 +17,7 @@ export const INPUTS = {
   details: "loads",
   depth: "depth",
   option: "option",
+  showFaces: "goal",
 };
 // What Undo / Redo covers: things the user builds by hand, not navigation or settings (§1.7).
 export const UNDOABLE = ["holds", "loads", "noLoads", "design", "pending"];
@@ -38,6 +39,7 @@ export function initialState() {
     details: { duration: "often", vibration: "no" },
     depth: "extended",
     option: null,
+    showFaces: [], // Quality: faces the user marked as the ones that must look good (empty: our guess)
     pending: [],
   };
 }

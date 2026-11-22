@@ -759,4 +759,10 @@ export default {
   "sim.legend.overhangNote": "Orange to red: these need support or a gentler angle.",
   "sim.review": {"one": "Review {count} problem", "other": "Review {count} problems"},
   "sim.allClear": "All clear: Done",
+
+  // Show faces for the Quality goal (T-563).
+  "showFaces.title": "Faces people see",
+  "showFaces.guess": "We assume the tinted outer faces are seen and keep support off them. Click a face to mark the one that must look good instead.",
+  "showFaces.marked": {"one": "{count} show face marked: support stays off it. Click a face to add or remove one.", "other": "{count} show faces marked: support stays off them. Click a face to add or remove one."},
+  "showFaces.reset": "Use our guess again",
 };

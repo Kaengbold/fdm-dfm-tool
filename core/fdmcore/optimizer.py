@@ -387,10 +387,11 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
              base: Profile, owned: list[str] | None = None, materials: list[str] | None = None,
              nozzles: list[str] | None = None, environment: dict | None = None, constraints: dict | None = None,
              change: str = "slicer", load_case=None, climb=None, grams_minutes=None, evaluate=None,
-             orientation_settings=None, zone_info=None, unit_shape=None) -> dict:
+             orientation_settings=None, zone_info=None, unit_shape=None, mark_faces=None) -> dict:
     """See module docstring. ``load_case``/``climb``/``grams_minutes``/``evaluate``/``orientation_settings``/
     ``zone_info``/``unit_shape`` are the session-bound helpers from api.py (api.optimize passes them), so
-    the strength model is shared and cached."""
+    the strength model is shared and cached. ``mark_faces(results, settings)`` (api._pose_marks) adds the marked
+    faces' penalties to the orientation scores (Quality: support on faces people see)."""
     from .checks import orient
     from .orientation import candidate_directions, evaluate as evaluate_pose, find_orientations
     from .placement import print_rotation
@@ -434,6 +435,8 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
     found = find_orientations(mesh, settings, top=2 * n_poses)
     as_loaded = evaluate_pose(mesh, [0, 0, 1], settings)
     pool = found + [as_loaded]
+    if mark_faces:
+        mark_faces(pool, settings)
     cases = load_case(loads) if strength_on else None
     if strength_on:
         from .strength import cases_safety

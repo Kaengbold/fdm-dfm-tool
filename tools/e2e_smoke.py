@@ -1018,6 +1018,50 @@ def check_new_ui_simulation(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_quality(browser, port: int) -> str:
+    """The new UI's Quality path (T-563, plan §14): no Holds / Loads / Load details in the rail, Analyse offers Fast and
+    Extended only and tints the faces people see (our guess); a click marks a show face, which the optimizer gets;
+    Options shows no Strength row."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Phone stand").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'quality' }); fdmUI.go('analyse'); }")
+        rail = page.locator(".ui-rail").inner_text()
+        assert not any(w in rail for w in ("Holds", "Loads", "Load details")), rail
+        assert page.get_by_role("radio", name=re.compile("Complete")).count() == 0
+        page.wait_for_selector(".showfaces")
+        assert "We assume the tinted outer faces" in page.locator(".showfaces").inner_text()
+        page.wait_for_function("() => fdmUI.services.picker.colored?.size > 0", timeout=120_000)
+        guessed = page.evaluate("() => fdmUI.services.picker.colored.size")
+        box = page.locator(".stage-canvas").bounding_box()
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.wait_for_function("() => fdmUI.services.picker.hit != null", timeout=10_000)
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.wait_for_function("() => fdmUI.store.get().showFaces.length === 1")
+        assert "1 show face marked" in page.locator(".showfaces").inner_text()
+        marked = page.evaluate("() => fdmUI.store.get().showFaces")
+        args = page.evaluate("async () => (await import('./steps/args.js')).optimizeArgs(fdmUI.store.get()).faces")
+        assert args == {"clean": marked}, args
+        page.get_by_role("radio", name=re.compile("Fast")).click()
+        page.get_by_role("button", name="Start optimization").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Options'", timeout=240_000)
+        page.wait_for_selector(".ui-col")
+        labels = page.locator(".options-labels").inner_text()
+        assert "Safety" not in labels and "Print time" in labels, labels
+        assert page.evaluate("() => fdmUI.services.picker.colored?.size ?? 0") == 0, "Analyse's tint stayed on the part"
+        assert not errors, errors
+        return f"rail without holds/loads; Fast/Extended; {guessed} faces guessed as seen, show face {marked} marked and sent; Options without Strength"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -1073,6 +1117,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: analyse", lambda: check_new_ui_analyse(ui, port))
             run.step("new UI: options", lambda: check_new_ui_options(ui, port))
             run.step("new UI: simulation", lambda: check_new_ui_simulation(ui, port))
+            run.step("new UI: quality", lambda: check_new_ui_quality(ui, port))
         finally:
             ui.close()
         if args.quick:

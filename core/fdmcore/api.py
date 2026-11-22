@@ -723,7 +723,8 @@ MARK_KINDS = ("clean", "bed", "vertical")
 
 
 def _marked_faces(faces: dict | None) -> dict | None:
-    """Triangle masks for the user's marked faces (regions), or None if nothing is marked."""
+    """Triangle masks for the user's marked faces (regions), or None if nothing is marked. ``"clean": "visible"``
+    stands for our guess of the faces people see (visible_faces), as one mask: ``guessed`` is then True."""
     if not faces or not any(faces.get(k) for k in MARK_KINDS):
         return None
     from .regions import find_regions
@@ -731,7 +732,26 @@ def _marked_faces(faces: dict | None) -> dict | None:
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
+    if faces.get("clean") == "visible":
+        seen = np.isin(s.regions, visible_faces()["regions"])
+        return {"clean": [seen] if seen.any() else [], "guessed": True,
+                **{k: [s.regions == r for r in faces.get(k, [])] for k in ("bed", "vertical")}}
     return {kind: [s.regions == r for r in faces.get(kind, [])] for kind in MARK_KINDS}
+
+
+def visible_faces() -> dict:
+    """The faces people will see, guessed (plan §14, decision 10): the outer ones, on the part's convex hull. Hole
+    walls, pockets and slots are left out, so support there doesn't count as a mark. The Quality goal starts from
+    this guess (``faces={"clean": "visible"}`` in optimize, check and orientations) until the user marks show faces."""
+    from .regions import find_regions, outer_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    ids = outer_regions(s.mesh, s.regions)
+    _, areas = s.mesh.normals_and_areas()
+    share = float(areas[np.isin(s.regions, ids)].sum() / max(areas.sum(), 1e-12))
+    return {"regions": [int(r) for r in ids], "share": round(share, 3)}
 
 
 def _normal_spread(mesh: Mesh, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1090,7 +1110,8 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
 
 def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str = "extended", profile: dict | None = None,
              owned: list[str] | None = None, materials: list[str] | None = None, nozzles: list[str] | None = None,
-             environment: dict | None = None, constraints: dict | None = None, change: str = "slicer") -> dict:
+             environment: dict | None = None, constraints: dict | None = None, change: str = "slicer",
+             faces: dict | None = None) -> dict:
     """The new UI's optimizer (optimizer.py): 2–4 verified options for ``goal`` (strong / balanced / fast /
     light / quality) over orientation, material, nozzle, layer height and walls / top / infill, plus local
     reinforcements at Complete depth (or whenever ``change="design"``).
@@ -1100,7 +1121,9 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
     with ``constraints``). ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
     to consider (nozzles = the ticked sizes). ``environment``: {"temp_c", "touches": [water, food, outdoors,
     abrasion, oil_fuel, solvent, skin]}. ``constraints`` ("Your choices", hard limits): material, nozzle,
-    layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both."""
+    layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both. ``faces`` as in orientations
+    (``{"clean": "visible"}``: the guessed faces people see, the Quality goal's default): orientations that put
+    support on them rank lower."""
     from . import optimizer
 
     s = _require()
@@ -1113,7 +1136,16 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
                               nozzles=nozzles, environment=env, constraints=constraints, change=change,
                               load_case=_load_case, climb=_climb, grams_minutes=_grams_minutes_of,
                               evaluate=_evaluate, orientation_settings=orientation_settings,
-                              zone_info=_zone_info, unit_shape=_unit_shape)
+                              zone_info=_zone_info, unit_shape=_unit_shape, mark_faces=_pose_marks(faces))
+
+
+def _pose_marks(faces: dict | None):
+    """For optimize: score candidate orientations against the marked faces, as orientations() does."""
+    marked = _marked_faces(faces)
+    if not marked:
+        return None
+    s = _require()
+    return lambda results, settings: [_face_penalty(s.mesh, r, marked, settings) for r in results]
 
 
 def estimate_runtime(depth: str = "extended", loads: list[dict] | None = None, profile: dict | None = None,
@@ -3756,8 +3788,9 @@ def _thread_findings(oriented: Mesh, rotation: np.ndarray, p: Profile) -> list[d
 
 
 def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotation: np.ndarray) -> list[dict]:
-    """Support marks on a face the user wants clean: the one place they matter most."""
-    if not marked or not marked["clean"]:
+    """Support marks on a face the user wants clean: the one place they matter most. Our guess of the faces people
+    see (``guessed``) only steers the orientation; the usual support_marks finding already names those marks."""
+    if not marked or not marked["clean"] or marked.get("guessed"):
         return []
     from .orientation import NEEDS_SUPPORT
 
@@ -4184,6 +4217,7 @@ METHODS = {
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,
+    "visible_faces": visible_faces,
     "orientation": orientation,
     "check": check,
     "export": export,
