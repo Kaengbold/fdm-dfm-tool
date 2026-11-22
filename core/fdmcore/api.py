@@ -4102,6 +4102,35 @@ FIT_WORDS = {"press": "press together tightly", "snug": "push together snugly", 
              "loose": "move freely with some play"}
 
 
+CLEARANCE_MAP_MM = 1.0  # the heat map's range: touching (red) to this far apart (cool)
+
+
+def clearance_map(data: bytes, profile: dict | None = None) -> dict:
+    """The mating part heat map (T-573, plan §15.2 idea 3): ``clearance``'s answer, plus the gap painted on the loaded
+    part: a finer copy of its surface (``field_triangles``, float32) with the gap to the mating part at every corner
+    (``vertex_gap_mm``, float32, negative where they overlap, ``CLEARANCE_MAP_MM`` and more counts as free), the
+    tightest spot on this part (``tight_at``) and the mating part itself (``mate_triangles``) to show beside it."""
+    from .clearance import signed_distance
+    from .formats import read_bodies
+    from .strength import refine
+
+    out = clearance(data, profile)
+    s = _require()
+    mate = Mesh(np.concatenate([m.triangles for _, m in read_bodies(data)]))
+    fine = refine(s.mesh.triangles, max(float(np.ptp(s.mesh.triangles.reshape(-1, 3), axis=0).max()) / 40, 1.0))
+    corners = fine.reshape(-1, 3)
+    uniq, back = np.unique(corners.round(4), axis=0, return_inverse=True)  # each corner is shared by several triangles
+    d = signed_distance(uniq, mate)[0][np.ravel(back)]
+    d = np.minimum(d, 10 * CLEARANCE_MAP_MM)
+    # A fit is often equally tight all round (a peg in a hole): of the tightest spots the highest, at the mouth where
+    # one looks in, not one at the bottom seen through the part.
+    tight = np.flatnonzero(d <= d.min() + 0.02)
+    i = int(tight[np.argmax(corners[tight, 2])])
+    return {**out, "field_triangles": fine.astype(np.float32).tobytes(), "vertex_gap_mm": d.astype(np.float32).tobytes(),
+            "tight_at": corners[i].round(3).tolist(), "tight_mm": round(float(d[i]), 3), "range_mm": CLEARANCE_MAP_MM,
+            "mate_triangles": mate.triangles.astype(np.float32).tobytes()}
+
+
 def clearance(data: bytes, profile: dict | None = None) -> dict:
     """The gap between the loaded part and a mating part (``data``: STL / 3MF / OBJ exported from the same CAD
     assembly, so both keep their places): the closest place (``gap_mm``, negative when they overlap; ``at``, part
@@ -4469,6 +4498,7 @@ METHODS = {
     "setup_check": setup_check,
     "tolerance": tolerance,
     "clearance": clearance,
+    "clearance_map": clearance_map,
     "diagnose": diagnose,
     "warping": warping,
     "set_fit": set_fit,

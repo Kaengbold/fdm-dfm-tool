@@ -1387,6 +1387,103 @@ def check_new_ui_quality_calibration(browser, port: int) -> str:
         ctx.close()
 
 
+def _extras_parts() -> tuple[bytes, bytes]:
+    """A 40 × 30 × 10 mm plate with a Ø8.4 hole and a 3 mm slot, and a Ø8.2 peg standing in the hole (one assembly).
+    Fixture files (made with fdmcore's extrude): the browser test runs without the engine's Python packages."""
+    fixtures = ROOT / "tools" / "fixtures"
+    return (fixtures / "slot_plate.stl").read_bytes(), (fixtures / "slot_plate_peg.stl").read_bytes()
+
+
+def check_new_ui_later_extras(browser, port: int) -> str:
+    """T-573: Tolerances' Flat gaps (two slot walls clicked: 3 mm measured, a blade slides in; a 3 mm part jams red, a
+    2.5 mm one fits; the change goes into Problems' batch) and Mating part (a peg from the same assembly: the gap painted
+    on the part, the tightest spot marked, snug); and the Holds brush (paint by dragging over the top: one painted hold,
+    sent to the engine as points with a radius)."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    done = []
+    title = "() => document.getElementById('step-title')?.textContent"
+    plate, peg = _extras_parts()
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "slot_plate.stl", "mimeType": "model/stl", "buffer": plate}])
+        page.wait_for_function(f"() => ({title})() === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'fast', optimized: 1, noLoads: true, change: 'both',
+          option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2, walls: 2, top: 4, bottom: 3,
+            infill: 0.15, settings: { wall_loops: '2' } } }); fdmUI.go('tolerances'); }""")
+        page.wait_for_selector(".tol-modes", timeout=120_000)
+        page.wait_for_function("() => fdmUI.services.picker.data", timeout=120_000)
+        # Flat gaps: the two slot walls (x = 28 facing +x, x = 31 facing -x).
+        page.get_by_role("radio", name="Flat gaps").click()
+        walls = page.evaluate("""() => { const r = fdmUI.services.picker.data.regions.filter((x) => x.kind === 'flat' && Math.abs(x.normal[0]) > 0.99);
+          const inSlot = r.filter((x) => x.area_mm2 > 150 && x.area_mm2 < 250);
+          return [inSlot.find((x) => x.normal[0] > 0).id, inSlot.find((x) => x.normal[0] < 0).id]; }""")
+        pick = "(r) => fdmUI.services.picker.listeners.pick.forEach((fn) => fn({ kind: 'face', region: r, point: null }, 0, 0))"
+        page.evaluate(pick, walls[0])
+        assert "other side" in page.locator(".panel").inner_text()
+        page.evaluate(pick, walls[1])
+        page.wait_for_selector(".tol-card", timeout=60_000)
+        head = page.locator(".tol-card b").first.inner_text()
+        assert head.startswith("Slot: 3.00 mm"), head
+        assert page.evaluate("() => fdmUI.services.stage.part.group.getObjectByName('tol-feeler')?.children.length") == 1
+        field = page.locator(".tol-card input").first
+        field.fill("3")
+        field.press("Enter")
+        page.wait_for_function("() => /Will jam/.test(document.querySelector('.tol-verdict')?.textContent ?? '')", timeout=60_000)
+        field = page.locator(".tol-card input").first
+        field.fill("2.5")
+        field.press("Enter")
+        page.wait_for_function("() => /^Fits/.test(document.querySelector('.tol-verdict')?.textContent ?? '')", timeout=60_000)
+        done.append("slot 3.00 mm: 3 mm jams, 2.5 mm fits")
+        page.locator(".tol-card").get_by_role("button", name="Add to my changes").click()
+        page.wait_for_function("() => fdmUI.store.get().pending.some((p) => p.id.startsWith('tol:gap-'))", timeout=120_000)
+        item = page.evaluate("() => fdmUI.store.get().pending.find((p) => p.id.startsWith('tol:gap-')).title")
+        done.append(f"in the batch: {item}")
+        # Mating part: the peg.
+        page.get_by_role("radio", name="Mating part").click()
+        assert page.evaluate("() => fdmUI.services.stage.part.group.getObjectByName('tol-feeler')") is None, "blade left behind"
+        page.set_input_files('.panel input[type=file][accept=".stl,.3mf,.obj"]', files=[{"name": "peg.stl", "mimeType": "model/stl", "buffer": peg}])
+        page.wait_for_selector(".sim-legend", timeout=180_000)
+        verdict = page.locator(".tol-verdict").inner_text()
+        assert verdict.startswith("Snug") and "0.10 mm" in verdict, verdict
+        assert page.evaluate("() => fdmUI.services.stage.field != null && fdmUI.services.stage.ghosts.length === 1")
+        assert page.evaluate("() => fdmUI.services.stage.part.group.getObjectByName('tol-tight') != null")
+        done.append("peg: snug, gap painted, tightest marked")
+        page.get_by_role("radio", name="Holes & pegs").click()
+        assert page.evaluate("() => fdmUI.services.stage.field == null && fdmUI.services.stage.ghosts.length === 0"), "map left behind"
+        # The brush on Holds: paint across the top.
+        page.evaluate("() => fdmUI.go('holds')")
+        page.wait_for_function("() => fdmUI.services.picker.enabled && fdmUI.services.picker.data", timeout=120_000)
+        a, b = page.evaluate("() => [fdmUI.services.picker.toClient([4, 4, 10]), fdmUI.services.picker.toClient([22, 4, 10])].map((c) => [c.x, c.y])")
+        page.mouse.move(*a)
+        page.wait_for_function("() => fdmUI.services.picker.hit?.kind === 'face'")
+        page.mouse.click(*a)
+        page.wait_for_selector(".ui-radial", state="attached")
+        page.get_by_role("menuitem", name="Paint part of this face").click()
+        assert "Drag over the part" in page.locator(".panel").inner_text()
+        page.mouse.move(*a)
+        page.mouse.down()
+        for k in range(1, 13):
+            page.mouse.move(a[0] + (b[0] - a[0]) * k / 12, a[1] + (b[1] - a[1]) * k / 12)
+        page.mouse.up()
+        spots = int(page.locator(".hold-brush .ui-hint").last.inner_text().split()[0])
+        assert spots >= 4, spots
+        page.locator(".hold-brush").get_by_role("button", name="Done").click()
+        hold = page.evaluate("""async () => { const m = await import('./steps/args.js'); const h = fdmUI.store.get().holds.at(-1);
+          return [h.name, m.holdToEngine(h)]; }""")
+        assert hold[0] == "Painted area" and len(hold[1]["points"]) == spots and hold[1]["radius"] == 4 and "region" not in hold[1], hold
+        assert page.evaluate("() => fdmUI.services.stage.controls.enabled"), "view left frozen"
+        assert page.evaluate("() => fdmUI.services.stage.part.group.getObjectByName('hold-brush')?.children.length") == spots
+        done.append(f"brush: {spots} spots, one painted hold")
+        assert not errors, errors
+        return "; ".join(done)
+    finally:
+        page.close()
+
+
 def check_old_project(browser, port: int) -> str:
     """Projects from before the cut-over (T-580) still open: an old-style project (goal "strength", a load in kg
     pointing "down") and a shared report with a project inside land on Setup with the part, its holds and loads."""
@@ -1604,6 +1701,7 @@ CHECKS = [
     ("problems", "check_new_ui_problems"),
     ("done", "check_new_ui_done"),
     ("tolerances", "check_new_ui_tolerances"),
+    ("tolerances extras and the hold brush", "check_new_ui_later_extras"),
     ("lighter and tuned settings", "check_new_ui_lighter_tuned"),
     ("more tools", "check_new_ui_tools"),
     ("quality settings and tests", "check_new_ui_quality_calibration"),

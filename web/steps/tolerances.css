@@ -11,3 +11,4 @@
 .tol-verdict.is-tight, .tol-verdict.is-loose { background: var(--warn-soft); color: var(--warn); }
 .tol-verdict.is-fits { background: var(--good-soft); color: var(--good); }
 .tol-printed-label { align-self: center; font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--text-2); }
+.tol-modes .ui-seg { flex-wrap: wrap; max-width: 100%; }

@@ -1161,7 +1161,8 @@ API_TOOLS = {
 # Only for the web app: it keeps the engine's state while restarting its worker (Cancel). The MCP
 # server's engine never restarts under the agent, so there is nothing to hand back.
 APP_ONLY = {"session_state", "restore_state", "holes_state", "restore_holes",  # agents: save_project / open_project
-            "print_mesh"}  # the browser slicer's input; agents slice with export + optimize_print_cooling / local OrcaSlicer
+            "print_mesh",  # the browser slicer's input; agents slice with export + optimize_print_cooling / local OrcaSlicer
+            "clearance_map"}  # the gap painted on the part, for the 3D view; agents use check_clearance's numbers
 
 
 def main():

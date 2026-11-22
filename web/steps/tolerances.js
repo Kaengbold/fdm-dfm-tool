@@ -6,6 +6,7 @@
 // on by default. Adding it goes into Problems' pending batch, the same confirm path as every other change (§13):
 // resized geometry, or hole compensation when only slicer settings may change (it affects every hole, so all holes are
 // tinted). "What prints" overlays the size each hole and peg really comes out at, ×5 or ×10.
+// Two more modes (T-573, steps/tolgaps.js): Flat gaps with a feeler gauge, and the Mating part heat map.
 import * as THREE from "three";
 import { h } from "../ui/dom.js";
 import { Button } from "../ui/button.js";
@@ -19,6 +20,7 @@ import { t } from "../i18n.js";
 import { optimizeArgs } from "./args.js";
 import { simProfile } from "./simulate.js";
 import { clearMate, clearPrinted, showMate, showPrinted } from "../viewport/tolerances3d.js";
+import { gapFaces, hideGaps, hideMate, pickGapFace, renderGaps, renderMate } from "./tolgaps.js";
 
 const FITS = ["press", "snug", "loose"];
 const SIZES = ["M2", "M2.5", "M3", "M4", "M5", "M6"];
@@ -33,7 +35,8 @@ let printed = 0; // 0 | 5 | 10
 let busy = null;
 let error = null;
 let wired = false;
-let designOk = false;
+const designOk = { value: false }; // "This changes your model" was confirmed once (shared with tolgaps.js)
+let mode = "round"; // round | gaps | mate
 
 const upOf = (s) => s.option?.up ?? [0, 0, 1];
 const profileOf = (s) => (s.option ? simProfile(s, s.option) : optimizeArgs(s).profile);
@@ -160,15 +163,32 @@ function wire(store, services) {
   wired = true;
   services.picker.on("pick", (hit) => {
     if (store.get().step !== "tolerances" || hit.region == null) return;
-    select(hit.region, store, services);
+    if (mode === "gaps") pickGapFace(hit, extraCtx(store, services));
+    else if (mode === "round") select(hit.region, store, services);
   });
 }
 
-/** Tint the round features; the selected group stronger; all holes when hole compensation is the way. */
+const extraCtx = (store, services, more = {}) => ({ store, services, upOf, profileOf, designOk, tolerance: data?.tolerance, ...more });
+
+/** Leave one mode's 3D bits behind when switching (or leaving the step). */
+function clearModes(services) {
+  clearMate(services.stage);
+  clearPrinted(services.stage);
+  hideGaps(services);
+  hideMate(services);
+}
+
+/** Tint the round features; the selected group stronger; all holes when hole compensation is the way. In Flat gaps,
+ * the faces picked so far. */
 function tint(store, services) {
   const picker = services.picker;
   if (!picker?.data || !data || !services.stage.part) return;
   const accent = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB");
+  if (mode !== "round") {
+    const picked = new Set(mode === "gaps" ? gapFaces() : []);
+    picker.setRegionColors((r) => (picked.has(r) ? accent : null));
+    return;
+  }
   const soft = services.stage.part.base.clone().lerp(accent, 0.35);
   const sel = new Set(form?.all ? featureOf(selected)?.same ?? [] : selected != null ? [selected] : []);
   const round = new Set(data.features.map((f) => f.region));
@@ -194,8 +214,13 @@ registerStep("tolerances", {
     if (busy) body.append(h("div", { class: "sim-running", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, busy)));
     if (error) body.append(h("p", { class: "drop-error", role: "alert" }, error));
     if (!data) return;
+    body.append(h("div", { class: "tol-modes" }, SegmentedControl({ label: t("tol.modes"), size: "small", value: mode,
+      options: ["round", "gaps", "mate"].map((m) => ({ value: m, label: t(`tol.modes.${m}`) })),
+      onChange: (v) => { clearModes(services); mode = v; services.rerender(); } })));
     tint(store, services);
     const tol = data.tolerance;
+    if (mode === "gaps") { renderGaps(extraCtx(store, services, { body })); return; }
+    if (mode === "mate") { renderMate(extraCtx(store, services, { body, stage })); return; }
     body.append(h("p", { class: "ui-hint" }, data.features.length ? t("tol.pick") : t("tol.none")));
 
     // The list: one row per size, the same as clicking one on the part.
@@ -242,9 +267,9 @@ registerStep("tolerances", {
       if (slicerOnly && grow) actions.append(Button({ label: t("tol.addComp"), variant: "primary", size: "small", disabled: Boolean(busy), onClick: () => add(store, services, true) }));
       actions.append(Button({ label: slicerOnly ? t("tol.addModel") : t("tol.add"), variant: slicerOnly && grow ? "secondary" : "primary", size: "small", disabled: Boolean(busy) || !answer,
         onClick: () => {
-          if (!slicerOnly || designOk) return add(store, services, false);
+          if (!slicerOnly || designOk.value) return add(store, services, false);
           openModal({ title: t("problems.modelTitle"), body: h("p", {}, t("problems.modelBody")), actions: [
-            { label: t("ui.cancel"), variant: "ghost" }, { label: t("ui.add"), variant: "primary", onClick: () => { designOk = true; add(store, services, false); } }] });
+            { label: t("ui.cancel"), variant: "ghost" }, { label: t("ui.add"), variant: "primary", onClick: () => { designOk.value = true; add(store, services, false); } }] });
         } }));
       if (slicerOnly && grow) card.append(h("p", { class: "ui-hint" }, t("tol.compNote")));
       card.append(actions);
@@ -268,8 +293,7 @@ registerStep("tolerances", {
     } else clearPrinted(services.stage);
   },
   leave({ services }) {
-    clearMate(services.stage);
-    clearPrinted(services.stage);
+    clearModes(services);
     services.picker?.setRegionColors(() => null);
     selected = null;
     form = null;
