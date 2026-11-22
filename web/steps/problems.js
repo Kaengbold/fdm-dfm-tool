@@ -18,6 +18,7 @@ import { holdToEngine, loadToEngine, markedFaces } from "./args.js";
 import { setupLine, simProfile } from "./simulate.js";
 import { trianglesOf } from "./part.js";
 import * as F from "./fixes.js";
+import { openTool } from "./tools.js";
 
 const DEPENDS = ["model", "option"];
 const f32 = (b) => new Float32Array(new Uint8Array(b).slice().buffer);
@@ -205,8 +206,21 @@ async function undoBatch(store, services) {
 
 // ---------- the list ----------
 
+/** Fixes that open a tool instead of going into the batch (T-564): split a part too big for the printer, and a
+ * pause in the 3MF before a closed pocket's roof (OrcaSlicer and PrusaSlicer take it; Bambu Studio ignores it). */
+function toolFixes(f, s) {
+  if (f.rule === "exceeds_build_volume") return [{ id: `tool:split:${f.finding_id}`, tag: "design", tool: "split", text: t("problems.splitFix"), action: t("problems.splitOpen") }];
+  const z = f.metrics?.top_z;
+  if (f.rule === "pause_to_insert" && z != null) {
+    return [{ id: `tool:pause:${f.finding_id}`, tag: "process", tool: "pause", z, text: t("problems.pauseFix", { z }), added: (s.pauses ?? []).includes(z) }];
+  }
+  return [];
+}
+
 function addFix(fix, finding, store) {
   const s = store.get();
+  if (fix.tool === "split") { openTool("split", goTo); return; }
+  if (fix.tool === "pause") { store.set({ pauses: [...new Set([...(s.pauses ?? []), fix.z])].sort((a, b) => a - b) }); return; }
   if (fix.steps) {
     openModal({ title: fix.cad ? t("problems.cadTitle") : t("problems.stepsTitle"), body: h("p", {}, fix.text), actions: [{ label: t("ui.close"), variant: "primary" }] });
     return;
@@ -329,12 +343,12 @@ registerStep("problems", {
       finding: {
         title: f.short_title ?? f.title, place: f.instance_label, line: f.one_liner ?? f.detail, severity: F.severityOf(f),
         state: ((st) => (st === "open" ? "pending" : st))(F.statusOf(f, ctx)),
-        fixes: F.fixesFor(f, res.design, { modelLocked }).map((fx) => ({ ...fx, added: s.pending.some((p) => p.id === fx.id),
-          text: fx.changesModel ? t("problems.changesModel", { text: fx.text }) : fx.text })),
+        fixes: [...F.fixesFor(f, res.design, { modelLocked }).map((fx) => ({ ...fx, added: s.pending.some((p) => p.id === fx.id),
+          text: fx.changesModel ? t("problems.changesModel", { text: fx.text }) : fx.text })), ...toolFixes(f, s)],
       },
       expanded: openId === f.finding_id,
       onFocus: () => { openId = f.finding_id; frameFinding(f, res, services); },
-      onAdd: (fx) => addFix(F.fixesFor(f, res.design, { modelLocked }).find((x) => x.id === fx.id), f, store),
+      onAdd: (fx) => addFix([...F.fixesFor(f, res.design, { modelLocked }), ...toolFixes(f, s)].find((x) => x.id === fx.id), f, store),
       onAccept: () => store.set({ accepted: [...new Set([...(s.accepted ?? []), f.finding_id])] }),
       onMore: () => showMore(f),
     });

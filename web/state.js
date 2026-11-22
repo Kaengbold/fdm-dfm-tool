@@ -20,7 +20,7 @@ export const INPUTS = {
   showFaces: "goal",
 };
 // What Undo / Redo covers: things the user builds by hand, not navigation or settings (§1.7).
-export const UNDOABLE = ["holds", "loads", "noLoads", "design", "pending"];
+export const UNDOABLE = ["holds", "loads", "noLoads", "design", "pending", "boxes", "pauses"];
 const UNDO_LIMIT = 100;
 
 export function initialState() {
@@ -43,6 +43,10 @@ export function initialState() {
     pending: [], // fixes waiting in the Problems batch (T-561)
     exportOff: [], // slicer changes the user unticked on Done (left to their own profile)
     accepted: [], // finding ids the user accepted as they are
+    boxes: [], // zones and hidden gaps from More tools (T-564): {id, kind, up, region, box, notes}, exported for their orientation
+    copies: 1, // copies on the plate (More tools)
+    pauses: [], // pocket tops (mm) to pause at, from Problems' "Pause in the 3MF" fix
+    versions: [], // versions kept to compare (More tools): numbers only
   };
 }
 

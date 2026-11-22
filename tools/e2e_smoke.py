@@ -1128,6 +1128,137 @@ def check_new_ui_lighter_tuned(browser, port: int) -> str:
         page.close()
 
 
+def _bar_stl(x: float, y: float, z: float) -> bytes:
+    """A plain box as binary STL (for a part too big for the bed)."""
+    import struct
+
+    v = [(a * x, b * y, c * z) for a in (0, 1) for b in (0, 1) for c in (0, 1)]
+    faces = [(0, 2, 3), (0, 3, 1), (4, 5, 7), (4, 7, 6), (0, 1, 5), (0, 5, 4), (2, 6, 7), (2, 7, 3), (0, 4, 6), (0, 6, 2), (1, 3, 7), (1, 7, 5)]
+    out = bytearray(80) + struct.pack("<I", len(faces))
+    for f in faces:
+        out += struct.pack("<3f", 0, 0, 0) + b"".join(struct.pack("<3f", *v[i]) for i in f) + b"\0\0"
+    return bytes(out)
+
+
+def check_new_ui_tools(browser, port: int) -> str:
+    """Done's More tools (T-564). On the electronics box: a stronger zone and a hidden gap from clicks (ghosts, kept for
+    the 3MF), copies on the plate (the bed view, Done says so, the 3MF has them), the box heat (verdict and the walls
+    coloured) and two versions compared. Then a 300 mm bar: Problems' "Too big" offers Split it, which opens the split
+    tool; the pieces are cut, shown apart and downloaded with the pins."""
+    import io
+    import zipfile
+
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    done = []
+    title = "() => document.getElementById('step-title')?.textContent"
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Electronics box").click()
+        page.wait_for_function(f"() => ({title})() === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'fast', optimized: 1, noLoads: true,
+          option: { up: [0, 0, 1], orientation: 'As loaded', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2, walls: 2, top: 4, bottom: 3,
+            infill: 0.15, minutes: 60, total_g: 20, settings: { wall_loops: '2' } } }); fdmUI.go('done'); }""")
+        page.get_by_role("button", name="More tools").click()
+        page.locator(".done-tools li", has_text="Zones and hidden gaps").get_by_role("button", name="Open").click()
+        page.wait_for_function(f"() => ({title})() === 'More tools'")
+        assert "More tools" in page.locator(".ui-rail").inner_text()
+        # Zones: a click on the floor (stronger) and on a side wall (hidden gap). The pick is sent as the picker sends it.
+        page.wait_for_function("() => fdmUI.services.picker.data", timeout=120_000)
+        regions = page.evaluate("""() => { const r = fdmUI.services.picker.data.regions.filter((x) => x.kind === 'flat');
+          const up = r.filter((x) => x.normal[2] > 0.9).sort((a, b) => b.area_mm2 - a.area_mm2)[0];
+          const side = r.filter((x) => Math.abs(x.normal[0]) > 0.9).sort((a, b) => b.area_mm2 - a.area_mm2)[0];
+          return [up.id, side.id]; }""")
+        pick = "(r) => fdmUI.services.picker.listeners.pick.forEach((fn) => fn({ kind: 'face', region: r, point: null }, 0, 0))"
+        page.evaluate(pick, regions[0])
+        page.wait_for_function("() => fdmUI.store.get().boxes.length === 1", timeout=60_000)
+        page.get_by_role("radio", name="Hidden gap").click()
+        page.evaluate(pick, regions[1])
+        page.wait_for_function("() => fdmUI.store.get().boxes.length === 2", timeout=60_000)
+        kinds = page.evaluate("() => fdmUI.store.get().boxes.map((b) => b.kind)")
+        assert kinds == ["stronger", "void"], kinds
+        assert page.evaluate("() => fdmUI.services.stage.ghosts.length") == 2
+        assert page.locator(".tools-list li").count() == 2
+        assert "null" not in page.locator(".panel").inner_text()
+        done.append("zones: stronger + hidden gap")
+        # Copies.
+        page.get_by_role("radio", name="Copies").click()
+        page.wait_for_selector(".tools-count", timeout=60_000)
+        assert page.evaluate("() => fdmUI.services.stage.ghosts.length") == 0
+        page.get_by_role("button", name="One more").click()
+        page.wait_for_function("() => fdmUI.store.get().copies === 2 && document.querySelectorAll('.tools-plate__part').length === 2", timeout=60_000)
+        fill = page.get_by_role("button", name="Fill the plate")
+        most = int(fill.inner_text().split("(")[1].rstrip(")"))
+        fill.click()
+        page.wait_for_function("(n) => document.querySelectorAll('.tools-plate__part').length === n", arg=most, timeout=60_000)
+        done.append(f"copies: {most} on the plate")
+        # Box heat.
+        page.get_by_role("radio", name="Box heat").click()
+        page.get_by_role("button", name="Work out the heat").click()
+        page.wait_for_selector(".tools-verdict", timeout=180_000)
+        verdict = page.locator(".tools-verdict").inner_text()
+        assert "°C inside" in verdict, verdict
+        assert page.evaluate("() => fdmUI.services.stage.field != null"), "walls not coloured"
+        assert page.locator(".sim-legend").count() == 1
+        done.append("box heat: " + verdict.split("\n")[0])
+        # Versions: keep, change the walls, keep again; the second row shows the difference.
+        page.get_by_role("radio", name="Versions").click()
+        assert page.evaluate("() => fdmUI.services.stage.field == null"), "heat field left on"
+        page.get_by_role("button", name="Keep this version").click()
+        page.evaluate("() => fdmUI.store.set({ option: { ...fdmUI.store.get().option, walls: 4, minutes: 75, total_g: 26 } })")
+        page.get_by_role("button", name="Keep this version").click()
+        rows = page.locator(".tools-table tbody tr").all_inner_texts()
+        assert len(rows) == 2 and "+15 min" in rows[1] and "+6 g" in rows[1], rows
+        done.append("versions compared")
+        # Back on Done: the extras are listed, and the 3MF carries the copies and the zones.
+        page.locator(".panel-foot").get_by_role("button", name="Back").click()
+        page.wait_for_function(f"() => ({title})() === 'Done'")
+        summary = page.locator(".ui-disc__head", has_text="More tools").inner_text()
+        assert "2 zones or gaps" in summary and f"{most} copies" in summary, summary
+        with page.expect_download(timeout=120_000) as dl:
+            page.locator(".done-export-row").get_by_role("button", name="Export 3MF").click()
+        z = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read()))
+        text = "".join(z.read(n).decode("utf-8", "replace") for n in z.namelist() if n.endswith((".model", ".config")))
+        assert text.count("modifier") + text.count("negative") >= 2 or text.count("<object ") > most, "no zones in the 3MF"
+        done.append(f"3MF with extras ({len(z.namelist())} files)")
+        assert not errors, errors
+
+        # A part too big for the bed: Problems' Split it.
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "long_bar.stl", "mimeType": "model/stl", "buffer": _bar_stl(300, 30, 20)}])
+        page.wait_for_function(f"() => ({title})() === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'fast', optimized: 1, noLoads: true,
+          option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2, walls: 2, top: 4, bottom: 3,
+            infill: 0.15, settings: { wall_loops: '2' } } }); fdmUI.go('problems'); }""")
+        row = page.locator(".ui-find", has_text="Too big")
+        row.wait_for(timeout=180_000)
+        row.locator(".ui-find__head").click()
+        row.get_by_role("button", name="Split it").click()
+        page.wait_for_function(f"() => ({title})() === 'More tools'")
+        page.get_by_role("button", name="Find the cut").click()
+        page.wait_for_selector(".tools-list li", timeout=180_000)
+        pieces = page.locator(".tools-list li").count()
+        assert pieces >= 2, pieces
+        assert page.evaluate("() => fdmUI.services.stage.field != null"), "pieces not shown"
+        names = []
+        page.on("download", lambda d: names.append(d.suggested_filename))
+        page.get_by_role("button", name="Download the").click()
+        page.wait_for_function("() => true")
+        page.wait_for_timeout(2_000)
+        assert "long_bar_piece_1.stl" in names and "long_bar_pin.stl" in names, names
+        done.append(f"split: {pieces} pieces + pins")
+        assert not errors, errors
+        return "; ".join(done)
+    finally:
+        page.close()
+
+
 def check_old_project(browser, port: int) -> str:
     """Projects from before the cut-over (T-580) still open: an old-style project (goal "strength", a load in kg
     pointing "down") and a shared report with a project inside land on Setup with the part, its holds and loads."""
@@ -1346,6 +1477,7 @@ CHECKS = [
     ("done", "check_new_ui_done"),
     ("tolerances", "check_new_ui_tolerances"),
     ("lighter and tuned settings", "check_new_ui_lighter_tuned"),
+    ("more tools", "check_new_ui_tools"),
 ]
 
 

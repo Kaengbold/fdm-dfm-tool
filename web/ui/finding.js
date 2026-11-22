@@ -19,7 +19,7 @@ export function FindingRow({ finding, expanded = false, onFocus, onAdd, onAccept
     h("span", { class: ["ui-tag", `is-${fix.tag}`] }, t(`ui.tag.${fix.tag}`)),
     h("span", { class: "ui-fix__text" }, fix.text),
     fix.added ? h("span", { class: "ui-fix__added" }, t("ui.added"))
-      : Button({ label: fix.steps ? t("ui.showSteps") : t("ui.add"), size: "small", onClick: () => onAdd?.(fix) })));
+      : Button({ label: fix.action ?? (fix.steps ? t("ui.showSteps") : t("ui.add")), size: "small", onClick: () => onAdd?.(fix) })));
   const body = h("div", { id, class: "ui-find__body", hidden: !expanded },
     finding.line && h("p", { class: "ui-find__line" }, finding.line),
     fixes,
