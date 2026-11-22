@@ -1167,7 +1167,7 @@ Rules for every [UI] task:
 - [ ] **T-534 P2** [UI] Exact fillets and chamfers at inside corners on STEP. · plan: §10.3 (point 7c), §16.4; research/cad_engine.md · files: the B-rep worker (T-529), `core/fdmcore/features.py` · owner: Claude (`task/T-534-exact-fillets`)
   - Do: `fillet` / `chamfer` intents on the edge between two faces (T-527); radius from the engine's stress-corner edit; fallback to today's faceted wedge on failure.
   - Done when: the bracket's inside corner fillets exactly, and a corpus part where OCCT fails falls back with the note.
-- [ ] **T-535 P3** [UI] STEP corpus and robustness report for B-rep edits. · plan: §16.4; research/cad_engine.md ("Risks") · files: `core/tests/corpus_step/` (new), a report under `research/` · owner: —
+- [ ] **T-535 P3** [UI] STEP corpus and robustness report for B-rep edits. · plan: §16.4; research/cad_engine.md ("Risks") · files: `core/tests/corpus_step/` (new), a report under `research/` · owner: Claude (`task/T-535-step-corpus`)
   - Do: 8–12 real-world STEP parts (open licences, sources noted); run every intent kind on each; record success rate, time and memory in a browser.
   - Done when: the report lists which edit kinds are reliable enough to be on by default.
 
