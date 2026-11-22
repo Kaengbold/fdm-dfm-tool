@@ -2674,6 +2674,10 @@ def _run_suite(port: int, args) -> Run:
             dl.value.save_as(out)
             text = out.read_text(encoding="utf-8", errors="replace")
             assert text.startswith("ISO-10303-21") and "ADVANCED_FACE" in text, text[:200]
+            # Made with exact CAD tools (T-529): nothing left out or faceted, and only a few new faces (10 before).
+            status = page.locator("#status").inner_text()
+            assert "Left out" not in status and "flat facets" not in status, status
+            assert text.count("ADVANCED_FACE") <= 16, text.count("ADVANCED_FACE")
             up = page.evaluate("() => fdm.state.options[fdm.state.active].up.map(Math.round)")
             run.act(lambda: page.set_input_files("#file", str(out)), 300_000)
             ups = page.evaluate("() => fdm.state.options.map((o) => o.up.map(Math.round))")

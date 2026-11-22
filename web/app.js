@@ -5238,9 +5238,12 @@ $("dl-stl").onclick = () => download(stlBytes(state.placed), `${baseName()}_orie
 $("dl-stl-model").onclick = () => download(stlBytes(state.triangles), `${baseName()}.stl`, "model/stl");
 $("dl-step").onclick = () =>
   busy("Writing STEP with your design changes (first time downloads ~23 MB)…", async () => {
-    const out = await stepWithEdits(state.step.bytes, state.step.volume, state.step.edits);
+    const { out, notes } = await stepWithEdits(state.step.bytes, state.step.volume, state.step.edits);
     download(out, `${baseName()}.step`, "model/step");
-    setStatus(state.summary);
+    // Changes that couldn't be made with exact CAD faces are still in, faceted; one that failed both ways isn't.
+    const faceted = notes.filter((n) => n.how === "mesh").map((n) => n.title);
+    const left = notes.filter((n) => n.how === "skipped").map((n) => n.title);
+    setStatus([left.length ? t("stepfile.skipped", { list: left }) : "", faceted.length ? t("stepfile.faceted", { list: faceted }) : "", state.summary].filter(Boolean).join(" "));
   });
 
 $("copy-report").onclick = async () => {

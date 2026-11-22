@@ -799,4 +799,8 @@ export default {
   "problems.toDone": "Continue to Done",
   "problems.leaveTitle": "Changes still pending",
   "problems.leaveBody": {"one": "{count} change hasn't been applied yet.", "other": "{count} changes haven't been applied yet."},
+
+  // Writing the STEP file back with design changes (T-529).
+  "stepfile.skipped": "Left out of the STEP file (couldn't be made): {list}.",
+  "stepfile.faceted": "Made with flat facets instead of exact CAD faces: {list}.",
 };

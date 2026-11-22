@@ -92,3 +92,186 @@ export function edgeSignature(oc, edge) {
   p.delete();
   return out;
 }
+
+// ---- B-rep design edits (T-529) ----
+// Edits come from the engine with an ``intent`` (features.py, T-528): exact shapes (flat outlines pushed along a
+// vector, rings round an axis) or rounds / chamfers on the edge between two B-rep faces. Each is made with exact
+// OpenCascade tools and checked (BRepCheck_Analyzer). One that fails falls back to its triangle pieces sewn into a
+// solid (the old path: right shape, faceted); one that fails that way too is left out. A note says which.
+
+const progress = (oc) => new oc.Message_ProgressRange();
+const pnt = (oc, p) => new oc.gp_Pnt(p[0], p[1], p[2]);
+
+export function volume(oc, shape) {
+  const props = new oc.GProp_GProps();
+  oc.BRepGProp.VolumeProperties(shape, props, false, false, false);
+  const v = props.Mass();
+  props.delete();
+  return v;
+}
+
+export const isValid = (oc, shape) => Boolean(shape) && !shape.IsNull() && new oc.BRepCheck_Analyzer(shape, true, false).IsValid();
+
+/** A closed triangle soup (Float32Array, 9 floats per triangle) as an OpenCascade solid. */
+export function soupToSolid(oc, soup) {
+  const sew = new oc.BRepBuilderAPI_Sewing(1e-4, true, true, true, false);
+  const P = (i) => new oc.gp_Pnt(soup[i], soup[i + 1], soup[i + 2]);
+  for (let t = 0; t < soup.length; t += 9) {
+    const [a, b, c] = [P(t), P(t + 3), P(t + 6)];
+    if (a.Distance(b) < 1e-6 || b.Distance(c) < 1e-6 || c.Distance(a) < 1e-6) continue;
+    const edge = (p, q) => new oc.BRepBuilderAPI_MakeEdge(p, q).Edge();
+    const wire = new oc.BRepBuilderAPI_MakeWire(edge(a, b), edge(b, c), edge(c, a)).Wire();
+    sew.Add(new oc.BRepBuilderAPI_MakeFace(wire, true).Face());
+  }
+  sew.Perform(progress(oc));
+  let solid = new oc.BRepBuilderAPI_MakeSolid(oc.TopoDS.Shell(sew.SewedShape())).Solid();
+  if (volume(oc, solid) < 0) solid = oc.TopoDS.Solid(solid.Reversed());
+  sew.delete();
+  return solid;
+}
+
+function polygonWire(oc, pts) {
+  const w = new oc.BRepBuilderAPI_MakeWire();
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > 1e-6) w.Add(new oc.BRepBuilderAPI_MakeEdge(pnt(oc, a), pnt(oc, b)).Edge());
+  }
+  if (!w.IsDone()) throw new Error("open outline");
+  return w.Wire();
+}
+
+/** An intent shape as an exact solid: a flat outline pushed along a vector, or a ring round an axis. */
+export function shapeSolid(oc, s) {
+  if (s.kind === "prism") {
+    const face = new oc.BRepBuilderAPI_MakeFace(polygonWire(oc, s.outline), true);
+    for (const hole of s.holes ?? []) face.Add(polygonWire(oc, hole));
+    if (!face.IsDone()) throw new Error("the outline isn't flat");
+    return new oc.BRepPrimAPI_MakePrism(face.Face(), new oc.gp_Vec(...s.extrude), false, true).Shape();
+  }
+  if (s.kind === "ring") {
+    const n = Math.hypot(...s.axis), axis = s.axis.map((v) => v / n);
+    const at = new oc.gp_Ax2(pnt(oc, s.center.map((c, i) => c + axis[i] * s.from)), new oc.gp_Dir(...axis));
+    const height = s.to - s.from;
+    let solid = new oc.BRepPrimAPI_MakeCylinder(at, s.outer, height).Shape();
+    if (s.inner > 0) solid = new oc.BRepAlgoAPI_Cut(solid, new oc.BRepPrimAPI_MakeCylinder(at, s.inner, height).Shape(), progress(oc)).Shape();
+    return solid;
+  }
+  throw new Error(`unknown shape ${s.kind}`);
+}
+
+/** The B-rep edges an inside-corner intent names, on the solid as read (its face ids are the importer's). */
+function cornerEdges(oc, solid, intent) {
+  const out = { fillet: [], chamfer: [] };
+  for (const item of intent.refs?.edges ?? []) {
+    if (!item.faces) throw new Error("this corner has no CAD faces");
+    const edges = sharedEdges(oc, solid, item.faces[0], item.faces[1]);
+    if (!edges.length) throw new Error("these faces share no edge");
+    for (const edge of edges) out[item.op === "chamfer" ? "chamfer" : "fillet"].push({ edge, size: item.size });
+  }
+  return out;
+}
+
+function blend(oc, shape, kind, items) {
+  if (!items.length) return shape;
+  const mk = kind === "fillet" ? new oc.BRepFilletAPI_MakeFillet(shape, oc.ChFi3d_FilletShape.ChFi3d_Rational) : new oc.BRepFilletAPI_MakeChamfer(shape);
+  for (const { edge, size } of items) mk.Add(size, edge);
+  mk.Build(progress(oc));
+  if (!mk.IsDone()) throw new Error(kind === "fillet" ? "OpenCascade could not make the round" : "OpenCascade could not make the chamfer");
+  return mk.Shape();
+}
+
+function boolean(oc, shape, tool, add) {
+  const b = add ? new oc.BRepAlgoAPI_Fuse(shape, tool, progress(oc)) : new oc.BRepAlgoAPI_Cut(shape, tool, progress(oc));
+  if (!b.IsDone()) throw new Error("the boolean failed");
+  return b.Shape();
+}
+
+/** The edit's triangle pieces of one kind ("add" / "cut"), each sewn into a solid. */
+function pieceSolids(oc, edit, op) {
+  const out = [];
+  let start = 0;
+  for (const [i, n] of edit.pieces.entries()) {
+    const soup = edit.mesh.subarray(start * 9, (start + n) * 9);
+    start += n;
+    if ((edit.piece_ops?.[i] ?? edit.op) === op) out.push(soupToSolid(oc, soup));
+  }
+  return out;
+}
+
+const CORNER_OPS = ["fillet", "chamfer"];
+
+/**
+ * ``edits`` ([{id, title, op, mesh, pieces, piece_ops?, intent?}], part coordinates) applied to ``solid``: rounds
+ * and chamfers first (they name faces of the solid as read), then every addition, then every cut. Returns
+ * {shape, notes: [{id, title, how: "exact" | "mesh" | "skipped", why?}]}. ``exact: false`` forces the mesh path.
+ */
+export function applyEdits(oc, solid, edits, { exact = true } = {}) {
+  const notes = new Map(edits.map((e) => [e, { id: e.id, title: e.title, how: exact && e.intent ? "exact" : "mesh" }]));
+  for (const e of edits) if (!e.intent) notes.get(e).why = "no exact description of this change";
+  const toMesh = (e, err) => Object.assign(notes.get(e), { how: "mesh", why: err?.message ?? String(err) });
+  let shape = solid;
+  for (const e of edits) {
+    if (notes.get(e).how !== "exact" || !CORNER_OPS.includes(e.intent.op)) continue;
+    try {
+      const { fillet, chamfer } = cornerEdges(oc, solid, e.intent);
+      const next = blend(oc, blend(oc, shape, "fillet", fillet), "chamfer", chamfer);
+      if (!isValid(oc, next)) throw new Error("the result wasn't a valid solid");
+      shape = next;
+    } catch (err) {
+      toMesh(e, err);
+    }
+  }
+  for (const op of ["add", "cut"]) {
+    for (const e of edits) {
+      const note = notes.get(e);
+      if (note.how === "exact" && CORNER_OPS.includes(e.intent.op)) continue; // done above
+      if (note.how === "exact") {
+        try {
+          if (!e.intent.shapes?.length) throw new Error("no exact shape for this change");
+          let next = shape;
+          for (const s of e.intent.shapes) if (Boolean(s.add) === (op === "add")) next = boolean(oc, next, shapeSolid(oc, s), op === "add");
+          if (!isValid(oc, next)) throw new Error("the result wasn't a valid solid");
+          shape = next;
+          continue;
+        } catch (err) {
+          toMesh(e, err);
+        }
+      }
+      if (note.how === "skipped") continue;
+      try {
+        let next = shape;
+        for (const piece of pieceSolids(oc, e, op)) next = boolean(oc, next, piece, op === "add");
+        if (!isValid(oc, next)) throw new Error("the faceted change wasn't a valid solid either");
+        shape = next;
+      } catch (err) {
+        Object.assign(note, { how: "skipped", why: err?.message ?? String(err) });
+      }
+    }
+  }
+  const unify = new oc.ShapeUpgrade_UnifySameDomain(shape, true, true, false);
+  unify.Build();
+  return { shape: unify.Shape(), notes: [...notes.values()] };
+}
+
+/** Triangles of a shape with the face id (explorer order) of each, for display and the engine's re-check. */
+export function tessellate(oc, shape, deflection = 0.05) {
+  new oc.BRepMesh_IncrementalMesh(shape, deflection, false, 0.3, false);
+  const soup = [], ids = [];
+  faces(oc, shape).forEach((face, id) => {
+    const loc = new oc.TopLoc_Location();
+    const tri = oc.BRep_Tool.Triangulation(face, loc, 0);
+    if (!tri || (tri.IsNull && tri.IsNull())) return;
+    const T = tri.get ? tri.get() : tri;
+    const trsf = loc.Transformation();
+    const flip = face.Orientation() !== oc.TopAbs_Orientation.TopAbs_FORWARD;
+    const node = (k) => { const p = T.Node(k).Transformed(trsf); return [p.X(), p.Y(), p.Z()]; };
+    for (let k = 1; k <= T.NbTriangles(); k++) {
+      const t = T.Triangle(k);
+      const v = [t.Value(1), t.Value(2), t.Value(3)];
+      if (flip) v.reverse();
+      for (const i of v) soup.push(...node(i));
+      ids.push(id);
+    }
+  });
+  return { soup: new Float32Array(soup), faceIds: new Uint32Array(ids) };
+}

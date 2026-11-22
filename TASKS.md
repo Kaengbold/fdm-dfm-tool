@@ -1173,9 +1173,23 @@ Rules for every [UI] task:
   - On a STEP part, `api.design` / `volume_solid` add the B-rep `faces` beside the regions (T-527's `_cad_face`).
   - Not yet with an intent (they stay mesh only, which is the fallback anyway): bed-corner and elephant-foot chamfers, ledge fills, sacrificial layers, magnet slots, gap edits, grip fins, fastener bosses / nut pockets, the thicker weak-spot sleeve, and the optimizer's own chamfer candidates (points only, no regions).
   - Checks: `test_edit_intents.py`, on the L-bracket as the STEP importer gives it (`core/tests/step/`, from `check_step_faces.mjs --dump`, so it runs without Node). The teardrop and fit ring name the right hole faces. Prism volumes equal the pieces' volumes. The inside corner names the base top and upright faces. Ribs and slabs are checked on mesh samples.
-- [ ] **T-529 P2** [UI] B-rep edit worker with per-edit fallback. · plan: §5, §15.1 (modified STEP), §16.4; research/cad_engine.md · files: `web/stepwrite-worker.js` (or a new `web/brep-worker.js`), `web/stepwrite.js`, `web/geometry.js`, e2e · owner: —
+- [x] **T-529 P2** [UI] B-rep edit worker with per-edit fallback. · plan: §5, §15.1 (modified STEP), §16.4; research/cad_engine.md · files: `web/stepwrite-worker.js` (or a new `web/brep-worker.js`), `web/stepwrite.js`, `web/geometry.js`, e2e · owner: Claude (`task/T-529-brep-worker`)
   - Do: apply intents on the original STEP with exact tools (cylinder/prism/box booleans first), `BRepCheck_Analyzer` after each op; an edit that fails falls back to its triangle pieces with a plain note; tessellate the result (with face ids) for display and the engine's re-check; write STEP. Free shapes; one worker.
   - Done when: the fixture's hole resize, teardrop, slab, void and rib come back as exact faces (face count stays near the original), a forced failure falls back, and the browser test downloads the edited STEP.
+  - Outcome: `web/brep.js` `applyEdits` (used by `stepwrite-worker.js`, no new worker).
+    - **Order:** inside-corner rounds and chamfers first, on the edge the two named B-rep faces share (T-527); then every addition, then every cut.
+    - **Exact tools:** a prism from the flat outline, a cylinder ring, `BRepFilletAPI` fillets and chamfers. `BRepCheck_Analyzer` runs after each edit.
+    - **Fallback:** an edit that fails, or has no intent, falls back to its sewn triangle pieces (the old path). One that fails that way too is left out. Each edit gets a note (exact / mesh / skipped, and why), and the old app's STEP download says which were faceted or left out.
+    - **Output:** the worker now also returns the result tessellated with its face ids (`tessellate`), for showing it and checking it again. Hooking that into the design-change flow belongs to the new app's Problems step (T-561).
+    - `piece_ops` now reach the worker too: grip fins used to lose them.
+  - Measured on the L-bracket (10 faces), `tools/check_brep_edits.mjs` via `test_brep_edits.py`, exact vs forced mesh:
+    - hole Ø6 → Ø6.9: 10 faces vs 265;
+    - inside-corner round: 11 (a real fillet) vs 16;
+    - teardrop 15, slab 16, void 17, rib 13 (the same faces as the mesh path: those shapes are flat anyway);
+    - each 33–153 ms in Node; the same plastic either way;
+    - a round too big to make falls back with "OpenCascade could not make the round";
+    - all together: one valid solid, 45 faces, written and read back alike.
+  - The browser STEP round trip checks that nothing was left out or faceted, and that the file has at most 16 faces.
 - [ ] **T-534 P2** [UI] Exact fillets and chamfers at inside corners on STEP. · plan: §10.3 (point 7c), §16.4; research/cad_engine.md · files: the B-rep worker (T-529), `core/fdmcore/features.py` · owner: —
   - Do: `fillet` / `chamfer` intents on the edge between two faces (T-527); radius from the engine's stress-corner edit; fallback to today's faceted wedge on failure.
   - Done when: the bracket's inside corner fillets exactly, and a corpus part where OCCT fails falls back with the note.
