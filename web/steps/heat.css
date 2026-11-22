@@ -1,14 +1,8 @@
-/* Heat in the Simulation step (T-478). Spacing only from the --s-* tokens (core/tests/test_css_tokens.py). */
+/* The heat model in the Simulation step (T-478). Spacing only from the --s-* tokens (core/tests/test_css_tokens.py). */
 /* The panel's one column never grows past the panel: long rows wrap instead. */
-.panel-body:has(.heat-strip) { grid-template-columns: minmax(0, 1fr); }
+.panel-body:has(.heat-summary) { grid-template-columns: minmax(0, 1fr); }
 .heat-block .ui-seg { flex-wrap: wrap; }
-.heat-strip { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); padding: var(--s-2) var(--s-3);
-  border-radius: var(--r); background: var(--surface-sunken); font-size: var(--fs-sm); }
-.heat-strip__text { color: var(--text-2); }
 .heat-block { display: grid; gap: var(--s-2); }
-.heat-file { display: none; }
-.heat-file-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); font-size: var(--fs-sm); }
-.heat-file-row b { overflow-wrap: anywhere; }
 
 .heat-summary { display: grid; gap: var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-raised); }
 .heat-summary__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }

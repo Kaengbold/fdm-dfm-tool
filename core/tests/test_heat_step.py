@@ -105,12 +105,12 @@ def test_summary_counts_and_the_slowest_cause():
 
 
 def test_every_message_the_step_can_show_exists():
-    """Keys built at run time (heat.reason.*, heat.cause.*, heat.overlay.*, …) are in the English table too."""
+    """Keys built at run time (heat.reason.*, heat.cause.*, heat.mode.*, …) are in the English table too."""
     table = set(re.findall(r'^  "([\w.]+)":', (ROOT / "web" / "messages" / "en.js").read_text(encoding="utf-8"), re.M))
     src = (ROOT / "web" / "steps" / "heatlogic.js").read_text(encoding="utf-8") + (ROOT / "web" / "steps" / "heat.js").read_text(encoding="utf-8")
-    used = set(re.findall(r'key: "(heat\.[\w.]+)"', src))
+    used = set(re.findall(r'key: "(heat\.[\w.]+)"', src)) | set(re.findall(r't\("(heat\.[\w.]+)"', src))
     used |= {f"heat.reason.{r}" for r in REASONS} | {f"heat.cause.{c}" for c in CAUSE_NAMES[1:] if c != "unknown"}
-    used |= {f"heat.overlay.{v}" for v in ("normal", "heat", "importance", "lines")} | {f"heat.stage.{s}" for s in ("asSliced", "plan", "check")}
+    used |= {f"heat.mode.{v}" for v in ("window", "importance", "lines")} | {"sim.stage.heat"}
     used |= {f"heat.confidence.{c}" for c in ("rough", "partly", "tuned")}
     used |= {f"heat.legend.{k}" for k in ("cold", "ok", "hot", "slow", "faded", "low", "high", "slower", "faster", "same", "fan")}
     assert not used - table, used - table

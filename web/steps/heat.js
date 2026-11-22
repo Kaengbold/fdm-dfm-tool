@@ -1,98 +1,55 @@
-// Simulation step (plan §12), its heat part (T-478): the chosen option's sliced G-code goes through the heat model
-// and the cooling plan (api.optimize_cooling with detail). On the stage: the window map (blue too cold, green fine,
-// red too hot; before / after the plan), the importance map, or the G-code lines coloured by how their speed
-// changed with markers where the fan changes; a layer slider plays the print back. In the panel: the summary card,
-// how sure the limits are, a timeline against height, why a clicked spot changed, and the opt-in "Optimize my
-// G-code directly". Warping and stress overlays and slicing in the background come with T-560.
+// The heat model and the cooling plan in the Simulation step (T-478), joined to Run simulations through
+// registerSimulation (web/steps/simulate.js, T-560). With the run's G-code (sliced in the browser or the user's own
+// file), api.optimize_cooling(detail) simulates every spot as sliced and with the cooling plan. Then the step's Heat
+// view shows the window map (blue too cold, green fine, red too hot; as sliced / with the plan), what matters most,
+// or the G-code lines coloured by how their speed changed with markers where the fan changes; a layer slider plays
+// the print back. In the panel: a summary card with how sure the limits are, a timeline against height, why a
+// clicked spot changed, and the opt-in "Optimize my G-code directly" (the user's file stays as it is).
 import { h } from "../ui/dom.js";
 import { Button } from "../ui/button.js";
 import { SegmentedControl } from "../ui/choice.js";
-import { ProgressCard } from "../ui/progress.js";
-import { registerStep } from "../shell.js";
+import { Cancelled } from "../engine.js";
 import { t } from "../i18n.js";
 import { HeatView, heatColors } from "../viewport/heatview.js";
 import { optimizeArgs } from "./args.js";
+import { registerSimulation } from "./simulate.js";
 import { FADED_BELOW, WINDOW, byLayer, decode, explain, series, summary } from "./heatlogic.js";
 
 const PLAY = "M8 5v14l11-7z";
 const PAUSE = ["M7 5h4v14H7z", "M13 5h4v14h-4z"];
-const STAGES = ["asSliced", "plan", "check"];
 const SVG = "http://www.w3.org/2000/svg";
 
-let gcode = null; // {id, name, bytes, info, up} the sliced file for the chosen option
-let nextId = 1;
-let run = null; // {started, done, share, card, timer} while the heat check runs
-let error = null;
-let fixing = null; // "busy" | {ok, problems} for "Optimize my G-code directly"
-const view = { overlay: "heat", which: "after", layer: Infinity, picked: null, playing: null };
+let fixing = null; // "busy" | {ok, problems, minutes} for "Optimize my G-code directly"
+const view = { mode: "window", which: "after", layer: Infinity, picked: null, playing: null }; // mode: window | importance | lines
 let shown = null; // {result, decoded, layers} drawn on the stage now
 
-/** The engine profile for the chosen option: its material, nozzle and layer height on the user's printer. */
-export function simProfile(s) {
-  const o = s.option ?? {};
-  return { ...optimizeArgs(s).profile, goal: s.goal || "balanced", ...(o.material ? { material: o.material } : {}),
-    ...(o.nozzle ? { nozzle: String(o.nozzle) } : {}), ...(o.layer_height ? { layer_height: o.layer_height } : {}) };
-}
-
-const current = (store) => {
-  const r = store.result("simulate");
-  return r && gcode && r.gcode === gcode.id && !store.isStale("simulate") ? r.value : null;
-};
-
-async function loadFile(file, store, services) {
-  error = null;
+/** Run simulations, after the print checks and the warping: the cooling plan on the run's G-code. Without a G-code
+ * (our own slicer stood in) there is nothing to follow line by line, and the panel says so. */
+async function runHeat({ engine, up, profile, detailed, state, gcode }) {
+  if (!detailed || !gcode) return { needsGcode: true };
+  const args = { up, profile: { ...profile, goal: state.goal || "balanced" }, loads: optimizeArgs(state).loads };
   fixing = null;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const s = store.get();
+  Object.assign(view, { which: "after", layer: Infinity, picked: null });
   try {
-    const info = await services.engine.call("load_gcode", { up: s.option.up, profile: simProfile(s) }, bytes);
-    gcode = { id: nextId++, name: file.name, bytes, info, up: s.option.up };
+    const result = await engine.call("optimize_cooling", { ...args, detail: true });
+    const hot = result.before.too_hot + result.before.too_cold, left = result.gcode.too_hot + result.gcode.too_cold;
+    const name = (state.part?.name ?? "part").replace(/\.[^.]+$/, "");
+    return { result, gcode, args, name, status: { label: t("heat.status"), value: hot ? t("heat.statusFixed", { count: hot, left }) : t("heat.statusFine"), tone: left ? "warn" : "ok" } };
   } catch (err) {
-    error = t("heat.gcodeFailed", { reason: err?.message ?? String(err) });
-  }
-  services.rerender();
-}
-
-async function check(store, services) {
-  const s = store.get();
-  const deps = store.deps("model", "option", "profile", "goal", "loads");
-  error = null;
-  fixing = null;
-  run = { started: performance.now(), done: 0, share: 0 };
-  services.onProgress = (fraction) => {
-    if (!run) return;
-    run.share = Math.max(run.share, fraction ?? 0);
-    run.done = run.share < 0.34 ? 0 : run.share < 0.67 ? 1 : 2;
-    run.card?.set({ done: run.done, share: run.share, elapsed: (performance.now() - run.started) / 1000 });
-  };
-  run.timer = setInterval(() => run?.card?.set({ done: run.done, share: run.share, elapsed: (performance.now() - run.started) / 1000 }), 500);
-  services.rerender();
-  const id = gcode.id;
-  try {
-    // A restarted engine (Cancel anywhere) has lost the G-code: give it again, it is quick next to the heat runs.
-    await services.engine.call("load_gcode", { up: gcode.up, profile: simProfile(s) }, gcode.bytes);
-    const result = await services.engine.call("optimize_cooling", { up: gcode.up, profile: simProfile(s), loads: optimizeArgs(s).loads, detail: true });
-    store.setResult("simulate", { value: result, gcode: id }, deps);
-    Object.assign(view, { which: "after", layer: Infinity, picked: null });
-  } catch (err) {
-    const cancelled = err?.name === "Cancelled" || err?.constructor?.name === "Cancelled";
-    if (!cancelled) error = t("heat.failed", { reason: err?.message ?? String(err) });
-  } finally {
-    clearInterval(run?.timer);
-    run = null;
-    services.rerender();
+    if (err instanceof Cancelled) throw err;
+    return { error: err?.message ?? String(err), status: { label: t("heat.status"), value: t("heat.statusFailed"), tone: "warn" } };
   }
 }
 
-async function fixGcode(store, services) {
-  const s = store.get();
+async function fixGcode(value, services) {
   fixing = "busy";
   services.rerender();
   try {
-    await services.engine.call("load_gcode", { up: gcode.up, profile: simProfile(s) }, gcode.bytes);
-    const r = await services.engine.call("optimize_gcode", { up: gcode.up, profile: simProfile(s), loads: optimizeArgs(s).loads }, gcode.bytes);
+    // The G-code the run read may be gone (another file, a restarted engine): give it again, it is quick.
+    await services.engine.call("load_gcode", { up: value.args.up, profile: value.args.profile }, value.gcode);
+    const r = await services.engine.call("optimize_gcode", value.args, value.gcode);
     fixing = r;
-    if (r.ok) download(r.data, gcode.name.replace(/(\.gcode)?$/i, "_cooled.gcode"));
+    if (r.ok) download(r.data, `${value.name}_cooled.gcode`);
   } catch (err) {
     fixing = { ok: false, problems: [err?.message ?? String(err)] };
   }
@@ -110,14 +67,13 @@ function download(data, name) {
 
 // ---- the stage ----
 
-function heatView(services) {
+/** Draw a result on the stage once (the part turned the way the engine prints it); later calls only recolour, hide
+ * or cut it. */
+function showHeat({ services, value }) {
+  const result = value?.result;
+  if (!result) return false;
   services.heatView ??= new HeatView(services.stage);
-  return services.heatView;
-}
-
-/** Draw a result on the stage once; later renders only recolour, hide or cut it. */
-function draw(services, result) {
-  const hv = heatView(services);
+  const hv = services.heatView;
   if (shown?.result !== result) {
     const d = decode(result);
     const { order, upto } = byLayer(d.layer);
@@ -133,7 +89,7 @@ function draw(services, result) {
     shown = { result, decoded: d, layers: upto.length };
   }
   const d = shown.decoded, c = heatColors();
-  if (view.overlay === "importance") {
+  if (view.mode === "importance") {
     hv.colorSpots((i) => c.lowImportance.clone().lerp(c.highImportance, Math.min(1, Math.max(0, (d.importance[i] - 0.2) / 0.8))));
   } else {
     const w = d[view.which].window;
@@ -142,24 +98,21 @@ function draw(services, result) {
       return w[i] && d.importance[i] < FADED_BELOW ? col.clone().lerp(c.faded, 0.65) : col;
     });
   }
-  hv.show(view.overlay === "lines" ? "lines" : view.overlay === "normal" ? null : "spots");
+  hv.show(view.mode === "lines" ? "lines" : "spots");
   hv.upTo(view.layer);
-  hv.pick(view.overlay === "heat" || view.overlay === "importance" ? view.picked : null);
-  services.stage.setXray(view.overlay !== "normal");
+  hv.pick(view.mode === "lines" ? null : view.picked);
+  services.stage.setXray(true);
+  return true;
 }
 
-let watching = false;
-/** Leaving the step takes the overlay away and stops playback. */
-function watchLeave(store, services) {
-  if (watching) return;
-  watching = true;
-  store.subscribe((s, changed) => {
-    if (!changed.includes("step") || s.step === "sim") return;
-    stopPlay();
-    services.heatView?.clear();
-    shown = null;
-    services.stage.setXray(false);
-  });
+/** Another view, or leaving the step: the overlay goes, the part stands as loaded again. */
+function clearHeat(services) {
+  stopPlay();
+  if (!shown) return;
+  services.heatView?.clear();
+  services.stage.setXray(false);
+  services.stage.orient(null);
+  shown = null;
 }
 
 function stopPlay() {
@@ -168,23 +121,6 @@ function stopPlay() {
 }
 
 // ---- the panel ----
-
-function setupStrip(o, go) {
-  const bits = [o.orientation, o.material_name ?? o.material, `${o.nozzle} mm`, t("heat.walls", { count: o.walls }), `${Math.round(o.infill * 100)} %`];
-  return h("div", { class: "heat-strip" }, h("span", { class: "heat-strip__text" }, bits.filter(Boolean).join(" · ")),
-    h("button", { type: "button", class: "ui-link", onclick: () => go("options") }, t("heat.change")));
-}
-
-function gcodeBlock(store, services) {
-  const input = h("input", { type: "file", accept: ".gcode,.gco,.g,.3mf", class: "heat-file", "aria-label": t("heat.gcodePick"),
-    onchange: (e) => e.target.files[0] && loadFile(e.target.files[0], store, services) });
-  const pick = Button({ label: gcode ? t("heat.gcodeOther") : t("heat.gcodePick"), variant: gcode ? "ghost" : "secondary", size: gcode ? "small" : null, onClick: () => input.click() });
-  if (!gcode) return h("section", { class: "heat-block" }, h("div", { class: "ui-label" }, t("heat.gcodeTitle")), h("p", { class: "ui-hint" }, t("heat.gcodeWhy")), input, pick);
-  const i = gcode.info;
-  return h("section", { class: "heat-block" }, h("div", { class: "ui-label" }, t("heat.gcodeTitle")),
-    h("div", { class: "heat-file-row" }, h("span", {}, h("b", {}, gcode.name), " ",
-      h("span", { class: "ui-hint num" }, t("heat.gcodeInfo", { layers: i.layers, min: i.print_time_min }))), input, pick));
-}
 
 function legend(overlay) {
   const items = overlay === "importance" ? [["low", "heat.legend.low"], ["high", "heat.legend.high"]]
@@ -298,9 +234,9 @@ function whyCard(r, services) {
     explain(d, r.gcode.plan, view.picked).map((m) => h("p", {}, t(m))));
 }
 
-function fixBlock(store, services) {
+function fixBlock(value, services) {
   const busy = fixing === "busy";
-  const out = [Button({ label: busy ? t("heat.fixBusy") : t("heat.fix"), variant: "secondary", disabled: busy || Boolean(run), onClick: () => fixGcode(store, services) }),
+  const out = [Button({ label: busy ? t("heat.fixBusy") : t("heat.fix"), variant: "secondary", disabled: busy, onClick: () => fixGcode(value, services) }),
     h("p", { class: "ui-hint" }, t("heat.fixHint"))];
   if (fixing && fixing !== "busy") {
     out.push(fixing.ok
@@ -310,51 +246,40 @@ function fixBlock(store, services) {
   return h("section", { class: "heat-block" }, out);
 }
 
-registerStep("sim", {
-  render({ body, stage, store, go, services }) {
-    watchLeave(store, services);
-    const s = store.get();
-    if (!s.option) {
-      body.append(h("p", { class: "ui-hint" }, t("heat.noOption")), Button({ label: t("heat.toOptions"), variant: "secondary", onClick: () => go("options") }));
-      return;
-    }
-    if (gcode && JSON.stringify(gcode.up) !== JSON.stringify(s.option.up)) gcode = null; // sliced for another orientation
-    body.append(setupStrip(s.option, go), gcodeBlock(store, services));
-    if (error) body.append(h("p", { class: "drop-error", role: "alert" }, error));
-    const r = current(store);
-    if (run) {
-      const card = ProgressCard({ title: t("heat.running"), stages: STAGES.map((k) => t(`heat.stage.${k}`)), onCancel: () => services.engine.cancel(), onStop: () => {} });
-      card.querySelector(".ui-progress__foot .ui-btn--secondary")?.remove();
-      run.card = card;
-      card.set({ done: run.done, share: run.share, elapsed: (performance.now() - run.started) / 1000 });
-      stage.append(h("div", { class: "analyse-progress" }, card));
-    }
-    if (gcode) {
-      body.append(Button({ label: run ? t("heat.runningShort") : r ? t("heat.again") : t("heat.run"), variant: r ? "ghost" : "primary", disabled: Boolean(run),
-        onClick: () => check(store, services) }));
-    }
-    if (!r) {
-      if (shown) { services.heatView?.clear(); shown = null; services.stage.setXray(false); }
-      if (gcode && store.result("simulate") && store.isStale("simulate")) body.append(h("p", { class: "analyse-stale" }, t("heat.stale")));
-      if (!run) services.stage.orient(s.option.up);
-      return;
-    }
-    draw(services, r);
-    const conf = { rough: "rough", "partly tuned": "partly", tuned: "tuned" }[r.confidence] ?? "rough";
-    body.append(h("section", { class: "heat-summary" },
-      h("div", { class: "heat-summary__head" }, h("b", {}, t("heat.sum.title")), h("span", { class: `heat-conf heat-conf--${conf}` }, t(`heat.confidence.${conf}`))),
-      h("ul", {}, summary(r, shown.decoded).map((m) => h("li", {}, t(m)))),
-      r.guessed ? h("p", { class: "ui-hint" }, t("heat.guessed")) : null));
-    body.append(h("section", { class: "heat-block" }, h("div", { class: "ui-label" }, t("heat.show")),
-      SegmentedControl({ label: t("heat.show"), value: view.overlay, size: "small",
-        options: ["normal", "heat", "importance", "lines"].map((v) => ({ value: v, label: t(`heat.overlay.${v}`) })),
-        onChange: (v) => { view.overlay = v; services.rerender(); } }),
-      view.overlay === "heat" ? SegmentedControl({ label: t("heat.whichRun"), value: view.which, size: "small",
-        options: [{ value: "before", label: t("heat.before") }, { value: "after", label: t("heat.after") }],
-        onChange: (v) => { view.which = v; services.rerender(); } }) : null,
-      view.overlay !== "normal" ? legend(view.overlay) : null,
-      view.overlay === "heat" || view.overlay === "importance" ? h("p", { class: "ui-hint" }, t("heat.clickSpot")) : null));
-    if (view.picked != null && (view.overlay === "heat" || view.overlay === "importance")) body.append(whyCard(r, services));
-    body.append(playback(services), timeline(), fixBlock(store, services));
-  },
-});
+/** The panel section under the status list. The heat views (switch, key, playback) only while the Heat view is on. */
+function panel({ body, services, value, overlay }) {
+  if (!value) return;
+  if (value.needsGcode) {
+    body.append(h("p", { class: "ui-hint" }, t("heat.needsGcode")));
+    return;
+  }
+  if (value.error) {
+    body.append(h("p", { class: "drop-error", role: "alert" }, t("heat.failed", { reason: value.error })));
+    return;
+  }
+  const r = value.result;
+  const d = shown?.result === r ? shown.decoded : decode(r);
+  const conf = { rough: "rough", "partly tuned": "partly", tuned: "tuned" }[r.confidence] ?? "rough";
+  body.append(h("section", { class: "heat-summary" },
+    h("div", { class: "heat-summary__head" }, h("b", {}, t("heat.sum.title")), h("span", { class: `heat-conf heat-conf--${conf}` }, t(`heat.confidence.${conf}`))),
+    h("ul", {}, summary(r, d).map((m) => h("li", {}, t(m)))),
+    r.guessed ? h("p", { class: "ui-hint" }, t("heat.guessed")) : null));
+  if (overlay === "heat") showHeat({ services, value }); // the stage is drawn after the panel: draw it now
+  if (overlay !== "heat" || shown?.result !== r) {
+    body.append(h("p", { class: "ui-hint" }, t("heat.seeHeat")), fixBlock(value, services));
+    return;
+  }
+  body.append(h("section", { class: "heat-block" }, h("div", { class: "ui-label" }, t("heat.show")),
+    SegmentedControl({ label: t("heat.show"), value: view.mode,
+      options: ["window", "importance", "lines"].map((v) => ({ value: v, label: t(`heat.mode.${v}`) })),
+      onChange: (v) => { view.mode = v; services.rerender(); } }),
+    view.mode === "window" ? SegmentedControl({ label: t("heat.whichRun"), value: view.which, size: "small",
+      options: [{ value: "before", label: t("heat.before") }, { value: "after", label: t("heat.after") }],
+      onChange: (v) => { view.which = v; services.rerender(); } }) : null,
+    legend(view.mode),
+    view.mode !== "lines" ? h("p", { class: "ui-hint" }, t("heat.clickSpot")) : null));
+  if (view.picked != null && view.mode !== "lines") body.append(whyCard(r, services));
+  body.append(playback(services), timeline(), fixBlock(value, services));
+}
+
+registerSimulation({ name: "heat", stage: "heat", run: runHeat, panel, showHeat, clearHeat });
