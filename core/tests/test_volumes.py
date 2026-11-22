@@ -187,7 +187,7 @@ def test_pin_hole_on_vertical_wall_without_normal():
     c = api._require().mesh.triangles[0].mean(axis=0).tolist()
     hub = api.volume_at(up, "void", point=c, profile={})
     assert hub["hi"][2] > hub["lo"][2] and not any("shows as a hole" in n for n in hub["notes"])
-    # Curved region's average normal is near zero (as web/app.js passes); local surface normal still wins.
+    # Curved region's average normal is near zero (as the old web app passed); local surface normal still wins.
     reg = api.regions()
     hub_web = api.volume_at(up, "void", point=c, normal=reg["regions"][reg["face_regions"][0]]["normal"], profile={})
     assert hub_web["lo"] == pytest.approx(hub["lo"]) and hub_web["hi"] == pytest.approx(hub["hi"])

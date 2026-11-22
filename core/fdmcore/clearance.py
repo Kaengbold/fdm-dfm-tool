@@ -75,27 +75,40 @@ def _closest_on_triangles(p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.nda
 
 def gaps(part: Mesh, mate: Mesh, spacing: float = SPACING_MM) -> tuple[np.ndarray, np.ndarray]:
     """Points on ``mate`` and their signed distance to ``part`` (negative: inside it, the parts overlap)."""
+    reach = FREE_MM + spacing
+    lo, hi = part.triangles.reshape(-1, 3).min(axis=0) - reach, part.triangles.reshape(-1, 3).max(axis=0) + reach
+    pts = _surface_points(_within(mate, lo, hi), spacing)
+    if not len(pts):
+        return np.zeros((0, 3)), np.zeros(0)
+    d, exact = signed_distance(pts, part, spacing)
+    return np.concatenate([pts[exact], pts[~exact]]), np.concatenate([d[exact], d[~exact]])
+
+
+def signed_distance(pts: np.ndarray, part: Mesh, spacing: float = SPACING_MM) -> tuple[np.ndarray, np.ndarray]:
+    """Each point's distance to ``part``'s surface, negative inside it; exact (``exact`` True) within FREE_MM of it,
+    a rough unsigned distance farther out, where the exact gap doesn't matter. Also used the other way round for
+    the mating part heat map (api.clearance_map: points on the loaded part, ``part`` the mating one)."""
     from scipy.spatial import cKDTree
 
     t = part.triangles
     normals, _ = part.normals_and_areas()
     reach = FREE_MM + spacing  # only where the parts come this close does the exact gap matter
-    lo, hi = part.triangles.reshape(-1, 3).min(axis=0) - reach, part.triangles.reshape(-1, 3).max(axis=0) + reach
-    mlo, mhi = mate.triangles.reshape(-1, 3).min(axis=0) - reach, mate.triangles.reshape(-1, 3).max(axis=0) + reach
-    pts = _surface_points(_within(mate, lo, hi), spacing)
+    plo, phi = pts.min(axis=0) - reach, pts.max(axis=0) + reach
     # Candidates: the triangles under the part's own surface points nearest to each point (a triangle's centre
     # can be far from its nearest spot when it is big or long, a grid of points on it isn't).
-    near, owner = _surface_points(_within(part, mlo, mhi), spacing / 2, with_triangle=True)
-    if not len(pts) or not len(near):
-        return np.zeros((0, 3)), np.zeros(0)
-    owner = np.flatnonzero(_box_mask(part, mlo, mhi))[owner]
+    near, owner = _surface_points(_within(part, plo, phi), spacing / 2, with_triangle=True)
+    out, exact = np.full(len(pts), np.inf), np.zeros(len(pts), bool)
+    if not len(near):
+        return out, exact
+    owner = np.flatnonzero(_box_mask(part, plo, phi))[owner]
     tree = cKDTree(near)
     rough, _ = tree.query(pts, k=1)
     close = rough < reach
-    far_pts, far_d = pts[~close], rough[~close]
+    out[~close] = rough[~close]
+    sel = np.flatnonzero(close)
     pts = pts[close]
     if not len(pts):
-        return far_pts, far_d
+        return out, exact
     k = min(NEIGHBOURS, len(near))
     _, idx = tree.query(pts, k=k)
     idx = owner[idx.reshape(len(pts), k)]
@@ -111,7 +124,9 @@ def gaps(part: Mesh, mate: Mesh, spacing: float = SPACING_MM) -> tuple[np.ndarra
     tie = dist <= best[:, None] * 1.001 + 1e-4
     j = np.argmax(np.where(tie, np.abs(side), -1.0), axis=1)
     sign = np.where(side[np.arange(len(pts)), j] < -1e-9, -1.0, 1.0)
-    return np.concatenate([pts, far_pts]), np.concatenate([best * sign, far_d])
+    out[sel] = best * sign
+    exact[sel] = True
+    return out, exact
 
 
 def _box_mask(mesh: Mesh, lo, hi) -> np.ndarray:

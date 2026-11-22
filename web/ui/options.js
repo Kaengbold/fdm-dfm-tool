@@ -1,15 +1,21 @@
 // OptionColumn and ConstraintsBar (§11): the comparison columns of the Options step and the "Your choices" bar.
 // Hovering or focusing a value shows a pin; pinning sends {row, value} to onPin. Results (time, safety) can't be
-// pinned. "Keep all" pins the whole recipe.
+// pinned. "Keep all" pins the whole recipe. An editable value is a button: clicking it calls onEdit(row), and the
+// step hands back the editor to show in that cell (``editing`` row key + ``editor``); an edited value is marked.
 import { h, icon, ICONS } from "./dom.js";
 import { Button } from "./button.js";
 import { ValueChip } from "./chip.js";
 import { t } from "../i18n.js";
 
-/** option: {badge, pros[], cons[], rows: [{key, value, pinnable?, pinned?, tone?}], recommended?}. */
-export function OptionColumn({ option, labels, onPin, onKeepAll, onUse, needsRecheck = false }) {
+/** option: {badge, pros[], cons[], rows: [{key, value, pinnable?, pinned?, tone?, editable?, edited?}], recommended?}. */
+export function OptionColumn({ option, labels, onPin, onKeepAll, onUse, onEdit, editing = null, editor = null, needsRecheck = false }) {
   const rows = option.rows.map((row) => {
-    const value = h("span", { class: ["ui-col__value", row.tone && `is-${row.tone}`] }, row.value);
+    if (row.key === editing && editor) return h("div", { class: "ui-col__cell is-editing", role: "cell" }, editor);
+    const cls = ["ui-col__value", row.tone && `is-${row.tone}`, row.edited && "is-edited"];
+    const value = row.editable && onEdit
+      ? h("button", { type: "button", class: [...cls, "ui-col__edit"], title: t("ui.editValue"),
+        "aria-label": t("ui.editValueOf", { name: labels[row.key], value: row.value }), onclick: () => onEdit(row) }, row.value)
+      : h("span", { class: cls }, row.value);
     const cell = h("div", { class: ["ui-col__cell", row.pinned && "is-pinned"], role: "cell" }, value);
     if (row.pinnable !== false) {
       cell.append(h("button", {

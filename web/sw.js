@@ -77,7 +77,7 @@ async function networkFirst(req) {
   const key = url.origin + url.pathname;
   try {
     // Revalidate with the server: otherwise the browser's HTTP cache can hand back an old module
-    // next to a new one (e.g. a new app.js calling a viewer.js function that isn't there yet, or
+    // next to a new one (e.g. a new main.js calling a stage.js function that isn't there yet, or
     // a stale manifest.json pointing at outdated engine hashes).
     const res = await (req.mode === "navigate" ? fetch(req.url, { cache: "no-cache" }) : fetch(req, { cache: "no-cache" }));
     if (res.ok) cache.put(key, res.clone());

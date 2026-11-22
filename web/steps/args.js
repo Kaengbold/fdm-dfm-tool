@@ -105,7 +105,8 @@ export function evaluateMaterials(catalog, profile, environment) {
  * Locked material / nozzle go into constraints; ticked nozzles go into nozzles; environment carries temp_c & touches.
  */
 const G = 9.81;
-const where = (x) => (x.edge != null ? { edge: x.edge, edge_kind: x.edgeKind ?? "feature" } : { region: x.region });
+const where = (x) => (Array.isArray(x.points) && x.points.length ? { points: x.points, radius: x.radius } // painted with the brush (T-573)
+  : x.edge != null ? { edge: x.edge, edge_kind: x.edgeKind ?? "feature" } : { region: x.region });
 
 /** A hold as the strength engine takes it (core/fdmcore/strength.py: kind fixed, hold clamped | resting | screw). */
 export function holdToEngine(hold) {
@@ -117,6 +118,19 @@ export function holdToEngine(hold) {
 export function loadToEngine(load) {
   if (load.kind === "force" && load.kg != null && load.newtons == null) return load; // old projects
   return { ...where(load), kind: "force", kg: load.newtons / G, direction: load.direction, ...(load.case > 1 ? { case: load.case } : {}) };
+}
+
+/** The faces that should stay free of support marks (Quality, §14): the ones the user marked as show faces, else our
+ * guess (``"visible"``: the outer faces, api.visible_faces). Other goals: none. */
+export function facesArg(state) {
+  if (state?.goal !== "quality") return null;
+  return { clean: state.showFaces?.length ? [...state.showFaces] : "visible" };
+}
+
+/** Only the show faces the user marked (for the checks and the export: support marks there are a problem, and the
+ * slicer keeps the seam off them). Our guess only steers the optimizer. */
+export function markedFaces(state) {
+  return state?.goal === "quality" && state.showFaces?.length ? { clean: [...state.showFaces] } : null;
 }
 
 export function optimizeArgs(state) {
@@ -136,6 +150,7 @@ export function optimizeArgs(state) {
   };
   if (prof.printer) profile.printer = prof.printer;
   if (prof.nozzle) profile.nozzle = String(prof.nozzle);
+  if (goal === "quality") profile.looks = true; // settings for parts people look at (recommend.py, T-572)
 
   const constraints = { ...(state?.constraints ?? {}) };
   if (prof.material) constraints.material = prof.material;
@@ -166,5 +181,6 @@ export function optimizeArgs(state) {
     environment: { temp_c: tempC, touches },
     constraints,
     change,
+    faces: facesArg(state),
   };
 }

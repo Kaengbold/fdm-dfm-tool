@@ -18,6 +18,9 @@ export const SAMPLES = [
 /** The engine's triangle bytes as Float32Array (copied: the bytes may not start on a 4-byte boundary). */
 export const trianglesOf = (info) => new Float32Array(new Uint8Array(info.triangles).slice().buffer);
 const kindOf = (name) => (/\.(step|stp)$/i.test(name) ? "step" : /\.3mf$/i.test(name) ? "3mf" : "stl");
+const isProject = (name) => /\.(json|html?)$/i.test(name);
+// Old projects named goals the old way (T-580).
+const OLD_GOALS = { strength: "strong", speed: "fast", material: "light" };
 
 // What the step shows between renders (a load in progress, a question, an error). Not in the store: it isn't
 // the user's input and shouldn't be undone or saved.
@@ -28,6 +31,7 @@ export async function loadPart({ name, bytes, store, go, services, rerender }) {
   const { engine, stage } = services;
   const kind = kindOf(name);
   const set = (v) => { view = v; rerender(); };
+  if (isProject(name)) return openProject({ name, bytes, store, go, services, set });
   try {
     set({ mode: "loading", text: t("part.reading") });
     let faceIds, stepBodies = null;
@@ -70,9 +74,54 @@ export async function loadPart({ name, bytes, store, go, services, rerender }) {
   }
 }
 
+/**
+ * A project file (web/project.js: Save project, the old app's projects, an agent's save_project) or a shared report
+ * with the project inside: the part, then what was set on it. Holds and loads come back on their faces; the build
+ * direction and slicer settings come back once Analyse has run again (an option needs the optimizer's numbers).
+ */
+async function openProject({ name, bytes, store, go, services, set }) {
+  const { engine, stage } = services;
+  try {
+    set({ mode: "loading", text: t("part.reading") });
+    let text = new TextDecoder().decode(bytes);
+    if (/\.html?$/i.test(name)) {
+      const { projectInReport } = await import("../report.js");
+      text = projectInReport(text);
+      if (!text) throw new Error(t("part.noProject"));
+    }
+    const { readProject } = await import("../project.js");
+    const p = readProject(text);
+    const info = await engine.call("load", { name: p.name, face_ids: p.faceIds ?? undefined }, p.stl);
+    services.setPart?.({ name: p.name, bytes: p.stl, faceIds: p.faceIds ?? undefined, kind: "stl" });
+    stage?.showPart(trianglesOf(info));
+    const regions = p.loads?.length ? (await engine.call("regions")).regions : [];
+    const centre = (x) => (x.point ?? (x.region != null ? regions[x.region]?.centroid : null) ?? null);
+    const holds = (p.loads ?? []).filter((l) => l.kind === "fixed").map((l, i) => ({ id: `hold-p${i}`, region: l.region ?? null,
+      edge: l.edge ?? null, edgeKind: l.edge_kind ?? null, kind: l.edge != null ? "edge" : "face", type: l.hold ?? "clamped",
+      name: t("part.projectHold", { n: i + 1 }), point: centre(l) }));
+    const { migrateLoads } = await import("./loads.js");
+    const loads = migrateLoads((p.loads ?? []).filter((l) => l.kind === "force")).map((l, i) => ({ ...l, id: `load-p${i}`,
+      edgeKind: l.edge_kind ?? null, point: centre(l) }));
+    const pr = p.profile ?? {};
+    const was = store.get();
+    store.set({
+      part: { name: p.name, kind: "stl", size: info.size_mm, faces: info.faces, volume: info.volume_mm3, organic: info.kind === "organic", damaged: false },
+      profile: { ...was.profile, ...(pr.printer ? { printer: pr.printer } : {}), ...(pr.material ? { material: pr.material } : {}), ...(pr.nozzle ? { nozzle: String(pr.nozzle) } : {}) },
+      ...(pr.goal ? { goal: OLD_GOALS[pr.goal] ?? pr.goal } : {}),
+      ...(pr.use_temp_c != null ? { environment: { ...was.environment, temp: "custom", tempC: pr.use_temp_c } } : {}),
+      holds, loads, noLoads: false, showFaces: p.faces?.clean ?? [],
+    }, { undoable: false });
+    view = { mode: "idle" };
+    go("setup");
+  } catch (err) {
+    if (err?.name === "Cancelled") { set({ mode: "idle" }); return; }
+    set({ mode: "error", message: err?.message ?? String(err) });
+  }
+}
+
 registerStep("part", {
   render({ body, stage, store, go, services }) {
-    const input = h("input", { type: "file", accept: ".stl,.3mf,.step,.stp", class: "visually-hidden", tabindex: "-1", "aria-hidden": "true" });
+    const input = h("input", { type: "file", accept: ".stl,.3mf,.step,.stp,.json,.html", class: "visually-hidden", tabindex: "-1", "aria-hidden": "true" });
     const open = async (file) => loadPart({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), store, go, services, rerender: services.rerender });
     input.addEventListener("change", () => input.files[0] && open(input.files[0]));
     const drop = h("div", { class: ["drop", `is-${view.mode}`] });

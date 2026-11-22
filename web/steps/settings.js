@@ -1468,7 +1468,14 @@ const CAL_TESTS = [
   { id: "bridge", apiKind: "bridge", steps: 3 },
   { id: "warping", apiKind: "warping", steps: 3 },
   { id: "layer_strength", apiKind: "layer_strength", steps: 3 },
+  // Quality (T-572): the material's own temperature and ironing flow.
+  { id: "temp", apiKind: "temp", steps: 4 },
+  { id: "ironing", apiKind: "ironing", steps: 3 },
 ];
+// The temperature tower's blocks against the material's usual temperature, bottom first (api.TEMP_TOWER_STEPS_C).
+const TEMP_TOWER_STEPS_C = [10, 5, 0, -5, -10, -15];
+const IRONING_TEST_PCT = [6, 9, 12, 15, 18]; // api.IRONING_TEST_PCT
+const towerTemps = (mat) => TEMP_TOWER_STEPS_C.map((d) => Math.round((mat?.nozzle_temp_c ?? 220) + d));
 
 function testMeasuredInfo(testId, { matId, mat, spec, enc }) {
   if (testId === "starter") {
@@ -1504,6 +1511,14 @@ function testMeasuredInfo(testId, { matId, mat, spec, enc }) {
     if (spec?.z_strength_factor?.[enc] != null) return { measured: true, summary: t("settings.cal.layer_strength.summary", { factor: spec.z_strength_factor[enc] }) };
     return { measured: false, summary: "" };
   }
+  if (testId === "temp") {
+    if (spec?.nozzle_temp_c != null) return { measured: true, summary: t("settings.cal.temp.summary", { c: spec.nozzle_temp_c }) };
+    return { measured: false, summary: "" };
+  }
+  if (testId === "ironing") {
+    if (spec?.ironing_flow_pct != null) return { measured: true, summary: t("settings.cal.ironing.summary", { pct: spec.ironing_flow_pct }) };
+    return { measured: false, summary: "" };
+  }
   return { measured: false, summary: "" };
 }
 
@@ -1521,6 +1536,16 @@ function makeSvg(viewBox, children) {
 }
 
 function calDiagram(testId) {
+  if (testId === "temp") { // six blocks, each with an overhang on its right
+    return makeSvg("0 0 200 100", [
+      ["rect", { x: 70, y: 88, width: 70, height: 5, rx: 2, fill: "currentColor", opacity: 0.3 }],
+      ...[0, 1, 2, 3, 4, 5].map((i) => ["path", { d: `M 76 ${88 - i * 13} V ${76 - i * 13} H 116 L 124 ${88 - i * 13} Z`, fill: "currentColor", opacity: 0.35 + i * 0.1 }]),
+    ]);
+  }
+  if (testId === "ironing") { // five steps, the highest on the left
+    return makeSvg("0 0 200 100", [0, 1, 2, 3, 4].map((i) => ["rect",
+      { x: 30 + i * 28, y: 30 + i * 10, width: 28, height: 58 - i * 10, fill: "currentColor", opacity: 0.75 - i * 0.1 }]));
+  }
   if (testId === "overhang") {
     return makeSvg("0 0 200 100", [
       ["rect", { x: 10, y: 78, width: 180, height: 10, rx: 2, fill: "currentColor", opacity: 0.25 }],
@@ -1629,6 +1654,10 @@ function openCalibrationTest(testId) {
     };
   } else if (testId === "layer_strength") {
     view.calDraft = { flat: "", upright: "" };
+  } else if (testId === "temp") {
+    view.calDraft = { c: spec?.nozzle_temp_c ?? null };
+  } else if (testId === "ironing") {
+    view.calDraft = { pct: spec?.ironing_flow_pct ?? null };
   } else if (testId === "starter") {
     view.calDraft = {
       look: settings.starterChecked[matId]?.note ?? "ok",
@@ -1647,14 +1676,29 @@ async function downloadCalibrationModel(testDef) {
   view.downloading = testDef.id;
   ctx?.services?.rerender?.();
   try {
-    const part = await ctx.engine.call("calibration_part", { kind: testDef.apiKind });
-    downloadBytes(new Uint8Array(part.stl), part.name, "model/stl");
-    showToast({ message: t("settings.cal.downloaded", { name: part.name }), tone: "good" });
+    const part = await ctx.engine.call("calibration_part", { kind: testDef.apiKind, profile: { material: calContext().matId } });
+    // The ironing test comes as a 3MF: each step's ironing flow is set in it (OrcaSlicer, Bambu Studio, PrusaSlicer).
+    const [bytes, name, mime] = part["3mf"] ? [part["3mf"], part.name_3mf, "model/3mf"] : [part.stl, part.name, "model/stl"];
+    downloadBytes(new Uint8Array(bytes), name, mime);
+    showToast({ message: t("settings.cal.downloaded", { name }), tone: "good" });
   } catch (err) {
     showToast({ message: t("settings.cal.downloadFailed", { reason: err.message }), tone: "bad" });
   } finally {
     view.downloading = null;
     ctx?.services?.rerender?.();
+  }
+}
+
+/** The temperature tower's second step: the user's sliced tower with each block's temperature written in. */
+async function towerGcode(file) {
+  if (!file) return;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const r = await ctx.engine.call("tuning_gcode", { kind: "temp", profile: { material: calContext().matId } }, bytes);
+    downloadBytes(new Uint8Array(r.data), file.name.replace(/\.gcode$/i, "") + "_temps.gcode", "text/x.gcode");
+    showToast({ message: t("settings.cal.temp.gcodeDone", { from: r.temps[0], to: r.temps[r.temps.length - 1] }), tone: "good" });
+  } catch (err) {
+    showToast({ message: t("settings.cal.temp.gcodeFailed", { reason: err.message }), tone: "bad" });
   }
 }
 
@@ -1789,6 +1833,37 @@ function renderCalibrationDetail() {
       h("div", { class: "set-grid-2" }, flatField, uprightField),
       h("div", { class: "cal-ratio-bar" }, barFill),
       ratioText);
+  } else if (testDef.id === "temp") {
+    const gcodeInput = h("input", { type: "file", accept: ".gcode,.gco,.g", class: "visually-hidden", tabindex: "-1", "aria-hidden": "true",
+      onchange: (e) => { towerGcode(e.target.files[0]); e.target.value = ""; } });
+    pickerBox.append(
+      h("div", { class: "cal-picker-group" },
+        h("span", { class: "ui-label" }, t("settings.cal.temp.gcodeTitle")),
+        h("p", { class: "hint" }, t("settings.cal.temp.gcodeLine")),
+        Button({ label: t("settings.cal.temp.gcode"), variant: "secondary", disabled: !engineReady, onClick: () => gcodeInput.click() }),
+        gcodeInput),
+      h("div", { class: "cal-picker-group" },
+        h("span", { class: "ui-label" }, t("settings.cal.temp.pick")),
+        visualRadioGroup({
+          label: t("settings.cal.temp.pick"),
+          value: view.calDraft.c,
+          options: towerTemps(info.mat).map((c) => ({ value: c, label: `${c} °C` })),
+          onChange: (val) => { view.calDraft.c = Number(val); },
+          // The tower with this block lit: where it sits (hottest at the bottom).
+          renderVisual: (o) => makeSvg("0 0 20 30", towerTemps(info.mat).map((c, i) => ["rect",
+            { x: 3, y: 25 - i * 4.4, width: 14, height: 3.6, rx: 0.8, fill: "currentColor", opacity: c === o.value ? 0.9 : 0.22 }])),
+        })));
+  } else if (testDef.id === "ironing") {
+    pickerBox.append(h("div", { class: "cal-picker-group" },
+      h("span", { class: "ui-label" }, t("settings.cal.ironing.pick")),
+      visualRadioGroup({
+        label: t("settings.cal.ironing.pick"),
+        value: view.calDraft.pct,
+        options: IRONING_TEST_PCT.map((p) => ({ value: p, label: `${p} %` })),
+        onChange: (val) => { view.calDraft.pct = Number(val); },
+        renderVisual: (o) => makeSvg("0 0 30 20", IRONING_TEST_PCT.map((p, i) => ["rect",
+          { x: 2 + i * 5.4, y: 4 + i * 2.2, width: 5, height: 14 - i * 2.2, fill: "currentColor", opacity: p === o.value ? 0.9 : 0.22 }])),
+      })));
   } else if (testDef.id === "starter") {
     const lookSeg = SegmentedControl({
       label: t("settings.cal.starter.firstLayer"),
@@ -1846,6 +1921,12 @@ function renderCalibrationDetail() {
         const u = Number(view.calDraft.upright);
         if (!(f > 0 && u > 0)) return showToast({ message: t("settings.cal.layer_strength.needBoth"), tone: "warn" });
         patch.z_strength = Number(zFactor(f, u).toFixed(2));
+      } else if (testDef.id === "temp") {
+        if (view.calDraft.c == null) return showToast({ message: t("settings.cal.pickFirst"), tone: "warn" });
+        patch.nozzle_temp_c = view.calDraft.c;
+      } else if (testDef.id === "ironing") {
+        if (view.calDraft.pct == null) return showToast({ message: t("settings.cal.pickFirst"), tone: "warn" });
+        patch.ironing_flow_pct = view.calDraft.pct;
       } else if (testDef.id === "starter") {
         starterNote = view.calDraft.look || "ok";
         if (view.calDraft.hole !== "" && view.calDraft.hole != null) {
@@ -1872,6 +1953,8 @@ function renderCalibrationDetail() {
         bridge: "max_bridge_mm",
         warping: "warp_length_mm",
         layer_strength: "z_strength_factor",
+        temp: "nozzle_temp_c",
+        ironing: "ironing_flow_pct",
       };
       clearCalibrationField(map[testDef.id]);
       openCalibrationTest(testDef.id);

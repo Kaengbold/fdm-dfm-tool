@@ -1,5 +1,5 @@
 // The report a person reads: one HTML file with the pictures inside (opens in any browser, prints
-// to PDF). app.js collects the facts and the pictures; this only lays them out.
+// to PDF). steps/done.js collects the facts and the pictures; this only lays them out.
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -28,7 +28,7 @@ td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e3e9e4; v
 
 /** ``r``: {title, date, setup, verdict:{kind, head, text}, overview, orientation:{label, reasons}, stats,
  * problems:[{title, severity, picture, details, why, fixes:[{kind, text}]}], strength?, warp?, design?,
- * settings:[{label, value, reason}], project?, appUrl?} — see app.js makeReport. ``project`` (project file text): the
+ * settings:[{label, value, reason}], project?, appUrl?} — see steps/done.js shareReport. ``project`` (project file text): the
  * part and everything set on it ride along inside the file (Share), so the app can open it again. */
 export function reportHtml(r) {
   const section = (title, ...body) => `<h2>${esc(title)}</h2>${body.join("")}`;

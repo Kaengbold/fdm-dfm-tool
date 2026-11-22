@@ -1,0 +1,8 @@
+/* Make it lighter and Tuned settings (T-571). */
+.light-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: var(--s-2); }
+.light-col { display: grid; gap: var(--s-1); align-content: start; justify-items: start; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--surface-raised); font-size: var(--fs-sm); }
+.light-col.is-way { border-color: var(--accent); }
+.light-confirm p { margin: 0 0 var(--s-2); }
+.tuned-summary p { margin: 0 0 var(--s-2); font-size: var(--fs-sm); }
+.tuned-ranges { display: grid; gap: var(--s-1); margin: 0; padding-left: var(--s-5); font-size: var(--fs-sm); }
