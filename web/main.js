@@ -19,6 +19,8 @@ import "./steps/holds.js";
 import "./steps/simulate.js";
 import { openExport } from "./steps/done.js";
 import "./steps/tolerances.js";
+import "./steps/lighter.js";
+import "./steps/tuned.js";
 import "./steps/problems.js";
 import { openGizmo } from "./viewport/gizmo.js";
 import { initSettings, openSettingsTab, restoreSettingsToEngine } from "./steps/settings.js";
