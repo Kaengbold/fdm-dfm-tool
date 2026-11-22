@@ -1251,8 +1251,9 @@ Rules for every [UI] task:
 
 ### Phase 8: cut-over
 
-- [~] **T-580 P1** [UI] Switch to the new app and delete the old one. · plan: §17 · files: `web/` · owner: Claude (`task/T-580-cutover`)
+- [x] **T-580 P1** [UI] Switch to the new app and delete the old one. · plan: §17 · files: `web/` · owner: Claude (`task/T-580-cutover`)
   - Do: `index.html` serves the new shell; delete the old `app.js`, `steps.js`, panes and CSS; old projects still open.
+  - Outcome: `web/index.html` is the new shell (was `new.html`); `app.js`, `steps.js`, `viewer.js`, `style.css` deleted; `main.js` registers `sw.js` (offline, as before). The Part step opens project files (`.json`, from the old app, Save project or an agent) and shared reports (`.html` with the project inside): part, printer / material / nozzle, goal (old names mapped), use temperature, holds and loads on their faces, show faces. The build direction and settings come back after Analyse. Pages: the existing rewrite of `index.html` to `../vendor` now applies to the new app (the browser slicer already loads from `../vendor`). `tools/e2e_smoke.py` runs the new app's checks only (3,772 → ~950 lines, a screenshot per check) plus `old projects and shared reports open`; the full journey is T-581. Engine charts use the Style A colours. Tests and comments no longer name the old files.
 - [ ] **T-581 P1** [UI] New browser smoke test. · plan: §17 · files: `tools/e2e_smoke.py` · owner: —
   - Do: 1280×720 and 1440×900: Start → sample + STEP → Setup → Environment → Holds (face, edge, toast) → Loads (gizmo, N/MPa) → details → Analyse → Options (pin PLA, re-optimize) → Simulation → Problems (pending + Confirm all) → Export → Tolerances → Quality path → Settings → Cancel and Undo; dark theme screenshot.
 - [ ] **T-582 P2** [UI] Docs. · plan: §16, §17 · files: `PRODUCT.md`, `DESIGN.md`, `PLAN.md`, `README.md`, `agents/` · owner: —

@@ -1,7 +1,7 @@
 // The new UI's shell (T-530, plan §1.2, §1.6, §1.7, §1.8, §2): header in grid row 1, the step rail, the 3D stage and
 // the right panel whose footer keeps Back (left) and Next (right) in the same spot on every step. Steps plug in
 // through registerStep(id, {render}); until their tasks land (T-531 …) a step shows only its title and purpose.
-// Started by web/new.html (the old web/index.html stays until the cut-over, T-580).
+// Started by web/index.html (main.js).
 import { h, icon } from "./ui/dom.js";
 import { Button } from "./ui/button.js";
 import { StepRail } from "./ui/steprail.js";
@@ -30,7 +30,7 @@ export function registerScreen(name, render) {
   screens.set(name, render);
 }
 
-/** Build the app into ``root`` (the .app grid of new.html). Returns {store, go, route} for steps and tests. */
+/** Build the app into ``root`` (the .app grid of index.html). Returns {store, go, route} for steps and tests. */
 export function startShell(root, { store = createStore(), saving = autosave(store), services = {} } = {}) {
   let route = "start"; // start | flow | settings
   const header = buildHeader();

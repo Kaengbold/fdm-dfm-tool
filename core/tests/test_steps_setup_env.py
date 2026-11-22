@@ -1,7 +1,7 @@
 """Setup and Environment steps of the new UI (T-532, plan §5, §6, §16.4, §16.7).
 
 args.js is pure logic, unit-tested under Node (and cross-checked against Python's optimizer.allowed_materials
-and api.optimize's signature); setup.js and environment.js are driven in a headless browser against web/new.html."""
+and api.optimize's signature); setup.js and environment.js are driven in a headless browser against web/index.html."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def page():
         pg = browser.new_page(viewport={"width": 1280, "height": 720})
         errors: list[str] = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        pg.goto(f"http://127.0.0.1:{server.server_address[1]}/web/new.html")
+        pg.goto(f"http://127.0.0.1:{server.server_address[1]}/web/")
         pg.wait_for_selector("body[data-ready]")
         yield pg
         assert not errors, errors

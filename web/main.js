@@ -1,5 +1,5 @@
-// Entry of the new UI (web/new.html, T-530/T-531): the engine, the 3D stage and the shell, plus the steps.
-// The theme follows the saved switch (light by default, §16.6).
+// Entry of the app (web/index.html, T-530/T-531, the only UI since T-580): the engine, the 3D stage and the shell,
+// plus the steps. The theme follows the saved switch (light by default, §16.6). sw.js keeps it working offline.
 import { startShell } from "./shell.js";
 import "./steps/setup.js";
 import "./steps/environment.js";
@@ -105,3 +105,4 @@ store.subscribe((_, changed) => {
 store.subscribe((_, changed) => { if (changed.includes("step") || changed.includes("part")) preparePicker(); });
 globalThis.fdmUI = app; // for the browser tests and for agents driving the page
 document.body.dataset.ready = "1";
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js");
