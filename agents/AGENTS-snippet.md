@@ -5,8 +5,8 @@
 Parts to print go through the `fdm-dfm` MCP server (or the `fdmdfm` command line, JSON out).
 Before using it, read the guide: `<path to fdm-dfm-tool>/agents/fdm-check/SKILL.md`. In short:
 
-- Flow: `list_presets` → `load_part` → `find_orientations` (use the first `up`) → `check_print(up)` →
-  loads only if the part carries something (`list_faces`, `check_strength`) → `export_3mf` →
-  `write_report` (HTML for the user).
-- Units: mm, kg (weight carried), °C, infill 0–1. Safety factor: aim ×2 (×3 for a load that stays on).
+- Flow: `list_presets` → `load_part` → loads only if the part carries something (`list_faces`) →
+  `optimize_print(goal, loads)` (goal strong / balanced / fast / light / quality: 2–4 checked options, each with
+  `up` and `settings`) → `check_print(up)` → `export_3mf(up, path, settings=…)` → `write_report` (HTML for the user).
+- Units: mm, kg (weight carried), °C, infill 0–1. Safety targets by goal: ×5 / ×3 / ×2 / ×1.5 (quality: no strength).
 - Results are rough estimates. Explain them in plain words for hobbyists, lead with the answer, give a fix.

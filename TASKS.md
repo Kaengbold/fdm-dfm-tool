@@ -1255,8 +1255,9 @@ Rules for every [UI] task:
   - Do: `index.html` serves the new shell; delete the old `app.js`, `steps.js`, panes and CSS; old projects still open.
 - [~] **T-581 P1** [UI] New browser smoke test. · plan: §17 · files: `tools/e2e_smoke.py` · owner: Claude (`task/T-581-smoke`, on top of T-580's branch)
   - Do: 1280×720 and 1440×900: Start → sample + STEP → Setup → Environment → Holds (face, edge, toast) → Loads (gizmo, N/MPa) → details → Analyse → Options (pin PLA, re-optimize) → Simulation → Problems (pending + Confirm all) → Export → Tolerances → Quality path → Settings → Cancel and Undo; dark theme screenshot.
-- [~] **T-582 P2** [UI] Docs. · plan: §16, §17 · files: `PRODUCT.md`, `DESIGN.md`, `PLAN.md`, `README.md`, `agents/` · owner: Claude (`task/T-582-docs`)
+- [x] **T-582 P2** [UI] Docs. · plan: §16, §17 · files: `PRODUCT.md`, `DESIGN.md`, `PLAN.md`, `README.md`, `agents/` · owner: Claude (`task/T-582-docs`)
   - Do: describe the new flow, desktop only, the `optimize` tool for agents, the new design system.
+  - Outcome: README's "What it does" is the new flow step by step (plus Quality, Settings & calibration, agents; a changed STEP part comes back as STL for now); PRODUCT.md names the flow, the goals with their safety targets and picking on the part; DESIGN.md is Style A from `web/tokens.css` (colours, type, the four layouts, components in `web/ui/` and `web/viewport/`, both themes) instead of the old green workbench; PLAN.md: goals and "what may change" instead of the mode toggle, the new UI and the browser OrcaSlicer in the architecture, phase 12 (UI revision) with its status; the agent guide (`SKILL.md`, `AGENTS-snippet.md`) leads with `optimize_print` and the goal's safety targets; AGENTS.md's layout table and e2e commands match the new app.
 
 ## Done
 

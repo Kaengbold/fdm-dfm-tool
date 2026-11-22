@@ -18,19 +18,27 @@ same (`fdmdfm --help`; JSON on stdout, errors as one line on stderr).
 3. `load_part(path)`. Check `unit_hint` (a part exported in inches is 25.4× too small: `scale_part`)
    and `bodies` (several bodies: `select_body`). `kind: "organic"` (a scan, sculpt or figure) means the
    checks for holes, gaps, pins and lettering are off; `set_cad_checks(true)` if it is really a CAD part.
-4. `find_orientations` → pick the first unless the user has a reason. Its `up` is the build
-   direction you pass to everything else.
+4. **Ask the goal and let the optimizer choose** (what the web app does): `optimize_print(goal, loads,
+   depth, printer, nozzle, …)` with goal `strong` / `balanced` / `fast` / `light` / `quality` (safety targets
+   ×5 / ×3 / ×2 / ×1.5; quality checks no strength). It returns 2–4 verified `options`, each with `up`,
+   `material`, `nozzle`, `layer_height`, walls / infill, time, grams, `safety` vs `target` and the `settings` for
+   the 3MF. Use `depth="fast"` for a quick answer; `estimate_optimize_runtime` says how long a depth takes. Hard
+   limits from the user ("PETG only", "0.4 nozzle") go in `constraints`. If nothing reaches the target,
+   `feasible` is false and `ways_out` says what would help; say so plainly, never "impossible".
+   Without a goal (just "how should I lay it?"): `find_orientations` → the first `up`.
 5. `check_print(up)` → findings (each with plain `title`, `detail`, `why` and `fixes` for the design,
    the slicer or the printer and material), print time, filament, recommended slicer settings.
    `mode`: "print" when the model can't be changed, "design" when slicer settings can't.
-6. Loads (only if it carries something): `list_faces` → face ids, then `check_strength(up, loads)`.
-   Not happy? `strength_options` (what helps most) or `optimise_strength` (lightest settings that hold).
+6. Loads (only if it carries something): `list_faces` → face ids for `loads`; give them to `optimize_print`
+   (step 4) or check one setup with `check_strength(up, loads)`. Not happy? `strength_options` (what helps most)
+   or `optimise_strength` (lightest settings that hold).
 7. Design changes (only if the user can change the model): `suggest_design_changes` →
    `apply_design_changes` saves a new STL and loads it; check again. For a redesign,
    `suggest_lighter_shape(up, loads, path.stl, keep=0.4)` saves a blocky shape that keeps the plastic only
    where the load runs: a guide for the user to rebuild in CAD, not a part to print as it is.
-8. `export_3mf(up, path)` → a 3MF with the part turned and the settings set, for OrcaSlicer / Bambu
-   Studio (`slicer: "orca"`) or PrusaSlicer (`slicer: "prusa"`).
+8. `export_3mf(up, path, settings=option["settings"])` → a 3MF with the part turned and the settings set, for
+   OrcaSlicer / Bambu Studio (`slicer: "orca"`) or PrusaSlicer (`slicer: "prusa"`). Pass the chosen option's
+   `material` and `nozzle` too.
 9. Show it: `write_report(path.html, up, loads)` for the user to open, `render_image` to see the part
    yourself (bed, overhangs, problem close-up, stress, warp, compare) and `make_chart` for one chart.
 10. `save_project(path.json, up, loads, …)` so the user can open your work in the web app and see it
@@ -41,8 +49,9 @@ same (`fdmdfm --help`; JSON on stdout, errors as one line on stderr).
 - Lengths in **mm**, forces in **kg** (the weight it carries, 1 kg ≈ 10 N), temperatures in **°C**,
   `infill` 0–1, `walls` in lines, time in minutes, filament in grams.
 - `up`: a direction in the part's own coordinates that will point up on the printer.
-- **Safety factor**: how many times the load the part holds before it breaks. Aim for ×2, ×3 when
-  the load stays on (`constant_load`) or the part gets warm. Below ×1 it breaks.
+- **Safety factor**: how many times the load the part holds before it breaks. The goal sets the target
+  (Strong ×5, Balanced ×3, Fast ×2, Light ×1.5; at least ×3 when the load stays on, `constant_load`). Below ×1 it
+  breaks.
 - Strength, warping and heat are **rough estimates** from a coarse simulation: good for comparing
   options, not for safety-critical parts. `fine=True` or a sliced G-code (`load_gcode`,
   `detailed_strength`) gets closer.
