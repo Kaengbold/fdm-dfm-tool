@@ -39,6 +39,7 @@ export function initialState() {
     depth: "extended",
     option: null,
     pending: [],
+    exportOff: [], // slicer changes the user unticked on Done (left to their own profile)
   };
 }
 

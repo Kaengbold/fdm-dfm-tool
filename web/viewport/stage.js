@@ -237,6 +237,15 @@ export class Stage {
     this.render();
   }
 
+  /** The part's triangles in part coordinates (a copy: the shown ones are moved onto the bed). */
+  partTriangles() {
+    if (!this.part) return null;
+    const out = this.part.geo.attributes.position.array.slice();
+    const { x, y, z } = this.part.offset;
+    for (let i = 0; i < out.length; i += 3) { out[i] -= x; out[i + 1] -= y; out[i + 2] -= z; }
+    return out;
+  }
+
   /** Camera presets for the camera bar. */
   view(name) {
     const box = this.part?.geo.boundingBox ?? new THREE.Box3(new THREE.Vector3(-30, -30, 0), new THREE.Vector3(30, 30, 30));

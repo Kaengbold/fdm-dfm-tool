@@ -17,6 +17,7 @@ import "./steps/loads.js";
 import "./steps/details.js";
 import "./steps/holds.js";
 import "./steps/simulate.js";
+import { openExport } from "./steps/done.js";
 import { openGizmo } from "./viewport/gizmo.js";
 import { initSettings, openSettingsTab, restoreSettingsToEngine } from "./steps/settings.js";
 
@@ -41,6 +42,8 @@ const services = {
     saving.putExtra("part", part);
     saving.putExtra("thumb", null);
   },
+  getPart: () => source,
+  openExport: () => openExport(store, services),
   restoreLast: async () => {
     const last = await saving.restore();
     if (!last?.state?.part) return null;
