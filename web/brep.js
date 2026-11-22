@@ -83,6 +83,16 @@ export function sharedEdges(oc, solid, a, b) {
   return out;
 }
 
+/** What kind of surface each face is ("plane", "cylinder", "torus", …), with the radius of cylinders. */
+export function surfaces(oc, shape) {
+  const names = Object.fromEntries(Object.entries(oc.GeomAbs_SurfaceType).map(([k, v]) => [v, k.replace("GeomAbs_", "").toLowerCase()]));
+  return faces(oc, shape).map((f) => {
+    const a = new oc.BRepAdaptor_Surface(f, true);
+    const kind = names[a.GetType()] ?? "other";
+    return kind === "cylinder" ? { kind, radius: a.Cylinder().Radius() } : { kind };
+  });
+}
+
 /** An edge's length (mm) and centre, for checks and notes. */
 export function edgeSignature(oc, edge) {
   const p = new oc.GProp_GProps();

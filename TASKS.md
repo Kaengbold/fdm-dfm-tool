@@ -1190,9 +1190,15 @@ Rules for every [UI] task:
     - a round too big to make falls back with "OpenCascade could not make the round";
     - all together: one valid solid, 45 faces, written and read back alike.
   - The browser STEP round trip checks that nothing was left out or faceted, and that the file has at most 16 faces.
-- [ ] **T-534 P2** [UI] Exact fillets and chamfers at inside corners on STEP. · plan: §10.3 (point 7c), §16.4; research/cad_engine.md · files: the B-rep worker (T-529), `core/fdmcore/features.py` · owner: —
+- [x] **T-534 P2** [UI] Exact fillets and chamfers at inside corners on STEP. · plan: §10.3 (point 7c), §16.4; research/cad_engine.md · files: the B-rep worker (T-529), `core/fdmcore/features.py` · owner: Claude (`task/T-534-exact-fillets`)
   - Do: `fillet` / `chamfer` intents on the edge between two faces (T-527); radius from the engine's stress-corner edit; fallback to today's faceted wedge on failure.
   - Done when: the bracket's inside corner fillets exactly, and a corpus part where OCCT fails falls back with the note.
+  - Outcome: the corner edits' intents (T-528) are made by T-529's `applyEdits` with `BRepFilletAPI_MakeFillet` / `MakeChamfer`, on the edge the two named faces share. Mixed corners get the rounds first, then the chamfers. `brep.surfaces` reports each face's surface kind (and a cylinder's radius) for the checks.
+    - `test_exact_fillets.py` (Node, via `check_brep_edits.mjs`):
+      - the L-bracket's stress corner becomes one new cylindrical face with exactly the engine's radius;
+      - printed upside down, the corner would hang over, so it becomes a 45° chamfer: one new flat face;
+      - on `gen_block` (corpus) the pocket's own round is exact, while a 9 mm round in the 10 mm pocket can't be made, so the faceted wedge goes in with "OpenCascade could not make the round".
+    - `check_step_faces.mjs --dump` now writes every test STEP's body (`core/tests/step/` has the bracket and `gen_block`).
 - [ ] **T-535 P3** [UI] STEP corpus and robustness report for B-rep edits. · plan: §16.4; research/cad_engine.md ("Risks") · files: `core/tests/corpus_step/` (new), a report under `research/` · owner: —
   - Do: 8–12 real-world STEP parts (open licences, sources noted); run every intent kind on each; record success rate, time and memory in a browser.
   - Done when: the report lists which edit kinds are reliable enough to be on by default.
