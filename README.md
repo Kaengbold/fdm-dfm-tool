@@ -23,7 +23,8 @@ One guided flow on a desktop browser (1280 × 720 or larger), with the part in 3
 | **Done** | A 3MF for OrcaSlicer, Bambu Studio or PrusaSlicer with the part turned and every setting you ticked; the changed part as STL (a changed STEP part comes back as STL for now); G-code from the browser OrcaSlicer; a project file, a report to share and a CAD checklist |
 
 The **Quality** goal is for parts that must look good: it skips holds, loads and strength, guesses which faces people
-see (the outer ones) and keeps support off them; you can mark the face that matters instead.
+see (the outer ones) and keeps support off them; you can mark the face that matters instead (agents:
+`guess_visible_faces`, then `faces` in `optimize_print`).
 
 **Settings & calibration** (from the header at any time): your printers and materials, imported slicer profiles, and
 small test prints that measure your printer (layer strength, warping, fits, overhang angle, bridges).

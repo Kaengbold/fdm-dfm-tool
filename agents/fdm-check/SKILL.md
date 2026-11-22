@@ -23,7 +23,9 @@ same (`fdmdfm --help`; JSON on stdout, errors as one line on stderr).
    ×5 / ×3 / ×2 / ×1.5; quality checks no strength). It returns 2–4 verified `options`, each with `up`,
    `material`, `nozzle`, `layer_height`, walls / infill, time, grams, `safety` vs `target` and the `settings` for
    the 3MF. Use `depth="fast"` for a quick answer; `estimate_optimize_runtime` says how long a depth takes. Hard
-   limits from the user ("PETG only", "0.4 nozzle") go in `constraints`. If nothing reaches the target,
+   limits from the user ("PETG only", "0.4 nozzle") go in `constraints`. For `quality`, pass
+   `faces={"clean": "visible"}` so support stays off the faces people see (`guess_visible_faces` lists them), or
+   `{"clean": [id]}` for the one face the user says must look good. If nothing reaches the target,
    `feasible` is false and `ways_out` says what would help; say so plainly, never "impossible".
    Without a goal (just "how should I lay it?"): `find_orientations` → the first `up`.
 5. `check_print(up)` → findings (each with plain `title`, `detail`, `why` and `fixes` for the design,
