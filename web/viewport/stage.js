@@ -133,6 +133,7 @@ export class Stage {
   /** Show ``triangles`` (Float32Array, part coordinates, as loaded) standing on the bed, and frame it. */
   showPart(triangles) {
     this.hideField();
+    this.clearGhosts();
     if (this.part) { this.scene.remove(this.part.group); this.part.geo.dispose(); }
     this.part = partGroup(triangles, palette());
     this.scene.add(this.part.group);
@@ -186,6 +187,7 @@ export class Stage {
 
   clearPart() {
     this.hideField();
+    this.clearGhosts();
     if (!this.part) return;
     this.scene.remove(this.part.group);
     this.part.geo.dispose();
@@ -244,6 +246,51 @@ export class Stage {
     const { x, y, z } = this.part.offset;
     for (let i = 0; i < out.length; i += 3) { out[i] -= x; out[i + 1] -= y; out[i + 2] -= z; }
     return out;
+  }
+
+  /** Pending design changes as ghosts (T-561): ``list`` of {mesh: Float32Array in part coordinates, op: add | cut};
+   * plastic added shows green, plastic cut away red, both see-through so the part stays readable. */
+  showGhosts(list) {
+    this.clearGhosts();
+    if (!this.part || !list.length) return;
+    const { x, y, z } = this.part.offset;
+    const css = getComputedStyle(document.documentElement);
+    this.ghosts = list.map(({ mesh, op }) => {
+      const pos = mesh.slice();
+      for (let i = 0; i < pos.length; i += 3) { pos[i] += x; pos[i + 1] += y; pos[i + 2] += z; }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.computeVertexNormals();
+      const color = css.getPropertyValue(op === "cut" ? "--bad" : "--good").trim() || (op === "cut" ? "#d33" : "#2a2");
+      const ghost = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }));
+      ghost.renderOrder = 2;
+      this.part.group.add(ghost);
+      return ghost;
+    });
+    this.render();
+  }
+
+  clearGhosts() {
+    for (const g of this.ghosts ?? []) { g.removeFromParent(); g.geometry.dispose(); g.material.dispose(); }
+    this.ghosts = [];
+    this.render();
+  }
+
+  /** Point the camera at ``corners`` (part coordinates), close enough to see that one feature (T-561). */
+  frameBox(corners) {
+    if (!this.part || !corners?.length) return;
+    this.part.group.updateMatrixWorld(true);
+    const { x, y, z } = this.part.offset;
+    const box = new THREE.Box3();
+    for (const c of corners) box.expandByPoint(new THREE.Vector3(c[0] + x, c[1] + y, c[2] + z).applyMatrix4(this.part.group.matrixWorld));
+    const centre = box.getCenter(new THREE.Vector3());
+    const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 4);
+    const d = this.camera.position.clone().sub(this.controls.target).normalize();
+    const dist = (r / Math.sin(THREE.MathUtils.degToRad(15))) * 1.3;
+    this.controls.target.copy(centre);
+    this.camera.position.copy(centre).addScaledVector(d, dist);
+    this.controls.update();
+    this.render();
   }
 
   /** Camera presets for the camera bar. */

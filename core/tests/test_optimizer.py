@@ -269,9 +269,14 @@ def test_estimate_runtime_api_and_corpus_accuracy(monkeypatch):
                     top = max(info, key=lambda i: i["area_mm2"] * max(i["normal"][2], 0))["id"]
                 case_loads = [{"region": back, "kind": "fixed"}, {"region": top, "kind": "force", "kg": kg, "direction": "down"}]
             est = api.estimate_runtime(depth, case_loads, {"printer": "bambu_p1s"}, change=change)["seconds"]
-            t0 = time.perf_counter()
-            api.optimize("balanced", case_loads, depth, {"printer": "bambu_p1s"}, change=change)
-            measured.append((f"{name} {depth}/{change}", est, time.perf_counter() - t0))
+            # The faster of two runs: CI runs the tests on both cores, and a run that shares its core with a heavy
+            # test on the other worker took up to 2× longer, which threw the comparison off in either direction.
+            actual = []
+            for _ in range(2):
+                t0 = time.perf_counter()
+                api.optimize("balanced", case_loads, depth, {"printer": "bambu_p1s"}, change=change)
+                actual.append(time.perf_counter() - t0)
+            measured.append((f"{name} {depth}/{change}", est, min(actual)))
         # The model is calibrated on one PC; CI and users' machines are faster or slower overall. What must hold
         # everywhere is the relative cost of parts and depths: scale by this machine's median actual/estimate.
         speed = float(np.median([actual / est for _, est, actual in measured]))
