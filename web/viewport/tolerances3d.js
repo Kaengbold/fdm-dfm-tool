@@ -1,7 +1,9 @@
 // Tolerances & fits in 3D (T-570, plan §15.2): the ghost mate (a see-through pin slides into a hole, or a sleeve
 // over a peg) with a clearance ring at the mouth coloured by what will happen (jams / tight / fits / loose), and the
 // printed-vs-CAD overlay: an orange circle at the size each hole or peg really prints, exaggerated ×5 or ×10 so a
-// tenth of a millimetre shows. Everything lives in the part's group (so it turns with the part) in part coordinates.
+// tenth of a millimetre shows. T-573: the feeler gauge for flat gaps (a blade slides through a slot, or slot walls
+// slide over a tab, and stop red at the mouth where it jams) and the tightest spot against a mating part. Everything
+// lives in the part's group (so it turns with the part) in part coordinates.
 import * as THREE from "three";
 
 const Y = new THREE.Vector3(0, 1, 0);
@@ -110,3 +112,68 @@ export function showPrinted(stage, features, factor) {
 }
 
 export function clearPrinted(stage) { clear(stage, "tol-printed"); }
+
+const vec = (a) => new THREE.Vector3(...a);
+
+/**
+ * The feeler gauge for a flat gap (set_gap's ``plane``: origin on face a, its normal, in-plane u / v and the overlap's
+ * ranges). A slot (``kind`` "slot") gets a blade ``partnerMm`` thick sliding through between the faces; a tab gets two
+ * slot walls ``partnerMm`` apart sliding over it. Coloured by ``verdict``; when it jams it stops at the mouth.
+ */
+export function showFeeler(stage, plane, kind, distanceMm, partnerMm, verdict) {
+  clearFeeler(stage);
+  if (!stage.part || !plane) return;
+  const g = layer(stage, "tol-feeler");
+  const o = stage.part.offset;
+  const n = vec(plane.normal).normalize(), u = vec(plane.u).normalize(), v = vec(plane.v).normalize();
+  const [u0, u1] = plane.u_range, [v0, v1] = plane.v_range;
+  const spanU = Math.max(u1 - u0, 1), spanV = Math.max(v1 - v0, 1);
+  const length = spanU + 6;
+  // Middle of the gap (a slot: between the faces; a tab: in its middle, the plastic between them).
+  const mid = vec(plane.origin).add(o).addScaledVector(u, (u0 + u1) / 2).addScaledVector(v, (v0 + v1) / 2)
+    .addScaledVector(n, kind === "slot" ? distanceMm / 2 : -distanceMm / 2);
+  const [token, fallback] = VERDICT_COLOR[verdict] ?? VERDICT_COLOR.fits;
+  const material = new THREE.MeshStandardMaterial({ color: css(token, fallback), transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide });
+  const basis = new THREE.Matrix4().makeBasis(u, v, n);
+  const plate = (thick, offset) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(length, spanV * 0.9, Math.max(thick, 0.05)), material);
+    m.quaternion.setFromRotationMatrix(basis);
+    m.userData.offset = offset;
+    m.renderOrder = 3;
+    return m;
+  };
+  const wall = 1.2;
+  const pieces = kind === "slot" ? [plate(partnerMm, 0)]
+    : [plate(wall, partnerMm / 2 + wall / 2), plate(wall, -(partnerMm / 2 + wall / 2))];
+  g.add(...pieces);
+  // Slides in along u from outside; a jam stops it just at the mouth.
+  const out = spanU / 2 + length / 2 + 2;
+  const stopAt = verdict === "jam" ? spanU / 2 + length / 2 : 0;
+  const place = (along) => { for (const p of pieces) p.position.copy(mid).addScaledVector(u, -along).addScaledVector(n, p.userData.offset); stage.render(); };
+  if (reducedMotion()) { place(stopAt); return; }
+  const t0 = performance.now();
+  const step = (now) => {
+    if (!pieces[0].parent) return;
+    const k = Math.min(1, (now - t0) / 700);
+    place(out + (stopAt - out) * (1 - (1 - k) ** 3));
+    if (k < 1) requestAnimationFrame(step);
+  };
+  place(out);
+  requestAnimationFrame(step);
+}
+
+export function clearFeeler(stage) { clear(stage, "tol-feeler"); }
+
+/** A dark dot at the tightest spot against a mating part (part coordinates): dark, so it stands out on the map's red. */
+export function showTight(stage, at, sizeMm) {
+  clearTight(stage);
+  if (!stage.part || !at) return;
+  const g = layer(stage, "tol-tight");
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(Math.max(sizeMm, 0.6), 24, 16), new THREE.MeshBasicMaterial({ color: css("--text", "#111827"), depthTest: false }));
+  dot.position.copy(vec(at).add(stage.part.offset));
+  dot.renderOrder = 6;
+  g.add(dot);
+  stage.render();
+}
+
+export function clearTight(stage) { clear(stage, "tol-tight"); }

@@ -105,7 +105,8 @@ export function evaluateMaterials(catalog, profile, environment) {
  * Locked material / nozzle go into constraints; ticked nozzles go into nozzles; environment carries temp_c & touches.
  */
 const G = 9.81;
-const where = (x) => (x.edge != null ? { edge: x.edge, edge_kind: x.edgeKind ?? "feature" } : { region: x.region });
+const where = (x) => (Array.isArray(x.points) && x.points.length ? { points: x.points, radius: x.radius } // painted with the brush (T-573)
+  : x.edge != null ? { edge: x.edge, edge_kind: x.edgeKind ?? "feature" } : { region: x.region });
 
 /** A hold as the strength engine takes it (core/fdmcore/strength.py: kind fixed, hold clamped | resting | screw). */
 export function holdToEngine(hold) {
