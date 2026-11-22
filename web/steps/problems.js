@@ -14,7 +14,7 @@ import { openModal } from "../ui/overlay.js";
 import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { t } from "../i18n.js";
-import { holdToEngine, loadToEngine } from "./args.js";
+import { holdToEngine, loadToEngine, markedFaces } from "./args.js";
 import { setupLine, simProfile } from "./simulate.js";
 import { trianglesOf } from "./part.js";
 import * as F from "./fixes.js";
@@ -29,6 +29,7 @@ let skipped = null; // the input revisions when the user applied without re-chec
 let batch = null; // the last confirmed batch: {undo, summary}
 let ghostKey = null;
 let designOk = false; // "This changes your model" was confirmed once
+let framed = false; // the camera is close on one feature: the whole part again when the step is left
 let svc = null; // the shell's services and go, kept from the last render for Next's confirm and the batch card
 let goTo = null;
 
@@ -48,7 +49,7 @@ function slimDesign(design) {
 
 async function checkAndDesign(engine, s, given = null) {
   const profile = profileOf(s);
-  const check = given ?? await engine.call("check", { up: s.option.up, profile });
+  const check = given ?? await engine.call("check", { up: s.option.up, profile, faces: markedFaces(s) });
   const design = await engine.call("design", { up: s.option.up, profile, findings: check.findings });
   return { check, design: slimDesign(design) };
 }
@@ -246,6 +247,7 @@ function frameFinding(f, res, services) {
   if (!f.bbox || !rotation || !stage.part) return;
   const [lo, hi] = F.turnedBounds(stage.partTriangles(), rotation);
   stage.frameBox(F.boxToPart(f.bbox, rotation, lo, hi));
+  framed = true;
 }
 
 function showGhosts(store, services) {
@@ -378,5 +380,7 @@ registerStep("problems", {
   leave({ services }) {
     services.stage.clearGhosts();
     ghostKey = null;
+    if (framed) services.stage.view("iso");
+    framed = false;
   },
 });

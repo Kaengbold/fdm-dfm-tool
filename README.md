@@ -9,19 +9,29 @@ browser, no install, your files never leave your computer.
 
 ## What it does
 
-| | |
-|---|---|
-| **Input** | STL, 3MF or STEP (exact CAD faces). Files with several parts let you pick one; parts exported in inches or metres get a one-click rescale |
-| **Orientation** | Ranks build directions by supports (sliced: bridges, supports landing on the part), bed contact, height — and strength if you add loads; click faces to keep them clean of support marks or put them on the bed; says why other options rank lower; checks the build volume and turns the part to fit |
-| **Printability** | Pseudo-slices the part: overhangs vs. bridges, thin walls, sharp bed corners, tipping, slender features, heat build-up (small pins and tips that are still soft when the next layers go on, with a heat colour view), material/printer issues |
-| **Explanations** | Every finding has a plain-language *why* and fixes, filtered by what you can change: *just print it* / *the design* / *both* |
-| **Slicer settings** | Recommended settings, exported in a 3MF together with the oriented part: OrcaSlicer, Bambu Studio and PrusaSlicer apply all of them; Cura applies the per-model ones (walls, infill, top/bottom, supports, hole and first-layer size, ironing, bridges, fuzzy skin), layer height, support type and brim are set in Cura by hand |
-| **Strength** | Click a face → "held here" or "2 kg pulling". Voxel FEA with weaker layer bonds (material + enclosure dependent) with your walls, top/bottom layers and infill gives a traffic light, a heat map and a plain explanation; "Find the lightest settings that hold" searches walls, layers, infill and orientation for your load; "A lighter shape" (topology optimisation) shows where the plastic carries the load, as a blocky guide to redesign in CAD |
-| **Detailed check** | Load the G-code you sliced from the exported 3MF (OrcaSlicer, Bambu Studio incl. `.gcode.3mf`, PrusaSlicer, Cura): strength then uses the plastic really printed in each spot and which way the lines run (lines pulled apart sideways are weak), and the heat check uses the real layer times. Locally, the MCP tool `detailed_strength` slices with the installed OrcaSlicer itself |
-| **Design fixes** | Detects holes and round posts and asks when unsure ("is this a hole?"); suggests teardrop holes, corner chamfers, 45° fills under ledges, sacrificial layers over holes that start in mid-air and thicker walls; previews them (red = cut, green = added), applies them and re-checks; STEP parts are written back as STEP with only the edited spots changed |
-| **AI agents** | No AI inside the app. Your own agent (Claude Code, Codex, Claude Desktop) operates the tool through the MCP server with *your own* subscription; it can write the report as HTML or Markdown with pictures and charts (`write_report`, `render_image`, `make_chart`, or the `fdmdfm` command line). Or copy the report into any AI chat |
+One guided flow on a desktop browser (1280 × 720 or larger), with the part in 3D the whole way:
 
-Add your own printer or filament (or import an OrcaSlicer filament profile) and measure it with small test prints: layer strength, warping, fits (snug / sliding gaps), overhang angle and bridge length.
+| Step | |
+|---|---|
+| **Your part** | STL, 3MF or STEP (exact CAD faces). Files with several parts let you pick one; parts exported in inches or metres get a one-click rescale. Saved projects and shared reports open here too |
+| **Setup** | Your printer (presets, or any printer OrcaSlicer knows), the nozzles you have, a material or "decide later", the goal (Strong, Balanced, Fast, Light or Quality) and what may change: slicer settings, the design, or both |
+| **Environment** | How warm it gets in use and what it touches (water, food, sunlight, oil…), so unsuitable materials are left out |
+| **Holds and loads** | Click on the part: where it is held (a face, an edge, an inside corner, a screw hole) and where it is pushed or pulled (in N or MPa, aimed with a 3D arrow); then how long the load stays and whether it shakes |
+| **Analyse → Options** | The optimizer tries orientations, materials, nozzles, layer heights, walls, top/bottom layers and infill (at Complete also local reinforcements) and checks each candidate's strength at its own pose with a voxel FEA that knows the weaker layer bonds. You get 2–4 options side by side against the goal's safety target (Strong ×5, Balanced ×3, Fast ×2, Light ×1.5); pin a value you want and re-optimize |
+| **Simulation** | OrcaSlicer, running in your browser, slices the chosen option in the background (or drop in your own G-code): heat per spot and layer cooling, warping (true size or exaggerated), internal stress and overhangs on the part |
+| **Problems & fixes** | Every problem with its fixes first: a slicer setting, a design change previewed on the part (teardrop holes, chamfers, thicker walls…), a printing tip, or the number to change in CAD. Collect fixes in one batch, confirm, and the part is changed safely and checked again (problems, strength, a better orientation if there is one); one click undoes the batch |
+| **Done** | A 3MF for OrcaSlicer, Bambu Studio or PrusaSlicer with the part turned and every setting you ticked; the changed part as STL (a changed STEP part comes back as STL for now); G-code from the browser OrcaSlicer; a project file, a report to share and a CAD checklist |
+
+The **Quality** goal is for parts that must look good: it skips holds, loads and strength, guesses which faces people
+see (the outer ones) and keeps support off them; you can mark the face that matters instead (agents:
+`guess_visible_faces`, then `faces` in `optimize_print`).
+
+**Settings & calibration** (from the header at any time): your printers and materials, imported slicer profiles, and
+small test prints that measure your printer (layer strength, warping, fits, overhang angle, bridges).
+
+**AI agents:** no AI inside the app. Your own agent (Claude Code, Codex, Claude Desktop) operates the same engine
+through the MCP server with *your own* subscription, including the app's optimizer (`optimize_print`), and can write
+the report as HTML or Markdown with pictures and charts. See [Use it from an AI agent](#use-it-from-an-ai-agent-local-mode).
 
 Autodesk Fusion users: an add-in in [`fusion/`](fusion/README.md) runs the same checks on a body and can add teardrops as real CAD features (early, not yet tested inside Fusion).
 
@@ -130,7 +140,7 @@ check it holds 5 kg on the top face, apply sensible design fixes and export a 3M
 | `core/fdmcore/` | Analysis engine (Python). Runs natively and in the browser via Pyodide |
 | `core/fdmcore/data/` | Presets and the knowledge base (`rules.yaml`) — contributions welcome |
 | `core/tests/` | `pytest` tests |
-| `web/` | Static web app: three.js viewer, Pyodide worker, manifold-3d booleans |
+| `web/` | Static web app (`index.html`, `main.js`): the shell and steps in `steps/`, components in `ui/`, the 3D view in `viewport/`, the Pyodide worker, manifold-3d booleans, the browser slicer |
 | `web/samples/` | Demo parts (generated by `tools/make_samples.py`) |
 | `tools/` | Dev scripts (`make_samples.py`, `make_manifest.py`, `e2e_smoke.py`) |
 | `research/` | Background notes and the research prompt (unverified unless stated) |
@@ -144,7 +154,7 @@ cd core
 pip install -e ".[dev]"
 python -m pytest
 python ../tools/make_manifest.py   # after adding/removing engine files
-cd .. && python tools/e2e_smoke.py # browser smoke test (pip install playwright; uses installed Edge)
+cd .. && python tools/e2e_smoke.py # browser test: every step, then the whole journey at 1280×720 and 1440×900 (pip install playwright; uses installed Edge)
 ```
 
 Engine modules used by the web app must only need numpy, shapely, pyyaml or scipy
