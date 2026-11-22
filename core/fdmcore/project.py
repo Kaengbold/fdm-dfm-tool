@@ -9,7 +9,7 @@ Pending boxes keep their geometry because a strength result that placed one isn'
 
 JSON with the part as base64 binary STL, so it opens anywhere and diffs as text. Face ids in loads and
 marks refer to the part's face regions, which come out the same when the same triangles load again
-(``face_ids`` keeps the CAD faces of a STEP part). The web app writes the same format in JS (app.js).
+(``face_ids`` keeps the CAD faces of a STEP part). The web app writes the same format in JS (web/project.js).
 """
 
 from __future__ import annotations

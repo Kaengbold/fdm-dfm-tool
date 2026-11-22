@@ -10,6 +10,7 @@ import { ProgressCard } from "../ui/progress.js";
 import { registerStep } from "../shell.js";
 import { t } from "../i18n.js";
 import { optimizeArgs } from "./args.js";
+import { showFacesPanel, clearShowFaces } from "./showfaces.js";
 
 export const DEPENDS = ["model", "profile", "goal", "environment", "loads", "depth"];
 // The optimizer's own stage names (core/fdmcore/optimizer.py progress.report) → the plan's list (§10.1).
@@ -31,7 +32,8 @@ async function loadEstimates(services, store, args) {
   estimates = { key, values: {} };
   for (const depth of ["fast", "extended", "complete"]) {
     try {
-      const e = await services.engine.call("estimate_runtime", { ...args, depth });
+      const { faces: _faces, ...rest } = args; // the estimate doesn't depend on marked faces
+      const e = await services.engine.call("estimate_runtime", { ...rest, depth });
       if (estimates.key !== key) return;
       estimates.values[depth] = e.browser_seconds ?? e.seconds * 3;
     } catch { /* no estimate: the card shows none */ }
@@ -101,6 +103,7 @@ registerStep("analyse", {
     body.append(h("p", { class: "ui-hint" }, [s.profile?.printer ? (s.catalog?.printers?.[s.profile.printer]?.name ?? s.profile.printer) : null, goalWord, changeWord].filter(Boolean).join(" · ")));
     body.append(h("div", { class: "ui-label" }, t("analyse.howDeep")),
       ChoiceCards({ label: t("analyse.howDeep"), columns: 1, value: depth, options, onChange: (v) => store.set({ depth: v }, { undoable: false }) }));
+    if (quality && s.part) body.append(showFacesPanel(store, services));
     if (!quality && !designAllowed) {
       body.append(h("p", { class: "ui-hint analyse-allow" }, t("analyse.needsDesign"), " ",
         h("button", { type: "button", class: "ui-link", onclick: () => store.set({ change: "both" }) }, t("analyse.allow"))));
@@ -126,6 +129,7 @@ registerStep("analyse", {
       if (result && !store.isStale("optimize")) body.append(Button({ label: t("analyse.toOptions"), variant: "ghost", onClick: () => go("options") }));
     }
   },
+  leave({ services }) { clearShowFaces(services); },
 });
 
 export { mmss };

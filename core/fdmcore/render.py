@@ -3,7 +3,7 @@
 A small numpy software renderer: orthographic camera, flat shading, a z-buffer filled by
 rasterising every triangle's bounding box at once (vectorised, in chunks), drawn at twice the
 size and averaged down for smooth edges. PNG written with zlib. No new dependency, so it runs
-in Pyodide too. Colours match the web app's 3D view (style.css / viewer.js).
+in Pyodide too. Colours match the web app's 3D view (viewport/stage.js).
 """
 
 from __future__ import annotations

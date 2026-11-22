@@ -119,6 +119,19 @@ export function loadToEngine(load) {
   return { ...where(load), kind: "force", kg: load.newtons / G, direction: load.direction, ...(load.case > 1 ? { case: load.case } : {}) };
 }
 
+/** The faces that should stay free of support marks (Quality, §14): the ones the user marked as show faces, else our
+ * guess (``"visible"``: the outer faces, api.visible_faces). Other goals: none. */
+export function facesArg(state) {
+  if (state?.goal !== "quality") return null;
+  return { clean: state.showFaces?.length ? [...state.showFaces] : "visible" };
+}
+
+/** Only the show faces the user marked (for the checks and the export: support marks there are a problem, and the
+ * slicer keeps the seam off them). Our guess only steers the optimizer. */
+export function markedFaces(state) {
+  return state?.goal === "quality" && state.showFaces?.length ? { clean: [...state.showFaces] } : null;
+}
+
 export function optimizeArgs(state) {
   const goal = state?.goal || "balanced";
   const depth = state?.depth || "extended";
@@ -166,5 +179,6 @@ export function optimizeArgs(state) {
     environment: { temp_c: tempC, touches },
     constraints,
     change,
+    faces: facesArg(state),
   };
 }

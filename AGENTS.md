@@ -22,7 +22,7 @@ may work here in parallel; these rules keep their work from colliding.
 | `core/fdmcore/` | Python engine. Runs natively **and in the browser via Pyodide** |
 | `core/fdmcore/data/` | `presets.yaml`, `rules.yaml` (knowledge base) |
 | `core/tests/` | pytest suite |
-| `web/` | Static app (no build step): `app.js` UI, `viewer.js` three.js, `worker.js` Pyodide, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `mypresets.js` user presets, `report.js` HTML report, `project.js` project files (same format as `core/fdmcore/project.py`) |
+| `web/` | Static app (no build step): `index.html` → `main.js`; `shell.js` header / step rail / panel, `state.js` the store, `flow.js` the steps; `steps/` one module per step, `ui/` components, `viewport/` the 3D stage, picker and gizmo; `tokens.css` the design tokens (see DESIGN.md); `worker.js` Pyodide, `slicer-worker.js` the browser OrcaSlicer, `geometry.js` manifold-3d, `step.js` STEP import, `stepwrite.js` STEP write-back, `mypresets.js` user presets, `report.js` HTML report, `project.js` project files (same format as `core/fdmcore/project.py`) |
 | `fusion/FDMDFM/` | Fusion add-in: `bridge.py` (no `adsk`, tested in `core/tests`), `FDMDFM.py` UI, `install_deps.py` |
 | `agents/` | Guide for the user's own agent: `fdm-check/SKILL.md` (Claude Code skill), `AGENTS-snippet.md` (Codex) |
 | `tools/` | `make_samples.py`, `make_manifest.py`, `e2e_smoke.py` |
@@ -50,10 +50,12 @@ may work here in parallel; these rules keep their work from colliding.
 
 ```sh
 cd core && python -m pytest -q                 # engine tests (~8 min; while working, run the test files you touch)
-python tools/e2e_smoke.py                      # browser test in headless Edge (pip install playwright)
-python tools/e2e_smoke.py part.step --gemini-review   # + your part, + Gemini screenshot review
+python tools/e2e_smoke.py                      # browser test in headless Edge: every step, then the whole journey at two sizes (pip install playwright)
+python tools/e2e_smoke.py --quick              # the step checks only (what CI runs)
+python tools/e2e_smoke.py --gemini-review      # + Gemini screenshot review
 node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)
 node tools/make_step_fixture.mjs               # regenerate the STEP test part (once: npm install --no-save --prefix tools replicad-opencascadejs@1.1.0)
+node tools/check_step_faces.mjs                # STEP face ids: importer vs OpenCascade (once: npm install --no-save --no-package-lock --prefix tools replicad-opencascadejs@1.1.0 occt-import-js@0.0.23)
 python tools/slicer_check.py                   # do installed OrcaSlicer / Bambu Studio / PrusaSlicer apply our 3MF settings?
 python tools/orca_profiles.py                  # regenerate the OrcaSlicer profiles local slicing ships with (pinned OrcaSlicer version)
 python tools/orca_printers.py                  # regenerate the list of other printers OrcaSlicer knows ("My printer isn't listed")

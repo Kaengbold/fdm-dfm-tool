@@ -1,7 +1,7 @@
 // The new UI's shell (T-530, plan §1.2, §1.6, §1.7, §1.8, §2): header in grid row 1, the step rail, the 3D stage and
 // the right panel whose footer keeps Back (left) and Next (right) in the same spot on every step. Steps plug in
 // through registerStep(id, {render}); until their tasks land (T-531 …) a step shows only its title and purpose.
-// Started by web/new.html (the old web/index.html stays until the cut-over, T-580).
+// Started by web/index.html (main.js).
 import { h, icon } from "./ui/dom.js";
 import { Button } from "./ui/button.js";
 import { StepRail } from "./ui/steprail.js";
@@ -13,12 +13,23 @@ import { STEPS, canLeave, nextStep, prevStep, railSteps, step } from "./flow.js"
 const GEAR = ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17m10-10 2.1-2.1"];
 const UNDO = ["M9 14 4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"];
 const REDO = ["m15 14 5-5-5-5", "M20 9H10a6 6 0 0 0 0 12h3"];
+const MOON = ["M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"];
+
+/** Light by default, a switch for dark (§16.6), remembered in this browser (main.js reads it at start). */
+function toggleTheme() {
+  const dark = document.documentElement.dataset.theme !== "dark";
+  if (dark) document.documentElement.dataset.theme = "dark";
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("fdm-theme", dark ? "dark" : "light"); } catch { /* storage blocked: this visit only */ }
+  return dark;
+}
 
 const steps = new Map(); // id -> {render({body, stage, store, go, services})}
 const screens = new Map(); // start | settings -> render({root, store, go, openRoute, services})
 /** A step's content. ``render`` fills the panel body and the stage's overlay layer (``stage``; the 3D view itself
  * is ``services.stage``); it runs again when the state changes. ``next({store, state})`` (optional) returns
- * ``{label, to}`` for the Next button, or nothing for the usual one; ``leave({store, services})`` (optional) runs when
+ * ``{label, to, confirm?}`` for the Next button, or nothing for the usual one (``confirm(go)`` runs instead of going
+ * straight on, so a step can ask first: Problems with changes still pending); ``leave({store, services})`` (optional) runs when
  * another step or screen takes over. */
 export function registerStep(id, def) {
   step(id);
@@ -29,7 +40,7 @@ export function registerScreen(name, render) {
   screens.set(name, render);
 }
 
-/** Build the app into ``root`` (the .app grid of new.html). Returns {store, go, route} for steps and tests. */
+/** Build the app into ``root`` (the .app grid of index.html). Returns {store, go, route} for steps and tests. */
 export function startShell(root, { store = createStore(), saving = autosave(store), services = {} } = {}) {
   let route = "start"; // start | flow | settings
   const header = buildHeader();
@@ -95,7 +106,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const next = own?.to ?? nextStep(s.step, s);
     const foot = h("div", { class: "panel-foot" },
       back ? Button({ label: t("shell.back"), variant: "ghost", onClick: () => go(back) }) : h("span"),
-      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => go(next) }) : h("span"));
+      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => (own?.confirm ? own.confirm(() => go(next)) : go(next)) }) : h("span"));
     const head = h("div", { class: "panel-head" }, title, h("p", { class: "hint" }, t(`step.${s.step}.purpose`)));
     (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, openRoute, services });
     if (def.layout === "part") {
@@ -135,10 +146,12 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const pill = h("button", { type: "button", class: "part-pill", title: t("shell.replacePart"), hidden: true });
     const undo = Button({ iconPath: UNDO, title: t("shell.undo"), variant: "ghost", onClick: () => store.undo() });
     const redo = Button({ iconPath: REDO, title: t("shell.redo"), variant: "ghost", onClick: () => store.redo() });
-    const exportBtn = Button({ label: t("shell.export"), variant: "secondary" });
+    const exportBtn = Button({ label: t("shell.export"), variant: "secondary", onClick: () => services.openExport?.() });
     const settings = Button({ label: t("shell.settings"), variant: "ghost", iconPath: GEAR, onClick: () => openRoute("settings") });
+    const theme = Button({ iconPath: MOON, variant: "ghost", title: t("shell.theme"), onClick: () => theme.setAttribute("aria-pressed", String(toggleTheme())) });
+    theme.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "dark"));
     const help = Button({ label: t("shell.help"), variant: "ghost" });
-    const el = h("header", { class: "app-header" }, brand, workflow, pill, h("span", { class: "ui-grow" }), undo, redo, exportBtn, settings, help);
+    const el = h("header", { class: "app-header" }, brand, workflow, pill, h("span", { class: "ui-grow" }), undo, redo, exportBtn, settings, theme, help);
     brand.addEventListener("click", () => {
       const s = store.get();
       if (!s.part) { openRoute("start"); return; }

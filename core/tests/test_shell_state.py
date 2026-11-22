@@ -131,7 +131,7 @@ def page():
         pg = browser.new_page(viewport={"width": 1280, "height": 720})
         errors: list[str] = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        pg.goto(f"http://127.0.0.1:{server.server_address[1]}/web/new.html")
+        pg.goto(f"http://127.0.0.1:{server.server_address[1]}/web/")
         pg.wait_for_selector("body[data-ready]")
         yield pg
         assert not errors, errors
@@ -152,7 +152,7 @@ def test_walk_the_empty_flow(page):
     for _ in range(12):
         seen.append(page.locator("#step-title").inner_text())
         assert page.evaluate("() => document.activeElement.id") == "step-title", "focus didn't move to the step title"
-        nxt = page.get_by_role("button", name="Next")
+        nxt = page.locator(".panel-foot .ui-btn--primary")  # Next, or a step's own label for it ("Continue to Done")
         if not nxt.count():
             break
         box = nxt.bounding_box()

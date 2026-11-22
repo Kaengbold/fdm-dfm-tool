@@ -58,6 +58,7 @@ class Session:
     coarse: list | None = None  # curves exported with too few facets (checks.coarse_surfaces), computed on demand
     kind: str = "cad"  # "cad" or "organic" (scan, sculpt, figure): _model_kind, T-408
     cad_checks: bool = True  # hole / gap / pin / lettering checks and feature detection (off for organic parts)
+    cad_faces: tuple | None = None  # STEP parts: (the regions loaded with it, B-rep face id per region), see _cad_face
     importance: tuple | None = None  # (key, importance.Map): how much each spot matters (T-475), cached
 
 
@@ -458,10 +459,11 @@ def load(data: bytes, name: str = "part", face_ids: list[int] | None = None) -> 
     if face_ids is not None:
         if len(bodies) > 1 or len(face_ids) != bodies[0][1].face_count:
             raise ValueError("face_ids must have one entry per triangle")
-        regions = np.unique(np.asarray(face_ids), return_inverse=True)[1].ravel()
+        ids, regions = np.unique(np.asarray(face_ids), return_inverse=True)
+        regions = regions.ravel()
     else:
-        regions = None
-    _session = Session(bodies[0][1], name, regions, bodies=bodies)
+        ids = regions = None
+    _session = Session(bodies[0][1], name, regions, bodies=bodies, cad_faces=None if ids is None else (regions, ids))
     _set_kind("cad" if face_ids is not None else None)
     return _info()
 
@@ -723,7 +725,8 @@ MARK_KINDS = ("clean", "bed", "vertical")
 
 
 def _marked_faces(faces: dict | None) -> dict | None:
-    """Triangle masks for the user's marked faces (regions), or None if nothing is marked."""
+    """Triangle masks for the user's marked faces (regions), or None if nothing is marked. ``"clean": "visible"``
+    stands for our guess of the faces people see (visible_faces), as one mask: ``guessed`` is then True."""
     if not faces or not any(faces.get(k) for k in MARK_KINDS):
         return None
     from .regions import find_regions
@@ -731,7 +734,26 @@ def _marked_faces(faces: dict | None) -> dict | None:
     s = _require()
     if s.regions is None:
         s.regions = find_regions(s.mesh)
+    if faces.get("clean") == "visible":
+        seen = np.isin(s.regions, visible_faces()["regions"])
+        return {"clean": [seen] if seen.any() else [], "guessed": True,
+                **{k: [s.regions == r for r in faces.get(k, [])] for k in ("bed", "vertical")}}
     return {kind: [s.regions == r for r in faces.get(kind, [])] for kind in MARK_KINDS}
+
+
+def visible_faces() -> dict:
+    """The faces people will see, guessed (plan §14, decision 10): the outer ones, on the part's convex hull. Hole
+    walls, pockets and slots are left out, so support there doesn't count as a mark. The Quality goal starts from
+    this guess (``faces={"clean": "visible"}`` in optimize, check and orientations) until the user marks show faces."""
+    from .regions import find_regions, outer_regions
+
+    s = _require()
+    if s.regions is None:
+        s.regions = find_regions(s.mesh)
+    ids = outer_regions(s.mesh, s.regions)
+    _, areas = s.mesh.normals_and_areas()
+    share = float(areas[np.isin(s.regions, ids)].sum() / max(areas.sum(), 1e-12))
+    return {"regions": [int(r) for r in ids], "share": round(share, 3)}
 
 
 def _normal_spread(mesh: Mesh, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1090,7 +1112,8 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
 
 def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str = "extended", profile: dict | None = None,
              owned: list[str] | None = None, materials: list[str] | None = None, nozzles: list[str] | None = None,
-             environment: dict | None = None, constraints: dict | None = None, change: str = "slicer") -> dict:
+             environment: dict | None = None, constraints: dict | None = None, change: str = "slicer",
+             faces: dict | None = None) -> dict:
     """The new UI's optimizer (optimizer.py): 2–4 verified options for ``goal`` (strong / balanced / fast /
     light / quality) over orientation, material, nozzle, layer height and walls / top / infill, plus local
     reinforcements at Complete depth (or whenever ``change="design"``).
@@ -1100,7 +1123,9 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
     with ``constraints``). ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
     to consider (nozzles = the ticked sizes). ``environment``: {"temp_c", "touches": [water, food, outdoors,
     abrasion, oil_fuel, solvent, skin]}. ``constraints`` ("Your choices", hard limits): material, nozzle,
-    layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both."""
+    layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both. ``faces`` as in orientations
+    (``{"clean": "visible"}``: the guessed faces people see, the Quality goal's default): orientations that put
+    support on them rank lower."""
     from . import optimizer
 
     s = _require()
@@ -1113,7 +1138,16 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
                               nozzles=nozzles, environment=env, constraints=constraints, change=change,
                               load_case=_load_case, climb=_climb, grams_minutes=_grams_minutes_of,
                               evaluate=_evaluate, orientation_settings=orientation_settings,
-                              zone_info=_zone_info, unit_shape=_unit_shape)
+                              zone_info=_zone_info, unit_shape=_unit_shape, mark_faces=_pose_marks(faces))
+
+
+def _pose_marks(faces: dict | None):
+    """For optimize: score candidate orientations against the marked faces, as orientations() does."""
+    marked = _marked_faces(faces)
+    if not marked:
+        return None
+    s = _require()
+    return lambda results, settings: [_face_penalty(s.mesh, r, marked, settings) for r in results]
 
 
 def estimate_runtime(depth: str = "extended", loads: list[dict] | None = None, profile: dict | None = None,
@@ -1801,7 +1835,8 @@ def _stress_story(r: dict) -> str:
 
 
 def _edges() -> tuple[dict, dict]:
-    """Cached compact (feature_edges, concave_edges) polylines for the loaded part."""
+    """Cached compact (feature_edges, concave_edges) polylines for the loaded part. On a STEP part each also names
+    the B-rep faces it lies between (``faces``, see ``_cad_face``): an edit there can work on the exact CAD edge."""
     from .regions import extract_edges, find_regions
 
     s = _require()
@@ -1809,7 +1844,21 @@ def _edges() -> tuple[dict, dict]:
         s.regions = find_regions(s.mesh)
     if s.edges is None:
         s.edges = extract_edges(s.mesh, s.regions)
+        for group in s.edges:
+            for m in group["meta"]:
+                faces = [_cad_face(r) for r in m["regions"]]
+                if m["regions"] and None not in faces:
+                    m["faces"] = faces
     return s.edges
+
+
+def _cad_face(region: int) -> int | None:
+    """The STEP file's B-rep face id of a region (the importer's id for this body, which is OpenCascade's own face
+    order, checked by tools/check_step_faces.mjs), or None when the part isn't from STEP or its regions changed."""
+    s = _require()
+    if s.cad_faces is None or s.cad_faces[0] is not s.regions or not 0 <= region < len(s.cad_faces[1]):
+        return None
+    return int(s.cad_faces[1][region])
 
 
 def _resolve_loads(loads: list[dict]) -> list[dict]:
@@ -1854,6 +1903,10 @@ def regions() -> dict:
     if s.regions is None:
         s.regions = find_regions(s.mesh)
     info = region_info(s.mesh, s.regions, accepted(_features()))
+    for r in info:
+        face = _cad_face(r["id"])
+        if face is not None:
+            r["face"] = face
     feature_edges, concave_edges = _edges()
     return {
         "face_regions": s.regions.astype("<u4").tobytes(),
@@ -3870,8 +3923,9 @@ def _thread_findings(oriented: Mesh, rotation: np.ndarray, p: Profile) -> list[d
 
 
 def _clean_face_findings(mesh: Mesh, up, p: Profile, marked: dict | None, rotation: np.ndarray) -> list[dict]:
-    """Support marks on a face the user wants clean: the one place they matter most."""
-    if not marked or not marked["clean"]:
+    """Support marks on a face the user wants clean: the one place they matter most. Our guess of the faces people
+    see (``guessed``) only steers the orientation; the usual support_marks finding already names those marks."""
+    if not marked or not marked["clean"] or marked.get("guessed"):
         return []
     from .orientation import NEEDS_SUPPORT
 
@@ -4298,6 +4352,7 @@ METHODS = {
     "select_body": select_body,
     "scale": scale,
     "orientations": orientations,
+    "visible_faces": visible_faces,
     "orientation": orientation,
     "check": check,
     "export": export,
