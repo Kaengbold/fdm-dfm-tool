@@ -2054,7 +2054,7 @@ HOT_SPOTS = 20  # heat_model lists this many of the hottest spots
 
 
 def heat_model(up, profile: dict | None = None, fine: bool = False, intents: list[dict] | None = None,
-               loads: list[dict] | None = None) -> dict:
+               loads: list[dict] | None = None, focus: bool = False) -> dict:
     """Heat network over the loaded G-code (thermal.py): how hot every spot is when the next layer
     covers it, how well each joint between layers bonds, and where that leaves the temperature window
     (``findings``: too hot, too cold to bond, or slowed down for cooling it doesn't need). The profile's
@@ -2065,7 +2065,10 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     cells and more layers in full detail (slower). Per spot, as float32 bytes in the oriented part's
     frame: ``points`` (x, y, z), ``cover_c_all``, ``cover_s``, ``above_tg_s``, ``bond``, ``joint_c``
     (T_int at each of ``delays_s``), ``importance``; as uint8: ``window`` (0 fine, 1 too hot, 2 too
-    cold, 3 needless slowdown) and ``importance_reason`` (index into ``reasons``)."""
+    cold, 3 needless slowdown) and ``importance_reason`` (index into ``reasons``). ``focus`` (with the quick
+    tier): the spots that leave their window or matter most are run again in fine detail, each in a box with a
+    margin (``focus``: where, and the hottest covering temperature both ways); the findings there come from the
+    fine runs. Cheaper than a fine run of a big part; the per-spot arrays stay the quick tier's."""
     from .importance import REASONS
     from .thermal import DELAYS_S, confidence, window
 
@@ -2075,6 +2078,10 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     pts, masks, weight, reason, imp = _spot_marks(h, up, p, intents, loads)
     w = window(h, p, masks, weight)
     state = np.select([w["too_hot"], w["needless"], w["too_cold"]], [1, 3, 2], 0)
+    findings = _heat_findings(tp, h, w, pts, p, masks.get("load_bearing"), reason, imp.guessed)
+    areas = None
+    if focus and not fine:
+        findings, areas = _focus(tp, tm, h, w, findings, up, p, intents, loads)
     covered = np.isfinite(h.cover_c)
     hottest = np.flatnonzero(covered)[np.argsort(-h.cover_c[covered])][:HOT_SPOTS]
     f32 = lambda a: np.asarray(a, np.float32).tobytes()
@@ -2090,8 +2097,75 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
         "joint_c": f32(h.joint_c), "bond": f32(h.bond), "window": np.asarray(state, np.uint8).tobytes(),
         "importance": f32(w["weight"]), "importance_reason": np.asarray(reason, np.uint8).tobytes(),
         "reasons": list(REASONS), "guessed": imp.guessed,
-        "findings": _heat_findings(tp, h, w, pts, p, masks.get("load_bearing"), reason, imp.guessed),
+        "findings": findings,
+        **({"focus": areas} if areas is not None else {}),
     }
+
+
+FOCUS_AREAS = 3  # at most this many fine detail runs
+FOCUS_MARGIN_MM = 6.0  # around what is looked at: a cut side loses no heat sideways, so keep it away
+FOCUS_MAX_SHARE = 0.5  # a box covering more of the part than this saves too little: run the fine tier instead
+
+
+def _focus_boxes(h, w: dict) -> list[tuple]:
+    """Printer-frame boxes (x0, y0, x1, y1) around what matters most: per column, the spots outside their
+    window (and, less, the ones that weigh most), heaviest columns first; grown by the margin, joined where
+    they overlap, none much bigger than ``FOCUS_MAX_SHARE`` of the part."""
+    flagged = w["too_hot"] | w["too_cold"]
+    score = np.where(flagged, 1.0 + w["weight"], np.where(w["weight"] >= 0.9, 0.5 * w["weight"], 0.0))
+    if not (score > 0).any():
+        return []
+    per_column = np.bincount(h.column.astype(np.intp), score)
+    lo_all, hi_all = h.xy.min(axis=0), h.xy.max(axis=0)
+    part_area = float(np.prod(hi_all - lo_all + h.cell_mm))
+    boxes = []
+    for col in np.argsort(-per_column)[:FOCUS_AREAS]:
+        sel = (h.column == col) & (score > 0)
+        if not sel.any():
+            continue
+        lo = h.xy[sel].min(axis=0) - h.cell_mm / 2 - FOCUS_MARGIN_MM
+        hi = h.xy[sel].max(axis=0) + h.cell_mm / 2 + FOCUS_MARGIN_MM
+        boxes.append([*lo, *hi])
+    merged = []
+    for b in sorted(boxes):
+        if merged and b[0] <= merged[-1][2] and b[1] <= merged[-1][3] and b[3] >= merged[-1][1]:
+            m = merged[-1]
+            merged[-1] = [min(m[0], b[0]), min(m[1], b[1]), max(m[2], b[2]), max(m[3], b[3])]
+        else:
+            merged.append(b)
+    return [tuple(float(v) for v in b) for b in merged if (b[2] - b[0]) * (b[3] - b[1]) <= FOCUS_MAX_SHARE * part_area * 1.5]
+
+
+def _focus(tp, tm, h, w: dict, findings: list[dict], up, p: Profile, intents, loads) -> tuple[list[dict], list[dict]]:
+    """Fine detail runs around ``_focus_boxes``: their findings replace the quick ones inside each box (the
+    margin itself is left to the quick run), and per box where it is and how hot it got both ways."""
+    from .thermal import simulate, window
+
+    to_oriented = _gcode_to_oriented(_require().gcode["rot"])
+    areas = []
+    for box in _focus_boxes(h, w):
+        hf = simulate(tp, tm, p, "fine", region=box)
+        ptsf, masks, weight, reason, imp = _spot_marks(hf, up, p, intents, loads)
+        wf = window(hf, p, masks, weight)
+        inner = ((hf.xy[:, 0] >= box[0] + FOCUS_MARGIN_MM) & (hf.xy[:, 0] <= box[2] - FOCUS_MARGIN_MM)
+                 & (hf.xy[:, 1] >= box[1] + FOCUS_MARGIN_MM) & (hf.xy[:, 1] <= box[3] - FOCUS_MARGIN_MM))
+        for key in ("too_hot", "too_cold", "needless"):
+            wf[key] = wf[key] & inner
+        corners = to_oriented(np.array([[box[0] + FOCUS_MARGIN_MM, box[1] + FOCUS_MARGIN_MM, 0], [box[2] - FOCUS_MARGIN_MM, box[3] - FOCUS_MARGIN_MM, 0],
+                                        [box[0] + FOCUS_MARGIN_MM, box[3] - FOCUS_MARGIN_MM, 0], [box[2] - FOCUS_MARGIN_MM, box[1] - FOCUS_MARGIN_MM, 0]]))
+        lo, hi = corners[:, :2].min(axis=0), corners[:, :2].max(axis=0)
+
+        def inside(f) -> bool:
+            c = (np.asarray(f["bbox"][0][:2]) + np.asarray(f["bbox"][1][:2])) / 2
+            return bool((c >= lo).all() and (c <= hi).all())
+
+        findings = [f for f in findings if not inside(f)] + _heat_findings(tp, hf, wf, ptsf, p, masks.get("load_bearing"), reason, imp.guessed)
+        quick_in = (h.xy[:, 0] >= box[0] + FOCUS_MARGIN_MM) & (h.xy[:, 0] <= box[2] - FOCUS_MARGIN_MM) & \
+                   (h.xy[:, 1] >= box[1] + FOCUS_MARGIN_MM) & (h.xy[:, 1] <= box[3] - FOCUS_MARGIN_MM)
+        hottest = lambda heat, sel: round(float(np.nanmax(heat.cover_c[sel])), 1) if np.isfinite(heat.cover_c[sel]).any() else None
+        areas.append({"bbox": [lo.tolist(), hi.tolist()], "spots": int(inner.sum()), "seconds": round(hf.seconds, 1),
+                      "cover_c_max": {"quick": hottest(h, quick_in), "fine": hottest(hf, inner)}})
+    return findings, areas
 
 
 def _toolpath_for(up, what: str):

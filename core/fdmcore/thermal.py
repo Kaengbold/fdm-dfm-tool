@@ -169,9 +169,10 @@ def _reptation_s(T: np.ndarray, c: dict) -> np.ndarray:
     return np.where(above, c["reptation_s"] * 10.0 ** np.minimum(shifted, 30), np.inf)
 
 
-def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict) -> dict:
+def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, region=None) -> dict:
     """Plastic of the part and its supports drawn onto the cells of each layer: one node per filled
-    cell, with its plastic, when it was printed and how hot it went down."""
+    cell, with its plastic, when it was printed and how hot it went down. ``region`` (x0, y0, x1, y1,
+    printer frame): only the plastic inside it (a detail run, see ``simulate``)."""
     which = np.flatnonzero(np.isin(tp.kind, (*PART_KINDS, SUPPORT)))
     a, b = tp.p0[which].astype(float), tp.p1[which].astype(float)
     length = np.linalg.norm(b - a, axis=1)
@@ -186,6 +187,12 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict) -> dict:
     duration = np.maximum(tm.t1[which] - tm.t0[which], 1e-6)
     flow = tp.volume[which] / duration  # mm³/s while printing the line
     melt = (c["nozzle_c"] - _interp(c["melt_drop"], flow))[seg]
+    if region is not None:
+        x0, y0, x1, y1 = region
+        inside = (pts[:, 0] >= x0) & (pts[:, 0] <= x1) & (pts[:, 1] >= y0) & (pts[:, 1] <= y1)
+        if not inside.any():
+            raise ValueError("No printed plastic in that region")
+        seg, line, pts, vol, t, melt = seg[inside], line[inside], pts[inside], vol[inside], t[inside], melt[inside]
 
     lo = np.floor(pts[:, :2].min(axis=0) / cell) - 1
     ij = (np.floor(pts[:, :2] / cell) - lo).astype(np.int64)
@@ -249,15 +256,19 @@ def _islands(n: int, layer: np.ndarray, side: np.ndarray, up: np.ndarray) -> tup
     return island, column_of[island]
 
 
-def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", overrides: dict | None = None) -> Heat:
-    """Run the heat network over the whole print. ``overrides`` replaces constants (tests, tuning)."""
+def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", overrides: dict | None = None,
+             region=None) -> Heat:
+    """Run the heat network over the whole print. ``overrides`` replaces constants (tests, tuning).
+    ``region`` (x0, y0, x1, y1, printer frame): only the plastic inside it gets cells, with the timing and the
+    nozzle of the whole print: a cheap detail run around a spot (its cut sides lose no heat sideways, so keep a
+    margin around what you look at)."""
     from scipy.sparse import coo_matrix
 
     started = time.time()
     cfg = TIERS[tier]
     c = {**constants(profile, tp.settings), **(overrides or {})}
     cell = cfg["cell_mm"]
-    d = _deposits(tp, tm, cell, c)
+    d = _deposits(tp, tm, cell, c, region)
     n = len(d["keys"])
     nx, ny = d["nx"], d["ny"]
     layer, z, lh = d["layer"], d["z"], d["lh"]
