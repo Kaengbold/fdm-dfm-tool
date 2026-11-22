@@ -1201,9 +1201,13 @@ Rules for every [UI] task:
 - [ ] **T-552 P2** [UI] Partial optimizer results: Stop & show best so far, time budget. · plan: §10.1, §1.7 · files: `core/fdmcore/optimizer.py`, `core/fdmcore/api.py`, `web/worker.js`, `web/steps/analyse.js` · owner: —
   - Do: the worker can't answer a second call while optimize runs, so stream the best valid options so far with the progress messages (e.g. `progress.report(..., partial=…)` posted by the worker); Stop keeps the latest partial result and cancels; a time budget ends the search early with "Search ended early" + Continue (never "impossible").
   - Done when: stopping a long Extended run shows its best options so far; a budgeted run says it ended early.
-- [~] **T-551 P1** [UI] Options step. · plan: §11, §10.2 (infeasible), §16.2 · files: `web/steps/options.js` · owner: Claude (`task/T-551-options`)
+- [x] **T-551 P1** [UI] Options step. · plan: §11, §10.2 (infeasible), §16.2 · files: `web/steps/options.js` · owner: Claude (`task/T-551-options`)
   - Do: full-width mode with a 3D strip on top; 2–4 aligned columns (pros/cons at the top, the rows from §11); hover pin + click-to-edit; "Your choices" bar with chips, conflicts, Keep all; Re-optimize with my choices; infeasible banner with ways out; a below-target option can be used/exported after a clear warning.
   - Done when: e2e pins PLA, re-optimizes, and every new column uses PLA.
+  - Outcome: `web/steps/options.js`: the optimizer's options as aligned columns (§11 rows: orientation, material + owned, nozzle, layer, walls, top/bottom, infill, support, total, time, safety vs target) under the 3D strip (stage `orient(up)` shows the hovered/focused option's pose; reset outside Options), pros/cons at the top; hover pin → "Your choices" chips (a second value for the same thing asks Replace / Cancel), Keep all, Re-optimize with my choices (chips as hard limits via `constraints`); infeasible banner with the ways out (allow materials / design → back to Analyse); a below-target option warns before use and carries `warning: below_target`; stale result says re-optimize. Inline click-to-edit of a value → T-553. e2e `new UI: options`.
+- [ ] **T-553 P2** [UI] Edit a value inside an Options column. · plan: §11 · files: `web/steps/options.js`, `web/ui/options.js` · owner: —
+  - Do: clicking a value edits it inline (Select or NumberField in the cell); an edited column becomes "Needs a re-check" and can't be used until re-optimized; the edit becomes a chip in Your choices.
+  - Done when: e2e edits walls in a column, the column says Needs a re-check, re-optimize uses the value.
 
 ### Phase 6: simulate, fix, finish
 

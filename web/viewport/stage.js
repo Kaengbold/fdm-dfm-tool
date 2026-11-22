@@ -145,6 +145,24 @@ export class Stage {
     this.render();
   }
 
+  /** Show the part in a build orientation: ``up`` (part coordinates) points up, resting on the bed, centred. The
+   * hover picker maps points for the part as loaded, so steps that pick call ``orient(null)`` to go back. */
+  orient(up) {
+    if (!this.part) return;
+    const g = this.part.group;
+    g.quaternion.identity();
+    g.position.set(0, 0, 0);
+    if (up && !(Math.abs(up[0]) < 1e-6 && Math.abs(up[1]) < 1e-6 && up[2] > 0)) {
+      g.quaternion.setFromUnitVectors(new THREE.Vector3(...up).normalize(), new THREE.Vector3(0, 0, 1));
+      g.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(g.children[0]);
+      g.position.set(-(box.min.x + box.max.x) / 2, -(box.min.y + box.max.y) / 2, -box.min.z);
+    }
+    this.oriented = up ?? null;
+    g.updateMatrixWorld(true);
+    this.render();
+  }
+
   /** X-ray: see through the part (holds and loads behind it stay visible). */
   setXray(on) {
     if (!this.part) return;

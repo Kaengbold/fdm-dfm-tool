@@ -11,6 +11,7 @@ import { Picker } from "./viewport/picker.js";
 import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
+import "./steps/options.js";
 import "./steps/analyse.js";
 import "./steps/loads.js";
 import "./steps/details.js";
@@ -88,6 +89,7 @@ async function preparePicker() {
     services.picker.setData(await engine.call("regions"));
   }
   services.picker.enable(on);
+  if (s.step !== "options" && services.stage.oriented) services.stage.orient(null);
 }
 const app = startShell(document.getElementById("app"), { store, saving, services });
 // Load persisted settings, populate store.catalog (printers + nozzles + owned materials), and push to the engine once ready.

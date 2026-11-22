@@ -1,0 +1,15 @@
+/* Options step (T-551): aligned comparison columns. Every column head has the same height, so the row labels on the
+   left line up with every column's cells. Spacing only from the --s-* tokens (core/tests/test_css_tokens.py). */
+.options-cols { display: grid; grid-template-columns: 112px repeat(var(--n, 3), minmax(200px, 1fr)); gap: var(--s-3); align-items: start; }
+.options-cols .ui-col__head { height: 136px; overflow: hidden; }
+.options-cols .ui-col__cell { height: 32px; }
+.options-labels { display: grid; grid-template-rows: 136px; grid-auto-rows: 32px; font-size: var(--fs-sm); color: var(--text-3); }
+.options-labels > span { display: flex; align-items: center; }
+.options-banner { display: grid; gap: var(--s-2); padding: var(--s-3) var(--s-4); border-radius: var(--r); background: var(--warn-soft); color: var(--text); }
+.options-banner b { color: var(--warn); }
+.options-banner .row { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.app-screen[data-layout="options"] > .compare .panel-body { gap: var(--s-4); }
+/* A compact title row on Options: the comparison needs the height (the mockup has no panel head). */
+.app-screen[data-layout="options"] > .compare .panel-head { padding: var(--s-3) var(--s-5) var(--s-2); border-bottom: 0; grid-template-columns: auto 1fr; align-items: baseline; gap: var(--s-3); }
+.app-screen[data-layout="options"] > .compare .panel-head h2 { font-size: var(--fs-lg); }
+.app-screen[data-layout="options"] > .compare .panel-body { padding-top: 0; }
