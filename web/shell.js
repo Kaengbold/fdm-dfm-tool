@@ -13,6 +13,16 @@ import { STEPS, canLeave, nextStep, prevStep, railSteps, step } from "./flow.js"
 const GEAR = ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M12 2v3m0 14v3M2 12h3m14 0h3M4.9 4.9 7 7m10 10 2.1 2.1M4.9 19.1 7 17m10-10 2.1-2.1"];
 const UNDO = ["M9 14 4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"];
 const REDO = ["m15 14 5-5-5-5", "M20 9H10a6 6 0 0 0 0 12h3"];
+const MOON = ["M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"];
+
+/** Light by default, a switch for dark (§16.6), remembered in this browser (main.js reads it at start). */
+function toggleTheme() {
+  const dark = document.documentElement.dataset.theme !== "dark";
+  if (dark) document.documentElement.dataset.theme = "dark";
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("fdm-theme", dark ? "dark" : "light"); } catch { /* storage blocked: this visit only */ }
+  return dark;
+}
 
 const steps = new Map(); // id -> {render({body, stage, store, go, services})}
 const screens = new Map(); // start | settings -> render({root, store, go, openRoute, services})
@@ -138,8 +148,10 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const redo = Button({ iconPath: REDO, title: t("shell.redo"), variant: "ghost", onClick: () => store.redo() });
     const exportBtn = Button({ label: t("shell.export"), variant: "secondary", onClick: () => services.openExport?.() });
     const settings = Button({ label: t("shell.settings"), variant: "ghost", iconPath: GEAR, onClick: () => openRoute("settings") });
+    const theme = Button({ iconPath: MOON, variant: "ghost", title: t("shell.theme"), onClick: () => theme.setAttribute("aria-pressed", String(toggleTheme())) });
+    theme.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "dark"));
     const help = Button({ label: t("shell.help"), variant: "ghost" });
-    const el = h("header", { class: "app-header" }, brand, workflow, pill, h("span", { class: "ui-grow" }), undo, redo, exportBtn, settings, help);
+    const el = h("header", { class: "app-header" }, brand, workflow, pill, h("span", { class: "ui-grow" }), undo, redo, exportBtn, settings, theme, help);
     brand.addEventListener("click", () => {
       const s = store.get();
       if (!s.part) { openRoute("start"); return; }
