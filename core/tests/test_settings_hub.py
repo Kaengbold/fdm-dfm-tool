@@ -225,7 +225,7 @@ def test_calibration_updates_active_checks_and_persists_through_reload_and_expor
 
     # Calibration tests tab: enter Overhang = 65 deg and Fits = 6.2 / 6.4.
     page.locator("#settings-tab-calibration").click()
-    assert page.locator(".cal-card").count() == 6
+    assert page.locator(".cal-card").count() == 8  # + temperature tower and ironing (T-572)
 
     page.locator('[data-cal-card="overhang"]').click()
     _assert_no_raw_controls(page, "calibration-overhang")

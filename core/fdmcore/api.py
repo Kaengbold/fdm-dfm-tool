@@ -174,7 +174,7 @@ def set_expert(values: dict[str, float]) -> dict:
     return expert_settings()
 
 
-CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "all")
+CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "temp", "ironing", "all")
 # What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
 CALIBRATION_HOW = {
     "layer_strength": "A 98 mm dog-bone: thin in the middle, wide with a hole at each end. Print one lying flat and one "
@@ -195,6 +195,13 @@ CALIBRATION_HOW = {
     "snap": "A thin wall 80 mm long and 40 mm tall. Slice it, load the G-code here and download the test G-code: it "
             "turns the fan down step by step, every 8 mm from 100 % at the bottom to 20 % at the top. Print it, then "
             "snap pieces off by hand from the top down: note the height below which it breaks easily along a layer.",
+    "temp": "A tower of six blocks, each printed at its own temperature (written on its front, hottest at the bottom): "
+            "slice it, load the G-code here and download the test G-code (it sets each block's temperature), print it, "
+            "then pick the block with the cleanest overhang and sharpest corners, without strings or a rough, dull surface. "
+            "OrcaSlicer and Bambu Studio also make their own (Calibration, Temperature).",
+    "ironing": "Five steps, each top ironed with a different flow (written on it, in %). Open the 3MF in OrcaSlicer or "
+               "Bambu Studio and print it as it is (the flows are already set for each height), then pick the smoothest "
+               "top: too little flow leaves lines, too much leaves ridges and blobs.",
     "all": "Every test on one plate (about 170 × 175 mm): the warping bars, two dog-bones (one lies flat, one stands on "
            "its end: give it a brim), the fit gauge with its peg, the overhang blocks and the bridges. Each piece has its "
            "size written on it (the fit holes: 6 mm plus the number). Print it without support, then read each test as below.",
@@ -322,6 +329,62 @@ def _warping_test(pitch: float = 20) -> list[np.ndarray]:
     return out
 
 
+TEMP_TOWER_STEPS_C = (10, 5, 0, -5, -10, -15)  # the tower's blocks against the material's usual temperature, bottom first
+TEMP_BLOCK_MM = 8.0
+TEMP_BASE_MM = 1.0
+IRONING_TEST_PCT = (6, 9, 12, 15, 18)  # ironing flows of the five steps (common starting points 8–15 %: thresholds looks)
+IRONING_STEP_MM = 1.6
+
+
+def _front_label(text: str, x: float, z: float, height: float) -> np.ndarray:
+    """Raised digits on a front face (y = 0), reading from the front: the flat label turned up (a rotation about x)."""
+    flat = _label(text, x, z, 0.0, height)  # drawn at y = z, standing on z = 0
+    return np.stack([flat[..., 0], -flat[..., 2], flat[..., 1]], axis=-1)
+
+
+def tower_temps(profile: dict | None = None) -> list[int]:
+    """The temperature tower's block temperatures, bottom first: the material's usual nozzle temperature plus TEMP_TOWER_STEPS_C."""
+    base = float(Profile.from_dict(profile).material["nozzle_temp_c"])
+    return [int(round(base + d)) for d in TEMP_TOWER_STEPS_C]
+
+
+def _temp_tower(temps: list[int]) -> list[np.ndarray]:
+    """Six 20 × 10 × 8 mm blocks on a base, each with a 45° overhang on its right and its temperature on its front."""
+    from shapely.geometry import Polygon, box as sbox
+
+    from .additions import extrude
+
+    out = [extrude(sbox(-3, -3, 31, 13), 0, TEMP_BASE_MM)]
+    for i, t in enumerate(temps):
+        z0 = TEMP_BASE_MM + i * TEMP_BLOCK_MM
+        out.append(_lying(Polygon([(0, z0), (20, z0), (28, z0 + TEMP_BLOCK_MM - 1), (0, z0 + TEMP_BLOCK_MM - 1)]), 0, 10))
+        out.append(extrude(sbox(1, 1, 19, 9), z0 + TEMP_BLOCK_MM - 1.05, z0 + TEMP_BLOCK_MM))  # a narrow waist: the bands show
+        out.append(_front_label(str(t), 4, z0 + 1.5, 4.5))
+    return out
+
+
+def _ironing_test() -> list[np.ndarray]:
+    """Five 20 × 22 mm steps rising to the left, each flow written in the front strip of its top."""
+    from shapely.geometry import box as sbox
+
+    from .additions import extrude
+
+    out = []
+    n = len(IRONING_TEST_PCT)
+    for i, pct in enumerate(IRONING_TEST_PCT):
+        top = IRONING_STEP_MM * (n - i)
+        out.append(extrude(sbox(20 * i, 0, 20 * i + 20, 22), 0, top))
+        out.append(_label(str(pct), 20 * i + 3, 1.5, top, 4))
+    return out
+
+
+def ironing_ranges() -> list[dict]:
+    """The ironing test's flows as height ranges: each step's top layers get their own (export3mf ranges)."""
+    n = len(IRONING_TEST_PCT)
+    return [{"z0": round(IRONING_STEP_MM * (n - i) - IRONING_STEP_MM / 2, 3), "z1": round(IRONING_STEP_MM * (n - i) + 0.05, 3),
+             "ironing_flow": f"{pct}%"} for i, pct in enumerate(IRONING_TEST_PCT)]
+
+
 SAG_PINS_MM = (10, 17.5, 25, 32.5, 40)  # pin heights of the sag test: fewer pins, faster layers, higher up
 SNAP_BAND_MM, SNAP_FANS = 8.0, (1.0, 0.8, 0.6, 0.4, 0.2)  # the snap test's fan steps, from the bottom
 
@@ -348,17 +411,25 @@ def _snap_test() -> list[np.ndarray]:
     return [extrude(box(0, -2.4, 80, 3.6), 0, 1.0), extrude(box(0, 0, 80, 1.2), 0.9, 40)]
 
 
-def tuning_gcode(kind: str, data: bytes) -> dict:
-    """The G-code for a heat tuning print (``kind`` "sag" or "snap"), from the user's own sliced test part
-    (plain .gcode). Sag: the slicer's slowdown for layer cooling is switched off, so the layers really get
+def tuning_gcode(kind: str, data: bytes, profile: dict | None = None) -> dict:
+    """The G-code for a tuning print (``kind`` "sag", "snap" or "temp"), from the user's own sliced test part
+    (plain .gcode). Temp: each block of the temperature tower at its temperature (tower_temps for ``profile``'s
+    material), see gcode.add_temperatures. Sag: the slicer's slowdown for layer cooling is switched off, so the layers really get
     faster with height. Snap: the part fan steps down every ``SNAP_BAND_MM`` (``SNAP_FANS``). Written and
     checked like optimize_gcode. Keep the file: tune_heat reads it with the result."""
     from .gcode import parse
     from .gcode_rewrite import check, rewrite
     from .thermal_opt import Plan
 
+    if kind == "temp":
+        from .gcode import add_temperatures
+
+        temps = tower_temps(profile)
+        text = data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else str(data)
+        new, where = add_temperatures(text, [(TEMP_BASE_MM + i * TEMP_BLOCK_MM, t) for i, t in enumerate(temps)])
+        return {"data": new.encode(), "name": "temp_tower_tuning.gcode", "temps": temps, "bands": where}
     if kind not in ("sag", "snap"):
-        raise ValueError("kind must be sag or snap")
+        raise ValueError("kind must be sag, snap or temp")
     tp = parse(data)
     plan = Plan.none(int(tp.layer.max()) + 1)
     if kind == "sag":
@@ -431,13 +502,31 @@ def _all_tests() -> list[np.ndarray]:
             standing + [124, 110, 0]]
 
 
-def calibration_part(kind: str) -> dict:
+def calibration_part(kind: str, profile: dict | None = None) -> dict:
     """Test print for measuring the user's own material on their printer, as STL bytes, with ``how``
     (``CALIBRATION_HOW``: what to print and measure). Upright / flat break weight is the layer strength
     factor, the longest flat warping bar the warping length, the fit holes the fit gaps, the steepest
     clean block the max overhang, the longest straight bridge the max bridge. Each piece has its size
-    written on it; ``all`` puts every test on one plate (T-388)."""
+    written on it; ``all`` puts every test on one plate (T-388). ``temp``: the temperature tower for ``profile``'s
+    material (``temps``, bottom first); ``ironing``: the ironing steps, also as a 3MF (``3mf``) with each step's flow
+    set for its height (OrcaSlicer / Bambu Studio height ranges)."""
     from .mesh import to_binary_stl
+
+    if kind == "temp":
+        temps = tower_temps(profile)
+        return {"stl": to_binary_stl(Mesh(np.concatenate(_temp_tower(temps)))), "name": "temp_tower.stl", "how": CALIBRATION_HOW[kind], "temps": temps}
+    if kind == "ironing":
+        from .export3mf import export_3mf
+
+        tris = np.concatenate(_ironing_test())
+        lo, hi = tris.reshape(-1, 3).min(axis=0), tris.reshape(-1, 3).max(axis=0)
+        mesh = Mesh(tris - [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])  # export_3mf: centred, on z = 0
+        t = load_data("thresholds")["looks"]
+        settings = {"ironing_type": "top", "ironing_spacing": str(t["ironing_spacing_mm"]), "layer_height": "0.2",
+                    "top_shell_layers": "4", "enable_support": "0"}
+        threemf = export_3mf(mesh, "ironing_test", settings, ranges=ironing_ranges())
+        return {"stl": to_binary_stl(mesh), "3mf": threemf, "name": "ironing_test.stl", "name_3mf": "ironing_test.3mf",
+                "how": CALIBRATION_HOW[kind], "flows": list(IRONING_TEST_PCT)}
 
     build = {"fit": _fit_test, "overhang": _overhang_test, "bridge": _bridge_test, "layer_strength": lambda: [_dogbone()],
              "warping": _warping_test, "sag": _sag_test, "snap": _snap_test, "all": _all_tests}

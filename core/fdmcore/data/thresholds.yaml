@@ -58,6 +58,28 @@ ironing:
   # passes over the last layer with almost no flow and smooths the ridges. Only the topmost face, since
   # ironing every top surface adds a lot of time [OrcaSlicer wiki quality_settings_ironing; Prusa KB ironing_177488].
   min_top_area_mm2: 300           # about 17 x 17 mm; smaller tops gain little for the extra time
+looks:
+  # The Quality goal (plan §14): settings for parts people look at. Sources and reasoning in
+  # research/quality_settings.md.
+  # Outer wall slower: OrcaSlicer 2.5.0's own Bambu "High Quality" process profiles print the outer wall at 60 mm/s
+  # where "Standard" uses 200 (0.12 / 0.16 mm, X1C), i.e. 0.3×; applied to the printer's speed class (presets.yaml
+  # speeds) so a slower printer isn't sped up [core/fdmcore/data/orca_profiles.json.gz; Creality wiki, speed].
+  outer_wall_share: 0.3
+  # Outer wall acceleration: the same High Quality profiles use 2000 mm/s² against 5000 (fast printers only: a
+  # "medium" printer's own default is often lower already) [orca_profiles.json.gz; OrcaSlicer wiki speed_settings_acceleration].
+  outer_wall_acceleration: 2000
+  # Wall order: inner-outer-inner prints the outer wall between two inner ones, undisturbed: the best outer
+  # surface and size [OrcaSlicer wiki quality_settings_wall_and_surfaces].
+  wall_sequence: "inner-outer-inner wall"
+  # Seam: lined up (aligned) instead of the nearest corner; aligned / aligned back / back work best
+  # [OrcaSlicer wiki quality_settings_seam]. "aligned" is a value OrcaSlicer, Bambu Studio and PrusaSlicer all know.
+  seam_position: aligned
+  # Ironing for looks: every flat top, not just the topmost (topmost alone leaves lower steps rough); flow and
+  # spacing as the common starting points (OrcaSlicer's Creality K2 profiles 10 % / 0.15 mm, Bambu 8 %; guides
+  # 8–15 %, 0.1 mm) until the ironing test gives the user's own [orca_profiles.json.gz; Printago, Stacksheriff guides].
+  ironing_type: top
+  ironing_flow_pct: 10
+  ironing_spacing_mm: 0.1
 seam:
   # Every wall loop starts and ends somewhere: the seam. On a part with corners the slicer hides it in one;
   # a round outline has none, so the seam shows as a line of blobs. A scarf seam ramps the start and end
