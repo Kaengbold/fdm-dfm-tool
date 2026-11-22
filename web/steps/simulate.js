@@ -87,6 +87,14 @@ function startSlice(store, services) {
   })();
 }
 
+/** The chosen option's G-code (Done's Download G-code): the background slice when it is for this option (or the
+ * user's own sliced file), else a new one. Resolves to {state: ready | fallback, gcode, source, reason}. */
+export async function optionGcode(store, services) {
+  startSlice(store, services);
+  await slice?.promise;
+  return slice;
+}
+
 /** The slicer line, updated in place while slicing (a full re-render per percent would be wasteful). */
 function sliceText() {
   if (!slice) return t("sim.slice.waiting");

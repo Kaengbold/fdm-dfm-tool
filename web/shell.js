@@ -136,7 +136,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const pill = h("button", { type: "button", class: "part-pill", title: t("shell.replacePart"), hidden: true });
     const undo = Button({ iconPath: UNDO, title: t("shell.undo"), variant: "ghost", onClick: () => store.undo() });
     const redo = Button({ iconPath: REDO, title: t("shell.redo"), variant: "ghost", onClick: () => store.redo() });
-    const exportBtn = Button({ label: t("shell.export"), variant: "secondary" });
+    const exportBtn = Button({ label: t("shell.export"), variant: "secondary", onClick: () => services.openExport?.() });
     const settings = Button({ label: t("shell.settings"), variant: "ghost", iconPath: GEAR, onClick: () => openRoute("settings") });
     const help = Button({ label: t("shell.help"), variant: "ghost" });
     const el = h("header", { class: "app-header" }, brand, workflow, pill, h("span", { class: "ui-grow" }), undo, redo, exportBtn, settings, help);
