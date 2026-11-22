@@ -11,6 +11,7 @@ import { openModal } from "../ui/overlay.js";
 import { registerStep } from "../shell.js";
 import { t } from "../i18n.js";
 import { optimizeArgs } from "./args.js";
+import { start as startAnalysis } from "./analyse.js";
 
 // The rows of §11 in order: [key, label key, pin key in the optimizer's constraints (null = a result, not pinnable)].
 export const ROWS = [
@@ -112,14 +113,23 @@ registerStep("options", {
     const constraints = s.constraints ?? {};
     const stale = store.isStale("optimize");
 
+    // Stopped or out of time (T-552): the best found so far, with Continue (a run without a time budget). Never "impossible".
+    const early = result.stopped || result.ended_early;
+    const goOn = () => { go("analyse"); startAnalysis(services, store, go, optimizeArgs(store.get()), { budget: false }); };
     if (!result.feasible) {
-      const ways = (result.ways_out ?? []).filter((w) => w.id !== "use_anyway");
-      body.append(h("div", { class: "options-banner", role: "alert" }, h("b", {}, result.explanation ?? t("options.notReached")),
-        h("div", { class: "row" }, ways.map((w) => Button({ label: w.label, variant: "secondary", size: "small", onClick: () => {
+      const ways = (result.ways_out ?? []).filter((w) => w.id !== "use_anyway" && !(w.id === "continue" && !early));
+      if (early && !ways.some((w) => w.id === "continue")) ways.unshift({ id: "continue", label: t("options.continue") });
+      body.append(h("div", { class: "options-banner", role: "alert" },
+        h("b", {}, early ? t(result.stopped ? "options.stoppedNone" : "options.endedNone") : result.explanation ?? t("options.notReached")),
+        h("div", { class: "row" }, ways.map((w) => Button({ label: w.id === "continue" ? t("options.continue") : w.label, variant: w.id === "continue" ? "primary" : "secondary", size: "small", onClick: () => {
+          if (w.id === "continue") { goOn(); return; }
           if (w.id === "allow_materials") { const c = { ...constraints }; delete c.material; store.set({ constraints: c, profile: { ...s.profile, material: "" } }); }
           if (w.id === "allow_design") store.set({ change: "both" });
           go("analyse");
         } })))));
+    } else if (early) {
+      body.append(h("div", { class: "options-banner is-early", role: "status" }, h("b", {}, t(result.stopped ? "options.stopped" : "options.endedEarly")),
+        h("div", { class: "row" }, Button({ label: t("options.continue"), variant: "secondary", size: "small", onClick: goOn }))));
     }
     if (stale) body.append(h("p", { class: "analyse-stale" }, t("options.stale")));
 

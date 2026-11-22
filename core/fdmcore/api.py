@@ -1113,7 +1113,7 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
 def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str = "extended", profile: dict | None = None,
              owned: list[str] | None = None, materials: list[str] | None = None, nozzles: list[str] | None = None,
              environment: dict | None = None, constraints: dict | None = None, change: str = "slicer",
-             faces: dict | None = None) -> dict:
+             faces: dict | None = None, budget_s: float | None = None) -> dict:
     """The new UI's optimizer (optimizer.py): 2–4 verified options for ``goal`` (strong / balanced / fast /
     light / quality) over orientation, material, nozzle, layer height and walls / top / infill, plus local
     reinforcements at Complete depth (or whenever ``change="design"``).
@@ -1125,7 +1125,9 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
     abrasion, oil_fuel, solvent, skin]}. ``constraints`` ("Your choices", hard limits): material, nozzle,
     layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both. ``faces`` as in orientations
     (``{"clean": "visible"}``: the guessed faces people see, the Quality goal's default): orientations that put
-    support on them rank lower."""
+    support on them rank lower. ``budget_s``: a time budget in seconds; when it runs out the search stops and picks from
+    what it checked (``ended_early``, and "Continue the search" first among the ways out). While it runs, the best
+    options so far go to progress.partial (the web worker posts them for "Stop & show best so far")."""
     from . import optimizer
 
     s = _require()
@@ -1138,7 +1140,7 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
                               nozzles=nozzles, environment=env, constraints=constraints, change=change,
                               load_case=_load_case, climb=_climb, grams_minutes=_grams_minutes_of,
                               evaluate=_evaluate, orientation_settings=orientation_settings,
-                              zone_info=_zone_info, unit_shape=_unit_shape, mark_faces=_pose_marks(faces))
+                              zone_info=_zone_info, unit_shape=_unit_shape, mark_faces=_pose_marks(faces), budget_s=budget_s)
 
 
 def _pose_marks(faces: dict | None):

@@ -552,7 +552,9 @@ def check_new_ui_loads(browser, port: int) -> str:
 
 def check_new_ui_analyse(browser, port: int) -> str:
     """The new UI's Analyse step (T-550): depth cards with estimates, a Quality run lands on Options with a result,
-    a changed input marks it stale (Next waits), and a long run shows its stages and can be cancelled."""
+    a changed input marks it stale (Next waits), and a long run shows its stages. T-552: Stop & show best so far comes
+    on with the first partial result and lands on Options with those options ("Stopped early" + Continue); Continue
+    runs again, which Cancel stops, leaving a working engine; a spent time budget says "Search ended early"."""
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -576,6 +578,7 @@ def check_new_ui_analyse(browser, port: int) -> str:
           const reg = (await fdmUI.services.engine.call('regions')).regions;
           const back = reg.reduce((a, r) => (r.normal[1] < a.normal[1] ? r : a)).id;
           const top = reg.filter((r) => r.normal[2] > 0.99).reduce((a, r) => (r.area_mm2 > a.area_mm2 ? r : a)).id;
+          await fdmUI.services.engine.call('set_expert', { values: { 'analysis.strength_voxels': 2500 } });
           fdmUI.store.set({ goal: 'balanced', depth: 'extended', holds: [{ region: back, type: 'clamped' }], loads: [{ region: top, newtons: 49, direction: [0, 0, -1] }] });
           fdmUI.go('analyse'); }""")
         assert page.evaluate("() => fdmUI.store.isStale('optimize')") and page.locator(".analyse-stale").count() == 1
@@ -583,13 +586,37 @@ def check_new_ui_analyse(browser, port: int) -> str:
         page.get_by_role("button", name="Start optimization").click()
         page.wait_for_selector(".ui-progress")
         stages = page.locator(".ui-progress__stages li").count()
+        stop = page.get_by_role("button", name="Stop & show best so far")
+        assert stop.is_disabled(), "Stop before any option"
+        page.wait_for_function("() => !document.querySelector('.ui-progress__foot .ui-btn--secondary')?.disabled", timeout=300_000)
+        stop.click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Options'", timeout=30_000)
+        got = page.evaluate("() => { const r = fdmUI.store.result('optimize'); return [r.stopped, r.partial, r.options.length, fdmUI.store.isStale('optimize')]; }")
+        assert got[0] and got[1] and got[2] >= 1 and not got[3], got
+        assert page.locator(".options-cols .ui-col").count() == got[2]
+        assert "Stopped early" in page.locator(".options-banner").inner_text()
+        page.get_by_role("button", name="Continue the search").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Analyse'")
+        page.wait_for_selector(".ui-progress")
         page.get_by_role("button", name="Cancel").click()
         page.wait_for_selector(".ui-progress", state="detached")
         assert page.locator("#step-title").inner_text() == "Analyse"
         ok = page.evaluate("async () => (await fdmUI.services.engine.call('estimate_runtime', { depth: 'fast' })).seconds > 0")
         assert ok, "engine not usable after Cancel"
+        assert page.evaluate("() => fdmUI.store.result('optimize').stopped"), "Cancel lost the kept result"
+        # A spent time budget: the engine picks from what it checked, Options says so.
+        page.evaluate("""async () => {
+          const s = fdmUI.store.get();
+          const r = await fdmUI.services.engine.call('optimize', { goal: 'balanced', depth: 'extended', profile: { printer: 'bambu_p1s' },
+            loads: null, budget_s: 0 });
+          fdmUI.store.setResult('optimize', r, fdmUI.store.deps('model', 'profile', 'goal', 'environment', 'loads', 'depth'));
+          fdmUI.go('options'); }""")
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Options'")
+        banner = page.locator(".options-banner").inner_text()
+        assert "Search ended early" in banner and "Continue the search" in banner, banner
         assert not errors, errors
-        return f"Quality run → Options ({res[1]} option); stale after a change, Next waits; {stages} stages shown, Cancel left a working engine"
+        return (f"Quality run → Options ({res[1]} option); stale after a change, Next waits; {stages} stages shown; "
+                f"Stop showed {got[2]} best so far, Continue, Cancel left a working engine; budget ended early")
     finally:
         page.close()
 
