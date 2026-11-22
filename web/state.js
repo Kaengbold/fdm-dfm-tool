@@ -40,7 +40,8 @@ export function initialState() {
     depth: "extended",
     option: null,
     showFaces: [], // Quality: faces the user marked as the ones that must look good (empty: our guess)
-    pending: [],
+    pending: [], // fixes waiting in the Problems batch (T-561)
+    accepted: [], // finding ids the user accepted as they are
   };
 }
 

@@ -1,0 +1,17 @@
+/* Problems & fixes step (T-561, plan §13). Rows and the pending bar are the shared components (ui/finding.js). */
+.prob-list { display: grid; gap: var(--s-4); }
+.prob-group > h3 { margin: 0 0 var(--s-2); font-size: var(--fs-sm); color: var(--text-2); }
+.prob-group > h3 small { color: var(--text-3); font-weight: var(--fw-normal); }
+.prob-rows { display: grid; gap: var(--s-2); }
+.prob-clear { display: grid; gap: var(--s-1); padding: var(--s-3); border-radius: var(--r); background: var(--good-soft); }
+.prob-new { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--bad-soft); color: var(--bad); font-weight: var(--fw-bold); font-size: var(--fs-sm); }
+.prob-stale { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.prob-batch { display: grid; gap: var(--s-1); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); font-size: var(--fs-sm); }
+.prob-batch .is-warn { color: var(--warn); }
+.prob-bar { position: sticky; bottom: 0; display: grid; justify-items: start; gap: var(--s-1); padding: var(--s-2) 0; background: var(--surface-raised); }
+.prob-bar .ui-pending { flex-wrap: wrap; }
+.prob-review { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.prob-review li { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2); border-radius: var(--r); background: var(--surface-sunken); font-size: var(--fs-sm); }
+.prob-review li.is-conflict { outline: 2px solid var(--warn); }
+.prob-review__text { flex: 1; }
+.prob-more p { margin: 0 0 var(--s-2); }
