@@ -1018,6 +1018,75 @@ def check_new_ui_simulation(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_heat(browser, port: int) -> str:
+    """The new UI's Simulation step, heat part (T-478): a real OrcaSlicer G-code of the test fixture goes through the
+    cooling check; the summary counts the spots fixed, the window map turns red spots green between As sliced and
+    With the plan, a clicked spot says why, the layer slider cuts the view, and "Optimize my G-code directly"
+    downloads a checked copy."""
+    import gzip
+
+    fixture = ROOT / "core" / "tests" / "gcode"
+    OUT.mkdir(exist_ok=True)
+    gcode = OUT / "sim_fixture.gcode"
+    gcode.write_bytes(gzip.decompress((fixture / "orca.gcode.gz").read_bytes()))
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.evaluate("""async () => {
+          const bytes = new Uint8Array(await (await fetch('../core/tests/gcode/part.stl')).arrayBuffer());
+          await fdmUI.services.loadPart('part.stl', bytes); }""")
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => {
+          fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, noLoads: true,
+            option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2, walls: 2, infill: 0.15 } });
+          fdmUI.go('sim'); }""")
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Simulation'")
+        page.set_input_files("input.heat-file", str(gcode))
+        page.wait_for_selector("text=Check the cooling", timeout=120_000)
+        page.get_by_role("button", name="Check the cooling").click()
+        page.wait_for_selector(".heat-summary", timeout=600_000)
+        summary = page.locator(".heat-summary").inner_text()
+        assert "Too hot: 40 spots before, 0 after" in summary and "Rough" in summary, summary
+        # Red spots on the stage as sliced, none with the plan (instance colours of the overlay).
+        hot = """() => { const hv = fdmUI.services.heatView, m = hv.spots.mesh, c = m.instanceColor.array;
+          let n = 0;  // red: much more red than green and blue (colours are linear here)
+          for (let i = 0; i < m.count; i++) if (c[i * 3] > 0.4 && c[i * 3 + 1] < 0.1 && c[i * 3 + 2] < 0.1) n++; return n; }"""
+        page.get_by_role("radio", name="As sliced").click()
+        red_before = page.evaluate(hot)
+        page.get_by_role("radio", name="With the plan").click()
+        red_after = page.evaluate(hot)
+        assert red_before > 0 and red_after == 0, (red_before, red_after)
+        # Click a spot that was too hot: why, and what the plan did.
+        page.evaluate("""async () => { const m = await import('./steps/heatlogic.js');
+          const d = m.decode(fdmUI.store.result('simulate').value);
+          fdmUI.services.heatView.onPick(d.before.window.findIndex((w) => w === 1)); }""")
+        why = page.locator(".heat-why").inner_text()
+        assert "As sliced, the next layer covered it" in why and "So the plan changes this layer" in why, why
+        # The layer slider shows the print up to a layer.
+        total = page.evaluate("() => fdmUI.services.heatView.spots.mesh.count")
+        page.locator(".heat-slider").fill("10")
+        cut = page.evaluate("() => fdmUI.services.heatView.spots.mesh.count")
+        assert 0 < cut < total, (cut, total)
+        page.screenshot(path=str(OUT / "new-ui-heat-heat.png"))
+        page.get_by_role("radio", name="G-code", exact=True).click()
+        assert page.evaluate("() => fdmUI.services.heatView.lines.mesh.visible")
+        page.screenshot(path=str(OUT / "new-ui-heat-gcode.png"))
+        charts = page.locator(".heat-chart").count()
+        with page.expect_download(timeout=600_000) as dl:
+            page.get_by_role("button", name="Optimize my G-code directly").click()
+        name = dl.value.suggested_filename
+        assert name == "sim_fixture_cooled.gcode", name
+        page.wait_for_selector(".heat-ok")
+        assert not errors, errors
+        return f"40 hot spots → 0; red on the stage {red_before} → {red_after}; slider {total} → {cut} spots; {charts} charts; downloaded {name}"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -1073,6 +1142,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: analyse", lambda: check_new_ui_analyse(ui, port))
             run.step("new UI: options", lambda: check_new_ui_options(ui, port))
             run.step("new UI: simulation", lambda: check_new_ui_simulation(ui, port))
+            run.step("new UI: simulation, heat", lambda: check_new_ui_heat(ui, port))
         finally:
             ui.close()
         if args.quick:

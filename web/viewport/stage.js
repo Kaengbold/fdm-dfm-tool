@@ -172,6 +172,22 @@ export class Stage {
     this.render();
   }
 
+  /** Turn the part with the engine's own rotation (3 × 3 rows: oriented = part @ rotation.T), resting on the bed and
+   * centred like the engine's oriented frame, so overlays in that frame (heat spots, G-code lines) sit on it. */
+  orientBy(rotation) {
+    if (!this.part) return;
+    const g = this.part.group;
+    const [a, b, c] = rotation;
+    g.quaternion.setFromRotationMatrix(new THREE.Matrix4().set(a[0], a[1], a[2], 0, b[0], b[1], b[2], 0, c[0], c[1], c[2], 0, 0, 0, 0, 1));
+    g.position.set(0, 0, 0);
+    g.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(g.children[0], true);
+    g.position.set(-(box.min.x + box.max.x) / 2, -(box.min.y + box.max.y) / 2, -box.min.z);
+    this.oriented = rotation;
+    g.updateMatrixWorld(true);
+    this.render();
+  }
+
   /** X-ray: see through the part (holds and loads behind it stay visible). */
   setXray(on) {
     if (!this.part) return;

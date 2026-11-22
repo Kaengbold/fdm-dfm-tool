@@ -1,0 +1,59 @@
+/* Heat in the Simulation step (T-478). Spacing only from the --s-* tokens (core/tests/test_css_tokens.py). */
+/* The panel's one column never grows past the panel: long rows wrap instead. */
+.panel-body:has(.heat-strip) { grid-template-columns: minmax(0, 1fr); }
+.heat-block .ui-seg { flex-wrap: wrap; }
+.heat-strip { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); padding: var(--s-2) var(--s-3);
+  border-radius: var(--r); background: var(--surface-sunken); font-size: var(--fs-sm); }
+.heat-strip__text { color: var(--text-2); }
+.heat-block { display: grid; gap: var(--s-2); }
+.heat-file { display: none; }
+.heat-file-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); font-size: var(--fs-sm); }
+.heat-file-row b { overflow-wrap: anywhere; }
+
+.heat-summary { display: grid; gap: var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-raised); }
+.heat-summary__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.heat-summary ul { display: grid; gap: var(--s-1); margin: 0; padding-left: var(--s-4); font-size: var(--fs-sm); }
+.heat-conf { padding: 0 var(--s-2); border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; }
+.heat-conf--rough { background: var(--warn-soft); color: var(--warn); }
+.heat-conf--partly { background: var(--accent-soft); color: var(--accent-text); }
+.heat-conf--tuned { background: var(--good-soft); color: var(--good); }
+
+.heat-legend { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); margin: 0; padding: 0; list-style: none; font-size: var(--fs-xs); color: var(--text-2); }
+.heat-legend li { display: flex; align-items: center; gap: var(--s-1); }
+.heat-dot { width: 10px; height: 10px; border-radius: var(--r-sm); }
+.heat-dot--ok { background: var(--heat-ok); }
+.heat-dot--hot { background: var(--heat-hot); }
+.heat-dot--cold { background: var(--heat-cold); }
+.heat-dot--slow { background: var(--heat-slow); }
+.heat-dot--faded { background: var(--heat-faded); }
+.heat-dot--low { background: var(--heat-low); border: 1px solid var(--line-strong); }
+.heat-dot--high { background: var(--heat-high); }
+.heat-dot--slower { background: var(--heat-cold); }
+.heat-dot--faster { background: var(--heat-faster); }
+.heat-dot--same { background: var(--heat-same); }
+.heat-dot--fan { background: var(--heat-fan); border-radius: var(--r-pill); }
+
+.heat-play { display: flex; align-items: center; gap: var(--s-2); }
+.heat-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
+
+.heat-timeline summary { cursor: pointer; }
+.heat-figure { margin: 0; }
+.heat-figure figcaption { margin-bottom: var(--s-1); }
+.heat-chart { display: block; width: 100%; height: auto; }
+.heat-band { fill: var(--heat-ok); opacity: 0.14; }
+.heat-axis { stroke: var(--line-strong); stroke-width: 1; }
+.heat-tick { fill: var(--text-3); font-size: 10px; }
+.heat-line { fill: none; stroke-width: 1.5; }
+.heat-line--before { stroke: var(--text-3); stroke-dasharray: 3 3; }
+.heat-line--after { stroke: var(--accent); }
+.heat-marker { stroke: var(--text); stroke-width: 1; opacity: 0.5; }
+.heat-key { display: inline-block; width: 16px; height: 0; margin: 0 var(--s-1); vertical-align: middle; border-top: 2px solid var(--accent); }
+.heat-key--before { border-top: 2px dashed var(--text-3); }
+.heat-key--band { height: 8px; border: 0; background: var(--heat-ok); opacity: 0.3; }
+
+.heat-why { display: grid; gap: var(--s-1); padding: var(--s-3); border-left: 3px solid var(--accent); border-radius: var(--r); background: var(--accent-soft); font-size: var(--fs-sm); }
+.heat-why p { margin: 0; }
+.heat-why__head { display: flex; align-items: center; justify-content: space-between; }
+.heat-ok { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--good-soft); color: var(--good); font-size: var(--fs-sm); }
+.drop-error ul { margin: var(--s-1) 0 0; padding-left: var(--s-4); }
+.drop-error p { margin: 0; }
