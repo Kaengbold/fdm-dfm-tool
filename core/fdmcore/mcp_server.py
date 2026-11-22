@@ -634,15 +634,16 @@ def compare_nozzles(up: list[float], printer: str = "bambu_p1s", material: str =
 
 @server.tool()
 def heat_model(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4", fine: bool = False,
-               goal: str = "balanced", intents: list[dict] | None = None, loads: list[dict] | None = None) -> dict:
+               goal: str = "balanced", intents: list[dict] | None = None, loads: list[dict] | None = None, focus: bool = False) -> dict:
     """Heat simulation over the G-code from load_gcode: how hot each spot still is when the next layer covers it
     and how well each joint between layers bonds. ``findings``: spots that stay too hot (sag, blobs), joints too
     cold to bond well, and slowdowns for cooling that aren't needed. ``goal`` (balanced / strength / speed /
     material) moves the limits; ``intents`` = [{"kind": "cosmetic" | "dimension_critical" | "load_bearing",
     "point": [x, y, z], "radius": mm}] tightens them where they are. ``loads`` (as for check_strength) say
     where the layers must bond well; without them that is guessed from the shape (``guessed``, see
-    spot_importance). ``hottest`` lists the worst spots; ``fine`` is slower and more exact."""
-    return _clean(api.heat_model(up, _profile(printer, material, nozzle, goal), fine, intents, loads))
+    spot_importance). ``hottest`` lists the worst spots; ``fine`` is slower and more exact; ``focus`` runs fine
+    detail only around the spots that matter (a big part: nearly the fine answer there, at about the quick cost)."""
+    return _clean(api.heat_model(up, _profile(printer, material, nozzle, goal), fine, intents, loads, focus))
 
 
 @server.tool()

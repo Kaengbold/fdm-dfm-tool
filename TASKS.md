@@ -919,9 +919,21 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
     - New `api.importance` / MCP `spot_importance`: per-cube weights, reasons and the important `areas` in plain words.
     - Checks: on the L-bracket pushed at the top of its upright, the upright's root weighs most (0.92); on the feature test part with no loads, the roots of the Ø3 pin and the thin slot walls come first. A sideways hole's side walls aren't taken for ribs.
     - Not done here: putting the fine heat detail only around important spots on big parts (T-583).
-- [ ] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: Claude (task/T-583-focus-detail)
+- [x] **T-583 P3** [TO] Fine heat detail only where it matters. · files: `core/fdmcore/thermal.py`, `core/fdmcore/api.py` · owner: Claude (task/T-583-focus-detail)
   - Do: on big parts, run the heat model's fine cells (1 mm, more layers in detail) only around the spots that weigh most (T-475 `importance`) and around hot spots, with the coarse cells elsewhere, so a big part gets the fine answer where it counts at the quick tier's cost.
   - Done when: on a big part with a pin, the pin's covering temperature matches the all-fine run within 5 °C, at no more than twice the quick tier's time.
+  - Outcome: instead of mixed cell sizes in one network (which every consumer of the result would have to handle), detail runs.
+    - **Region runs:** `thermal.simulate(..., region=box)` gives cells only to the plastic inside a box, with the whole print's timing and nozzle.
+    - **`heat_model(focus=True)`** (MCP too): after the quick run, up to 3 boxes around the columns with spots outside their window (and, less, the ones that weigh most), 6 mm margin, joined where they overlap. Each runs at the fine tier; its findings replace the quick ones inside (not in the margin, whose cut sides lose no heat sideways). `focus` lists each box with the hottest covering temperature both ways. Boxes covering more than about half the part are skipped (fine tier is cheap there).
+    - **Check, 60 × 60 × 6 mm solid plate with a Ø3 mm pin:**
+
+      | Run | Time | Pin median when covered |
+      |---|---|---|
+      | Quick | 15.1 s | 184.4 °C |
+      | All fine | 90.4 s | 182.0 °C |
+      | Fine in a 16 mm box | 5.1 s | 182.0 °C |
+
+      So quick + focus = 1.3× quick.
 - [x] **T-476 P2** [TO] Heat result back into the strength check. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` (`strength_z`), `core/fdmcore/api.py` · owner: Claude (task/T-476-heat-into-strength)
   - Do: at the detailed level, the strength between layers comes from each spot's bonding result instead of one constant for the whole part. Show the safety before and after optimizing ("bracket root: 1.4 → 1.9"). One round of strength → weights → optimize → strength; no looping until nothing changes.
   - Done when: an overcooled thin wall shows a lower safety factor than the same wall printed inside its window.
