@@ -58,6 +58,7 @@ class Session:
     coarse: list | None = None  # curves exported with too few facets (checks.coarse_surfaces), computed on demand
     kind: str = "cad"  # "cad" or "organic" (scan, sculpt, figure): _model_kind, T-408
     cad_checks: bool = True  # hole / gap / pin / lettering checks and feature detection (off for organic parts)
+    cad_faces: tuple | None = None  # STEP parts: (the regions loaded with it, B-rep face id per region), see _cad_face
     importance: tuple | None = None  # (key, importance.Map): how much each spot matters (T-475), cached
 
 
@@ -458,10 +459,11 @@ def load(data: bytes, name: str = "part", face_ids: list[int] | None = None) -> 
     if face_ids is not None:
         if len(bodies) > 1 or len(face_ids) != bodies[0][1].face_count:
             raise ValueError("face_ids must have one entry per triangle")
-        regions = np.unique(np.asarray(face_ids), return_inverse=True)[1].ravel()
+        ids, regions = np.unique(np.asarray(face_ids), return_inverse=True)
+        regions = regions.ravel()
     else:
-        regions = None
-    _session = Session(bodies[0][1], name, regions, bodies=bodies)
+        ids = regions = None
+    _session = Session(bodies[0][1], name, regions, bodies=bodies, cad_faces=None if ids is None else (regions, ids))
     _set_kind("cad" if face_ids is not None else None)
     return _info()
 
@@ -1833,7 +1835,8 @@ def _stress_story(r: dict) -> str:
 
 
 def _edges() -> tuple[dict, dict]:
-    """Cached compact (feature_edges, concave_edges) polylines for the loaded part."""
+    """Cached compact (feature_edges, concave_edges) polylines for the loaded part. On a STEP part each also names
+    the B-rep faces it lies between (``faces``, see ``_cad_face``): an edit there can work on the exact CAD edge."""
     from .regions import extract_edges, find_regions
 
     s = _require()
@@ -1841,7 +1844,21 @@ def _edges() -> tuple[dict, dict]:
         s.regions = find_regions(s.mesh)
     if s.edges is None:
         s.edges = extract_edges(s.mesh, s.regions)
+        for group in s.edges:
+            for m in group["meta"]:
+                faces = [_cad_face(r) for r in m["regions"]]
+                if m["regions"] and None not in faces:
+                    m["faces"] = faces
     return s.edges
+
+
+def _cad_face(region: int) -> int | None:
+    """The STEP file's B-rep face id of a region (the importer's id for this body, which is OpenCascade's own face
+    order, checked by tools/check_step_faces.mjs), or None when the part isn't from STEP or its regions changed."""
+    s = _require()
+    if s.cad_faces is None or s.cad_faces[0] is not s.regions or not 0 <= region < len(s.cad_faces[1]):
+        return None
+    return int(s.cad_faces[1][region])
 
 
 def _resolve_loads(loads: list[dict]) -> list[dict]:
@@ -1886,6 +1903,10 @@ def regions() -> dict:
     if s.regions is None:
         s.regions = find_regions(s.mesh)
     info = region_info(s.mesh, s.regions, accepted(_features()))
+    for r in info:
+        face = _cad_face(r["id"])
+        if face is not None:
+            r["face"] = face
     feature_edges, concave_edges = _edges()
     return {
         "face_regions": s.regions.astype("<u4").tobytes(),
