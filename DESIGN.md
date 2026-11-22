@@ -1,62 +1,53 @@
 ---
 name: FDM Check
-description: A browser workbench that checks one 3D-printed part before it goes to the slicer.
+description: A desktop browser app that finds the best way to print one part, checks it, fixes it and exports it for the slicer.
 colors:
-  accent: "#1f5c47"
-  accent-hover: "#174a39"
-  accent-soft: "#e2efe8"
-  deep-green: "#173a2e"
-  now: "#f2c12e"
-  text: "#1d2b27"
-  muted: "#56645f"
-  panel: "#fdfdfc"
-  chrome: "#f3f5f2"
-  soft: "#eef2ef"
-  stage: "#e9ecea"
-  line: "#dbe2dd"
-  line-strong: "#c3cdc6"
-  good: "#22784a"
-  good-soft: "#e1f2e8"
-  warn: "#8f5600"
-  warn-soft: "#fbf0d9"
-  bad: "#b82d35"
-  bad-soft: "#fbe5e6"
-  part-ok: "#a3acb4"
-  part-borderline: "#f0b429"
-  part-support: "#e5484d"
-  part-bed: "#30a46c"
-  part-fixed: "#0090ff"
-  part-force: "#8e4ec6"
-  part-clean: "#12a594"
-  part-vertical: "#f76b15"
+  surface: "#F5F6F8"
+  surface-raised: "#FFFFFF"
+  surface-sunken: "#ECEFF3"
+  line: "#D9DEE5"
+  line-strong: "#B8C0CC"
+  stage-top: "#E4E8EE"
+  stage-bottom: "#D8DEE6"
+  text: "#111827"
+  text-2: "#4B5563"
+  text-3: "#6B7280"
+  text-on-accent: "#FFFFFF"
+  accent: "#2563EB"
+  accent-hover: "#1D4ED8"
+  accent-soft: "#DBE6FD"
+  accent-text: "#1D4ED8"
+  good: "#15803D"
+  good-soft: "#DCF3E4"
+  warn: "#B45309"
+  warn-soft: "#FCEBD5"
+  bad: "#B91C1C"
+  bad-soft: "#FBE0E0"
+  ov-hover: "#38BDF8"
+  ov-hold: "#2563EB"
+  ov-load: "#9333EA"
+  ov-added: "#16A34A"
+  ov-removed: "#DC2626"
 typography:
-  headline:
+  start:
     fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "23px"
+    fontSize: "28px"
     fontWeight: 700
     lineHeight: 1.2
-  brand:
+  step-title:
     fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "18px"
+    fontSize: "20px"
     fontWeight: 700
+    lineHeight: 1.2
   title:
     fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "15px"
+    fontSize: "16px"
     fontWeight: 700
-    lineHeight: 1.45
   body:
     fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
     fontSize: "15px"
     fontWeight: 400
     lineHeight: 1.45
-  control:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "14px"
-    fontWeight: 400
-  label:
-    fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
-    fontSize: "14px"
-    fontWeight: 700
   hint:
     fontFamily: "Atkinson Hyperlegible, system-ui, sans-serif"
     fontSize: "13px"
@@ -66,250 +57,164 @@ typography:
     fontSize: "12px"
     fontWeight: 700
 rounded:
-  swatch: "2px"
-  r: "6px"
-  track: "9px"
-  overlay: "10px"
-  dialog: "12px"
+  sm: "4px"
+  r: "8px"
+  lg: "12px"
   pill: "999px"
 spacing:
-  xs: "4px"
-  sm: "6px"
-  md: "10px"
-  lg: "14px"
-  xl: "24px"
+  s-1: "4px"
+  s-2: "8px"
+  s-3: "12px"
+  s-4: "16px"
+  s-5: "24px"
+  s-6: "32px"
+  s-7: "48px"
 components:
   button-primary:
     backgroundColor: "{colors.accent}"
-    textColor: "{colors.panel}"
-    typography: "{typography.label}"
+    textColor: "{colors.text-on-accent}"
     rounded: "{rounded.r}"
-    padding: "9px 16px"
-  button-primary-hover:
-    backgroundColor: "{colors.accent-hover}"
-  button-primary-big:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.panel}"
-    rounded: "{rounded.r}"
-    padding: "13px"
-    width: "100%"
+    height: "44px"
+    padding: "0 24px"
   button-secondary:
-    backgroundColor: "{colors.panel}"
+    backgroundColor: "{colors.surface-raised}"
     textColor: "{colors.text}"
-    typography: "{typography.control}"
     rounded: "{rounded.r}"
-    padding: "6px 12px"
+    height: "36px"
+    padding: "0 16px"
   button-ghost:
     backgroundColor: "transparent"
-    textColor: "{colors.muted}"
+    textColor: "{colors.text-2}"
     rounded: "{rounded.r}"
-    padding: "6px 12px"
-  segment-selected:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.panel}"
-    typography: "{typography.label}"
-    rounded: "{rounded.r}"
-    padding: "5px 12px"
-  input:
-    backgroundColor: "{colors.panel}"
+    height: "36px"
+  card:
+    backgroundColor: "{colors.surface-raised}"
     textColor: "{colors.text}"
-    typography: "{typography.control}"
     rounded: "{rounded.r}"
-    padding: "5px 7px"
-  step-now:
+  card-selected:
     backgroundColor: "{colors.accent-soft}"
     textColor: "{colors.text}"
     rounded: "{rounded.r}"
-    padding: "8px 10px"
-  step-dot-now:
-    backgroundColor: "{colors.now}"
-    textColor: "{colors.text}"
-    size: "26px"
-    rounded: "{rounded.pill}"
-  chip-slicer:
+  tag-slicer:
     backgroundColor: "{colors.accent-soft}"
-    textColor: "{colors.accent}"
+    textColor: "{colors.accent-text}"
     typography: "{typography.badge}"
-    rounded: "{rounded.pill}"
-    padding: "1px 8px"
-  finding-card:
-    backgroundColor: "{colors.panel}"
-    textColor: "{colors.text}"
-    rounded: "{rounded.r}"
-    padding: "9px 11px"
-  working-bar:
-    backgroundColor: "{colors.deep-green}"
-    textColor: "{colors.chrome}"
-    rounded: "{rounded.overlay}"
-    padding: "11px 14px"
+    rounded: "{rounded.sm}"
+  tag-design:
+    backgroundColor: "{colors.warn-soft}"
+    textColor: "{colors.warn}"
+    typography: "{typography.badge}"
+    rounded: "{rounded.sm}"
 ---
 
 # Design System: FDM Check
 
+The source of truth is `web/tokens.css`: every colour, space, size and radius the stylesheets use comes from there
+(`core/tests/test_css_tokens.py` fails on raw pixel spacing anywhere else). This file says what the tokens are for.
+The plan behind it is [research/redesign-2026-11/PLAN-COMBINED.md](research/redesign-2026-11/PLAN-COMBINED.md) (§1, Style A,
+approved by the owner on 2026-11-21).
+
 ## Overview
 
-**Creative North Star: "The Workbench"**
+**Creative North Star: "The part first"**
 
-FDM Check is a bench, not a form. Three fixed zones sit side by side at full viewport height: a pale step rail that reads like a checklist, the part itself large in the middle on a calm grey stage, and a near-white panel on the right holding only the current step's controls, with one primary action pinned at its foot. Nothing scrolls the whole page on desktop; the part never leaves view.
+The part is the biggest thing on screen, in 3D, from the first step to the export. Around it: a header that is always
+on top, a step rail on the left that reads like a checklist, and a panel on the right with only what the current step
+needs, its one primary action always in the same place at the panel's foot. Picking happens on the part (holds, loads,
+show faces, problems), not in lists.
 
-The world is light and quiet: near-white surfaces with a faint green cast, dark-green ink and actions, hairline borders, small 6px corners, no gradients. One loud colour exists, a signal yellow, and it means exactly two things: "you are here" (the current step's dot) and keyboard focus. Every other colour is either green ink or a meaning colour (good, warn, bad) or a colour painted on the part in the 3D view. Atkinson Hyperlegible carries everything at modest sizes; hierarchy comes from weight, not scale.
+The look is light, cool and quiet: near-white surfaces with a faint blue-grey cast, dark ink, hairline borders, 8 px
+corners. One blue accent means "act here". Green, amber and red mean status only. A dark theme switches every colour
+token (`<html data-theme="dark">`, the moon button in the header, remembered in the browser).
 
-Density is calm but working: 14px controls, 13px hints, 14px vertical rhythm inside a pane. Detail lives behind closed disclosures ("More information", "Which nozzle?"), so the panel stays short.
+**Key characteristics:**
+- Desktop only: windows of 1280 × 720 and larger. No phone layouts.
+- Header on top; rail │ 3D stage │ panel below it.
+- One primary button per step, bottom right of the panel ("Next", or the step's own next move: "Review 3 problems").
+- Text is short. One sentence per line of hint; explanations behind **More**.
+- Background work shows on the stage (a progress card with stages, elapsed time and Cancel), never only in the panel.
 
-**Key Characteristics:**
-- Three-zone grid (step rail, 3D stage, step panel) with a 56px header.
-- Faint-green near-white surfaces, dark-green ink and buttons.
-- Signal yellow reserved for "you are here" and focus.
-- One primary button per step, at the panel foot.
-- Hairline borders and 6px corners; shadows only on things floating over the 3D stage.
-- Background work shown in a dark-green bar over the stage, never in the panel.
+## Colours
 
-## Colors
+- **Surfaces.** `surface` is the app background, `surface-raised` the panels, cards and inputs, `surface-sunken`
+  wells (rows inside a card, segment tracks). `line` for dividers and control borders, `line-strong` when hovered.
+- **The stage** is a soft vertical gradient (`stage-top` → `stage-bottom`). The part and the bed are drawn in greys
+  from the stage palette (`viewport/stage.js`, light and dark).
+- **Ink.** `text` for content, `text-2` for secondary lines, `text-3` for hints and units.
+- **Accent** (blue) is for actions and selection only: primary buttons, links (`accent-text`), the selected card or
+  step (`accent-soft`), focus. Never decoration, never a heading colour.
+- **Status.** `good`, `warn`, `bad`, each with a `-soft` background, for verdicts, badges, the strength target and
+  problem dots. Text in the strong colour on the soft fill.
+- **3D overlays** (`ov-*`) are read by the viewport from CSS, so the part and its legend never disagree: hover sky
+  blue, holds blue, loads violet, added plastic green, removed plastic red. Result fields (heat, warping, stress) use
+  one banded blue-to-red scale (`fieldColor`).
 
-A green-tinted neutral world with one dark-green voice, one yellow signal, and a separate, saturated vocabulary that only appears on the 3D part.
-
-### Primary
-- **Workshop Green** (accent): all primary buttons, the selected level and segment, links, disclosure summaries, focused finding borders, the drop-zone hover border, the selected-region colour in 3D. Hover deepens to **Bench Shadow Green** (accent-hover).
-- **Pale Leaf** (accent-soft): the current step's row, the selected orientation card, a focused finding, the slicer-fix chip, the current guide choice. It is the quiet "selected" fill under green ink.
-- **Night Green** (deep-green): the floating "working" bar and the 3D hover tooltip; the only dark surface in the app.
-
-### Secondary
-- **Signal Yellow** (now): the current step's dot, the focus outline (3px, 2px offset), the progress fill and spinner arc in the working bar, the pulse that flashes a changed control, and text selection (at 50% alpha).
-
-### Tertiary (meaning)
-- **Good** / **Good Soft**: completed step dots, "Prints as designed" summary, fine verdicts, "recommended" tags, strength gains.
-- **Warn** / **Warn Soft**: warning badges, "shape will differ" groups, borderline verdicts, the unit hint.
-- **Bad** / **Bad Soft**: problem badges, "will fail" groups, likely-to-break verdicts, error status lines.
-
-### Part colours (3D view only)
-Read by `viewer.js` from CSS custom properties, so the 3D view and the legend can never disagree. **Prints Fine** grey (part-ok), **May Droop** amber (part-borderline), **Needs Support** red (part-support, also cut previews and load arrows), **On the Bed** green (part-bed), **Held Fixed** blue (part-fixed), **Pushed** violet (part-force), **Clean Surface** teal (part-clean, also add previews), **Vertical** orange (part-vertical). These appear in the panel only as small legend squares, swatches and dots next to the list item they key.
-
-### Neutral
-- **Ink** (text): all body text and headings.
-- **Muted Ink** (muted): hints, leads, inactive steps, unselected level labels, secondary lines.
-- **Panel White** (panel): the right panel, inputs, secondary buttons, cards.
-- **Chrome** (chrome): header and step rail.
-- **Soft** (soft): drop zone, info boxes, neutral badges, verdict default.
-- **Stage Grey** (stage): the 3D view background. The bed plate and grid are drawn a shade darker in the same green-grey family (#dde3df plate, #bac4bd / #ccd4ce grid).
-- **Line** / **Line Strong**: hairline dividers and card borders / control borders and dashed outlines.
-
-### Named Rules
-**The One Signal Rule.** Signal Yellow means "you are here" or "keyboard focus" (plus progress inside the working bar). It is never a decoration, a heading colour or a warning colour; warnings use Warn.
-
-**The Part Palette Stays on the Part Rule.** The saturated part colours belong to the 3D view and its keys. They never fill buttons, panels or headings.
-
-**The Read From CSS Rule.** Any colour the 3D view paints is a CSS custom property read at runtime. No colour is defined twice.
+**Rule: status colours mean status.** A warning is amber because something needs a look, never because amber looks nice.
 
 ## Typography
 
-**Display Font:** none (no separate display face)
-**Body Font:** Atkinson Hyperlegible (self-hosted, 400 and 700, with system-ui, sans-serif)
+One face, Atkinson Hyperlegible, self-hosted in 400 and 700 (the font has no 600). Hierarchy comes from weight and a
+short ramp: 28 px start screen, 20 px step title, 16 px panel and card titles, 15 px body and controls, 13 px hints,
+12 px badges and units. Numbers that change (times, grams, safety, sizes) use tabular figures (`.num`).
 
-**Character:** One hyperlegible face in two weights. It reads as a careful, friendly tool for hobbyists rather than an engineering console; hierarchy comes from 700 weight and a short size ramp.
-
-### Hierarchy
-- **Headline** (700, 23px, 1.2): the step title at the top of the panel ("Your part", "Problems"), and the guide dialog title.
-- **Brand** (700, 18px): the name in the header, with a 12px muted version tag.
-- **Result statement** (700, 17–19px): the one-line verdict in a verdict or summary box ("Prints as designed"); coloured by meaning.
-- **Title** (700, 15px): sub-headings and problem group heads inside a pane.
-- **Body** (400, 15px, 1.45): leads and running text.
-- **Control** (400, 14px): buttons, selects, inputs, list rows, findings.
-- **Label** (700, 14px): field labels, choice labels, primary button text, selected segments.
-- **Hint** (400, 13px): muted hints, notes, status line, "what this updates".
-- **Badge** (700, 12px): severity badges, fix chips, tags.
-
-Numbers in inputs, tables and timers use tabular figures.
-
-### Named Rules
-**The Weight Not Size Rule.** The ramp tops out at 23px. Emphasis is 700 weight or a meaning colour, never a bigger size.
-
-**The Sentence Case Rule.** Headings, labels, buttons and badges are written in sentence case. No uppercase labels, no letter-spaced small caps.
+Sentence case everywhere. No uppercase labels, no letter-spacing.
 
 ## Layout
 
-Desktop is a full-height CSS grid: 56px header across the top; below it a 210px step rail, a flexible 3D stage, and a 410px panel. Expert drops the rail (0px) and widens the panel to 480px, stacking every pane in one scroll separated by a hairline and 30px gap. The panel scrolls internally (22px 24px 28px padding); its foot (status line, Back on the left, the primary on the right) is fixed below the scroll.
+The app is one grid: a 56 px header, then the screen. Screens have one of four layouts (`data-layout`):
 
-Inside a pane, blocks stack in a column with a 14px gap; rows of controls wrap with 8–10px gaps. Overlays on the stage (part label, colour key, FEA legend) sit 12px from its corners; the working bar centres 16px above its bottom, at most 520px wide.
+- **full** (Start, Settings & calibration): one centred column, no rail, no 3D.
+- **part** (before a file is loaded): rail and a stage that is all drop zone.
+- **work** (Setup … Analyse, Simulation, Problems, Done): rail 216 px │ stage │ panel 384 px. The panel scrolls inside;
+  its 64 px foot holds Back (left) and Next (right) in the same place on every step.
+- **options**: the rail collapses to 56 px icons, a 220 px 3D strip on top, the option columns below at full width.
 
-At 820px and below the grid becomes one column: header (the level switch wraps to its own full-width row), a horizontal step strip (only the current step shows its name), the 3D stage sticky at 42vh, then the panel, whose foot sticks to the bottom of the screen. Buttons and selects grow to a 40px minimum height; the colour key hides.
+Spacing comes only from `--s-1` … `--s-7` (4 to 48 px): 8 inside a control, 12 between controls, 24 between groups,
+32 between sections. Stage furniture: camera bar bottom-left, instruction pill top-centre, legend top-right, toasts
+bottom-centre, all 16 px from the edges.
 
-## Elevation & Depth
+## Elevation and shapes
 
-Flat by default. Zones are separated by tone (chrome vs panel vs stage) and 1px hairlines, not shadows. Shadows appear only on elements that float above the 3D stage or the page, and they are soft, green-black and ambient.
+Flat by default: zones are separated by tone and 1 px lines. `shadow-pop` is for things that float: menus, pop-overs
+on the part, the progress card, toasts, dialogs. Corners: 8 px on buttons, inputs and cards; 4 px on tags; 12 px on
+dialogs and the progress card; pills for chips and the part name in the header.
 
-### Shadow Vocabulary
-- **Floating bar** (`box-shadow: 0 8px 24px #10241c40`): the working bar over the stage.
-- **Stage overlay** (`box-shadow: 0 2px 8px #1d2b271f`): the FEA colour legend.
-- **Dialog** (`box-shadow: 0 12px 40px #10241c4d`, backdrop `#10241c66`): the start guide.
+## Components (`web/ui/`)
 
-### Named Rules
-**The Float Only Rule.** A shadow means "this hovers over something". Cards, buttons and inputs in the panel never carry one.
+- **Button** (`button.js`): primary (accent fill, 44 px), secondary (raised, hairline), ghost (no fill), small (32 px)
+  and icon-only (36 px, with a title). Disabled buttons say why in their title.
+- **ChoiceCards / SegmentedControl** (`choice.js`): radio groups as cards (goal, depth, with a one-line explanation
+  and an estimate) or as a segmented track (units, overlays, the export slicer). The selected card takes
+  `accent-soft` and an accent border.
+- **Select** (`select.js`): a searchable list with optional "Decide later" and badges ("Owned").
+- **NumberField** (`numberfield.js`): a value with its unit (N / MPa, mm, °C) and a live hint ("≈ 5.1 kg of weight").
+- **Chip** (`chip.js`): toggle chips (nozzle sizes) and removable chips ("Your choices" in Options).
+- **Disclosure** (`disclosure.js`): a closed section with a summary on its head ("Slicer changes (12)", "More tools").
+- **OptionColumn** (`options.js`): one option per column, rows aligned across columns, a pin on hover to keep a value.
+- **FindingRow / PendingBar** (`finding.js`): a problem in one short row (dot, title, place pill, status) that opens
+  to its fixes (Slicer / Design / Process tags, Add or Show steps), then More; the sticky bar of the pending batch.
+- **ProgressCard** (`progress.js`): named stages, elapsed vs estimate, Cancel. Lives on the stage.
+- **Overlays** (`overlay.js`, `popover3d.js`, `radialmenu.js`): dialogs and toasts; a pop-over anchored to a point
+  on the part (the load's force box); the radial menu at a picked spot ("Hold this face").
+- **StepRail** (`steprail.js`): done steps are links with a green dot, the current one is highlighted, upcoming ones
+  plain text, skipped ones left out; a done step whose result is out of date says "Needs a re-run".
 
-## Shapes
+In the 3D view (`web/viewport/`): the stage with its camera bar (Iso, Top, Front, Fit), the hover picker with a badge
+("Flat face · 1,622 mm²"), the direction gizmo for loads, result fields with true-size or exaggerated warping, and
+see-through ghosts for pending design changes.
 
-Small, even corners everywhere: 6px on buttons, inputs, cards, step rows, info boxes and stage labels. The level switch is a 9px track holding 6px segments. Larger floating things get slightly rounder: 10px for the working bar and drop zone, 12px for the guide dialog. Badges, chips and tags are full pills; step dots are circles (26px). Colour keys and swatches are near-square (2px). Borders are 1px hairlines; dashed borders mark something not yet there (the drop zone at 2px, locked step dots at 1.5px, unfinished features). A selected card switches to a 2px green border.
+## Do and don't
 
-## Components
+**Do**
+- Keep the part in view; a new feature is picked on the part where it can be.
+- Give each step one primary action at the bottom right of the panel.
+- Say what a change does to results ("These results are from before your last changes", "Needs a re-run").
+- Take every value from `tokens.css`, and every 3D colour from a CSS custom property.
+- Check both themes.
 
-### Buttons
-Quiet and firm: a white button with a hairline border, a solid green one when it is the step's next move.
-- **Shape:** gently rounded (6px).
-- **Primary:** Workshop Green fill, white 700 text, 9px 16px. One per step, at the right of the panel foot, phrased as the next move ("Next: Will it hold?"). The full-width big variant (13px padding, 16px text) is used for the single final action, such as the 3MF download.
-- **Hover / Focus:** primary deepens to Bench Shadow Green; secondary buttons turn their border green; transitions 0.12s on border and background. Focus is the 3px Signal Yellow outline.
-- **Secondary:** panel white, Line Strong border, 14px text, 6px 12px. Small variant 3px 10px at 13px for sample picks and list actions.
-- **Ghost:** no fill, Line border, muted text that darkens on hover; on the dark working bar it inverts to a pale outline.
-- **Link button:** bold green underlined text, no box, for in-flow actions.
-- **Disabled:** 55% opacity, not-allowed cursor.
-
-### Segmented choices
-The level switch (Simple / Basic / Advanced / Expert) and in-pane choices ("What matters most?") are radio groups styled as segments. The level switch sits in a grey track with borderless segments; in-pane segments are separate bordered buttons. Selected: Workshop Green fill, white 700 text. A changed choice flashes a brief yellow ring (0.5s pulse).
-
-### Chips and badges
-- **Severity badge:** pill, 12px 700. Problem = Bad on Bad Soft, Warning = Warn on Warn Soft, Tip = Muted on Soft.
-- **Fix chip:** pill naming the kind of fix: slicer (green on Pale Leaf), geometry (violet on pale violet), process (teal on pale teal).
-- **Tag:** Good on Good Soft pill, e.g. "best" on an orientation option.
-- **Estimate badge:** Muted on Soft pill, 12px 700, a button next to a heading whose numbers are estimates (strength, design changes). A click shows one sentence on what that means. No frame around the section.
-
-### Cards / Containers
-- **Corner Style:** 6px.
-- **Background:** Panel White; selected or focused cards take Pale Leaf with a green border.
-- **Shadow Strategy:** none (see Elevation).
-- **Border:** 1px Line; Line Strong on hover.
-- **Internal Padding:** 9px 11px (findings), 10px 12px (orientation options).
-- **Verdict and summary boxes:** borderless, filled with the soft meaning colour, a 17–19px bold statement in the strong meaning colour, then one plain sentence.
-
-### Inputs / Fields
-- **Style:** Panel White, 1px Line Strong border, 6px corners, 14px text, 5px 7px padding. Labels stack above in 14px 700. Native checkboxes and ranges take the green accent colour.
-- **Hover:** border darkens to Muted Ink.
-- **Focus:** the 3px Signal Yellow outline.
-
-### Navigation (step rail)
-A checklist, not a menu. Each step is a full-width row: a 26px circle and the step name. Upcoming steps show a grey numbered dot; the current step has a Pale Leaf row, bold name and a Signal Yellow dot; done steps have a Good dot with a white check; a step being recomputed shows a spinning green arc; locked steps show a dashed empty circle and muted text. On phones the rail becomes a horizontal strip.
-
-### Working bar (signature)
-Whenever the engine runs, a Night Green bar floats over the bottom of the 3D stage: spinner with a yellow arc, what is running in bold, elapsed time in tabular figures, a Cancel ghost button, a 5px yellow progress line, and a pale-yellow line saying which steps it will update. It never moves into the panel, so it stays visible whatever step is open.
-
-### Stage overlays
-The part label and colour key sit top-left on translucent Panel White pills (6px); keys use 10px near-square swatches with plain-language names ("Prints fine", "Needs support").
-
-### Drop zone
-2px dashed Line Strong border, 10px corners, Soft fill, centred bold "Drop an STL, 3MF or STEP file here" with a muted second line; hover or drag-over turns the border green and the fill Pale Leaf.
-
-## Do's and Don'ts
-
-### Do:
-- **Do** keep the three zones; a new step adds a pane to the panel and a row to the rail, not a new page.
-- **Do** give each step one primary button, at the right of the panel foot, phrased as the next move.
-- **Do** use Signal Yellow (#f2c12e) only for the current step, focus and progress.
-- **Do** say what a change updates, in a 13px muted line under the control or in the working bar.
-- **Do** put detail in closed disclosures with a bold green summary.
-- **Do** read every 3D colour from a CSS custom property.
-- **Do** use soft meaning fills (good, warn, bad) for verdicts and badges, with the strong colour on the text.
-
-### Don't:
-- **Don't** add gradients, a cutting-mat texture, or any pattern behind the 3D view; the stage stays a flat calm grey.
-- **Don't** put shadows on panel cards, buttons or inputs; shadows are for things floating over the stage or page.
-- **Don't** use the part colours (support red, droop amber, force violet…) as UI fills or text colours outside keys and swatches.
-- **Don't** raise headings above 23px or add a second typeface.
-- **Don't** add uppercase or letter-spaced labels above headings.
-- **Don't** show background work only in the panel; it belongs in the working bar over the stage.
+**Don't**
+- Add phone or tablet layouts.
+- Use the accent or a status colour as decoration.
+- Put shadows on cards, buttons or inputs inside the panel.
+- Write more than a sentence where a hint is enough; put the rest behind More.
+- Show background work only in the panel.

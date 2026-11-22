@@ -1,16 +1,16 @@
 """Charts as SVG text, drawn from API results, for agents and the engine-built report.
 
 Plain string building (no plotting library, so it runs in Pyodide too). Same colours as the web
-app (style.css). Every chart has a title and plain labels, so it reads on its own in a report or a chat.
+app (web/tokens.css, light theme). Every chart has a title and plain labels, so it reads on its own in a report or a chat.
 """
 
 from __future__ import annotations
 
 from html import escape
 
-# style.css :root
-INK, MUTED, LINE, ACCENT = "#1d2b27", "#56645f", "#dbe2dd", "#1f5c47"
-GOOD, WARN, BAD = "#22784a", "#8f5600", "#b82d35"
+# web/tokens.css :root (light): --text, --text-2, --line, --accent, --good, --warn, --bad
+INK, MUTED, LINE, ACCENT = "#111827", "#4B5563", "#D9DEE5", "#2563EB"
+GOOD, WARN, BAD = "#15803D", "#B45309", "#B91C1C"
 FONT = "Atkinson Hyperlegible, system-ui, sans-serif"
 
 W, ROW, LEFT, RIGHT, TOP = 560, 30, 150, 70, 46

@@ -128,6 +128,36 @@ def _bend(mesh: Mesh, normals: np.ndarray, adj: np.ndarray, use: np.ndarray) -> 
     return np.where(use, np.sign(s), 0.0)
 
 
+OUTER_TOL_SHARE = 0.01  # a triangle within 1 % of the part's size (at least OUTER_TOL_MM) of the hull is on the outside
+OUTER_TOL_MM = 0.3
+OUTER_REGION_SHARE = 0.5  # a face counts as outer when at least half its area is
+
+
+def outer_regions(mesh: Mesh, region: np.ndarray, chunk: int = 4096) -> np.ndarray:
+    """Faces people see, as a first guess for the Quality goal (plan §14, decision 10): the ones lying on the part's
+    convex hull. Hole walls, pockets and the insides of slots are off the hull, so support marks there are hidden.
+    Returns the sorted region ids."""
+    from scipy.spatial import ConvexHull, QhullError
+
+    pts = mesh.triangles.reshape(-1, 3)
+    try:
+        hull = ConvexHull(np.unique(np.round(pts, 4), axis=0))
+    except (QhullError, ValueError):  # flat or degenerate: every face is on the outside
+        return np.unique(region)
+    eq = hull.equations  # n·x + d <= 0 inside, n pointing out
+    tol = max(OUTER_TOL_MM, OUTER_TOL_SHARE * float(np.linalg.norm(np.ptp(pts, axis=0))))
+    centres = mesh.triangles.mean(axis=1)
+    outer = np.empty(len(centres), bool)
+    for i in range(0, len(centres), chunk):
+        dist = (centres[i:i + chunk] @ eq[:, :3].T + eq[:, 3]).max(axis=1)  # ≈ minus the distance to the hull
+        outer[i:i + chunk] = dist > -tol
+    _, areas = mesh.normals_and_areas()
+    n = int(region.max()) + 1 if len(region) else 0
+    on = np.bincount(region, weights=areas * outer, minlength=n)
+    total = np.bincount(region, weights=areas, minlength=n)
+    return np.flatnonzero(on >= OUTER_REGION_SHARE * np.maximum(total, 1e-12))
+
+
 def region_info(mesh: Mesh, region: np.ndarray, features: list[dict] | None = None) -> list[dict]:
     """Area, mean normal, centroid and kind per region (bincount sums: CAD exports have
     thousands of regions, and a mask per region would scan every triangle each time).

@@ -9,7 +9,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from math import ceil
 
-from .profile import Profile, load_data
+from .profile import Profile, load_data, presets
 
 # What each goal changes in the slicer. Walls carry most of the strength (2–3× more than
 # infill), thicker layers print faster, sparse infill patterns save plastic.
@@ -379,9 +379,27 @@ def recommend_settings(profile: Profile, findings: list[dict], stats: dict | Non
             "Keeps the bottom edges and holes at the bed true to size" if rules & {"elephant_foot", "first_layer_detail"}
             else "The first layer gets squashed and bulges out; this pulls it in so the bottom edge stays straight",
             fixes=("elephant_foot", "first_layer_detail"))
-    if stats.get("top_flat_mm2", 0) >= T["ironing"]["min_top_area_mm2"] and goal in ("balanced", "strength"):
-        put("ironing_type", "topmost", "Ironing", f"The {stats['top_flat_mm2']:,.0f} mm² flat top comes out smooth: the nozzle passes"
-            " over it once more with almost no plastic (adds a few minutes)")
+    looks = T["looks"]
+    if stats.get("top_flat_mm2", 0) >= T["ironing"]["min_top_area_mm2"] and (goal in ("balanced", "strength") or profile.looks):
+        how = looks["ironing_type"] if profile.looks else "topmost"
+        put("ironing_type", how, "Ironing", f"The {stats['top_flat_mm2']:,.0f} mm² flat top comes out smooth: the nozzle passes"
+            " over it once more with almost no plastic (adds a few minutes)" + (", and so do the lower flat tops" if how == "top" else ""))
+        measured = mat.get("ironing_flow_pct")
+        if measured is not None or profile.looks:
+            put("ironing_flow", f"{measured if measured is not None else looks['ironing_flow_pct']:g}%", "Ironing flow",
+                "From your ironing test" if measured is not None else "A common starting point: the ironing test finds your own")
+            put("ironing_spacing", looks["ironing_spacing_mm"], "Ironing spacing", "Close passes for a smooth top")
+    if profile.looks:  # Quality (plan §14): sourced in research/quality_settings.md
+        base = presets()["speeds"][profile.printer.get("speed", "fast")]["outer_wall"]
+        share = presets()["nozzles"].get(profile.nozzle, {}).get("speed", {}).get("outer_wall", 1.0)
+        put("outer_wall_speed", round(base * share * looks["outer_wall_share"]), "Outer wall speed",
+            "Slower outside walls come out smoother, with less ringing (as the slicers' own high-quality profiles)")
+        if profile.printer.get("speed", "fast") == "fast":
+            put("outer_wall_acceleration", looks["outer_wall_acceleration"], "Outer wall acceleration",
+                "Gentler starts and stops on the outside walls: less ringing next to corners")
+        put("wall_sequence", looks["wall_sequence"], "Wall order", "The outside wall prints between two inside ones, undisturbed:"
+            " a cleaner surface and truer size (OrcaSlicer, Bambu Studio)")
+        put("seam_position", looks["seam_position"], "Seam", "The seam lines up in one place instead of jumping from corner to corner")
     if stats.get("round_share", 0) >= T["seam"]["round_share"] and goal != "speed":
         put("seam_slope_type", "external", "Scarf seam", "Round outline with no corner to hide the seam in: the scarf seam"
             " blends the start and end of each loop instead of leaving a line of blobs (OrcaSlicer / Bambu Studio)")
