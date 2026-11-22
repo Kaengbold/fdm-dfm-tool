@@ -152,7 +152,7 @@ def test_walk_the_empty_flow(page):
     for _ in range(12):
         seen.append(page.locator("#step-title").inner_text())
         assert page.evaluate("() => document.activeElement.id") == "step-title", "focus didn't move to the step title"
-        nxt = page.get_by_role("button", name="Next")
+        nxt = page.locator(".panel-foot .ui-btn--primary")  # Next, or a step's own label for it ("Continue to Done")
         if not nxt.count():
             break
         box = nxt.bounding_box()

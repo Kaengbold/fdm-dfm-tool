@@ -1018,6 +1018,74 @@ def check_new_ui_simulation(browser, port: int) -> str:
         page.close()
 
 
+def check_new_ui_problems(browser, port: int) -> str:
+    """The new UI's Problems & fixes step (T-561): grouped rows; opening one frames it and shows its fixes; a teardrop
+    (design, with the one-time "changes your model" confirm) and a slicer fix go into one pending batch with a ghost;
+    Confirm all changes applies them, carries the hold and load over, re-checks (strength too) and shows the result;
+    Undo batch puts the part back."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/new.html")
+        page.wait_for_selector("body[data-ready]")
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Hole block").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""async () => {
+          const e = fdmUI.services.engine;
+          const reg = (await e.call('regions')).regions;
+          const bottom = reg.reduce((a, r) => (r.normal[2] < a.normal[2] ? r : a)).id;
+          const top = reg.reduce((a, r) => (r.normal[2] > a.normal[2] ? r : a)).id;
+          fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'balanced', optimized: 1,
+            holds: [{ id: 'h1', region: bottom, type: 'clamped' }], loads: [{ id: 'l1', region: top, newtons: 100, direction: [0, 0, -1] }],
+            option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2,
+              walls: 3, top: 4, bottom: 3, infill: 0.15, safety: 20, target: 3,
+              settings: { wall_loops: '3', top_shell_layers: '4', bottom_shell_layers: '3', sparse_infill_density: '15%', layer_height: '0.20' } } });
+          fdmUI.go('problems'); }""")
+        page.wait_for_selector(".prob-list .ui-find", timeout=120_000)
+        groups = page.locator(".prob-group h3").all_inner_texts()
+        rows = page.locator(".ui-find").count()
+        row = page.locator(".ui-find", has_text="Side hole prints oval").first
+        cam = page.evaluate("() => fdmUI.services.stage.camera.position.toArray()")
+        row.locator(".ui-find__head").click()
+        moved = page.evaluate("(c) => fdmUI.services.stage.camera.position.toArray().some((v, i) => Math.abs(v - c[i]) > 0.5)", cam)
+        assert moved, "opening the row didn't frame the hole"
+        tags = row.locator(".ui-tag").all_inner_texts()
+        assert tags[0] == "Slicer" and "Design" in tags, tags
+        row.locator(".ui-fix", has_text="Teardrop").get_by_role("button", name="Add").click()
+        assert "changes your model" in page.locator("dialog.ui-modal").inner_text().lower()
+        page.locator("dialog.ui-modal").get_by_role("button", name="Add").click()
+        row = page.locator(".ui-find", has_text="Side hole prints oval").first
+        if row.locator(".ui-find__body").is_hidden():
+            row.locator(".ui-find__head").click()
+        row.locator(".ui-fix", has_text="bridge").get_by_role("button", name="Add").click()
+        page.wait_for_selector(".ui-pending")
+        bar = page.locator(".ui-pending").inner_text()
+        assert "2 changes pending" in bar, bar
+        assert page.evaluate("() => fdmUI.services.stage.ghosts.length") > 0, "no ghost for the teardrop"
+        vol0 = page.evaluate("() => fdmUI.store.get().part.volume")
+        page.get_by_role("button", name="Confirm all changes").click()
+        page.wait_for_selector(".prob-batch", timeout=240_000)
+        card = page.locator(".prob-batch").inner_text().replace("\n", " ")
+        assert "Re-checked:" in card and "Strength: ×" in card, card
+        s = page.evaluate("""() => { const s = fdmUI.store.get(); return { name: s.part.name, volume: s.part.volume, holds: s.holds.length,
+          loads: s.loads.length, bridge: s.option.settings.bridge_speed, pending: s.pending.length, design: s.design.length }; }""")
+        assert s["name"].endswith("_dfm.stl") and s["volume"] < vol0, s
+        assert s["holds"] == 1 and s["loads"] == 1 and s["bridge"] and s["pending"] == 0 and s["design"] == 1, s
+        assert page.evaluate("() => fdmUI.services.stage.ghosts.length") == 0
+        page.get_by_role("button", name="Undo these changes").click()
+        page.wait_for_function("(v) => Math.abs(fdmUI.store.get().part.volume - v) < 0.01", arg=vol0, timeout=60_000)
+        assert page.evaluate("() => fdmUI.store.get().option.settings.bridge_speed") is None
+        nxt = page.locator(".panel-foot .ui-btn--primary").inner_text()
+        assert nxt == "Continue to Done", nxt
+        assert not errors, errors
+        return f"groups {groups}, {rows} rows, framed: {moved}; teardrop + bridge fix → {card[:120]}; undo restored the part"
+    finally:
+        page.close()
+
+
 def run_quick(run: Run) -> None:
     """Short smoke check (~2 min): desktop start screen, Simple flow to 3MF, start guide, one finding."""
     page = run.page
@@ -1073,6 +1141,7 @@ def _run_suite(port: int, args) -> Run:
             run.step("new UI: analyse", lambda: check_new_ui_analyse(ui, port))
             run.step("new UI: options", lambda: check_new_ui_options(ui, port))
             run.step("new UI: simulation", lambda: check_new_ui_simulation(ui, port))
+            run.step("new UI: problems", lambda: check_new_ui_problems(ui, port))
         finally:
             ui.close()
         if args.quick:
