@@ -38,9 +38,10 @@ def test_face_order_matches_on_every_test_step(checked):
     names = [f["name"] for f in out["files"]]
     assert "l_bracket.step" in names and len(names) >= 4, names
     for f in out["files"]:
-        assert f["bodies"] == f["solids"], f  # one importer body per solid, in the same order
-        assert all(c["ok"] for c in f["checks"]), f
-    assert sum(len(f["checks"]) for f in out["files"]) >= 5  # the two-body file counts twice
+        solids = [c for c in f["checks"] if c["solid"] is not None]
+        assert len(solids) == f["solids"], f  # every solid is one of the importer's bodies (some files add loose surfaces)
+        assert all(c["ok"] for c in solids), f
+    assert sum(c["solid"] is not None for f in out["files"] for c in f["checks"]) >= 16  # the two-body file counts twice
     assert out["corner"]["driftCaught"]  # a wrong order would be noticed (then the edit falls back to the mesh)
 
 

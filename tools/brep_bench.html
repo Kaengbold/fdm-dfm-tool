@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>B-rep edit bench</title>
+    <!-- Dev-only page for tools/step_robustness.py (T-535): runs web/brep.js's design edits on STEP parts in a real
+         browser and reports per edit how it was made, the time and the OpenCascade memory. Not part of the app. -->
+    <script type="module">
+      import Module from "https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js";
+      import * as B from "../web/brep.js";
+
+      const ready = Module();
+      const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+      const heapMb = (oc) => Math.round(oc.HEAP8.length / 2 ** 20);
+
+      /** One part: every edit alone (exact, falling back as in the app), then all together. */
+      window.runPart = async (stepB64, edits) => {
+        const oc = await ready;
+        oc.FS.writeFile("/in.step", b64(stepB64));
+        const t0 = performance.now();
+        const reader = new oc.STEPControl_Reader();
+        reader.ReadFile("/in.step");
+        reader.TransferRoots(new oc.Message_ProgressRange());
+        const all = B.solids(oc, reader.OneShape());
+        const solid = all.reduce((a, s) => (B.volume(oc, s) > B.volume(oc, a) ? s : a));
+        const readMs = performance.now() - t0;
+        const list = edits.map((e) => ({ ...e, mesh: Float32Array.from(e.mesh) }));
+        const one = list.map((e) => {
+          const t = performance.now();
+          let note, valid = false, faces = 0;
+          try {
+            const { shape, notes } = B.applyEdits(oc, solid, [e]);
+            note = notes[0];
+            valid = B.isValid(oc, shape);
+            faces = B.faces(oc, shape).length;
+          } catch (err) {
+            note = { id: e.id, how: "error", why: String(err?.message ?? err) };
+          }
+          return { ...note, kind: e.intent?.op ?? "none", ms: Math.round(performance.now() - t), valid, faces };
+        });
+        const t = performance.now();
+        let together;
+        try {
+          const { shape, notes } = B.applyEdits(oc, solid, list);
+          const mesh = B.tessellate(oc, shape);
+          together = { valid: B.isValid(oc, shape), faces: B.faces(oc, shape).length, triangles: mesh.faceIds.length,
+            how: notes.map((n) => n.how), ms: Math.round(performance.now() - t) };
+        } catch (err) {
+          together = { error: String(err?.message ?? err), ms: Math.round(performance.now() - t) };
+        }
+        oc.FS.unlink("/in.step");
+        return { faces: B.faces(oc, solid).length, readMs: Math.round(readMs), one, together, heapMb: heapMb(oc),
+          jsHeapMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 2 ** 20) : null };
+      };
+      window.benchReady = ready.then(() => true);
+    </script>
+  </head>
+  <body></body>
+</html>

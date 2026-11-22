@@ -50,25 +50,29 @@ export function meshSignatures(soup, faceIds) {
 }
 
 /**
- * Do the importer's face ids name the same faces as OpenCascade's order on ``solid``? Compared by area and centre
- * (the triangles only approximate curved faces: ``areaTol`` relative, ``mm`` for the centre). Returns {ok, faces,
- * worst: {id, area, mm}}; an edit worker falls back to the mesh edit when it isn't ok.
+ * Do the importer's face ids name the same faces as OpenCascade's order on ``solid``? Each face is compared by area
+ * and centre. The triangles only approximate curved faces, so a face passes when it is close (``areaTol`` relative;
+ * the centre within ``mm`` or ``share`` of the face's size) and no other face of the solid fits it better. Returns
+ * {ok, faces, worst: {id, area, mm}, misfit}; an edit worker falls back to the mesh edit when it isn't ok.
  */
-export function checkFaceOrder(oc, solid, soup, faceIds, { areaTol = 0.02, mm = 0.25 } = {}) {
+export function checkFaceOrder(oc, solid, soup, faceIds, { areaTol = 0.05, mm = 0.25, share = 0.02 } = {}) {
   const ref = faces(oc, solid).map((f) => faceSignature(oc, f));
   const got = meshSignatures(soup, faceIds);
   const worst = { id: -1, area: 0, mm: 0 }; // the largest misfits (relative area, centre distance) and the worst face
-  let ok = ref.length === got.length, score = 0;
+  const fit = (g, r) => [Math.abs(g.area - r.area) / Math.max(r.area, 1e-9), Math.hypot(...g.centre.map((v, i) => v - r.centre[i]))];
+  let ok = ref.length === got.length, score = 0, misfit = null;
   got.forEach((g, id) => {
-    const r = ref[id];
-    if (!r) { ok = false; return; }
-    const area = Math.abs(g.area - r.area) / Math.max(r.area, 1e-9);
-    const dist = Math.hypot(...g.centre.map((v, i) => v - r.centre[i]));
+    if (!ref[id]) { ok = false; return; }
+    const [area, dist] = fit(g, ref[id]);
     worst.area = Math.max(worst.area, area);
     worst.mm = Math.max(worst.mm, dist);
-    if (Math.max(area / areaTol, dist / mm) > score) { score = Math.max(area / areaTol, dist / mm); worst.id = id; }
+    const s = Math.max(area / areaTol, dist / Math.max(mm, share * Math.sqrt(ref[id].area)));
+    if (s > score) { score = s; worst.id = id; }
+    const mine = area + dist / Math.sqrt(ref[id].area);
+    const other = ref.findIndex((r, j) => j !== id && (([a, d]) => a + d / Math.sqrt(r.area))(fit(g, r)) < mine * 0.5);
+    if (other >= 0 && misfit === null) misfit = { id, fits: other };
   });
-  return { ok: ok && score <= 1, faces: ref.length, worst };
+  return { ok: ok && score <= 1 && misfit === null, faces: ref.length, worst, misfit };
 }
 
 /** The B-rep edges two faces share (an inside corner between faces ``a`` and ``b`` of ``solid``); [] if they don't
