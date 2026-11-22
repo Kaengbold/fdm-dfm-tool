@@ -123,11 +123,14 @@ registerStep("options", {
     }
     if (stale) body.append(h("p", { class: "analyse-stale" }, t("options.stale")));
 
-    const labels = Object.fromEntries(ROWS.map(([k, label]) => [k, t(label)]));
+    // Quality checks no strength at all (§14): no Strength row.
+    const shown = s.goal === "quality" ? ROWS.filter(([k]) => k !== "safety") : ROWS;
+    const rowsOf = (o) => optionRows(o, constraints).filter((r) => shown.some(([k]) => k === r.key));
+    const labels = Object.fromEntries(shown.map(([k, label]) => [k, t(label)]));
     const cols = h("div", { class: "options-cols" },
-      h("div", { class: "options-labels", "aria-hidden": "true" }, h("span", { class: "options-labels__head" }), ROWS.map(([, label]) => h("span", {}, t(label)))),
+      h("div", { class: "options-labels", "aria-hidden": "true" }, h("span", { class: "options-labels__head" }), shown.map(([, label]) => h("span", {}, t(label)))),
       options.map((o, i) => {
-        const col = OptionColumn({ option: { ...o, rows: optionRows(o, constraints) }, labels, needsRecheck: stale,
+        const col = OptionColumn({ option: { ...o, rows: rowsOf(o) }, labels, needsRecheck: stale,
           onPin: (row) => setPin(store, row.pinKey, row.pinValue, options),
           onKeepAll: () => store.set({ constraints: { ...constraints, ...Object.fromEntries(optionRows(o).filter((r) => r.pinKey).map((r) => [r.pinKey, r.pinValue])) } }),
           onUse: () => use(store, go, o) });
