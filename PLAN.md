@@ -1,7 +1,7 @@
 # FDM DFM Tool — Plan & Requirements
 
-Working title: **FDM DFM Tool** (rename later)
-Status: scoping · 2026-10-28
+Working title: **FDM DFM Tool** (rename later); the app calls itself **FDM Check**.
+Status: pre-alpha · started 2026-10-28 · the new UI replaced the first one on 2026-11-22 (see phase 12)
 
 ## 1. Vision
 
@@ -23,21 +23,26 @@ chat and hand back reports, charts and pictures (see section 6).
 
 ## 3. Users & modes
 
-Primary user: hobbyist with a consumer printer (Bambu, Prusa, Creality, Voron…), mostly OrcaSlicer/Bambu Studio/PrusaSlicer.
+Primary user: hobbyist with a consumer printer (Bambu, Prusa, Creality, Voron…), mostly OrcaSlicer/Bambu Studio/PrusaSlicer,
+at a desktop browser (1280 × 720 and larger; no phone layouts, decided 2026-11-21).
 
-Mode toggle (every suggestion carries a domain tag `geometry` / `slicer` / `process`):
+Two choices in Setup shape everything after them (every fix carries a domain tag `geometry` / `slicer` / `process`):
 
-| Mode | For | Shows |
+| Choice | Values | Effect |
 |---|---|---|
-| **Just print it** (default) | Downloaded STL/3MF, can't edit | Orientation, slicer settings, process tips |
-| **I'm designing it** | Own CAD model, someone else slices | Geometry fixes only + handoff notes |
-| **Both** | Own design, own printer | Everything |
+| **Goal** | Strong ×5 · Balanced ×3 · Fast ×2 · Light ×1.5 · Quality | The safety target the optimizer must reach, and what it optimises for after that (time, plastic, support, looks). Quality checks no strength and keeps support off the faces people see |
+| **What may change** | Slicer settings · The design · Both | Slicer-only users still see design fixes, tagged "changes your model" with a one-time confirm |
+
+The flow: Start → Your part → Setup → Environment → Holds → Loads → Load details → Analyse → Options → Simulation →
+Problems & fixes → Done (details: [research/redesign-2026-11/PLAN-COMBINED.md](research/redesign-2026-11/PLAN-COMBINED.md)).
 
 ## 4. Architecture
 
 ```
 Browser (static site, e.g. GitHub Pages — no backend)
-├── UI: plain ES modules (no framework, no build step) + three.js
+├── UI: plain ES modules (no framework, no build step) + three.js: web/index.html → main.js, shell.js (header, step rail,
+│       panel), state.js (inputs with revisions, results marked stale), flow.js (the steps), steps/, ui/, viewport/
+├── Browser slicer: OrcaSlicer built for WebAssembly (Muon3D Slicer Engine) in its own worker, for G-code
 ├── Geometry I/O (JS/WASM): opencascade.js/replicad (STEP), manifold-3d (booleans), 3MF/STL parsers
 └── Core engine: Python package `fdmcore` running in Pyodide (Web Worker)
       numpy · scipy · shapely · pyyaml
@@ -50,7 +55,7 @@ Same `fdmcore` package, also usable as:
 Key decisions:
 - **Browser-first via Pyodide.** Python for the engine (easy to contribute to), but runs in the browser, so hosting is free and files never leave the user's machine.
 - **Voxel FEA instead of tet meshing.** Regular hex grid aligned with the build direction: no meshing failures on bad STLs, shell/infill zones fall out of distance-to-surface, layers map directly to voxel slabs. Target 100k–300k DOF ≈ 3–15 s in browser.
-- **Own "pseudo-slicer" in core** (layer areas, overhang per layer, bridges, layer-time estimate). Good enough for advice; real slicing via OrcaSlicer CLI in local mode only.
+- **Own "pseudo-slicer" in core** (layer areas, overhang per layer, bridges, layer-time estimate). Good enough for advice; real G-code from OrcaSlicer in the browser (WebAssembly) feeds the Simulation step and the G-code download, and from the installed OrcaSlicer in local mode.
 - **Output to the user's slicer:** export a 3MF with orientation + Orca/Bambu project settings → "Open in OrcaSlicer" and everything is set.
 - **Not forking OrcaSlicer.** No plugin system, huge C++ codebase. Integrate via 3MF export, profile import, CLI.
 
@@ -108,7 +113,7 @@ removed. Instead, the tool is something an agent the user already runs can use:
 
 | Path | Setup for user | What the agent can do |
 |---|---|---|
-| MCP server (local) | `pip install` + one `claude mcp add` / Codex config line | Every API call the web app makes, plus files out: reports, charts, images, 3MF/STL/STEP |
+| MCP server (local) | `pip install` + one `claude mcp add` / Codex config line | Every API call the web app makes (including the app's optimizer, `optimize_print`), plus files out: reports, charts, images, 3MF/STL/STEP |
 | Command line `fdmdfm` | `pip install` | Same as MCP for agents (or scripts) without MCP: `fdmdfm check part.stl --json`, `fdmdfm report part.stl -o report.html` |
 | Copy for your AI chat | None | A plain-text report pasted into any chat; the chat can't act on the tool |
 
@@ -193,6 +198,7 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | **9 — More simulation (advanced mode)** | Answers beyond "will it break" | Simplified dynamic (vibration / impact), heat (part in use, e.g. a hot car), creep under constant load, warping with visible deformation, internal (residual) stress from printing, cooling optimised from the heat simulation |
 | **10 — Calibration & materials** | Right numbers for your printer | Calibration prints with a form for the result: tolerances / fits, overhang angle, bridges, support gap, layer strength, warping (some exist). Ship presets for printers once they prove consistent between machines. Optional material advisor: from the environment (heat, outdoors, chemicals) and the load case, the best material you can print — not assuming everything maxed out at any price |
 | **11 — Agent toolkit** | Use the tool from Claude Code / Codex | Remove the built-in AI panel; every API call as MCP tool and command line; reports, PNG images and SVG charts from the engine; project files shared with the web app; agent guide (section 6) |
+| **12 — UI revision** (2026-11) | One clear path a hobbyist can follow | A new app replacing the first one: desktop only, the part in 3D throughout, holds and loads picked on the part, an optimizer that returns 2–4 verified options per goal, the browser OrcaSlicer for simulations, one batch of fixes with a safe re-check, a Done step with the export. Plan: [research/redesign-2026-11/PLAN-COMBINED.md](research/redesign-2026-11/PLAN-COMBINED.md); tasks T-500…T-582 in TASKS.md |
 
 ### Progress (2026-10-29)
 
@@ -204,6 +210,7 @@ Infill stiffness: Gibson–Ashby scaling `E* ≈ E·(ρ)^n`. Walls: shell thickn
 | 3 — Design fixes | ✅ done | Feature confirm ("is this a hole?"), teardrops, corner chamfers, 45° ledge fills, sacrificial layers, thicker walls; ghost preview (cut/add), adjustable sizes, STL and STEP output (OpenCascade write-back) |
 | 4 — AI & agents | ✅ done | MCP server (local mode) with real slicing via the installed OrcaSlicer, copy-report + paste-back answers (any chat subscription), Ask AI with Anthropic / Gemini / OpenAI keys. Replaced by the agent toolkit (Phase 11, 2026-10-31): the built-in AI goes, the MCP server grows |
 | 5 — Ecosystem | ⏳ | Done: your own printers/materials with calibration prints, offline use, GitHub Pages workflow, Fusion add-in (report + teardrops; untested inside Fusion). Open: first Pages deploy, real calibration prints, community rules |
+| 12 — UI revision | ✅ main path (2026-11-22) | Start → … → Done and the Quality path work end to end (browser test walks it at 1280×720 and 1440×900). Open: Tolerances in 3D (T-570), Make it lighter (T-571), More tools on Done (T-564), exact STEP edits (T-527…T-535) |
 
 Research to do: more CAD tricks and optimisations to suggest (e.g. holes that force walls, rib and gusset patterns,
 bolt-hole bosses, print-in-place clearances, split lines for big parts, orientation-friendly chamfers instead of fillets
