@@ -1161,13 +1161,13 @@ Rules for every [UI] task:
 - [ ] **T-528 P2** [UI] Edit intents beside triangle pieces. · plan: §10.3 (point 7), §16.4; research/cad_engine.md · files: `core/fdmcore/features.py`, `core/fdmcore/additions.py`, `core/fdmcore/api.py`, tests · owner: Claude (`task/T-528-edit-intents`)
   - Do: every design edit also carries `intent` = {op: hole_resize | teardrop | slab | void | rib | fillet | chamfer, params (mm), refs: B-rep face ids / edge (two face ids) when the part came from STEP}. Triangle `pieces` stay (mesh path and fallback). JSON-friendly.
   - Done when: hole, teardrop, slab, void, rib and inside-corner edits carry intents with face refs on the STEP fixture; existing edit tests pass.
-- [ ] **T-529 P2** [UI] B-rep edit worker with per-edit fallback. · plan: §5, §15.1 (modified STEP), §16.4; research/cad_engine.md · files: `web/stepwrite-worker.js` (or a new `web/brep-worker.js`), `web/stepwrite.js`, `web/geometry.js`, e2e · owner: —
+- [ ] **T-529 P2** [UI] B-rep edit worker with per-edit fallback. · plan: §5, §15.1 (modified STEP), §16.4; research/cad_engine.md · files: `web/stepwrite-worker.js` (or a new `web/brep-worker.js`), `web/stepwrite.js`, `web/geometry.js`, e2e · owner: Claude (`task/T-529-brep-worker`)
   - Do: apply intents on the original STEP with exact tools (cylinder/prism/box booleans first), `BRepCheck_Analyzer` after each op; an edit that fails falls back to its triangle pieces with a plain note; tessellate the result (with face ids) for display and the engine's re-check; write STEP. Free shapes; one worker.
   - Done when: the fixture's hole resize, teardrop, slab, void and rib come back as exact faces (face count stays near the original), a forced failure falls back, and the browser test downloads the edited STEP.
-- [ ] **T-534 P2** [UI] Exact fillets and chamfers at inside corners on STEP. · plan: §10.3 (point 7c), §16.4; research/cad_engine.md · files: the B-rep worker (T-529), `core/fdmcore/features.py` · owner: —
+- [ ] **T-534 P2** [UI] Exact fillets and chamfers at inside corners on STEP. · plan: §10.3 (point 7c), §16.4; research/cad_engine.md · files: the B-rep worker (T-529), `core/fdmcore/features.py` · owner: Claude (`task/T-534-exact-fillets`)
   - Do: `fillet` / `chamfer` intents on the edge between two faces (T-527); radius from the engine's stress-corner edit; fallback to today's faceted wedge on failure.
   - Done when: the bracket's inside corner fillets exactly, and a corpus part where OCCT fails falls back with the note.
-- [ ] **T-535 P3** [UI] STEP corpus and robustness report for B-rep edits. · plan: §16.4; research/cad_engine.md ("Risks") · files: `core/tests/corpus_step/` (new), a report under `research/` · owner: —
+- [ ] **T-535 P3** [UI] STEP corpus and robustness report for B-rep edits. · plan: §16.4; research/cad_engine.md ("Risks") · files: `core/tests/corpus_step/` (new), a report under `research/` · owner: Claude (`task/T-535-step-corpus`)
   - Do: 8–12 real-world STEP parts (open licences, sources noted); run every intent kind on each; record success rate, time and memory in a browser.
   - Done when: the report lists which edit kinds are reliable enough to be on by default.
 
