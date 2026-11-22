@@ -118,6 +118,9 @@ MATERIAL_FIELDS = {
     # which a covered spot loses its shape, and the bond between layers the snap test still found solid.
     "sag_limit_c": (float, 30, 300),
     "min_bond": (float, 0.02, 1.0),
+    # Quality calibration (T-572): the best block of the temperature tower and the best ironing flow (%).
+    "nozzle_temp_c": (float, 150, 450),
+    "ironing_flow_pct": (float, 2, 40),
 }
 ENCLOSURES = ("none", "passive", "heated")
 
@@ -212,6 +215,7 @@ class Profile:
     nozzle: str = "0.4"
     multi_material: bool = False  # AMS / MMU / second nozzle available (support interfaces in another material)
     goal: str = "balanced"  # what orientation and settings optimise for: see GOALS
+    looks: bool = False  # the new UI's Quality goal (plan §14): settings for parts people look at (recommend.py)
     use_temp_c: float | None = None  # hottest the part gets in use (sun, car, near a heater); None = room
     constant_load: bool = False  # the load stays on (hangs permanently): plastic slowly creeps
     # Layer height override (mm); None follows the nozzle preset. Kept apart from the derived value, so
@@ -285,6 +289,7 @@ class Profile:
             nozzle=str(d.get("nozzle", cls.nozzle)),
             multi_material=bool(d.get("multi_material", False)),
             goal=d.get("goal", "balanced"),
+            looks=bool(d.get("looks", False)),
             use_temp_c=None if d.get("use_temp_c") in (None, "") else float(d["use_temp_c"]),
             constant_load=bool(d.get("constant_load", False)),
             layer_height_mm=lh,

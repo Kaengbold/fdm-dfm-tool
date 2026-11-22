@@ -1,8 +1,12 @@
 // Analyse step (T-550, plan §10.1): how deep should we look? Fast / Extended (default) / Complete, each with this
 // part's time estimate (api.estimate_runtime, calibrated; the browser figure). Complete needs design changes: shown
 // but off with "Allow" when only slicer settings may change; hidden for Quality. Start runs the optimizer
-// (api.optimize) in the engine worker with a progress card on the stage: named stages, elapsed vs estimate, Cancel.
-// The result is kept with the input revisions it used, so a later change marks it stale; then on to Options.
+// (api.optimize) in the engine worker with a progress card on the stage: named stages, elapsed vs estimate, Cancel, and
+// Stop & show best so far once the engine has sent a partial result (T-552: the worker can't answer a second call while
+// the optimizer runs, so the best options so far come with the progress; Stop keeps the latest and cancels). Extended
+// and Complete get a time budget (BUDGET × the estimate): when it runs out the engine picks from what it checked and
+// Options says "Search ended early" with Continue (a run without a budget), never "impossible". The result is kept
+// with the input revisions it used, so a later change marks it stale; then on to Options.
 import { h } from "../ui/dom.js";
 import { Button } from "../ui/button.js";
 import { ChoiceCards } from "../ui/choice.js";
@@ -22,7 +26,11 @@ const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart
 /** "~20 s", "~2 min" for an estimate in seconds. */
 export const roughTime = (s) => (s < 50 ? t("analyse.seconds", { n: Math.max(5, Math.round(s / 5) * 5) }) : t("analyse.minutes", { n: Math.max(1, Math.round(s / 60)) }));
 
-let run = null; // {depth, started, estimate, card, timer} while the optimizer runs
+let run = null; // {depth, started, estimate, card, timer, partial} while the optimizer runs
+// The time budget: this many times the browser estimate, at least BUDGET_MIN_S; none for Fast or without an estimate.
+const BUDGET = 2.5;
+const BUDGET_MIN_S = 120;
+export const budgetFor = (depth, estimate) => (depth === "fast" || !estimate ? null : Math.max(BUDGET_MIN_S, Math.round(BUDGET * estimate)));
 let estimates = { key: null, values: {} };
 let lastError = null;
 
@@ -41,11 +49,15 @@ async function loadEstimates(services, store, args) {
   if (estimates.key === key && !run) services.rerender();
 }
 
-async function start(services, store, go, args) {
+/** Run the optimizer. ``budget``: false for no time budget (Continue the search), else the depth's own. */
+export async function start(services, store, go, args, { budget = true } = {}) {
   const depth = store.get().depth;
   const deps = store.deps(...DEPENDS);
   lastError = null;
-  run = { depth, started: performance.now(), estimate: estimates.values[depth] ?? null, done: 0, share: 0 };
+  const estimate = estimates.values[depth] ?? null;
+  const me = { depth, started: performance.now(), estimate, done: 0, share: 0, partial: null, deps };
+  run = me;
+  services.onPartial = (result) => { if (run === me && result?.options?.length) { me.partial = result; update(); } };
   services.onProgress = (fraction, text) => {
     if (!run) return;
     const hit = STAGE_OF.find(([prefix]) => text?.startsWith(prefix));
@@ -53,16 +65,19 @@ async function start(services, store, go, args) {
     run.share = Math.max(run.share, fraction ?? 0);
     update();
   };
-  const update = () => run?.card?.set({ done: run.done, share: run.share, elapsed: (performance.now() - run.started) / 1000, estimate: run.estimate });
+  const update = () => run?.card?.set(cardState(run));
   run.timer = setInterval(update, 500);
   services.rerender();
   try {
-    const result = await services.engine.call("optimize", { ...args, depth });
+    const budget_s = budget ? budgetFor(depth, estimate) : null;
+    const result = await services.engine.call("optimize", { ...args, depth, budget_s });
+    if (run !== me) return; // stopped: the partial result is in already
     store.setResult("optimize", result, deps);
     finish();
     store.set({ optimized: Date.now() }, { undoable: false });
     go("options");
   } catch (err) {
+    if (run !== me) return; // stopped with the best so far
     const cancelled = err?.name === "Cancelled" || err?.constructor?.name === "Cancelled";
     finish();
     if (!cancelled) lastError = err?.message ?? String(err);
@@ -73,6 +88,19 @@ async function start(services, store, go, args) {
 function finish() {
   if (run?.timer) clearInterval(run.timer);
   run = null;
+}
+
+const cardState = (r) => ({ done: r.done, share: r.share, elapsed: (performance.now() - r.started) / 1000, estimate: r.estimate, canStop: Boolean(r.partial) });
+
+/** Stop & show best so far: keep the latest partial result (marked stopped) and cancel the run. */
+function stop(services, store, go) {
+  const r = run;
+  if (!r?.partial) return;
+  finish();
+  store.setResult("optimize", { ...r.partial, stopped: true }, r.deps);
+  services.engine.cancel();
+  store.set({ optimized: Date.now() }, { undoable: false });
+  go("options");
 }
 
 let watching = false;
@@ -115,12 +143,9 @@ registerStep("analyse", {
 
     if (run) {
       const card = ProgressCard({ title: t("analyse.running"), stages: STAGES.map((k) => t(`analyse.stage.${k}`)),
-        onCancel: () => { services.engine.cancel(); }, onStop: () => {} });
-      // Stopping with the best so far needs the engine to hand back partial results (follow-up task); until then the
-      // button says why it's off.
-      card.querySelector(".ui-progress__foot .ui-btn--secondary")?.setAttribute("title", t("analyse.stopLater"));
+        onCancel: () => { services.engine.cancel(); }, onStop: () => stop(services, store, go) });
       run.card = card;
-      card.set({ done: run.done, share: run.share, elapsed: (performance.now() - run.started) / 1000, estimate: run.estimate });
+      card.set(cardState(run));
       stage.append(h("div", { class: "analyse-progress" }, card));
       body.append(Button({ label: t("analyse.runningShort"), variant: "primary", disabled: true }));
     } else {

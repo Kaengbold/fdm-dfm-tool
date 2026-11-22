@@ -150,6 +150,7 @@ export function optimizeArgs(state) {
   };
   if (prof.printer) profile.printer = prof.printer;
   if (prof.nozzle) profile.nozzle = String(prof.nozzle);
+  if (goal === "quality") profile.looks = true; // settings for parts people look at (recommend.py, T-572)
 
   const constraints = { ...(state?.constraints ?? {}) };
   if (prof.material) constraints.material = prof.material;
