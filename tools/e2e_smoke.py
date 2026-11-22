@@ -552,7 +552,9 @@ def check_new_ui_loads(browser, port: int) -> str:
 
 def check_new_ui_analyse(browser, port: int) -> str:
     """The new UI's Analyse step (T-550): depth cards with estimates, a Quality run lands on Options with a result,
-    a changed input marks it stale (Next waits), and a long run shows its stages and can be cancelled."""
+    a changed input marks it stale (Next waits), and a long run shows its stages. T-552: Stop & show best so far comes
+    on with the first partial result and lands on Options with those options ("Stopped early" + Continue); Continue
+    runs again, which Cancel stops, leaving a working engine; a spent time budget says "Search ended early"."""
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     errors: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -576,6 +578,7 @@ def check_new_ui_analyse(browser, port: int) -> str:
           const reg = (await fdmUI.services.engine.call('regions')).regions;
           const back = reg.reduce((a, r) => (r.normal[1] < a.normal[1] ? r : a)).id;
           const top = reg.filter((r) => r.normal[2] > 0.99).reduce((a, r) => (r.area_mm2 > a.area_mm2 ? r : a)).id;
+          await fdmUI.services.engine.call('set_expert', { values: { 'analysis.strength_voxels': 2500 } });
           fdmUI.store.set({ goal: 'balanced', depth: 'extended', holds: [{ region: back, type: 'clamped' }], loads: [{ region: top, newtons: 49, direction: [0, 0, -1] }] });
           fdmUI.go('analyse'); }""")
         assert page.evaluate("() => fdmUI.store.isStale('optimize')") and page.locator(".analyse-stale").count() == 1
@@ -583,13 +586,37 @@ def check_new_ui_analyse(browser, port: int) -> str:
         page.get_by_role("button", name="Start optimization").click()
         page.wait_for_selector(".ui-progress")
         stages = page.locator(".ui-progress__stages li").count()
+        stop = page.get_by_role("button", name="Stop & show best so far")
+        assert stop.is_disabled(), "Stop before any option"
+        page.wait_for_function("() => !document.querySelector('.ui-progress__foot .ui-btn--secondary')?.disabled", timeout=300_000)
+        stop.click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Options'", timeout=30_000)
+        got = page.evaluate("() => { const r = fdmUI.store.result('optimize'); return [r.stopped, r.partial, r.options.length, fdmUI.store.isStale('optimize')]; }")
+        assert got[0] and got[1] and got[2] >= 1 and not got[3], got
+        assert page.locator(".options-cols .ui-col").count() == got[2]
+        assert "Stopped early" in page.locator(".options-banner").inner_text()
+        page.get_by_role("button", name="Continue the search").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Analyse'")
+        page.wait_for_selector(".ui-progress")
         page.get_by_role("button", name="Cancel").click()
         page.wait_for_selector(".ui-progress", state="detached")
         assert page.locator("#step-title").inner_text() == "Analyse"
         ok = page.evaluate("async () => (await fdmUI.services.engine.call('estimate_runtime', { depth: 'fast' })).seconds > 0")
         assert ok, "engine not usable after Cancel"
+        assert page.evaluate("() => fdmUI.store.result('optimize').stopped"), "Cancel lost the kept result"
+        # A spent time budget: the engine picks from what it checked, Options says so.
+        page.evaluate("""async () => {
+          const s = fdmUI.store.get();
+          const r = await fdmUI.services.engine.call('optimize', { goal: 'balanced', depth: 'extended', profile: { printer: 'bambu_p1s' },
+            loads: null, budget_s: 0 });
+          fdmUI.store.setResult('optimize', r, fdmUI.store.deps('model', 'profile', 'goal', 'environment', 'loads', 'depth'));
+          fdmUI.go('options'); }""")
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Options'")
+        banner = page.locator(".options-banner").inner_text()
+        assert "Search ended early" in banner and "Continue the search" in banner, banner
         assert not errors, errors
-        return f"Quality run → Options ({res[1]} option); stale after a change, Next waits; {stages} stages shown, Cancel left a working engine"
+        return (f"Quality run → Options ({res[1]} option); stale after a change, Next waits; {stages} stages shown; "
+                f"Stop showed {got[2]} best so far, Continue, Cancel left a working engine; budget ended early")
     finally:
         page.close()
 
@@ -1280,6 +1307,86 @@ def check_new_ui_tools(browser, port: int) -> str:
         page.close()
 
 
+def _sliced_tower() -> bytes:
+    """A stand-in for a sliced temperature tower: layer marks every 0.2 mm up to 49 mm, the slicer's own temperatures."""
+    out = ["M104 S220", "M109 S220", "G28"]
+    for k in range(1, 246):
+        z = round(0.2 * k, 2)
+        out += [";LAYER_CHANGE", f";Z:{z:g}", f"G1 Z{z:g} F600", "G1 X10 Y10 E0.5 F1800"]
+    out += ["M104 S0"]
+    return "\n".join(out).encode()
+
+
+def check_new_ui_quality_calibration(browser, port: int) -> str:
+    """Quality settings and tests (T-572): the temperature tower downloads, a sliced tower comes back with each block's
+    temperature set, the best block is saved as the material's temperature; the ironing test downloads as a 3MF with
+    the flows set, the smoothest is saved; the engine has both. Then a Quality part's Done list has the looks settings
+    (slower outer wall, inner-outer-inner, aligned seam)."""
+    import io
+    import zipfile
+
+    ctx = browser.new_context(viewport={"width": 1280, "height": 720}, accept_downloads=True)
+    page = ctx.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    done = []
+    try:
+        page.goto(f"http://127.0.0.1:{port}/web/")
+        page.wait_for_selector("body[data-ready]")
+        page.wait_for_function("() => Boolean(fdmUI.services.settings?.isEngineSynced?.())", timeout=240_000)
+        page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
+        page.wait_for_selector(".settings-wrap")
+        page.locator("#settings-tab-calibration").click()
+        # Temperature tower.
+        page.locator('[data-cal-card="temp"]').click()
+        with page.expect_download(timeout=60_000) as dl:
+            page.get_by_role("button", name="Download model").click()
+        assert dl.value.suggested_filename == "temp_tower.stl", dl.value.suggested_filename
+        with page.expect_download(timeout=60_000) as dl:
+            page.set_input_files('.cal-picker-group input[type=file]', files=[{"name": "temp_tower.gcode", "mimeType": "text/plain", "buffer": _sliced_tower()}])
+        text = open(dl.value.path(), encoding="utf-8").read()
+        assert dl.value.suggested_filename == "temp_tower_temps.gcode" and "M104 S230" in text and "M104 S205" in text, dl.value.suggested_filename
+        assert text.rstrip().endswith("M104 S0"), "heater left on"
+        page.locator('.cal-pick[data-pick-value="215"]').click()
+        page.get_by_role("button", name="Save result").click()
+        done.append("tower: G-code with 230 → 205 °C, 215 saved")
+        # Ironing.
+        page.get_by_role("button", name="All calibration tests").click()
+        page.locator('[data-cal-card="ironing"]').click()
+        with page.expect_download(timeout=60_000) as dl:
+            page.get_by_role("button", name="Download model").click()
+        assert dl.value.suggested_filename == "ironing_test.3mf", dl.value.suggested_filename
+        z = zipfile.ZipFile(io.BytesIO(open(dl.value.path(), "rb").read()))
+        assert z.read("Metadata/layer_config_ranges.xml").decode().count('opt_key="ironing_flow"') == 5
+        page.locator('.cal-pick[data-pick-value="12"]').click()
+        page.get_by_role("button", name="Save result").click()
+        page.get_by_role("button", name="All calibration tests").click()
+        cards = page.locator(".cal-grid").inner_text()
+        assert "Prints best at 215 °C" in cards and "Irons best at 12 % flow" in cards, cards
+        got = page.evaluate("""async () => { await fdmUI.services.settings.syncEngine();
+          const m = (await fdmUI.services.engine.call("presets")).materials.my_cal_pla; return [m.nozzle_temp_c, m.ironing_flow_pct]; }""")
+        assert got == [215, 12], got
+        done.append("ironing: 3MF with 5 flows, 12 % saved")
+        # A Quality part: the looks settings on Done.
+        page.get_by_role("button", name="Back to your part").click()
+        page.get_by_role("button", name="Optimize your print").click()
+        page.get_by_role("button", name="Sample parts").click()
+        page.locator(".sample-card", has_text="Hole block").click()
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
+        page.evaluate("""() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s', material: '' }, goal: 'quality', optimized: 1,
+          option: { up: [0, 0, 1], orientation: 'Flat', material: 'my_cal_pla', material_name: 'My PLA', nozzle: '0.4', layer_height: 0.2, walls: 2, top: 4,
+            bottom: 3, infill: 0.15, settings: { wall_loops: '2' } } }); fdmUI.go('done'); }""")
+        page.wait_for_selector(".done-settings li", state="attached", timeout=180_000)
+        rows = page.locator(".done-settings").text_content()
+        for want in ("Outer wall speed", "Wall order", "inner-outer-inner wall", "Seam"):
+            assert want in rows, (want, rows)
+        done.append("Quality Done list: outer wall, wall order, seam")
+        assert not errors, errors
+        return "; ".join(done)
+    finally:
+        ctx.close()
+
+
 def check_old_project(browser, port: int) -> str:
     """Projects from before the cut-over (T-580) still open: an old-style project (goal "strength", a load in kg
     pointing "down") and a shared report with a project inside land on Setup with the part, its holds and loads."""
@@ -1499,6 +1606,7 @@ CHECKS = [
     ("tolerances", "check_new_ui_tolerances"),
     ("lighter and tuned settings", "check_new_ui_lighter_tuned"),
     ("more tools", "check_new_ui_tools"),
+    ("quality settings and tests", "check_new_ui_quality_calibration"),
 ]
 
 
