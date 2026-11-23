@@ -43,7 +43,8 @@ For steady loads at 18–30 °C, the strength check multiplies its usual ×2 mar
 365-day drop divided by the initial drop. The optimizer also keeps the goal's minimum margin.
 The ×3 fallback applies outside that temperature range or until the initial reading and a reading
 from at least 1 hour are available. An estimate from fewer than four readings or less than
-four weeks is marked provisional.
+four weeks is marked provisional and can only raise the ×3 margin, never lower it:
+a year extrapolated from hours or days can miss the late speed-up of creep.
 
 This is a sag-based margin, with extrapolation beyond the last reading. Print settings, load
 direction, temperature, and stress can all change how the plastic creeps. Estimating time to

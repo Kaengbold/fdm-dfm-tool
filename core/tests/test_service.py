@@ -95,11 +95,16 @@ def test_creep_calibration_changes_live_strength_target(measured_pla):
     before = api.strength([1, 0, 0], loads, p)
     assert before["required_safety"] == 3 and before["verdict"] == "borderline"
     measured_pla([[1, 4], [60, 4.1]])
+    early = api.strength([1, 0, 0], loads, p)
+    assert early["required_safety"] == 3 and "early estimate" in early["explanation"]  # an early estimate can't lower ×3
+    measured_pla([[1, 4], [60, 4.1], [1440, 4.18], [10080, 4.22], [40320, 4.26]])
     after = api.strength([1, 0, 0], loads, p)
     assert after["safety_factor"] == before["safety_factor"]
+    assert not after["creep"]["provisional"]
     assert after["required_safety"] == pytest.approx(2 * after["creep"]["factor"])
     assert after["required_safety"] < 3 and after["verdict"] == "fine"
-    assert "early estimate" in after["explanation"]
+    measured_pla([[1, 4], [60, 5]])
+    assert api.strength([1, 0, 0], loads, p)["required_safety"] > 3  # fast early sag raises it at once
     assert api.strength([1, 0, 0], loads, {**p, "constant_load": False})["required_safety"] == 2
     assert api.strength([1, 0, 0], loads, {**p, "use_temp_c": 40})["required_safety"] == 3
 

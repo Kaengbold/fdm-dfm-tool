@@ -495,7 +495,7 @@ export default {
   "settings.cal.creep.readingsHint": "Enter the total drop from the unloaded mark each time. Save readings as you take them and leave later fields blank.",
   "settings.cal.creep.needReading": "Enter at least one tip drop to save.",
   "settings.cal.creep.pending": "The ×3 target stays until you save the 1-minute reading and a reading from 1 hour or later.",
-  "settings.cal.creep.early": "Early estimate. Add readings through four weeks to improve it.",
+  "settings.cal.creep.early": "Early estimate. Until you add the 4-week reading it can only raise the ×3 target, not lower it.",
   "settings.cal.creep.summary": "Four weeks of readings saved for the one-year estimate.",
   "settings.cal.overhang.title": "Overhang",
   "settings.cal.overhang.line": "How steep it prints without support.",

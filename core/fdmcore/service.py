@@ -61,4 +61,8 @@ def required_safety(profile: Profile) -> float:
         return 2.0
     creep = creep_estimate(profile)
     # Treat extra sag as a margin on the short-load check. This is not a fit of time to rupture.
-    return 2.0 * creep["factor"] if creep is not None else CONSTANT_LOAD_SAFETY
+    if creep is None:
+        return CONSTANT_LOAD_SAFETY
+    # A year extrapolated from hours or days can miss the late speed-up of creep: an early estimate may only
+    # raise the margin; four weeks of readings may also lower it.
+    return max(CONSTANT_LOAD_SAFETY, 2.0 * creep["factor"]) if creep["provisional"] else 2.0 * creep["factor"]
