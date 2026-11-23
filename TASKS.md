@@ -1297,8 +1297,9 @@ Rules for every [UI] task:
   - Do: the profile accepts the new goals (strong / fast / light / quality) beside the old ones; a test runs the heat check with every goal.
 - [ ] **T-585 P2** [UI] Keep the chosen option's orientation after Options. · files: `web/main.js`, `web/viewport/stage.js`, steps that pick · owner: Claude (`task/T-585-keep-orientation`)
   - Do: Simulation, Problems and Done show the part turned to print (on the bed); steps that pick faces turn it back while picking; a short line says how it's turned.
-- [ ] **T-586 P2** [UI] Options screen side by side (layout A). · files: `web/steps/options.js`, `web/steps/options.css`, `web/shell.css`, `web/messages/en.js`, e2e · owner: Codex GPT-6.2 Sol (`task/T-586-options-layout`)
+- [x] **T-586 P2** [UI] Options screen side by side (layout A). · files: `web/steps/options.js`, `web/steps/options.css`, `web/shell.css`, `web/messages/en.js`, e2e · owner: Codex GPT-6.2 Sol (`task/T-586-options-layout`)
   - Do: the part on the left (smaller), the comparison table on the right (wider, about 60 %); no fixed 136 px head; rows ~24 px; rows that are the same for every option fold into one "Same for all" line; Use buttons in the column head; pointing at a column turns the part; no scrolling at 1920×1080.
+  - Outcome: Four options fit beside the 3D preview at 1920×1080, with compact rows, expandable shared settings and per-column editing. [PR](https://github.com/Kaengbold/fdm-dfm-tool/pulls?q=is%3Apr+head%3Atask%2FT-586-options-layout)
 - [ ] **T-587 P2** [UI] Heat result on the sliced paths. · files: `web/viewport/heatview.js`, `web/steps/heat.js`, `core/fdmcore/thermal_opt.py` / `api.py` · owner: Claude (`task/T-587-heat-paths`)
   - Do: hide the STL and draw the G-code paths as thin tubes coloured by the heat window, so it's clear the simulation ran on the real print.
 - [ ] **T-588 P2** [UI] Heat replay and a guided explanation. · files: `core/fdmcore/thermal.py`, `api.py`, `web/steps/heat.js`, `web/viewport/heatview.js`, `web/messages/en.js` · owner: Claude (`task/T-588-heat-replay`)

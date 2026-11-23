@@ -1,6 +1,5 @@
-// Options step (T-551, plan §11, §10.2, decision 2): the optimizer's 2–4 options as aligned columns under a 3D strip
-// (the part turned the way the focused option prints it). Pros and cons at the top, then the same rows in every
-// column. Hover a value for its pin: pinned values become chips in "Your choices" (two values for the same thing
+// Compare the optimizer's options beside a 3D view of the focused option's orientation.
+// Hover a value for its pin: pinned values become chips in "Your choices" (two values for the same thing
 // ask Replace or Cancel); "Keep all" pins a column's whole recipe; "Re-optimize with my choices" reruns with the
 // chips as hard limits. Nothing reaches the target → a banner with the ways out; an option below the target can
 // still be used after a clear warning, which travels with it. "Use this option" moves on to Simulation.
@@ -18,12 +17,12 @@ import { t } from "../i18n.js";
 import { activeNozzles, optimizeArgs, orderedMaterials } from "./args.js";
 import { start as startAnalysis } from "./analyse.js";
 
-// The rows of §11 in order: [key, label key, pin key in the optimizer's constraints (null = a result, not pinnable)].
+// Comparison order: [row key, label key].
 export const ROWS = [
-  ["orientation", "options.row.orientation", "up"], ["material", "options.row.material", "material"], ["nozzle", "options.row.nozzle", "nozzle"],
-  ["layer", "options.row.layer", "layer_height"], ["walls", "options.row.walls", "walls"], ["topBottom", "options.row.topBottom", null],
-  ["infill", "options.row.infill", "infill"], ["support", "options.row.support", null], ["total", "options.row.total", null],
-  ["time", "options.row.time", null], ["safety", "options.row.safety", null],
+  ["safety", "options.row.safety"], ["time", "options.row.time"], ["total", "options.row.total"],
+  ["orientation", "options.row.orientation"], ["material", "options.row.material"], ["infill", "options.row.infill"],
+  ["topBottom", "options.row.topBottom"], ["changes", "options.row.changes"], ["nozzle", "options.row.nozzle"],
+  ["layer", "options.row.layer"], ["walls", "options.row.walls"], ["support", "options.row.support"],
 ];
 
 const minutes = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, "0")}` : `${Math.round(m)} min`);
@@ -42,6 +41,7 @@ export function optionRows(o, constraints = {}) {
     cell("layer", `${o.layer_height.toFixed(2)} mm`, "layer_height", o.layer_height),
     cell("walls", String(o.walls), "walls", o.walls),
     cell("topBottom", `${o.top} / ${o.bottom}`, null),
+    cell("changes", o.reinforcements?.map((r) => r.label).join(" · ") || t("options.noChanges"), null),
     cell("infill", `${Math.round(o.infill * 100)} %`, "infill", o.infill),
     cell("support", grams(o.support_g), null),
     cell("total", grams(o.total_g), null),
@@ -82,6 +82,32 @@ let busy = false;
 let focused = 0;
 let editing = null; // {col, key} while a value is being edited
 let edits = { result: null, cols: {} }; // per column: constraint key → edited value, for the result they were made on
+let showShared = false;
+let framedPart = null;
+
+function framePreview(stage) {
+  const part = stage?.part;
+  if (!part || part === framedPart) return;
+  // The old camera target may fall outside the turned part in the taller Options stage.
+  const { min, max } = part.geo.boundingBox;
+  const { x, y, z } = part.offset;
+  const corners = [min.x, max.x].flatMap((px) => [min.y, max.y].flatMap((py) =>
+    [min.z, max.z].map((pz) => [px - x, py - y, pz - z])));
+  stage.frameBox(corners);
+  framedPart = part;
+}
+
+function sharedRows(keys, columns) {
+  if (columns.length < 2) return [];
+  return keys.filter((key) => {
+    const first = columns[0].rows[key];
+    const pinValue = JSON.stringify(first.pinValue);
+    return editing?.key !== key && columns.every(({ rows }) => {
+      const row = rows[key];
+      return !row.edited && row.value === first.value && JSON.stringify(row.pinValue) === pinValue;
+    });
+  });
+}
 
 async function reoptimize(services, store) {
   busy = true;
@@ -162,6 +188,7 @@ function use(store, go, o) {
 }
 
 registerStep("options", {
+  leave() { framedPart = null; },
   render({ body, store, go, services }) {
     const s = store.get();
     const result = store.result("optimize");
@@ -170,9 +197,14 @@ registerStep("options", {
       return;
     }
     const options = result.options ?? [];
-    if (edits.result !== result) { edits = { result, cols: {} }; editing = null; } // a new run: the edits went into it
+    if (edits.result !== result) {
+      edits = { result, cols: {} }; // A new run incorporates the edits.
+      editing = null;
+      showShared = false;
+    }
     focused = Math.min(focused, Math.max(options.length - 1, 0));
     services.stage?.orient(options[focused]?.up ?? null);
+    framePreview(services.stage);
     const constraints = s.constraints ?? {};
     const stale = store.isStale("optimize");
 
@@ -196,30 +228,51 @@ registerStep("options", {
     }
     if (stale) body.append(h("p", { class: "analyse-stale" }, t("options.stale")));
 
-    // Quality checks no strength at all (§14): no Strength row.
-    const shown = s.goal === "quality" ? ROWS.filter(([k]) => k !== "safety") : ROWS;
-    const rowsOf = (o) => optionRows(o, constraints).filter((r) => shown.some(([k]) => k === r.key));
-    const labels = Object.fromEntries(shown.map(([k, label]) => [k, t(label)]));
+    const shown = ROWS.filter(([key]) => (key !== "safety" || s.goal !== "quality")
+      && (key !== "changes" || options.some((o) => o.reinforcements?.length)));
+    const labels = Object.fromEntries(shown.map(([key, label]) => [key, t(label)]));
+    labels.why = t("options.row.why");
+    const columns = options.map((original, i) => {
+      const mine = standingEdits(edits.cols[i], constraints);
+      const option = editedOption(original, mine, s.catalog);
+      const rows = Object.fromEntries(optionRows(option, constraints).map((row) => [row.key, {
+        ...row, editable: row.key in EDITABLE && !busy, edited: EDITABLE[row.key] in mine,
+      }]));
+      return { option, rows, needsRecheck: stale || Object.keys(mine).length > 0 };
+    });
+    const keys = shown.map(([key]) => key);
+    const shared = sharedRows(keys, columns);
+    const visible = keys.filter((key) => showShared || !shared.includes(key));
+    if (options.some((o) => o.pros?.length || o.cons?.length)) visible.push("why");
+
     const cols = h("div", { class: "options-cols" },
-      h("div", { class: "options-labels", "aria-hidden": "true" }, h("span", { class: "options-labels__head" }), shown.map(([, label]) => h("span", {}, t(label)))),
-      options.map((o0, i) => {
-        const mine = standingEdits(edits.cols[i], constraints);
-        const edited = Object.keys(mine).length > 0;
-        const o = editedOption(o0, mine, s.catalog);
-        const rows = rowsOf(o).map((r) => ({ ...r, editable: r.key in EDITABLE && !busy, edited: EDITABLE[r.key] in mine }));
-        const col = OptionColumn({ option: { ...o, rows }, labels, needsRecheck: stale || edited,
+      h("div", { class: "options-labels", "aria-hidden": "true" }, h("span"), visible.map((key) => h("span", {}, labels[key]))),
+      columns.map(({ option, rows, needsRecheck }, i) => {
+        const col = OptionColumn({ option: { ...option, rows: visible.map((key) => rows[key] ?? { key }) }, labels, needsRecheck,
           editing: editing?.col === i ? editing.key : null, editor: editing?.col === i ? valueEditor(store, services, options, i, editing.key) : null,
           onEdit: (row) => { editing = { col: i, key: row.key }; services.rerender(); },
           onPin: (row) => setPin(store, row.pinKey, row.pinValue, options),
-          onKeepAll: () => store.set({ constraints: { ...constraints, ...Object.fromEntries(optionRows(o).filter((r) => r.pinKey).map((r) => [r.pinKey, r.pinValue])) } }),
-          onUse: () => use(store, go, o0) });
-        col.addEventListener("mouseenter", () => services.stage?.orient(o.up));
+          onKeepAll: () => store.set({ constraints: { ...constraints, ...Object.fromEntries(Object.values(rows).filter((r) => r.pinKey).map((r) => [r.pinKey, r.pinValue])) } }),
+          onUse: () => use(store, go, options[i]) });
+        col.addEventListener("mouseenter", () => services.stage?.orient(option.up));
         col.addEventListener("mouseleave", () => services.stage?.orient(options[focused]?.up ?? null));
-        col.addEventListener("focusin", () => { focused = i; services.stage?.orient(o.up); });
+        col.addEventListener("focusin", () => { focused = i; services.stage?.orient(option.up); });
         return col;
       }));
-    cols.style.setProperty("--n", String(options.length)); // a custom property can't be set through style.x
-    body.append(cols);
+    if (columns.length) {
+      cols.style.setProperty("--option-count", String(columns.length));
+      cols.style.setProperty("--comparison-rows", String(visible.length + 1));
+      body.append(cols);
+    }
+    if (shared.length) {
+      const settings = shared.map((key) =>
+        t("options.sameSetting", { name: labels[key], value: columns[0].rows[key].value }));
+      body.append(h("div", { class: "options-shared" },
+        h("span", {}, t("options.sameForAll", { settings })),
+        h("button", { type: "button", class: "ui-link", "aria-expanded": String(showShared), dataset: { focusKey: "options-shared" },
+          onclick: () => { showShared = !showShared; services.rerender(); } },
+        t(showShared ? "options.hideShared" : "options.showShared"))));
+    }
     const choices = Object.entries(constraints).filter(([, v]) => v != null).map(([key, value]) => ({ key, label: chipLabel(key, value, options) }));
     body.append(ConstraintsBar({ choices, busy,
       onRemove: (c) => { const next = { ...constraints }; delete next[c.key]; store.set({ constraints: next }); },
