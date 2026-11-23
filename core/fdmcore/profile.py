@@ -121,6 +121,7 @@ MATERIAL_FIELDS = {
     # Quality calibration (T-572): the best block of the temperature tower and the best ironing flow (%).
     "nozzle_temp_c": (float, 150, 450),
     "ironing_flow_pct": (float, 2, 40),
+    "creep_readings": ("creep", 0.1, 25.0),  # [minutes since loading, drop from unloaded in mm]
 }
 ENCLOSURES = ("none", "passive", "heated")
 
@@ -154,6 +155,14 @@ def _custom_entry(kind: str, key: str, spec: dict, fields: dict, base_table: dic
             value = {k: float(v) for k, v in dict(value).items() if k in FITS}
             if not all(lo <= v <= hi for v in value.values()):
                 raise ValueError(f"{key}.{field} gaps must be between {lo} and {hi} mm")
+        elif kind_ == "creep":
+            try:
+                value = sorted([float(t), float(d)] for t, d in value)
+            except (TypeError, ValueError):
+                raise ValueError(f"{key}.{field} needs pairs of minutes and millimetres") from None
+            if (len(value) > 100 or len({t for t, _ in value}) != len(value)
+                    or not all(1 <= t <= 525_600 and lo <= d <= hi for t, d in value)):
+                raise ValueError(f"{key}.{field} needs distinct times (1–525600 min) and drops of {lo:g}–{hi:g} mm")
         elif kind_ == "note":
             value = None if value is None else str(value)[:hi]
         elif isinstance(kind_, tuple):

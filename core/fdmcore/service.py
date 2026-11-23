@@ -5,6 +5,8 @@ Kept apart from strength.py so the web app can use it without loading scipy.
 
 from __future__ import annotations
 
+from math import log
+
 import numpy as np
 
 from .profile import Profile
@@ -16,8 +18,10 @@ from .profile import Profile
 HEAT_RETENTION = ((0.0, 1.0), (0.19, 1.0), (0.46, 0.82), (0.73, 0.69), (1.0, 0.25), (1.15, 0.05))
 ROOM_C = 23.0
 # A load that stays on: plastics creep (slowly stretch) and can break under less than their short-term
-# strength. No printed-plastic data good enough for a number yet: ask for ×3 instead of ×2 (rule of thumb).
+# strength. Without a usable calibration, ask for ×3 instead of ×2 (rule of thumb).
 CONSTANT_LOAD_SAFETY = 3.0
+CREEP_LIFE_DAYS = 365
+CREEP_TIMES_MIN = (1, 60, 1440, 10080, 40320)
 
 
 def heat_limit(profile: Profile) -> float:
@@ -35,5 +39,30 @@ def heat_factor(profile: Profile) -> float:
     return float(np.interp(x, xs, ks))
 
 
+def creep_estimate(profile: Profile) -> dict | None:
+    """Estimate one-year sag relative to the one-minute reading, for room-temperature use."""
+    if not profile.constant_load or not 18 <= (ROOM_C if profile.use_temp_c is None else profile.use_temp_c) <= 30:
+        return None
+    readings = profile.material.get("creep_readings", [])
+    if len(readings) < 2 or readings[0][0] != 1 or readings[-1][0] < 60:
+        return None
+    initial = readings[0][1]
+    # Compliance under the same force scales with drop. Fit drop against log(time),
+    # anchored at the initial reading, and disallow a slope that predicts recovery under load.
+    followups = [(log(t), d - initial) for t, d in readings[1:]]
+    slope = max(0.0, sum(x * y for x, y in followups) / sum(x * x for x, _ in followups))
+    factor = 1.0 + slope * log(CREEP_LIFE_DAYS * 1440) / initial
+    return {"factor": factor, "days": CREEP_LIFE_DAYS, "points": len(readings),
+            "provisional": len(readings) < 4 or readings[-1][0] < CREEP_TIMES_MIN[-1]}
+
+
 def required_safety(profile: Profile) -> float:
-    return CONSTANT_LOAD_SAFETY if profile.constant_load else 2.0
+    if not profile.constant_load:
+        return 2.0
+    creep = creep_estimate(profile)
+    # Treat extra sag as a margin on the short-load check. This is not a fit of time to rupture.
+    if creep is None:
+        return CONSTANT_LOAD_SAFETY
+    # A year extrapolated from hours or days can miss the late speed-up of creep: an early estimate may only
+    # raise the margin; four weeks of readings may also lower it.
+    return max(CONSTANT_LOAD_SAFETY, 2.0 * creep["factor"]) if creep["provisional"] else 2.0 * creep["factor"]
