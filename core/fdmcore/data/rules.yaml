@@ -300,9 +300,10 @@ rules:
     - Bambu Lab Wiki — Filament Drying Recommendations — https://wiki.bambulab.com/en/filament-acc/filament/dry-filament
   stress_at_inside_corner:
     title: Sharp inside corner can crack
-    why: A sharp inside corner puts more stress in one spot. In printed PLA, rounding it helps a little when the
-      load is applied once or held steady. It matters more for clips, hinges and brackets that flex or shake over
-      and over. Start by turning the part so the load runs along the layers.
+    why: A sharp inside corner puts more stress in one spot. For a load applied once or held steady, tests on
+      printed PLA disagree on how much rounding helps (from almost nothing to about half the strength back). It
+      matters more for clips, hinges and brackets that flex or shake over and over. Start by turning the part so the
+      load runs along the layers.
     fixes:
     - domain: geometry
       text: Try a 1–3 mm round where it prints without support, such as at the base of an upright stem.
@@ -319,6 +320,7 @@ rules:
     - stress-concentration
     sources:
     - 'Printed Solid — 3D Printing Design Tips, Part 1: Stress Concentrations — https://www.printedsolid.com/blogs/news/37036739-3d-printing-design-tips-part-1-stress-concentrations'
+    - Zabihollah et al. (2024) — Tensile stress concentration factors of printed PLA (fillet radius, hole size, infill) — https://doi.org/10.4028/p-9hyd0a
     - Seifollahi and Kabir (2026) — Static and repeated loading of printed PLA with notches and holes — https://doi.org/10.3390/polym18010001
     - Ezeh and Susmel (2020) — Repeated loading of printed PLA with blunt and sharp notches — https://eprints.whiterose.ac.uk/158161/1/PLA_Notch_Fatigue_Accpeted%20Manuscript_LS.pdf
     - Materials (2024) — Print direction and strength under pin loading in PLA — https://doi.org/10.3390/ma17225394
