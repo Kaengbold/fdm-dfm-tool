@@ -68,7 +68,7 @@ def test_continuous_load_raises_the_target(hook):
 def test_optimizer_uses_the_locked_materials_creep_target(hook):
     from fdmcore.service import required_safety
 
-    api.custom_presets(materials={"creep": {"based_on": "pla", "creep_readings": [[1, 4], [60, 4.1]]}})
+    api.custom_presets(materials={"creep": {"based_on": "pla", "creep_readings": [[1, 4], [60, 4.1], [1440, 4.18], [10080, 4.22], [40320, 4.26]]}})
     try:
         profile = {"printer": "bambu_p1s", "constant_load": True}
         result = api.optimize("light", hook, "fast", profile, constraints={"material": "my_creep"})
