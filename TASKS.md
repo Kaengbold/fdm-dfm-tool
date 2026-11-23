@@ -1312,6 +1312,43 @@ Rules for every [UI] task:
 - [ ] **T-588 P2** [UI] Heat replay and a guided explanation. · files: `core/fdmcore/thermal.py`, `api.py`, `web/steps/heat.js`, `web/viewport/heatview.js`, `web/messages/en.js` · owner: Claude (`task/T-588-heat-replay`)
   - Do: the engine keeps a small surface-temperature snapshot per layer; the step plays the print back with the surface cooling (clock, layer, fan), stops at the problem layers with what we found, then shows the same with the cooling plan and the changes, then the result.
 
+### Simulation accuracy (2026-11-23, from the owner's review of T-390 and the heat model)
+
+Gaps found while reviewing T-390 / T-484 and the heat model. Real-print checks stay in T-477 / T-443; these make the
+models better before that. Papers the owner supplied (PDFs, not in the repo): Laumann 2023 (PLA bed peel), Spoerk 2018
+(bed temperature and adhesion), Costa 2014 (heat transfer conditions in FFF), Zabihollah 2024 (PLA notch factors).
+Not reachable: Pollák & Goryl 2025.
+
+- [~] **T-590 P1** Read the supplied papers and put their numbers into the research notes. · files: `research/bed_adhesion.md`, `research/fillet_stress_factors.md`, `research/thermal_constants.md` · owner: GPT-6.1 Terra, reviewed by Claude (`task/T-590-paper-numbers`)
+  - Do: Laumann + Spoerk: grip per plastic, bed surface and bed temperature (and print speed); Costa: contact conductance, convection with and without fan; Zabihollah: measured notch factors vs fillet radius. Say what each number would replace in the code.
+- [ ] **T-591 P2** Bed grip from the new data, smooth with bed temperature. · files: `core/fdmcore/warp.py`, `core/fdmcore/data/thresholds.yaml` · owner: —
+  - Do: replace T-390 estimates where T-590 found measurements; grip as a smooth curve around each plastic's softening point instead of the 60 / 70 °C step, so "raise the bed 5 °C" can be judged.
+- [ ] **T-592 P1** Calibrate bed grip from the warping test bars. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py`, `web/steps/settings.js` · owner: —
+  - Do: the user's "longest bar that stayed flat" (warping calibration print) → solve backwards for the grip on their plastic, plate and bed temperature; stored per material, replaces the estimate.
+- [ ] **T-593 P2** Glue-layer peel model at the bed (cohesive zone). · files: `core/fdmcore/warp.py`, `core/fdmcore/fea.py` · owner: —
+  - Do: the first layer held by springs that weaken and break as they stretch, so a lift grows by itself; must tell the short and long reference bars apart without T-390's curl gate (then drop the gate). Only in the detailed warping run if it is slow.
+- [ ] **T-594 P2** Check the peel while printing, not only at the end. · files: `core/fdmcore/warp.py` · owner: —
+  - Do: run the peel check at each warp step (corners usually lift in the first layers, bed hot, part still soft); report the height where it starts.
+- [ ] **T-595 P2** Heated chamber: the real set point and its warm-up. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml`, `core/fdmcore/warp.py` · owner: —
+  - Do: read the chamber temperature from the G-code / printer profile instead of a fixed 60 °C; enclosures (passive and heated) warm up over the first ~30 min instead of being warm from layer 1.
+- [ ] **T-596 P2** Layer joints as a bead neck. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml` · owner: —
+  - Do: heat between layers flows through the neck where two round beads touch: contact width from line width and layer height (0.3 × 0.8 vs 0.05 × 0.45 differ), not the whole cell; contact conductance from T-590 (today 500 W/m²K, range 100–5000, the most uncertain number).
+- [ ] **T-597 P1** Cooling feeds layer strength. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: —
+  - Do: where the heat simulation says a joint bonded cold (time above the softening point), the strength check uses a weaker layer strength there instead of one factor for the whole part.
+- [ ] **T-598 P2** Results as ranges. · files: `core/fdmcore/api.py`, `web/` · owner: —
+  - Do: run with the low and high ends of the uncertain constants (thermal.yaml / thresholds ranges) and show e.g. "×2.1 to ×3.4" or "40–55 °C" beside today's single number; keep it fast (only the few constants that matter most).
+- [ ] **T-599 P2** Strength grid check on thin features. · files: `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: —
+  - Do: warn when the weak spot, a thin wall or a fillet is only a few voxels thick, and re-check it on a finer grid automatically; say when the answer moved.
+- [ ] **T-600 P3** Strength: big bending and buckling. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` · owner: —
+  - Do: large-deflection solve for snap fits and TPU; a buckling check for thin, tall walls under pressure.
+- [ ] **T-601 P3** Warping: plastic relaxes while warm. · files: `core/fdmcore/warp.py` · owner: —
+  - Do: stress relaxation near the softening point (bed-warm layers), from published data; check whether PLA warping is over-predicted today.
+- [ ] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: —
+- [ ] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: —
+  - Do: add the brim / ears the 3MF will get to the warp model's first layer (more bed contact, different peel front) instead of a rule of thumb.
+- [ ] **T-604 P3** Finer heat tier prototype. · files: `core/fdmcore/thermal.py` · owner: —
+  - Do: the plan in `research/thermal_optimizer_later.md`: quick-run temperatures as the edges of a finer local model around hot spots; compare on a pin, a bridge and a thick-to-thin part; time and memory in Pyodide; then decide on GPU.
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
