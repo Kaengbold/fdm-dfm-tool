@@ -1238,4 +1238,8 @@ export default {
   "tuned.part.infill": "infill",
   "tuned.part.solid": "solid infill",
   "tuned.part.top": "top",
+
+  // Writing the STEP file back with design changes (T-529).
+  "stepfile.skipped": "Left out of the STEP file (couldn't be made): {list}.",
+  "stepfile.faceted": "Made with flat facets instead of exact CAD faces: {list}.",
 };

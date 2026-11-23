@@ -1,12 +1,13 @@
 // STEP write-back worker (started by stepwrite.js): apply design edits to the original CAD solid
 // with OpenCascade (replicad's WASM build, LGPL-2.1, ~23 MB, loaded on first use), so CAD users get
-// their exact faces back and only the edited spots change. Edits arrive as closed triangle pieces
-// (see geometry.js); each is sewn into a small solid, fused or cut, and coplanar triangles merged
-// into plain faces. In a worker because OpenCascade's bindings build functions from strings, which
-// the page's Content Security Policy forbids (T-327); a worker started from a file of this site
-// doesn't take on the page's policy.
+// their exact faces back. An edit with an exact description (its ``intent``, T-528) is made with exact
+// tools: a resized hole stays one cylinder, a round is a real fillet. Otherwise, or when that fails, its
+// closed triangle pieces (see geometry.js) are sewn into a small solid and fused or cut (web/brep.js,
+// T-529). In a worker because OpenCascade's bindings build functions from strings, which the page's
+// Content Security Policy forbids (T-327); a worker started from a file of this site doesn't take on
+// the page's policy.
 import { answerJobs, checkedFetch } from "./jobworker.js";
-import { solids } from "./brep.js";
+import { applyEdits, solids, tessellate, volume } from "./brep.js";
 
 // Resolved against this module, so the self-hosted build can swap in a relative "../vendor/..." path.
 const OC_URL = new URL("https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js", import.meta.url).href;
@@ -36,36 +37,11 @@ async function opencascade() {
 
 const progress = (oc) => new oc.Message_ProgressRange();
 
-function volume(oc, shape) {
-  const props = new oc.GProp_GProps();
-  oc.BRepGProp.VolumeProperties(shape, props, false, false, false);
-  const v = props.Mass();
-  props.delete();
-  return v;
-}
-
-/** A closed triangle soup (Float32Array, 9 floats per triangle) as an OpenCascade solid. */
-function soupToSolid(oc, soup) {
-  const sew = new oc.BRepBuilderAPI_Sewing(1e-4, true, true, true, false);
-  const P = (i) => new oc.gp_Pnt(soup[i], soup[i + 1], soup[i + 2]);
-  for (let t = 0; t < soup.length; t += 9) {
-    const [a, b, c] = [P(t), P(t + 3), P(t + 6)];
-    if (a.Distance(b) < 1e-6 || b.Distance(c) < 1e-6 || c.Distance(a) < 1e-6) continue;
-    const edge = (p, q) => new oc.BRepBuilderAPI_MakeEdge(p, q).Edge();
-    const wire = new oc.BRepBuilderAPI_MakeWire(edge(a, b), edge(b, c), edge(c, a)).Wire();
-    sew.Add(new oc.BRepBuilderAPI_MakeFace(wire, true).Face());
-  }
-  sew.Perform(progress(oc));
-  let solid = new oc.BRepBuilderAPI_MakeSolid(oc.TopoDS.Shell(sew.SewedShape())).Solid();
-  if (volume(oc, solid) < 0) solid = oc.TopoDS.Solid(solid.Reversed());
-  sew.delete();
-  return solid;
-}
-
 /**
- * The original STEP with design edits applied, as STEP bytes.
+ * The original STEP with design edits applied: {out: STEP bytes, notes (per edit: exact, mesh or skipped, and why),
+ * soup + faceIds: the result's triangles and B-rep face of each, for showing it and checking it again}.
  * ``bodyVolume`` picks the solid the edits belong to when the file has several (mm³).
- * ``edits``: [{op: "add"|"cut", mesh: Float32Array, pieces: [triangles per piece]}], in part (= STEP) coordinates.
+ * ``edits``: [{id, title, op, mesh: Float32Array, pieces, piece_ops?, intent?}], in part (= STEP) coordinates.
  */
 async function stepWithEdits(stepBytes, bodyVolume, edits) {
   const oc = await opencascade();
@@ -75,33 +51,17 @@ async function stepWithEdits(stepBytes, bodyVolume, edits) {
   reader.TransferRoots(progress(oc));
   const all = solids(oc, reader.OneShape());
   if (!all.length) throw new Error("No solid in the original STEP file");
-  let shape = all.reduce((best, s) => (Math.abs(volume(oc, s) - bodyVolume) < Math.abs(volume(oc, best) - bodyVolume) ? s : best));
-  for (const op of ["add", "cut"]) {
-    for (const e of edits) {
-      let start = 0;
-      for (const [i, n] of e.pieces.entries()) {
-        const mine = (e.piece_ops?.[i] ?? e.op) === op; // grip fins add and cut in one edit
-        const soup = e.mesh.subarray(start * 9, (start + n) * 9);
-        start += n;
-        if (!mine) continue;
-        const piece = soupToSolid(oc, soup);
-        const bool = op === "add" ? new oc.BRepAlgoAPI_Fuse(shape, piece, progress(oc)) : new oc.BRepAlgoAPI_Cut(shape, piece, progress(oc));
-        if (!bool.IsDone()) throw new Error(`OpenCascade could not apply "${e.title}"`);
-        shape = bool.Shape();
-      }
-    }
-  }
-  const unify = new oc.ShapeUpgrade_UnifySameDomain(shape, true, true, false);
-  unify.Build();
+  const solid = all.reduce((best, s) => (Math.abs(volume(oc, s) - bodyVolume) < Math.abs(volume(oc, best) - bodyVolume) ? s : best));
+  const { shape, notes } = applyEdits(oc, solid, edits);
   const writer = new oc.STEPControl_Writer();
-  writer.Transfer(unify.Shape(), oc.STEPControl_StepModelType.STEPControl_AsIs, true, progress(oc));
+  writer.Transfer(shape, oc.STEPControl_StepModelType.STEPControl_AsIs, true, progress(oc));
   if (writer.Write("/out.step") !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) throw new Error("Could not write the STEP file");
   const out = oc.FS.readFile("/out.step");
   for (const f of ["/in.step", "/out.step"]) oc.FS.unlink(f);
-  return out;
+  return { out, notes, ...tessellate(oc, shape) };
 }
 
 answerJobs(async ({ stepBytes, bodyVolume, edits }) => {
-  const out = await stepWithEdits(stepBytes, bodyVolume, edits);
-  return { result: { out }, transfer: [out.buffer] };
+  const result = await stepWithEdits(stepBytes, bodyVolume, edits);
+  return { result, transfer: [result.out.buffer, result.soup.buffer, result.faceIds.buffer] };
 });
