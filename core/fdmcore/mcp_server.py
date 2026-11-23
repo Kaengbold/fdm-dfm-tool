@@ -142,11 +142,12 @@ def find_orientations(
     material: str = "pla",
     nozzle: str = "0.4",
     loads: list[dict] | None = None,
-    faces: dict[str, list[int]] | None = None,
+    faces: dict[str, list[int] | str] | None = None,
 ) -> dict:
     """Rank print orientations. With loads (see check_strength), strength is included in the ranking.
     ``faces`` marks faces (ids from list_faces) the user cares about: {"clean": [...] no support marks,
-    "bed": [...] on the bed, "vertical": [...] upright, e.g. a hole that must come out round}."""
+    "bed": [...] on the bed, "vertical": [...] upright, e.g. a hole that must come out round}; "clean": "visible"
+    stands for the faces people see (guess_visible_faces)."""
     return _clean(api.orientations(_profile(printer, material, nozzle), loads=loads or None, faces=faces))
 
 
@@ -157,7 +158,7 @@ def check_print(
     material: str = "pla",
     nozzle: str = "0.4",
     mode: str = "both",
-    faces: dict[str, list[int]] | None = None,
+    faces: dict[str, list[int] | str] | None = None,
     use_temp_c: float | None = None,
 ) -> dict:
     """Printability findings, rough print time/filament and recommended slicer settings for one orientation.
@@ -172,6 +173,24 @@ def list_faces() -> list[dict]:
     """Faces (regions) of the part with id, kind (flat / cylinder / hole / curved), area_mm2,
     normal, centroid and hole_diameter (on holes) — use ids for loads."""
     return api.regions()["regions"]
+
+
+@server.tool()
+def guess_visible_faces() -> dict:
+    """The faces people will see, guessed: the outer ones (on the part's convex hull), so hole walls, pockets and
+    slots are left out. ``regions``: face ids (as list_faces), ``share``: their part of the surface. For a part that
+    should look good, keep support off them: ``faces={"clean": "visible"}`` in optimize_print / check_print, or
+    mark the one face that matters as {"clean": [id]}."""
+    return api.visible_faces()
+
+
+@server.tool()
+def list_round_features(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Round holes and pegs the user can set a fit on: region id, kind (hole / peg), diameter, axis, centre, the
+    regions of the same size (``same``), the fit or fastener already set, and ``printed_mm``: the size it comes
+    out at on this printer (measured with the fit test, or typical). ``tolerance``: the fit gaps in use. Then
+    ``set_fit`` / ``set_fastener`` on a region, and ``suggest_design_changes`` offers the resize."""
+    return _clean(api.round_features(up, _profile(printer, material, nozzle)))
 
 
 @server.tool()
@@ -603,15 +622,22 @@ def set_custom_presets(printers: dict | None = None, materials: dict | None = No
 
 
 @server.tool()
-def calibration_part(kind: str, output_path: str) -> dict:
-    """Save a test print as STL for measuring the user's own material on their printer. ``kind``:
-    "layer_strength", "warping", "fit", "overhang", "bridge" or "all" (every test on one plate);
-    each piece has its size written on it. ``how`` says what to print and measure.
-    The measured numbers go into a custom material (set_custom_presets)."""
-    r = api.calibration_part(kind)
-    out = _out(output_path, (".stl",), "STL path")
-    out.write_bytes(r["stl"])
-    return {"saved": str(out), "how": r["how"]}
+def calibration_part(kind: str, output_path: str, material: str = "pla") -> dict:
+    """Save a test print for measuring the user's own material on their printer. ``kind``:
+    "layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "temp" (a temperature tower for
+    ``material``: then heat_tuning_gcode "temp" on its sliced G-code), "ironing" (save it as .3mf: each step's
+    ironing flow is set in it) or "all" (every test on one plate); each piece has its size written on it.
+    ``how`` says what to print and measure. The measured numbers go into a custom material (set_custom_presets:
+    nozzle_temp_c from the tower, ironing_flow_pct from the ironing test)."""
+    r = api.calibration_part(kind, {"material": material})
+    if kind == "ironing" and str(output_path).lower().endswith(".3mf"):
+        out = _out(output_path, (".3mf",), "3MF path")
+        out.write_bytes(r["3mf"])
+    else:
+        out = _out(output_path, (".stl",), "STL path")
+        out.write_bytes(r["stl"])
+    extra = {k: r[k] for k in ("temps", "flows") if k in r}
+    return {"saved": str(out), "how": r["how"], **extra}
 
 
 @server.tool()
@@ -636,6 +662,8 @@ def optimize_print(
     touches: list[str] | None = None,
     constraints: dict | None = None,
     change: str = "slicer",
+    faces: dict | None = None,
+    budget_seconds: float | None = None,
 ) -> dict:
     """The best 2–4 ways to print the loaded part for a goal (strong / balanced / fast / light / quality):
     orientation, material, nozzle, layer height, walls, top/bottom and infill, each checked for strength at its
@@ -644,11 +672,14 @@ def optimize_print(
     (extended can take a few minutes). ``owned``: materials the user has; ``materials`` / ``nozzles``: the only
     ones to consider; ``touches``: water, food, outdoors, abrasion, oil_fuel, solvent, skin. ``constraints``:
     hard limits (material, nozzle, layer_height, walls, top, bottom, infill, up). ``change``: slicer / design /
-    both. Returns ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the
-    target, ``ways_out``."""
+    both. ``faces`` as in find_orientations, or ``{"clean": "visible"}`` for the faces people see as guessed by
+    guess_visible_faces (what the app does for quality): orientations with support on them rank lower. Returns
+    ``options`` (with ``settings`` to pass to export_3mf), ``feasible`` and, if nothing reaches the target, ``ways_out``.
+    ``budget_seconds``: stop searching after about that long and pick from what was checked (``ended_early``; run it
+    again without a budget to search the rest)."""
     profile = {"printer": printer, "nozzle": nozzle, "use_temp_c": use_temp_c, "constant_load": constant_load}
     return _clean(api.optimize(goal, loads, depth, profile, owned, materials, nozzles, {"temp_c": use_temp_c, "touches": touches or []},
-                               constraints, change))
+                               constraints, change, faces, budget_seconds))
 
 
 @server.tool()
@@ -725,12 +756,13 @@ def optimize_gcode_file(up: list[float], gcode_path: str, output_path: str, prin
 
 
 @server.tool()
-def heat_tuning_gcode(kind: str, gcode_path: str, output_path: str) -> dict:
-    """The G-code for a heat tuning print (calibration_part "sag" or "snap"), from the user's sliced test part: sag
-    switches the slicer's slowdown for cooling off, snap steps the fan down every 8 mm. Keep the written file:
-    tune_heat_window reads it with the result."""
+def heat_tuning_gcode(kind: str, gcode_path: str, output_path: str, material: str = "pla") -> dict:
+    """The G-code for a tuning print (calibration_part "sag", "snap" or "temp"), from the user's sliced test part: sag
+    switches the slicer's slowdown for cooling off, snap steps the fan down every 8 mm, temp sets each block of the
+    temperature tower to its temperature (``material``'s, as on the tower). Keep the written file: tune_heat_window
+    reads it with the result (sag, snap)."""
     src = _in(gcode_path, (".gcode", ".gco", ".g"), "G-code file")
-    r = api.tuning_gcode(kind, src.read_bytes())
+    r = api.tuning_gcode(kind, src.read_bytes(), {"material": material})
     out = _out(output_path, (".gcode",), "G-code path")
     out.write_bytes(r.pop("data"))
     return {**r, "path": str(out)}
@@ -1089,6 +1121,7 @@ API_TOOLS = {
     "warping": "check_warping",
     "set_fit": "set_fit",
     "set_fastener": "set_fastener",
+    "round_features": "list_round_features",
     "fastener_suggestions": "fastener_suggestions",
     "split": "split_part",
     "plate": "plan_plate",
@@ -1106,6 +1139,7 @@ API_TOOLS = {
     "export": "export_3mf",
     "report": "get_report",
     "regions": "list_faces",
+    "visible_faces": "guess_visible_faces",
     "optimise_strength": "optimise_strength",
     "expert_settings": "expert_settings",
     "set_expert": "set_expert_settings",
@@ -1127,7 +1161,8 @@ API_TOOLS = {
 # Only for the web app: it keeps the engine's state while restarting its worker (Cancel). The MCP
 # server's engine never restarts under the agent, so there is nothing to hand back.
 APP_ONLY = {"session_state", "restore_state", "holes_state", "restore_holes",  # agents: save_project / open_project
-            "print_mesh"}  # the browser slicer's input; agents slice with export + optimize_print_cooling / local OrcaSlicer
+            "print_mesh",  # the browser slicer's input; agents slice with export + optimize_print_cooling / local OrcaSlicer
+            "clearance_map"}  # the gap painted on the part, for the 3D view; agents use check_clearance's numbers
 
 
 def main():

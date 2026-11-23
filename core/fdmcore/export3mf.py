@@ -58,6 +58,9 @@ PRUSA_KEYS = {
     "fuzzy_skin": "fuzzy_skin",  # none | external | all in both
     "fuzzy_skin_thickness": "fuzzy_skin_thickness",
     "fuzzy_skin_point_distance": "fuzzy_skin_point_dist",
+    "seam_position": "seam_position",
+    "ironing_flow": "ironing_flowrate",  # a percent in both
+    "ironing_spacing": "ironing_spacing",  # nearest | aligned | random in both (Orca's back is Prusa's rear: not used)
     # speeds (mm/s), also per height range (T-479)
     "outer_wall_speed": "external_perimeter_speed",
     "inner_wall_speed": "perimeter_speed",
@@ -224,8 +227,9 @@ def range_files(ranges: list[dict], layer_height: float | None = None) -> dict[s
     layout, its own keys). The slicers take no overlapping ranges, so ranges are cut where they meet and
     each piece gets the settings of every range over it (the smaller value where two set the same key:
     the thinner layer, the slower speed). Every range carries a layer height (``layer_height`` when it
-    sets none). tools/slicer_check.py checks that all three apply them."""
+    sets none). Percent values ("12%") stay percent. tools/slicer_check.py checks that all three apply them."""
     pieces = []
+    pct = {k for r in ranges for k, v in r.items() if isinstance(v, str) and v.strip().endswith("%")}
     cuts = sorted({float(r["z0"]) for r in ranges} | {float(r["z1"]) for r in ranges})
     for lo, hi in zip(cuts, cuts[1:]):
         opts: dict[str, float] = {}
@@ -233,7 +237,7 @@ def range_files(ranges: list[dict], layer_height: float | None = None) -> dict[s
             if r["z0"] <= lo + 1e-9 and r["z1"] >= hi - 1e-9:
                 for k, v in r.items():
                     if k not in ("z0", "z1"):
-                        opts[k] = min(float(v), opts.get(k, float("inf")))
+                        opts[k] = min(float(str(v).strip().rstrip("%")), opts.get(k, float("inf")))
         if not opts:
             continue
         if "layer_height" not in opts:
@@ -250,7 +254,7 @@ def range_files(ranges: list[dict], layer_height: float | None = None) -> dict[s
     def text(keys) -> str:
         body = ""
         for lo, hi, opts in pieces:
-            lines = "".join(f'  <option opt_key="{keys[k]}">{v:.3f}</option>\n' if k == "layer_height" else f'  <option opt_key="{keys[k]}">{v:g}</option>\n'
+            lines = "".join(f'  <option opt_key="{keys[k]}">{v:.3f}</option>\n' if k == "layer_height" else f'  <option opt_key="{keys[k]}">{v:g}{"%" if k in pct else ""}</option>\n'
                             for k, v in opts.items() if k in keys)
             body += f' <range min_z="{lo:.3f}" max_z="{hi:.3f}">\n  <option opt_key="extruder">0</option>\n{lines} </range>\n'
         return f'<?xml version="1.0" encoding="utf-8"?>\n<objects>\n<object id="1">\n{body}</object>\n</objects>\n'

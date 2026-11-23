@@ -41,6 +41,17 @@
   --ov-load: #9333EA;
   --ov-added: #16A34A;
   --ov-removed: #DC2626;
+  /* Heat overlay (simulation step): the temperature window, the importance scale, G-code speed changes. */
+  --heat-ok: #16A34A;
+  --heat-hot: #DC2626;
+  --heat-cold: #2563EB;
+  --heat-slow: #0EA5E9;
+  --heat-faded: #9CA3AF;
+  --heat-faster: #EA580C;
+  --heat-same: #9CA3AF;
+  --heat-fan: #7C3AED;
+  --heat-low: #E5E7EB;
+  --heat-high: #7C3AED;
 
   --focus: #2563EB;
   --shadow-pop: 0 8px 24px rgb(17 24 39 / 0.14), 0 1px 3px rgb(17 24 39 / 0.10);
@@ -127,6 +138,16 @@
   --ov-load: #B26BF5;
   --ov-added: #22C55E;
   --ov-removed: #EF4444;
+  --heat-ok: #22C55E;
+  --heat-hot: #EF4444;
+  --heat-cold: #4C82F7;
+  --heat-slow: #38BDF8;
+  --heat-faded: #6B7280;
+  --heat-faster: #FB923C;
+  --heat-same: #6B7280;
+  --heat-fan: #B26BF5;
+  --heat-low: #374151;
+  --heat-high: #B26BF5;
 
   --focus: #6B98F8;
   --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.40);
