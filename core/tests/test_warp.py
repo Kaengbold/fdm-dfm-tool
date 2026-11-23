@@ -50,6 +50,63 @@ def test_warping_result_for_the_view():
     assert "brim" in r["explanation"]
 
 
+@pytest.mark.parametrize("h", [1.0, None])
+def test_open_abs_short_bar_holds_and_long_bar_peels(h):
+    p = Profile.from_dict(ABS_OPEN)
+    short, long = (warp.simulate(bar(n), [0, 0, 1], p, h=h, adhesion=True)["adhesion"] for n in (40, 90))
+    assert not short.get("may_lift")
+    assert long["may_lift"] and long["advance_mm"] >= 2
+    assert long["energy_release_n_mm"] > long["grip_n_mm"] > 0
+    assert min(abs(long["point"][0] - x) for x in (0, 90)) < 2
+
+
+def test_peel_finding_is_local_and_contributes_to_print_risk():
+    api.custom_presets(printers={"my_glass": {"based_on": "prusa_mk4s", "bed_surface": "glass"}})
+    try:
+        api.load(to_binary_stl(bar(90)), "bar")
+        up = [0, 0, 1]
+        assert not any(f["rule"] == "bed_adhesion" for f in api.check(up, ABS_OPEN)["findings"])
+        r = api.warping(up, ABS_OPEN)
+        assert r["adhesion"]["assumed_surface"] and r["adhesion"]["surface"] == "textured_pei"
+        check = api.check(up, ABS_OPEN)
+        finding = next(f for f in check["findings"] if f["rule"] == "bed_adhesion")
+        assert finding["title"] == "May come loose here"
+        assert finding["bbox"][0][2] == 0 and abs(finding["bbox"][0][0]) > 35
+        assert any("build plate" in reason for reason in check["print_risk"]["reasons"])
+        changed_plate = api.check(up, {**ABS_OPEN, "printer": "my_glass"})
+        assert not any(f["rule"] == "bed_adhesion" for f in changed_plate["findings"])
+    finally:
+        api.custom_presets()
+
+
+def test_expert_grip_override_can_stop_peel():
+    path = "thresholds.bed_adhesion.nominal_shear_n_mm.abs.textured_pei"
+    try:
+        api.set_expert({path: 10})
+        p = Profile.from_dict(ABS_OPEN)
+        r = warp.simulate(bar(90), [0, 0, 1], p, h=1, adhesion=True)["adhesion"]
+        assert r["curls"] and r["advance_mm"] == 0 and not r["may_lift"]
+        assert r["energy_release_n_mm"] < r["grip_n_mm"]
+    finally:
+        api.set_expert({})
+
+
+def test_pla_grip_uses_the_anchor_for_the_plate_and_bed_temperature():
+    api.custom_presets(
+        printers={s: {"based_on": "prusa_mk4s", "bed_surface": s} for s in ("glass", "polyimide")},
+        materials={str(t): {"based_on": "pla", "bed_temp_c": t} for t in (60, 70)},
+    )
+    try:
+        for plate, temp, shear in (("glass", 60, 0.73), ("glass", 70, 6.51),
+                                   ("polyimide", 60, 0.51), ("polyimide", 70, 3.22)):
+            grip = warp.bed_grip(Profile.from_dict({"material": f"my_{temp}", "printer": f"my_{plate}"}))
+            assert grip["shear_source"] == "measured shear anchor" and grip["confidence"] == "low"
+            assert grip["shear_n_mm"] == shear
+            assert grip["grip_n_mm"] == pytest.approx(shear * 0.30 / (2 * 1.8))
+    finally:
+        api.custom_presets()
+
+
 def test_thick_sections_stay_warm_higher_up():
     p = Profile.from_dict(ABS_OPEN)
     assert warp.fade_length(p, 5.0) > 2 * warp.fade_length(p, 1.0)

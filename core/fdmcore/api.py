@@ -23,7 +23,7 @@ from .checks import RULE_IMPACT, orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh, mesh_health, to_binary_stl
-from .messages import summarize_finding
+from .messages import format_message, summarize_finding
 from .orientation import OrientationResult, OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
 from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
@@ -173,6 +173,7 @@ def set_expert(values: dict[str, float]) -> dict:
     _analysis.update(grids)
     if _session is not None:
         _session.solved = None  # results depend on these
+        _session.warp = None
     return expert_settings()
 
 
@@ -1866,7 +1867,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     p = Profile.from_dict(profile)
     sh = _shells(p)
     warm = _warm_layers(up, p) if detailed else None
-    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm)
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, adhesion=True)
     model, turn = r["model"], r["rotation"]  # model in the print frame; turn: part -> print
     s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"] @ turn, "turn": turn}  # set_fit / set_gap use it
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
@@ -1876,7 +1877,9 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     curl = warp.curl(r)
     ratio = float(np.sqrt(curl / ref)) if ref else None
     verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
-    s.warp.update(verdict=verdict, setup=(p.material_id, p.enclosure))  # check() rates the print risk with it (T-391)
+    adhesion = r.get("adhesion")
+    peel_point = adhesion["point"] @ turn if adhesion and adhesion.get("may_lift") else None
+    s.warp.update(verdict=verdict, setup=_warp_setup(p), adhesion=adhesion, peel_point=peel_point)
     # Shape for the view: the part's own movement without the rigid shift and tilt it gets off the bed.
     pos = (model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h) @ turn  # part frame
     u = _without_rigid_motion(pos, r["u"] @ turn)
@@ -1886,7 +1889,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     pull = r["pull"]
     order = np.argsort(-pull)
-    spots = []
+    spots = [peel_point] if peel_point is not None else []
     for i in order[: 40]:
         if pull[i] <= 0 or len(spots) == 3:
             break
@@ -1897,6 +1900,11 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
            "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
            "from_gcode": warm is not None}
+    if adhesion is not None:
+        out["adhesion"] = {k: v for k, v in adhesion.items() if k != "point"}
+        if peel_point is not None:
+            out["lift_points_print"][0][2] = 0
+            out["adhesion"]["point_print"] = out["lift_points_print"][0]
     vm = warp.residual_stress(r)
     out["stress_value"] = surface_values(model, vm, fine @ turn.T).astype(np.float32).tobytes()
     out["stress_max"] = round(float(np.percentile(vm, 99)), 2) if len(vm) else 0.0
@@ -1934,12 +1942,28 @@ def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
     return u - (a @ coef).reshape(-1, 3)
 
 
-def _warp_verdict(s: Session, up, p: Profile) -> str | None:
-    """The last warping simulation's verdict, if it ran for this orientation, material and enclosure."""
+def _warp_setup(p: Profile) -> tuple:
+    return (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure,
+            p.printer.get("bed_surface", "unknown"), p.nozzle, p.layer_height, _shells(p))
+
+
+def _matching_warp(s: Session, up, p: Profile) -> dict | None:
+    """A change to the orientation or to inputs that drive shrinkage or grip needs another solve."""
     w = s.warp
-    if not w or "verdict" not in w or w["setup"] != (p.material_id, p.enclosure):
+    if not w or w.get("setup") != _warp_setup(p):
         return None
-    return w["verdict"] if np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999 else None
+    return w if np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999 else None
+
+
+def _adhesion_finding(s: Session, w: dict, rotation: np.ndarray) -> dict:
+    point = _print_frame_map(s.mesh, rotation)(w["peel_point"])
+    point[2] = 0  # The voxelised footprint can sit a fraction of a cube below the mesh.
+    h = w["model"].grid.h
+    bbox = [(point - [h, h, 0]).tolist(), (point + [h, h, h]).tolist()]
+    metrics = {k: v for k, v in w["adhesion"].items() if k not in ("point", "curls")}
+    message = {"key": "finding.bed_adhesion.one_liner", "params": {}}
+    return {"rule": "bed_adhesion", "severity": "warn", "impact": "fails", "bbox": bbox,
+            "metrics": metrics, "detail": format_message(message), "message": message}
 
 
 def _warp_story(r: dict, p: Profile) -> str:
@@ -3973,7 +3997,10 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         result["findings"].append({"rule": "turned_to_fit", "severity": "info", "bbox": None, "metrics": fit,
                                    "detail": f"Turned {fit['turned_deg']:.0f}° on the bed so it fits the {p.printer['name']}"})
     height = float(np.ptp(oriented.triangles[..., 2])) if len(oriented.triangles) else 0.0
-    risk = print_risk(p, result["findings"], height, _warp_verdict(s, up, p))
+    w = _matching_warp(s, up, p)
+    if w and w["peel_point"] is not None:
+        result["findings"].append(_adhesion_finding(s, w, rotation))
+    risk = print_risk(p, result["findings"], height, w["verdict"] if w else None)
     if risk["level"] == "high":
         result["findings"].append({"rule": "print_may_fail", "severity": "warn", "bbox": None,
                                    "metrics": {"score": risk["score"], "hold": risk["hold"]},
