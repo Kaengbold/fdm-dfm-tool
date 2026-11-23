@@ -249,6 +249,7 @@ export default {
   "camera.top": "Top",
   "camera.front": "Front",
   "camera.fit": "Fit",
+  "camera.turned": "Turned to print: {orientation}",
 
   // Direction gizmo (T-542).
   "gizmo.title": "Direction",

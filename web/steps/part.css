@@ -65,6 +65,7 @@ button.big-card { cursor: pointer; }
 .stage-camera { display: flex; gap: var(--s-1); padding: var(--s-1); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-pop); }
 .stage-camera button { padding: var(--s-1) var(--s-3); border: 0; border-radius: var(--r-sm); background: none; color: var(--text-2); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
 .stage-camera button.is-on { background: var(--accent-soft); color: var(--accent-text); font-weight: var(--fw-bold); }
+.stage-camera .stage-turned { align-self: center; padding: 0 var(--s-3); border-left: 1px solid var(--line); color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
 
 /* Hover picker badge and the keyboard feature list (T-540). */
 .pick-badge { position: absolute; z-index: 5; padding: var(--s-1) var(--s-2); border-radius: var(--r-sm); background: var(--text); color: var(--surface-raised);
