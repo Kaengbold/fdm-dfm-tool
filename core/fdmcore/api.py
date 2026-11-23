@@ -2451,6 +2451,43 @@ def _match_nodes(a, b) -> np.ndarray:
     return np.where(kb[order][at] == ka, order[at], -1)
 
 
+DETAIL_MAX_PIECES = 300_000  # the printed paths, cut into short pieces so each takes its own spot's colour
+
+
+def _paths(tp, lines: np.ndarray, heat) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The G-code ``lines`` cut into pieces about two heat cells long (longer when there would be too many), so a
+    long wall shows how its heat changes along it (T-587). Returns the pieces' ends (printer frame), the line
+    each came from, and the heat node it lies in (same layer and cell as the heat model's; a sliver cell the
+    model joined to a neighbour takes that neighbour; -1 when none)."""
+    a, b = np.asarray(tp.p0[lines], float), np.asarray(tp.p1[lines], float)
+    length = np.linalg.norm(b - a, axis=1)
+    cell = heat.cell_mm
+    piece = max(2 * cell, float(length.sum()) / DETAIL_MAX_PIECES)
+    n = np.maximum(np.ceil(length / piece).astype(np.int64), 1)
+    if n.sum() > DETAIL_MAX_PIECES:
+        n[:] = 1
+    src = np.repeat(np.arange(len(lines)), n)
+    k = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    f0, f1 = (k / n[src])[:, None], ((k + 1) / n[src])[:, None]
+    pa, pb = a[src] + (b - a)[src] * f0, a[src] + (b - a)[src] * f1
+    mid = (pa + pb) / 2
+    key = lambda layer, gx, gy: (layer.astype(np.int64) << 40) + ((gx.astype(np.int64) + (1 << 19)) << 20) + (gy.astype(np.int64) + (1 << 19))
+    nodes = key(heat.layer, np.floor(heat.xy[:, 0] / cell), np.floor(heat.xy[:, 1] / cell))
+    order = np.argsort(nodes)
+    sorted_keys = nodes[order]
+    layer = tp.layer[lines][src]
+    gx, gy = np.floor(mid[:, 0] / cell), np.floor(mid[:, 1] / cell)
+    spot = np.full(len(src), -1, np.int64)
+    for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+        todo = spot < 0
+        if not todo.any() or not len(sorted_keys):
+            break
+        want = key(layer[todo], gx[todo] + dx, gy[todo] + dy)
+        at = np.minimum(np.searchsorted(sorted_keys, want), len(sorted_keys) - 1)
+        spot[todo] = np.where(sorted_keys[at] == want, order[at], -1)
+    return pa, pb, src, spot
+
+
 def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     """What the simulation step shows (T-478), before and after the G-code plan. ``spots`` (heat nodes as
     sliced, in the oriented part's frame; the after values are the same spots in the planned run): ``points``,
@@ -2458,7 +2495,8 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     hot, 2 too cold, 3 needless slowdown), ``limit_c`` (too hot above this), ``importance`` and its
     ``reason``. ``timeline`` per layer: height, seconds until the next layer, part fan (0–1), median covering
     temperature (before, after) and the sag limit; ``tg_c`` is the window's cold side. ``lines``: the part's
-    lines (``segments``: x0 y0 z0 x1 y1 z1) with ``factor`` (new speed / old) and ``layer``; ``fan_marks``
+    lines cut into short pieces (``segments``: x0 y0 z0 x1 y1 z1) with ``factor`` (new speed / old), ``layer``,
+    ``width`` / ``height`` (mm) and ``spot`` (the heat spot each lies in, -1: none; ``_paths``); ``fan_marks``
     where the plan changes the fan. ``slowdown_min``: minutes each slicer slowdown cause costs (what limits
     the print). ``rotation``: the oriented frame (part @ rotation.T, centred, on z = 0)."""
     from .gcode import CAUSE_NAMES, time_lost
@@ -2533,7 +2571,10 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     else:
         keep[:] = True
     chosen = part[keep]
-    seg = np.column_stack([to_oriented(np.asarray(tp.p0[chosen], float)), to_oriented(np.asarray(tp.p1[chosen], float))])
+    pa, pb, src, spot = _paths(tp, chosen, base)
+    seg = np.column_stack([to_oriented(pa), to_oriented(pb)])
+    a, b = np.asarray(tp.p0[chosen], float), np.asarray(tp.p1[chosen], float)
+    width = tp.volume[chosen] / np.maximum(np.linalg.norm(b - a, axis=1) * tp.layer_height[chosen], 1e-6)
     # Where the plan sets a fan the slicer didn't: the first line of each stretch with a new value.
     new_fan = np.abs(planned.part_fan - tp.part_fan) > 0.01
     starts = np.flatnonzero(new_fan & (np.concatenate([[True], np.abs(np.diff(planned.part_fan)) > 0.01]) | ~np.concatenate([[False], new_fan[:-1]])))
@@ -2541,8 +2582,9 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
                   "fan": round(float(planned.part_fan[i]), 2)} for i in starts[tp.part()[starts]][:200]]
     lost = time_lost(tp)
     return {"spots": spots, "timeline": timeline, "rotation": np.round(rot, 6).tolist(),
-            "lines": {"segments": f32(seg), "factor": f32(factor[keep]), "layer": np.asarray(tp.layer[chosen], np.int32).tobytes(),
-                      "all": int(len(part))},
+            "lines": {"segments": f32(seg), "factor": f32(factor[keep][src]), "layer": np.asarray(tp.layer[chosen][src], np.int32).tobytes(),
+                      "width": f32(np.clip(width, 0.1, 3.0)[src]), "height": f32(tp.layer_height[chosen][src]),
+                      "spot": np.asarray(spot, np.int32).tobytes(), "all": int(len(part))},
             "fan_marks": fan_marks,
             "slowdown_min": {CAUSE_NAMES[c]: round(float(lost[c]) / 60, 1) for c in range(1, len(CAUSE_NAMES)) if lost[c] >= 3}}
 

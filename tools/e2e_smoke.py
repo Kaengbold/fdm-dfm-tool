@@ -799,8 +799,9 @@ def check_new_ui_heat(browser, port: int) -> str:
         assert "Too hot: 40 spots before, 0 after" in summary and "Rough" in summary, summary
         page.locator(".sim-views").get_by_role("radio", name="Heat").click()
         page.wait_for_selector(".heat-slider")
-        # Red spots on the stage as sliced, none with the plan (instance colours of the overlay).
-        hot = """() => { const hv = fdmUI.services.heatView, m = hv.spots.mesh, c = m.instanceColor.array;
+        # The sliced paths stand in for the part (T-587); red beads as sliced, none with the plan (instance colours).
+        assert page.evaluate("() => fdmUI.services.heatView.paths.mesh.count > 1000 && !fdmUI.services.stage.part.group.visible")
+        hot = """() => { const hv = fdmUI.services.heatView, m = hv.paths.mesh, c = m.instanceColor.array;
           let n = 0;  // red: much more red than green and blue (colours are linear here)
           for (let i = 0; i < m.count; i++) if (c[i * 3] > 0.4 && c[i * 3 + 1] < 0.1 && c[i * 3 + 2] < 0.1) n++; return n; }"""
         page.get_by_role("radio", name="As sliced").click()
@@ -815,13 +816,13 @@ def check_new_ui_heat(browser, port: int) -> str:
         why = page.locator(".heat-why").inner_text()
         assert "As sliced, the next layer covered it" in why and "So the plan changes this layer" in why, why
         # The layer slider shows the print up to a layer.
-        total = page.evaluate("() => fdmUI.services.heatView.spots.mesh.count")
+        total = page.evaluate("() => fdmUI.services.heatView.paths.mesh.count")
         page.locator(".heat-slider").fill("10")
-        cut = page.evaluate("() => fdmUI.services.heatView.spots.mesh.count")
+        cut = page.evaluate("() => fdmUI.services.heatView.paths.mesh.count")
         assert 0 < cut < total, (cut, total)
         page.screenshot(path=str(OUT / "new-ui-heat-heat.png"))
         page.get_by_role("radio", name="G-code changes").click()
-        assert page.evaluate("() => fdmUI.services.heatView.lines.mesh.visible")
+        assert page.evaluate("() => fdmUI.services.heatView.marks?.mesh.visible ?? true")
         page.screenshot(path=str(OUT / "new-ui-heat-gcode.png"))
         charts = page.locator(".heat-chart").count()
         with page.expect_download(timeout=600_000) as dl:
@@ -831,9 +832,9 @@ def check_new_ui_heat(browser, port: int) -> str:
         page.wait_for_selector(".heat-ok")
         # Another view takes the heat overlay away; leaving the step too.
         page.locator(".sim-views").get_by_role("radio", name="Overhangs").click()
-        assert page.evaluate("() => !fdmUI.services.heatView.spots")
+        assert page.evaluate("() => !fdmUI.services.heatView.paths && fdmUI.services.stage.part.group.visible")
         assert not errors, errors
-        return f"40 hot spots → 0; red on the stage {red_before} → {red_after}; slider {total} → {cut} spots; {charts} charts; downloaded {name}"
+        return f"40 hot spots → 0; red on the stage {red_before} → {red_after}; slider {total} → {cut} beads; {charts} charts; downloaded {name}"
     finally:
         page.close()
 

@@ -18,7 +18,8 @@ export function decode(r) {
     points: f32(s.points), layer: i32(s.layer), limit: f32(s.limit_c), importance: f32(s.importance), reason: u8(s.reason),
     reasons: s.reasons, cell: s.cell_mm, before: run(0), after: run(1),
     timeline: { z: f32(tl.z), seconds: tl.seconds.map(f32), fan: tl.fan.map(f32), cover: tl.cover_c.map(f32), limit: f32(tl.limit_c), tg: tl.tg_c },
-    lines: { segments: f32(lines.segments), factor: f32(lines.factor), layer: i32(lines.layer), all: lines.all },
+    lines: { segments: f32(lines.segments), factor: f32(lines.factor), layer: i32(lines.layer), width: f32(lines.width), height: f32(lines.height),
+      spot: i32(lines.spot), all: lines.all },
     fanMarks: r.fan_marks ?? [],
   };
 }

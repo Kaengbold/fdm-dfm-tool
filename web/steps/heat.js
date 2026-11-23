@@ -76,32 +76,37 @@ function showHeat({ services, value }) {
   const hv = services.heatView;
   if (shown?.result !== result) {
     const d = decode(result);
-    const { order, upto } = byLayer(d.layer);
+    const { upto } = byLayer(d.layer);
     services.stage.orientBy(result.rotation);
-    hv.setSpots(d.points, d.cell, order, upto);
+    hv.setPaths(d.lines.segments, d.lines.width, d.lines.height, d.lines.layer, d.lines.spot);
+    hv.setSpots(d.points, d.cell, d.lines.height[0] || 0.2);
     const c = heatColors();
-    hv.setLines(d.lines.segments, d.lines.layer, (i) => {
-      const f = d.lines.factor[i];
-      return f < 0.99 ? c.slower : f > 1.01 ? c.faster : c.same;
-    });
     hv.setMarks(d.fanMarks, Math.max(0.4, d.cell * 0.3), c.fan);
     hv.onPick = (i) => { view.picked = i; services.rerender(); };
     shown = { result, decoded: d, layers: upto.length };
   }
   const d = shown.decoded, c = heatColors();
-  if (view.mode === "importance") {
-    hv.colorSpots((i) => c.lowImportance.clone().lerp(c.highImportance, Math.min(1, Math.max(0, (d.importance[i] - 0.2) / 0.8))));
+  if (view.mode === "lines") {
+    hv.colorPaths((i) => {
+      const f = d.lines.factor[i];
+      return f < 0.99 ? c.slower : f > 1.01 ? c.faster : c.same;
+    });
+  } else if (view.mode === "importance") {
+    hv.colorPaths((_, s) => (s < 0 ? c.faded : c.lowImportance.clone().lerp(c.highImportance, Math.min(1, Math.max(0, (d.importance[s] - 0.2) / 0.8)))));
   } else {
     const w = d[view.which].window;
-    hv.colorSpots((i) => {
-      const col = c[WINDOW[w[i]]];
-      return w[i] && d.importance[i] < FADED_BELOW ? col.clone().lerp(c.faded, 0.65) : col;
+    hv.colorPaths((_, s) => {
+      if (s < 0) return c.faded;
+      const col = c[WINDOW[w[s]]];
+      return w[s] && d.importance[s] < FADED_BELOW ? col.clone().lerp(c.faded, 0.65) : col;
     });
   }
-  hv.show(view.mode === "lines" ? "lines" : "spots");
+  hv.showMarks(view.mode === "lines");
   hv.upTo(view.layer);
   hv.pick(view.mode === "lines" ? null : view.picked);
-  services.stage.setXray(true);
+  // The print the simulation ran on, not the model: the part's own surface steps aside (T-587).
+  if (services.stage.part) services.stage.part.group.visible = false;
+  services.stage.render();
   return true;
 }
 
@@ -110,7 +115,7 @@ function clearHeat(services) {
   stopPlay();
   if (!shown) return;
   services.heatView?.clear();
-  services.stage.setXray(false);
+  if (services.stage.part) services.stage.part.group.visible = true;
   services.stage.orient(null);
   shown = null;
 }

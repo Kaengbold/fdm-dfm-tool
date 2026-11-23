@@ -45,10 +45,18 @@ def test_detail_has_every_spot_before_and_after(detail):
     secs = [np.frombuffer(s, np.float32) for s in tl["seconds"]]
     assert np.nansum(secs[1]) > np.nansum(secs[0])  # the plan waits where the pin is too hot
     factor = np.frombuffer(detail["lines"]["factor"], np.float32)
-    assert len(factor) == detail["lines"]["all"] and (np.abs(factor - 1) > 0.01).any()
+    assert len(factor) >= detail["lines"]["all"] and (np.abs(factor - 1) > 0.01).any()
     pts = np.frombuffer(sp["points"], np.float32).reshape(-1, 3)
     seg = np.frombuffer(detail["lines"]["segments"], np.float32).reshape(-1, 6)
     assert pts[:, 2].min() >= 0 and abs(pts[:, :2].mean(axis=0)).max() < 3 and abs(seg[:, 3:5].mean(axis=0)).max() < 3
+    # The printed paths in short pieces, each in the heat spot it lies in (T-587): as wide and high as its line.
+    spot = np.frombuffer(detail["lines"]["spot"], np.int32)
+    width, height = (np.frombuffer(detail["lines"][k], np.float32) for k in ("width", "height"))
+    assert len(spot) == len(seg) == len(width) == len(height) == len(factor) and (spot >= 0).mean() > 0.98
+    assert 0.3 < np.median(width) < 0.6 and np.allclose(np.median(height), 0.2)
+    near = spot >= 0
+    gap = np.linalg.norm((seg[near, :2] + seg[near, 3:5]) / 2 - pts[spot[near], :2], axis=1)
+    assert np.percentile(gap, 99) <= 1.6 * sp["cell_mm"]
     assert np.allclose(detail["rotation"], np.eye(3)) and detail["slowdown_min"]["layer_time"] > 0
 
 
