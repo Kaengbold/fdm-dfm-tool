@@ -9,7 +9,7 @@ settings. Built from the engine's existing pieces (orientation scoring, sliced s
 the greedy shell search ``api._climb``), so a number here means the same as everywhere else.
 
 Rules from the owner (§16):
-- Safety targets are floors: Strong ×5, Balanced ×3, Fast ×2, Light ×1.5; a load that stays on raises it to ×3.
+- Safety targets are floors: Strong ×5, Balanced ×3, Fast ×2, Light ×1.5; sustained loads use the material's creep margin.
   Nothing below the floor is offered as meeting it; if nothing reaches it, the best reachable comes back marked
   ``below_target`` with the ways out (decision 2: usable after a warning).
 - Quality and "no loads" never run a strength solve (§14).
@@ -33,9 +33,9 @@ import numpy as np
 
 from . import progress
 from .profile import Profile, load_data, presets
+from .service import CONSTANT_LOAD_SAFETY, required_safety
 
 GOAL_FLOOR = {"strong": 5.0, "balanced": 3.0, "fast": 2.0, "light": 1.5, "quality": None}
-SUSTAINED_FLOOR = 3.0  # a load that never lets go creeps: at least ×3 whatever the goal (service.CONSTANT_LOAD_SAFETY)
 GOALS = tuple(GOAL_FLOOR)
 DEPTHS = ("fast", "extended", "complete")
 DEPTH_POSES = {"fast": 3, "extended": 6, "complete": 6}
@@ -77,11 +77,11 @@ class Pose:
     tags: set = field(default_factory=set)  # which shortlists it came from
 
 
-def target_for(goal: str, constant_load: bool) -> float | None:
+def target_for(goal: str, constant_load: bool, sustained_floor: float = CONSTANT_LOAD_SAFETY) -> float | None:
     floor = GOAL_FLOOR[goal]
     if floor is None:
         return None
-    return max(floor, SUSTAINED_FLOOR) if constant_load else floor
+    return max(floor, sustained_floor) if constant_load else floor
 
 
 def pose_label(up) -> str:
@@ -423,7 +423,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
     env = dict(environment or {})
     owned = list(owned or [])
     strength_on = goal != "quality" and bool(loads)
-    target = target_for(goal, base.constant_load) if strength_on else None
+    target = target_for(goal, base.constant_load, required_safety(base)) if strength_on else None
     skipped: list[dict] = []
     if goal != "quality" and not loads:
         skipped.append({"what": "strength", "why": "No loads: strength wasn't checked."})
@@ -441,6 +441,10 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
     def prof(material: str, nozzle: str, lh: float | None = None) -> Profile:
         # goal "balanced" (layer factor 1): the layer height is given explicitly, so bonding and time agree on it.
         return replace(base, material_id=material, nozzle=nozzle, goal="balanced", layer_height_mm=lh)
+
+    targets = {mid: target_for(goal, base.constant_load, required_safety(prof(mid, noz[0]))) if strength_on else None
+               for mid in mats}
+    target = targets[mats[0]]
 
     # ---------- 1. Orientations: separate shortlists so a strong pose isn't filtered out for printability. ----------
     progress.report(0.0, "Finding orientations")
@@ -542,13 +546,14 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
 
         total = g_part + (sup or 0.0)
         minutes += _grams_minutes(sup, p) if sup else 0.0
+        need = targets[p.material_id]
         row = {
             "up": [round(float(x), 6) for x in poses[i].up], "orientation": poses[i].label, "shortlists": sorted(poses[i].tags),
             "material": p.material_id, "material_name": p.material.get("name", p.material_id), "nozzle": p.nozzle,
             "layer_height": round(p.layer_height, 2), "walls": sh.walls, "top": sh.top, "bottom": sh.bottom, "infill": round(sh.infill, 2),
             "part_g": round(g_part, 1), "support_g": None if sup is None else round(sup, 1), "total_g": round(total, 1),
-            "minutes": round(minutes, 1), "safety": None if sf is None else round(float(sf), 2), "target": target,
-            "meets_target": target is None or (sf is not None and sf >= target), "ease": poses[i].ease,
+            "minutes": round(minutes, 1), "safety": None if sf is None else round(float(sf), 2), "target": need,
+            "meets_target": need is None or (sf is not None and sf >= need), "ease": poses[i].ease,
             "owned": p.material_id in owned, "warp_risk": p.material.get("warp_risk"),
             "reinforced": reinforced, "reinforcement_kind": reinforcement_kind,
             "reinforcements": list(reinforcements or []), "zones": list(zones or []), "edits": list(edits or []),
@@ -584,7 +589,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
     own_search = ([m for m in mats[1:] if m in owned] + [m for m in ("pla", "petg") if m in mats[1:] and m not in owned])[:OWN_SEARCH_MATERIALS]
 
     def _run_climb(i: int, q: Profile, zones=None, solid_known_ok: bool = False) -> dict:
-        return climb(cases, poses[i].up, q, target, mesh, zones=zones, precond_cache=precond_cache,
+        return climb(cases, poses[i].up, q, targets[q.material_id], mesh, zones=zones, precond_cache=precond_cache,
                      eval_fn=climb_eval(i, q), solid_known_ok=solid_known_ok)
 
     def refine(i: int, nozzle: str, own_climbs: bool = True) -> None:
@@ -603,7 +608,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
             for mid in mats:
                 q = prof(mid, nozzle, lh)
                 sf = _material_safety(case_fi, p_ref_s, q)
-                if sf >= target or depth == "fast" or mid == mats[0] or not own_climbs or mid not in own_search:
+                if sf >= targets[mid] or depth == "fast" or mid == mats[0] or not own_climbs or mid not in own_search:
                     option(i, q, sh, sf, gm_for(i))
                     continue
                 known_ok_q = any(c["up"] == pose_up and c["nozzle"] == nozzle and c["layer_height"] == round(lh, 2)
@@ -649,20 +654,30 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
             out["ended_early"] = True
             out["ended_at"] = ended_at[0]
         if not feasible:
-            best = max(cands, key=lambda c: c["safety"] or 0.0) if cands else None
+            best = max(cands, key=lambda c: (c["safety"] or 0.0) / (c["target"] or 1.0)) if cands else None
+            checked_target = target
+            uniform_target = len(set(targets.values())) == 1
             if best is not None:
                 picks = [dict(best, badge="Best reachable", recommended=True, below_target=True)]
-            out["ways_out"] = ways_out(change, bool(lock.get("material")) or bool(materials), best and best["safety"], target)
+                checked_target = best["target"]
+            out["ways_out"] = ways_out(change, bool(lock.get("material")) or bool(materials), best and best["safety"], checked_target)
             if ended_at or partial:  # not everything was tried: never "impossible" (plan §10.1)
                 out["ways_out"].insert(0, {"id": "continue", "label": "Continue the search"})
-                out["explanation"] = (f"Search ended early: none of the options checked so far reaches ×{target:g}"
+                missing = f"none of the options checked so far reaches ×{target:g}" if uniform_target else "no option checked so far meets its target"
+                out["explanation"] = (f"Search ended early: {missing}"
                                       + (f" (best ×{best['safety']:.1f})" if best and best["safety"] else "")
                                       + ". Continue the search to try the rest.")
             else:
-                out["explanation"] = (f"None of the options we checked reached ×{target:g}. Best: ×{best['safety']:.1f}" if best and best["safety"]
-                                      else "Nothing could be checked.")
+                out["explanation"] = "Nothing could be checked."
+                if best and best["safety"]:
+                    if uniform_target:
+                        out["explanation"] = f"None of the options we checked reached ×{target:g}. Best: ×{best['safety']:.1f}"
+                    else:
+                        out["explanation"] = f"No option met its target. Closest: ×{best['safety']:.1f} of ×{checked_target:.2f}"
         elif ended_at:
             out["explanation"] = "Search ended early: these are the best options it found in the time. Continue the search to try the rest."
+        if picks:
+            out["target"] = picks[0]["target"]
         for o in picks:
             o.pop("reinforcement_kind", None)
             pros_cons(o, picks[0], mat_cons)
@@ -733,7 +748,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
         progress.report(0.78, "Testing local reinforcements")
         reinf_poses = ranked_poses[:REINF_POSES[depth]]
         added = _test_reinforcements(
-            mesh, cases, poses, reinf_poses, mats, noz[0], goal, depth, target, lock,
+            mesh, cases, poses, reinf_poses, mats, noz[0], goal, depth, lock,
             prof, option, gm_for, cached_solve, _run_climb, cands,
             run_zones=run_zones, run_design=run_design, recipe_fixed=recipe_fixed,
             bed=bed, moving=moving, zone_info=zone_info, unit_shape=unit_shape,
@@ -760,7 +775,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
 
 
 def _test_reinforcements(mesh, cases, poses, pose_indices: list[int], mats: list[str], nozzle: str, goal: str,
-                         depth: str, target: float, lock: dict, prof, option, gm_for, cached_solve, run_climb,
+                         depth: str, lock: dict, prof, option, gm_for, cached_solve, run_climb,
                          cands: list[dict], *, run_zones: bool, run_design: bool, recipe_fixed: bool,
                          bed, moving: bool, zone_info, unit_shape, precond_cache: dict) -> int:
     """Test local reinforcements in voxel space on ``pose_indices`` (best 1–2 poses):
@@ -818,7 +833,7 @@ def _test_reinforcements(mesh, cases, poses, pose_indices: list[int], mats: list
                     detail = f"{z_walls_max} walls, {z_infill_max:.0%} infill in stressed areas"
                     added += _emit_if_better(
                         i, mats, nozzle, lh, prof, sh_z, rz["case_fi"], p_rz, gm_for(i), option,
-                        base_snapshot, pose_up, goal, target,
+                        base_snapshot, pose_up, goal,
                         kind="modifier_zone", label=label, detail=detail, zones=z_dicts, edits=[],
                     )
 
@@ -834,7 +849,7 @@ def _test_reinforcements(mesh, cases, poses, pose_indices: list[int], mats: list
                     rv, p_rv = cached_solve(i, p0, sh_v, rtol=1e-4)
                     # Check if any material improves before building export zone dicts & cut meshes.
                     if _any_material_improves(mats, nozzle, lh, prof, sh_v, rv["case_fi"], p_rv,
-                                              gm_for(i), base_snapshot, pose_up, goal, target):
+                                              gm_for(i), base_snapshot, pose_up, goal):
                         z_dicts = [_zone_dict(zone_info, z, mesh, up, bed, moving, kind="void") for z in voids]
                         gap_edits = _hidden_gap_edits(voids, up, unit_shape)
                         n = len(voids)
@@ -842,7 +857,7 @@ def _test_reinforcements(mesh, cases, poses, pose_indices: list[int], mats: list
                         detail = "Internal pin voids that force solid inner walls through the stressed core"
                         added += _emit_if_better(
                             i, mats, nozzle, lh, prof, sh_v, rv["case_fi"], p_rv, gm_for(i), option,
-                            base_snapshot, pose_up, goal, target,
+                            base_snapshot, pose_up, goal,
                             kind="hidden_gap", label=label, detail=detail, zones=z_dicts, edits=gap_edits,
                         )
                 if len(voids) < n_pins:
@@ -859,14 +874,14 @@ def _test_reinforcements(mesh, cases, poses, pose_indices: list[int], mats: list
             added += _try_fillets(
                 mesh, cases, edges_cache, i, up, pose_up, bed_z, weak_spot, hot_spots,
                 mats, nozzle, lh, p0, test_shells, u_base, FILLET_SIZES[tier],
-                prof, gm_for, option, base_snapshot, goal, target,
+                prof, gm_for, option, base_snapshot, goal,
             )
 
             # C2: Local thickening
             added += _try_thickening(
                 mesh, cases, i, up, pose_up, bed_z, fi, ignore, weak_spot, hot_spots,
                 mats, nozzle, lh, p0, test_shells, u_base, THICKEN_SIZES[tier],
-                prof, gm_for, option, base_snapshot, goal, target, bed, moving,
+                prof, gm_for, option, base_snapshot, goal, bed, moving,
             )
     return added
 
@@ -1156,7 +1171,7 @@ def _unpack_edit_pieces(edit: dict) -> list[np.ndarray]:
 def _try_fillets(mesh, cases, edges: list[dict], i: int, up, pose_up: list[float], bed_z: float,
                  weak_spot: np.ndarray, hot_spots, mats: list[str], nozzle: str, lh: float, p0: Profile,
                  test_shells: list, u_base, sizes: tuple[float, ...], prof, gm_for, option,
-                 base_snapshot: list[dict], goal: str, target: float) -> int:
+                 base_snapshot: list[dict], goal: str) -> int:
     """Screen inside-corner fillets in voxel space; only winners get edit meshes and a full re-check."""
     from .features import _stress_chamfers
     from .strength import augment_cases, evaluate_cases, map_displacement, rasterize_edit_onto_grid
@@ -1180,7 +1195,7 @@ def _try_fillets(mesh, cases, edges: list[dict], i: int, up, pose_up: list[float
             r_scr = evaluate_cases(aug_cases, up, p0, sh_try, x0=x0_aug, rtol=1e-3, precond_cache=pc_local)
             if _any_material_improves(mats, nozzle, lh, prof, sh_try, r_scr["case_fi"], p0,
                                       gm_for(i, aug_cases[0].model, orig_vol + added_mm3),
-                                      base_snapshot, pose_up, goal, target, min_gain=0.05):
+                                      base_snapshot, pose_up, goal, min_gain=0.05):
                 winners.append((size, sh_try))
 
     # Stage 2: ONLY winners get real edit meshes and are re-checked with the exact rasterised edit.
@@ -1210,7 +1225,7 @@ def _try_fillets(mesh, cases, edges: list[dict], i: int, up, pose_up: list[float
         gm_chk = gm_for(i, chk_cases[0].model, orig_vol + real_add_mm3)
         added += _emit_if_better(
             i, mats, nozzle, lh, prof, sh_try, r_chk["case_fi"], p0, gm_chk, option,
-            base_snapshot, pose_up, goal, target,
+            base_snapshot, pose_up, goal,
             kind="fillet", label=edit["title"], detail=edit["description"], zones=[], edits=[edit],
         )
     return added
@@ -1219,7 +1234,7 @@ def _try_fillets(mesh, cases, edges: list[dict], i: int, up, pose_up: list[float
 def _try_thickening(mesh, cases, i: int, up, pose_up: list[float], bed_z: float, fi: np.ndarray,
                     ignore: np.ndarray, weak_spot: np.ndarray, hot_spots, mats: list[str], nozzle: str,
                     lh: float, p0: Profile, test_shells: list, u_base, grows: tuple[float, ...], prof,
-                    gm_for, option, base_snapshot: list[dict], goal: str, target: float, bed, moving: bool) -> int:
+                    gm_for, option, base_snapshot: list[dict], goal: str, bed, moving: bool) -> int:
     """Screen local thickening in voxel space; only winners get edit meshes and a full re-check."""
     from .features import _thicker_weak_spot
     from .strength import augment_cases, evaluate_cases, map_displacement, rasterize_edit_onto_grid
@@ -1242,7 +1257,7 @@ def _try_thickening(mesh, cases, i: int, up, pose_up: list[float], bed_z: float,
             r_scr = evaluate_cases(aug_cases, up, p0, sh_try, x0=x0_aug, rtol=1e-3, precond_cache=pc_local)
             if _any_material_improves(mats, nozzle, lh, prof, sh_try, r_scr["case_fi"], p0,
                                       gm_for(i, aug_cases[0].model, orig_vol + added_mm3),
-                                      base_snapshot, pose_up, goal, target, min_gain=0.05):
+                                      base_snapshot, pose_up, goal, min_gain=0.05):
                 winners.append((grow, sh_try))
 
     # Stage 2: ONLY winners get real edit meshes and are re-checked with the exact rasterised edit.
@@ -1269,7 +1284,7 @@ def _try_thickening(mesh, cases, i: int, up, pose_up: list[float], bed_z: float,
         gm_chk = gm_for(i, chk_cases[0].model, orig_vol + real_add_mm3)
         added += _emit_if_better(
             i, mats, nozzle, lh, prof, sh_try, r_chk["case_fi"], p0, gm_chk, option,
-            base_snapshot, pose_up, goal, target,
+            base_snapshot, pose_up, goal,
             kind="thicken", label=edit["title"], detail=edit["description"], zones=[], edits=[edit],
         )
     return added
@@ -1313,13 +1328,14 @@ def _build_thicken_edit(mesh, weak_spot: np.ndarray, grow: float, hot_spots, up,
 
 
 def _material_improves(mid: str, sf: float, part_g: float, base_snapshot: list[dict], pose_up: list[float],
-                       goal: str, target: float, min_gain: float = REINF_MIN_SAFETY_GAIN) -> bool:
+                       goal: str, min_gain: float = REINF_MIN_SAFETY_GAIN) -> bool:
     """True only if this reinforced candidate genuinely beats unreinforced options for ``mid``."""
     same_mat = [c for c in base_snapshot if c["material"] == mid]
     same_pose = [c for c in same_mat if c["up"] == pose_up]
     ref_list = same_pose or same_mat
     if not ref_list:
         return True
+    target = ref_list[0]["target"]
     ok_mat = [c for c in same_mat if c["meets_target"]]
     ok_pose = [c for c in same_pose if c["meets_target"]]
     best_sf_pose = max((c["safety"] or 0.0 for c in ref_list), default=0.0)
@@ -1344,25 +1360,25 @@ def _material_improves(mid: str, sf: float, part_g: float, base_snapshot: list[d
 
 def _any_material_improves(mats: list[str], nozzle: str, lh: float, prof, sh, case_fi, p_ref: Profile,
                            gm_fn, base_snapshot: list[dict], pose_up: list[float], goal: str,
-                           target: float, min_gain: float = REINF_MIN_SAFETY_GAIN) -> bool:
+                           min_gain: float = REINF_MIN_SAFETY_GAIN) -> bool:
     for mid in mats:
         q = prof(mid, nozzle, lh)
         sf = _material_safety(case_fi, p_ref, q)
         g_part, _ = gm_fn(sh, q)
-        if _material_improves(mid, sf, g_part, base_snapshot, pose_up, goal, target, min_gain=min_gain):
+        if _material_improves(mid, sf, g_part, base_snapshot, pose_up, goal, min_gain=min_gain):
             return True
     return False
 
 
 def _emit_if_better(i: int, mats: list[str], nozzle: str, lh: float, prof, sh, case_fi, p_ref: Profile,
-                    gm_fn, option, base_snapshot: list[dict], pose_up: list[float], goal: str, target: float,
+                    gm_fn, option, base_snapshot: list[dict], pose_up: list[float], goal: str,
                     *, kind: str, label: str, detail: str, zones: list[dict], edits: list[dict]) -> int:
     emitted = 0
     for mid in mats:
         q = prof(mid, nozzle, lh)
         sf = _material_safety(case_fi, p_ref, q)
         g_part, _ = gm_fn(sh, q)
-        if _material_improves(mid, sf, g_part, base_snapshot, pose_up, goal, target):
+        if _material_improves(mid, sf, g_part, base_snapshot, pose_up, goal):
             option(i, q, sh, sf, gm_fn, reinforced=True, reinforcement_kind=kind,
                    reinforcements=[{"kind": kind, "label": label, "detail": detail}],
                    zones=zones, edits=edits)

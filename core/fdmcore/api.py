@@ -30,7 +30,7 @@ from .profile import DATA as DATA_DIR, Profile, load_data, presets
 from . import progress
 from .progress import stage
 from .recommend import bambu, cooling_ranges, goal_plan, grip_settings, print_risk, recommend_settings
-from .service import required_safety
+from .service import CREEP_LIFE_DAYS, CREEP_TIMES_MIN, creep_estimate, required_safety
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
 
@@ -73,7 +73,7 @@ def _require() -> Session:
 
 def get_presets() -> dict:
     """All presets, plus how to use each calibration print (``calibration``) for the My materials form."""
-    return {**presets(), "calibration": CALIBRATION_HOW}
+    return {**presets(), "calibration": CALIBRATION_HOW, "creep_test": CREEP_TEST}
 
 
 def custom_presets(printers: dict | None = None, materials: dict | None = None) -> dict:
@@ -81,6 +81,8 @@ def custom_presets(printers: dict | None = None, materials: dict | None = None) 
     from .profile import set_custom_presets
 
     set_custom_presets(printers, materials)
+    if _session is not None:
+        _session.solved = None
     return get_presets()
 
 
@@ -174,7 +176,12 @@ def set_expert(values: dict[str, float]) -> dict:
     return expert_settings()
 
 
-CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "temp", "ironing", "all")
+CALIBRATION = ("layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "temp", "ironing", "creep", "all")
+CREEP_TEST = {"lever_mm": 75, "width_mm": 15, "thickness_mm": 4, "mass_g": 500, "hole_mm": 6,
+              "times_min": CREEP_TIMES_MIN, "design_days": CREEP_LIFE_DAYS}
+# Nominal bending stress at the clamp: M / section modulus, in N/mm².
+CREEP_TEST["stress_mpa"] = round(6 * (CREEP_TEST["mass_g"] / 1000) * 9.80665 * CREEP_TEST["lever_mm"]
+                                / (CREEP_TEST["width_mm"] * CREEP_TEST["thickness_mm"] ** 2), 2)
 # What to print and measure per test print: shown in the web app's My materials form and by the MCP tool.
 CALIBRATION_HOW = {
     "layer_strength": "A 98 mm dog-bone: thin in the middle, wide with a hole at each end. Print one lying flat and one "
@@ -202,7 +209,14 @@ CALIBRATION_HOW = {
     "ironing": "Five steps, each top ironed with a different flow (written on it, in %). Open the 3MF in OrcaSlicer or "
                "Bambu Studio and print it as it is (the flows are already set for each height), then pick the smoothest "
                "top: too little flow leaves lines, too much leaves ridges and blobs.",
-    "all": "Every test on one plate (about 170 × 175 mm): the warping bars, two dog-bones (one lies flat, one stands on "
+    "creep": "Print the arm flat with 0.2 mm layers, 100% infill and supports off. Clamp the wide end to a sturdy table "
+             "with the table edge at the end of the taper. Fix a ruler upright beside the pointed tip and mark the "
+             "height of the tip's lower edge before loading. Hang a bottle and cord of 500 g total from the hole "
+             "above a catch tray. "
+             f"The load puts about {CREEP_TEST['stress_mpa']:g} MPa of bending stress on the arm at the clamp. "
+             "Keep it at 18–30 °C away from sun or heaters. With the weight still on, measure the tip drop from the "
+             "unloaded mark at 1 minute, 1 hour, 1 day, 1 week and 4 weeks.",
+    "all": "The starter tests on one plate (about 170 × 175 mm): the warping bars, two dog-bones (one lies flat, one stands on "
            "its end: give it a brim), the fit gauge with its peg, the overhang blocks and the bridges. Each piece has its "
            "size written on it (the fit holes: 6 mm plus the number). Print it without support, then read each test as below.",
 }
@@ -317,6 +331,22 @@ def _dogbone() -> np.ndarray:
     for x in (d["end_l"] / 2, length - d["end_l"] / 2):
         bone = bone.difference(Point(x, w / 2).buffer(d["hole_d"] / 2, 64))
     return extrude(bone, 0, d["thick"])
+
+
+def _creep_arm() -> np.ndarray:
+    """A clamping tab, a straight beam, and a pointer whose height can be read against a fixed ruler."""
+    from shapely.geometry import Point, Polygon
+
+    from .additions import extrude
+
+    clamp = 30
+    hole_x = clamp + CREEP_TEST["lever_mm"]
+    centre = 12
+    half = CREEP_TEST["width_mm"] / 2
+    shoulder = [(0, 0), (22, 0), (clamp, centre - half), (hole_x + 3, centre - half), (hole_x + 8, centre - 1)]
+    outline = Polygon(shoulder + [(x, 2 * centre - y) for x, y in reversed(shoulder)])
+    hole = Point(hole_x, centre).buffer(CREEP_TEST["hole_mm"] / 2, 16)
+    return extrude(outline.difference(hole), 0, CREEP_TEST["thickness_mm"])
 
 
 def _warping_test(pitch: float = 20) -> list[np.ndarray]:
@@ -492,7 +522,7 @@ def tune_heat(kind: str, data: bytes, at_mm: float | None, profile: dict | None 
 
 
 def _all_tests() -> list[np.ndarray]:
-    """Every test on one 170 × 175 mm plate (fits a 180 mm bed): warping bars at the front, the dog-bones and the
+    """The starter tests on one 170 × 175 mm plate (fits a 180 mm bed): warping bars at the front, the dog-bones and the
     fit gauge in the middle, overhang and bridge blocks at the back, the second dog-bone standing on its end."""
     bone = _dogbone()
     standing = bone[..., [1, 2, 0]]  # (x, y, z) -> (y, z, x): stood on its end; a cyclic swap keeps the winding
@@ -507,11 +537,15 @@ def calibration_part(kind: str, profile: dict | None = None) -> dict:
     (``CALIBRATION_HOW``: what to print and measure). Upright / flat break weight is the layer strength
     factor, the longest flat warping bar the warping length, the fit holes the fit gaps, the steepest
     clean block the max overhang, the longest straight bridge the max bridge. Each piece has its size
-    written on it; ``all`` puts every test on one plate (T-388). ``temp``: the temperature tower for ``profile``'s
+    written on it; ``all`` puts the starter tests on one plate (T-388). ``temp``: the temperature tower for ``profile``'s
     material (``temps``, bottom first); ``ironing``: the ironing steps, also as a 3MF (``3mf``) with each step's flow
-    set for its height (OrcaSlicer / Bambu Studio height ranges)."""
+    set for its height (OrcaSlicer / Bambu Studio height ranges). ``creep``: a clamped arm with a hanging weight
+    and a pointed tip to measure its drop over time."""
     from .mesh import to_binary_stl
 
+    if kind == "creep":
+        return {"stl": to_binary_stl(Mesh(_creep_arm())), "name": "creep_test.stl",
+                "how": CALIBRATION_HOW[kind], "creep_test": CREEP_TEST}
     if kind == "temp":
         temps = tower_temps(profile)
         return {"stl": to_binary_stl(Mesh(np.concatenate(_temp_tower(temps)))), "name": "temp_tower.stl", "how": CALIBRATION_HOW[kind], "temps": temps}
@@ -1116,7 +1150,13 @@ def _use_story(p: Profile) -> str:
                     " its stiffness and strength and will sag or bend over time even under a small load. A material that takes more heat is the real fix.")
         else:
             out += f" At {t:.0f} °C {name} keeps only about {k:.0%} of its strength and stiffness (already included above)."
-    if p.constant_load:
+    creep = creep_estimate(p)
+    if creep:
+        out += (f" Your room-temperature creep test estimates {creep['factor']:.2f} times the initial sag after a year. "
+                f"The strength check uses a ×{required_safety(p):.2f} target based on that estimate.")
+        if creep["provisional"]:
+            out += " This early estimate may change as you add readings through four weeks."
+    elif p.constant_load:
         out += (f" The load stays on: plastic slowly stretches under a constant load (creep), so it needs about ×{CONSTANT_LOAD_SAFETY:.0f}"
                 " instead of ×2. Warmth makes creep much worse.")
     return out
@@ -2674,7 +2714,7 @@ def _importance_map(up, p: Profile, loads: list[dict] | None):
 
     s = _require()
     up = np.asarray(up, float) / np.linalg.norm(up)
-    key = json.dumps([np.round(up, 6).tolist(), loads or None, p.material, p.goal, p.constant_load, s.tags, s.cad_checks],
+    key = json.dumps([np.round(up, 6).tolist(), loads or None, p.material, p.goal, p.constant_load, p.use_temp_c, s.tags, s.cad_checks],
                      sort_keys=True, default=str)
     if s.importance is None or s.importance[0] != key:
         if loads:
@@ -2866,6 +2906,7 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     ok = ~worst.ignore  # stresses right at the supports and loads are not meaningful (they grow as the grid gets finer)
     r["fi_max_pct"] = float(fi[ok].max(initial=0) * 100)
     r["required_safety"] = float(required_safety(p))
+    r["creep"] = creep_estimate(p)
     r["vm_max_mpa"] = float(vm[ok].max(initial=0))
     r["mesh"] = {"voxels": int(len(model.elems)), "voxel_mm": float(model.grid.h), "nodes": int(model.n_nodes),
                  "load_n": float(np.linalg.norm(worst.forces.sum(axis=0)))}
@@ -3140,12 +3181,13 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
     from .strength import verdict
 
     s = _require()
+    override = need
     need = need or required_safety(p)
     out = []
 
-    def add(change, kind, sf, why, cost="", **extra):
+    def add(change, kind, sf, why, cost="", *, target=need, **extra):
         out.append({"change": change, "kind": kind, "safety_factor": None if sf is None else float(sf),
-                    "verdict": None if sf is None else verdict(sf, need), "why": why, "cost": cost, **extra})
+                    "verdict": None if sf is None else verdict(sf, target), "why": why, "cost": cost, **extra})
 
     # Design: a chamfer at the inside corner next to the weak spot (see features._stress_chamfers).
     if s.weak_spot is not None:
@@ -3185,7 +3227,7 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             needs.append("dry filament")
         add(f"Print it in {m['name']}", "material", sf,
             f"{m['name']} is stronger{' and its layers bond better' if other.z_strength_factor > p.z_strength_factor else ''}.",
-            "needs " + ", ".join(needs) if needs else "", material=mid)
+            "needs " + ", ".join(needs) if needs else "", material=mid, target=override or required_safety(other))
 
     # Two pieces, each printed its strong way (T-347): only where no single orientation suits every part of it.
     from .split import strength_cut
@@ -3241,7 +3283,6 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
         from .strength import evaluate_cases
 
         base = _evaluate(_load_case(loads), up, p, _shells(p))
-    need = required_safety(p)
     out = []
     for mid, m in presets()["materials"].items():
         other = Profile.from_dict({**(profile or {}), "material": mid})
@@ -3276,7 +3317,7 @@ def material_advice(profile: dict | None = None, up=None, loads: list[dict] | No
         sf = None
         if base is not None:
             sf = float(_scaled_safety(base, p, other))
-            v = verdict(sf, need)
+            v = verdict(sf, required_safety(other))
             (good if v == "fine" else care if v == "borderline" else bad).append(f"holds your load {_format_safety(sf)}")
         rating = "not suitable" if bad else "with care" if care else "good"
         fuss = {"low": 0, "medium": 1, "high": 2}[m["warp_risk"]] + (m["hygroscopic"] == "high") + bool(m["abrasive"])

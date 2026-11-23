@@ -56,6 +56,14 @@ def test_every_api_method_has_a_tool():
     assert set(m.API_TOOLS.values()) - tools == set()
 
 
+def test_creep_calibration_tool_saves_the_print_and_instructions(tmp_path):
+    path = tmp_path / "creep.stl"
+    result = m.calibration_part("creep", str(path))
+    assert load_stl(path.read_bytes()).face_count > 0
+    assert "500 g" in result["how"]
+    assert result["creep_test"]["stress_mpa"] == 9.19
+
+
 def test_more_tools(tmp_path):
     m.load_part(str(SAMPLES / "l_bracket.stl"))
     up = [0.0, 0.0, 1.0]

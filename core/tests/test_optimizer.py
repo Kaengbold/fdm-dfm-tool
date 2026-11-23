@@ -65,6 +65,21 @@ def test_continuous_load_raises_the_target(hook):
     assert r["target"] == 3.0
 
 
+def test_optimizer_uses_the_locked_materials_creep_target(hook):
+    from fdmcore.service import required_safety
+
+    api.custom_presets(materials={"creep": {"based_on": "pla", "creep_readings": [[1, 4], [60, 4.1]]}})
+    try:
+        profile = {"printer": "bambu_p1s", "constant_load": True}
+        result = api.optimize("light", hook, "fast", profile, constraints={"material": "my_creep"})
+        measured = required_safety(Profile.from_dict({**profile, "material": "my_creep"}))
+        assert result["target"] == pytest.approx(measured)
+        assert measured < 3
+        assert all(o["material"] == "my_creep" and o["target"] == measured for o in result["options"])
+    finally:
+        api.custom_presets()
+
+
 def test_nothing_reaches_the_target_is_honest(hook):
     heavy = [hook[0], {**hook[1], "kg": 5000}]
     r = api.optimize("strong", heavy, "fast", {"printer": "bambu_p1s"}, constraints={"material": "pla"})

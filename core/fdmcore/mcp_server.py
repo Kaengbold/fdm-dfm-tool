@@ -237,7 +237,8 @@ def check_strength(
     zones: list[dict] | None = None,
 ) -> dict:
     """Rough strength check. use_temp_c: hottest the part gets in use (weaker when warm, soft near the
-    material's heat limit); constant_load: the load stays on (creep: needs ×3 instead of ×2). fine=True: a finer grid (slower); compare with the normal one to see how
+    material's heat limit); constant_load: the load stays on (uses the room-temperature creep test or a ×3 target).
+    fine=True: a finer grid (slower); compare with the normal one to see how
     far to trust the answer. walls (lines), infill (0–1), top/bottom (solid layers): how it is
     printed; omitted = the goal's usual settings. loads: [{"region": id, "kind": "fixed", "hold": "clamped"|"resting"|"screw"},
     {"region": id, "kind": "force", "kg": 5, "direction": "push"|"pull"|"down"|[x,y,z], "case": 1}].
@@ -626,9 +627,10 @@ def calibration_part(kind: str, output_path: str, material: str = "pla") -> dict
     """Save a test print for measuring the user's own material on their printer. ``kind``:
     "layer_strength", "warping", "fit", "overhang", "bridge", "sag", "snap", "temp" (a temperature tower for
     ``material``: then heat_tuning_gcode "temp" on its sliced G-code), "ironing" (save it as .3mf: each step's
-    ironing flow is set in it) or "all" (every test on one plate); each piece has its size written on it.
+    ironing flow is set in it), "creep" (a hanging weight test) or "all" (the starter test plate).
     ``how`` says what to print and measure. The measured numbers go into a custom material (set_custom_presets:
-    nozzle_temp_c from the tower, ironing_flow_pct from the ironing test)."""
+    nozzle_temp_c from the tower, ironing_flow_pct from the ironing test, or creep_readings as
+    [minutes since loading, drop in mm from the unloaded tip] pairs with a first reading at one minute)."""
     r = api.calibration_part(kind, {"material": material})
     if kind == "ironing" and str(output_path).lower().endswith(".3mf"):
         out = _out(output_path, (".3mf",), "3MF path")
@@ -636,7 +638,7 @@ def calibration_part(kind: str, output_path: str, material: str = "pla") -> dict
     else:
         out = _out(output_path, (".stl",), "STL path")
         out.write_bytes(r["stl"])
-    extra = {k: r[k] for k in ("temps", "flows") if k in r}
+    extra = {k: r[k] for k in ("temps", "flows", "creep_test") if k in r}
     return {"saved": str(out), "how": r["how"], **extra}
 
 
