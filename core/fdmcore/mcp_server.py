@@ -643,6 +643,14 @@ def calibration_part(kind: str, output_path: str, material: str = "pla") -> dict
 
 
 @server.tool()
+def calibrate_bed_grip(longest_flat_mm: int, printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
+    """Fit bed grip from the 40, 80, 120 and 160 mm warping bars. Use 0 if every bar lifted.
+    Set the printer's build plate and material's bed temperature in the presets first.
+    Save the returned record under its enclosure in the material's bed_grip_calibration field."""
+    return api.calibrate_bed_grip(longest_flat_mm, _profile(printer, material, nozzle))
+
+
+@server.tool()
 def check_orientation(up: list[float], printer: str = "bambu_p1s", material: str = "pla", nozzle: str = "0.4") -> dict:
     """Score one build direction of your choice (``up``: the part axis that points up on the printer),
     packed like the entries of find_orientations: score, support area, bed contact, height, reasons."""
@@ -1106,6 +1114,7 @@ API_TOOLS = {
     "presets": "list_presets",
     "custom_presets": "set_custom_presets",
     "calibration_part": "calibration_part",
+    "calibrate_bed_grip": "calibrate_bed_grip",
     "load": "load_part",
     "set_cad_checks": "set_cad_checks",
     "load_gcode": "load_gcode",

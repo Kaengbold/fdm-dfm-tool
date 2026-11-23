@@ -101,7 +101,8 @@ MATERIAL_FIELDS = {
     "density_g_cm3": (float, 0.5, 3.0),
     "shrinkage_pct": (float, 0, 5),
     "bed_temp_c": (float, 0, 200),
-    "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
+    "warp_length_mm": ("warp_lengths", 10, 1000),  # overrides thresholds.yaml for the measured enclosures
+    "bed_grip_calibration": ("bed_grip", None, None),
     "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
     "uv_resistance": (("good", "fair", "poor"), None, None),
     "water": (("good", "fair", "poor", None), None, None),
@@ -126,6 +127,30 @@ MATERIAL_FIELDS = {
     "creep_readings": ("creep", 0.1, 25.0),  # [minutes since loading, drop from unloaded in mm]
 }
 ENCLOSURES = ("none", "passive", "heated")
+WARPING_TEST_MM = (40, 80, 120, 160)
+
+
+def _grip_calibration(value: dict) -> dict:
+    """Validate the saved bar result and keep only its known fields."""
+    required_bounds = {"calibrated": ("upper_n_mm", "grip_n_mm"), "lower_only": ("lower_n_mm",),
+                       "upper_only": ("upper_n_mm",), "unknown_plate": (), "incompatible": (), "unresolved": ()}
+    records = {}
+    for enclosure, record in value.items():
+        status, surface, bed_temp, flat = (record[k] for k in ("status", "surface", "bed_temp_c", "longest_flat_mm"))
+        if (enclosure not in ENCLOSURES or surface not in PRINTER_FIELDS["bed_surface"][0]
+                or not 0 <= float(bed_temp) <= 200 or flat not in (0, *WARPING_TEST_MM)):
+            raise ValueError("Invalid warping calibration setup")
+        fields = required_bounds[status]
+        if status == "calibrated" and "lower_n_mm" in record:
+            fields += ("lower_n_mm",)
+        bounds = {k: float(record[k]) for k in fields}
+        if not all(math.isfinite(v) and v >= 0 for v in bounds.values()):
+            raise ValueError("Invalid warping calibration grip")
+        if status == "calibrated" and not bounds.get("lower_n_mm", 0) < bounds["grip_n_mm"] < bounds["upper_n_mm"]:
+            raise ValueError("Calibrated grip must be between the bar thresholds")
+        records[enclosure] = {"status": status, "surface": surface, "bed_temp_c": float(bed_temp),
+                              "longest_flat_mm": int(flat), **bounds}
+    return records
 
 FIBRE_NAME = re.compile(r"(?<![a-z])[cg]f(?![a-z])|carbon.?fib|glass.?fib", re.I)  # not "polycarbonate"
 
@@ -167,6 +192,15 @@ def _custom_entry(kind: str, key: str, spec: dict, fields: dict, base_table: dic
                 raise ValueError(f"{key}.{field} needs distinct times (1–525600 min) and drops of {lo:g}–{hi:g} mm")
         elif kind_ == "note":
             value = None if value is None else str(value)[:hi]
+        elif kind_ == "bed_grip":
+            try:
+                value = _grip_calibration(value)
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"{key}.{field} needs a valid warping calibration result") from exc
+        elif kind_ == "warp_lengths":
+            value = {e: float(v) for e, v in value.items() if e in ENCLOSURES}
+            if not all(lo <= v <= hi for v in value.values()):
+                raise ValueError(f"{key}.{field} must be between {lo} and {hi}")
         elif isinstance(kind_, tuple):
             if value not in kind_:
                 allowed = ", ".join("null" if v is None else str(v) for v in kind_)
@@ -269,6 +303,12 @@ class Profile:
     @property
     def enclosure(self) -> str:
         return self.printer["enclosure"]
+
+    def warping_length(self, risk_lengths: dict) -> float | None:
+        """Use the warping test result for this enclosure when one was saved."""
+        material = self.material
+        typical = risk_lengths.get(material.get("based_on", self.material_id), {})
+        return material.get("warp_length_mm", {}).get(self.enclosure, typical.get(self.enclosure))
 
     @property
     def speeds(self) -> dict:

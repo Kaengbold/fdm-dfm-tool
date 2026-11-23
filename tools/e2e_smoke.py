@@ -349,6 +349,21 @@ def check_new_ui_settings(browser, port: int) -> str:
         page.get_by_text("Early estimate.", exact=False).wait_for()
         assert page.evaluate("() => fdmUI.store.revisions().profile") > revision
 
+        # Fit ABS grip from the warping bars on a known plate.
+        page.evaluate("""async () => {
+          const { settings } = fdmUI.services;
+          const data = settings.getData();
+          data.mine.printers.my_test_pei = { based_on: "prusa_mk4s", bed_surface: "textured_pei" };
+          data.calibrationMaterial = "abs";
+          settings.importJson(JSON.stringify(data));
+          await settings.syncEngine();
+          fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: "my_test_pei" } });
+        }""")
+        page.locator('[data-cal-card="warping"]').click()
+        page.locator('.cal-pick[data-pick-value="40"]').click()
+        page.get_by_role("button", name="Save result").click()
+        page.get_by_text("Bed grip calibrated for Textured PEI at 100 °C.").wait_for(timeout=120_000)
+
         # Confirm the Python engine actually received the measured values and uses them in tolerance().
         page.wait_for_function(
             "() => fdmUI.store.get().catalog.materials.my_cal_pla?.max_overhang_deg === 65",
@@ -360,10 +375,15 @@ def check_new_ui_settings(browser, port: int) -> str:
           const tol = await fdmUI.services.engine.call("tolerance", {
             profile: { printer: "bambu_p1s", material: "my_cal_pla", nozzle: "0.4" },
           });
-          return { mat: presets.materials.my_cal_pla, tol };
+          const { adhesion } = await fdmUI.services.engine.call("warping", {
+            up: [0, 0, 1], profile: { printer: "my_test_pei", material: "my_cal_abs" },
+          });
+          return { mat: presets.materials.my_cal_pla, grip: presets.materials.my_cal_abs.bed_grip_calibration.none, adhesion, tol };
         }""")
         assert engine_check["mat"]["max_overhang_deg"] == 65, engine_check
         assert engine_check["mat"]["creep_readings"] == [[1, 4], [60, 4.1]], engine_check
+        assert engine_check["grip"]["longest_flat_mm"] == 40, engine_check
+        assert engine_check["adhesion"]["shear_source"] == "calibrated", engine_check
         assert engine_check["tol"]["measured"] is True, engine_check
         assert abs(engine_check["tol"]["gaps"]["snug"] - 0.1) < 1e-6, engine_check
 
@@ -378,10 +398,11 @@ def check_new_ui_settings(browser, port: int) -> str:
         page.wait_for_function("() => Boolean(fdmUI.services.settings?.isEngineSynced?.())", timeout=240_000)
         reloaded = page.evaluate("""async () => {
           const presets = await fdmUI.services.engine.call("presets");
-          return presets.materials.my_cal_pla;
+          return { pla: presets.materials.my_cal_pla, abs: presets.materials.my_cal_abs };
         }""")
-        assert reloaded and reloaded["max_overhang_deg"] == 65, reloaded
-        assert reloaded["creep_readings"] == [[1, 4], [60, 4.1]], reloaded
+        assert reloaded["pla"]["max_overhang_deg"] == 65, reloaded
+        assert reloaded["pla"]["creep_readings"] == [[1, 4], [60, 4.1]], reloaded
+        assert reloaded["abs"]["bed_grip_calibration"]["none"] == engine_check["grip"], reloaded
 
         # More thresholds disclosure loads engine expert_settings cleanly.
         page.locator(".app-header").get_by_role("button", name="Settings & calibration", exact=True).click()
@@ -390,7 +411,7 @@ def check_new_ui_settings(browser, port: int) -> str:
         page.get_by_role("button", name="More thresholds").click()
         page.wait_for_selector(".expert-row", timeout=30_000)
         assert not errors, errors
-        return f"downloaded {stl_name} ({stl_size} B) and creep_test.stl; overhang, fit and creep readings survived reload"
+        return f"downloaded {stl_name} ({stl_size} B) and creep_test.stl; overhang, fit, creep and bed grip survived reload"
     finally:
         ctx.close()
 

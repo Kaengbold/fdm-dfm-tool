@@ -28,6 +28,7 @@ reference, not for exact numbers.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from itertools import product
 
 import numpy as np
@@ -37,7 +38,7 @@ from .fea import Model, b_matrix, build_model, element_stiffness, solve
 from .heat import H_FAN, H_STILL, K_PLASTIC
 from .mesh import Mesh
 from .orientation import rotation_to_z
-from .profile import Profile, load_data
+from .profile import WARPING_TEST_MM, Profile, load_data
 from .progress import report
 from .strength import Shells, element_scale, material_for, von_mises
 from .voxel import VoxelGrid, voxelize
@@ -51,13 +52,11 @@ ROOM_C = 25.0
 
 def warp_limit(profile: Profile) -> float | None:
     """Longest bar that stays flat (mm) for this material and enclosure."""
-    measured = profile.material.get("warp_length_mm")
-    table = measured or load_data("thresholds")["warping"]["risk_length_mm"].get(profile.material.get("based_on", profile.material_id), {})
-    return table.get(profile.enclosure)
+    return profile.warping_length(load_data("thresholds")["warping"]["risk_length_mm"])
 
 
 def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None,
-             warm: tuple | None = None, *, adhesion: bool = False) -> dict:
+             warm: tuple | None = None, *, adhesion: bool = False, grip_trial: bool = False) -> dict:
     """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model (voxelised in the
     print frame: ``rotation`` turns part coordinates into it, so a tilted part sits flat on the grid's
     bottom layer instead of touching the bed with one stair-step corner), displacement after coming off
@@ -65,7 +64,7 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     (N, positive = the part pulls away from the bed) and the bed nodes. ``warm`` (heights, °C): how warm
     each height still is when more goes on top (the layer heat model with the G-code's real layer
     times); plastic still warm then shrinks less while printing. With ``adhesion``, test whether a
-    bed edge peels in the final shrink state."""
+    bed edge peels in the final shrink state. With ``grip_trial``, compute the bar's grip threshold instead."""
     rotation = rotation_to_z(up)
     # Rounded: float noise from the turn (3.0000000001 mm) would add a whole voxel layer.
     model = build_model(voxelize(Mesh(np.round(mesh.triangles @ rotation.T, 9)), target_voxels, h))
@@ -129,20 +128,27 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     pull = -(held_total @ up)  # the bed pulling the part down = the part pulling away from the bed
     out = {"model": model, "u": u_total + u_free, "pull": pull, "bed": bed, "up": up, "rotation": rotation,
            "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat}
-    if adhesion:
-        grip = bed_grip(profile)
-        if grip is not None:
-            # Local energy saturates even for finite cracks on long bars. Screen for
-            # enough overall bending to open a meaningful gap before trying the peel.
-            settings = load_data("thresholds")["bed_adhesion"]
-            curls = curl(out) >= settings["min_curl_layers"] * profile.layer_height
-            peel = _edge_peel(model, c, scale, held_total, bed, springs, grip["grip_n_mm"]) if curls else {}
+    grip = bed_grip(profile) if adhesion else None
+    if grip_trial or grip is not None:
+        # Local energy saturates even for finite cracks on long bars. Screen for
+        # enough overall bending to open a meaningful gap before trying the peel.
+        settings = load_data("thresholds")["bed_adhesion"]
+        curls = curl(out) >= settings["min_curl_layers"] * profile.layer_height
+        peel = _edge_peel(model, c, scale, held_total, bed, springs,
+                          None if grip_trial else grip["grip_n_mm"]) if curls else {}
+        if grip_trial:
+            out["lift_grip_n_mm"] = peel.get("lift_grip_n_mm")
+            out["peel_solved"] = not peel.get("solver_failed", False)
+        else:
             out["adhesion"] = {**grip, "may_lift": False, "advance_mm": 0.0, **peel, "curls": curls}
     return out
 
 
 def bed_grip(profile: Profile) -> dict | None:
     """Effective peel-work estimate from strand shear, with the measured inputs identified."""
+    calibrated = _calibrated_grip(profile)
+    if calibrated is not None:
+        return calibrated
     settings = load_data("thresholds")["bed_adhesion"]
     mat = profile.material.get("based_on", profile.material_id)
     surface = profile.printer.get("bed_surface", "unknown")
@@ -173,8 +179,12 @@ def bed_grip(profile: Profile) -> dict | None:
 
 
 def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray, bed: np.ndarray,
-               springs: tuple, grip: float) -> dict:
-    """Release a finite patch at the most-pulled edge, then follow its front."""
+               springs: tuple, grip: float | None) -> dict:
+    """Release a finite patch at the most-pulled edge, then follow its front.
+
+    For a calibration trial, record the release rates until the front first advances
+    enough to flag lift. The same trial solves apply to every grip along this path.
+    """
 
     h = model.grid.h
     bottom = model.elems[:, 2].min()
@@ -200,6 +210,7 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray,
     advance = 0.0
     starter_extent = 0.0
     rate = None
+    rates = []
     for i, distance in enumerate((starter_mm, advance_mm, advance_mm)):
         grown = binary_dilation(released, mask=area > 0, iterations=max(1, round(distance / h)))
         grown_area = area[grown].sum()
@@ -210,12 +221,14 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray,
         trial[ids[grown]] = False
         step, info = solve(model, c, scale, loads, trial, springs=springs, x0=u)
         if info or not np.isfinite(step).all():
+            if grip is None:
+                return {"solver_failed": True}
             break
         # About the held equilibrium, release is equivalent to reversing the
         # accumulated bed reactions. Minimum potential is -f·u/2 (N mm).
         work = 0.5 * np.sum(loads * step)
         rate = float((work - energy) / added)
-        if rate < grip or step[ids[seed], 2] <= 0:
+        if rate < (0 if grip is None else grip) or step[ids[seed], 2] <= 0:
             break
         released, energy, u = grown, work, step
         released_area = grown_area
@@ -223,8 +236,64 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray,
         if i == 0:
             starter_extent = extent
         advance = float(extent - starter_extent)
+        if grip is None:
+            rates.append(rate)
+            if advance >= advance_mm:
+                # Lift occurs only when every step up to this advance passes.
+                # The changeover is at one of the cached step rates.
+                candidates = sorted(rates, reverse=True)
+                first_lifting = bisect_right(candidates, False, key=lambda g: all(r >= g for r in rates))
+                return {"lift_grip_n_mm": candidates[first_lifting]}
     point = model.grid.origin + h * np.array([*seed, bottom])
     return {"point": point, "energy_release_n_mm": rate, "advance_mm": advance, "may_lift": advance >= advance_mm}
+
+
+def _calibrated_grip(profile: Profile) -> dict | None:
+    surface = profile.printer.get("bed_surface", "unknown")
+    record = profile.material.get("bed_grip_calibration", {}).get(profile.enclosure, {})
+    if surface == "unknown" or record.get("surface") != surface or record["status"] != "calibrated":
+        return None
+    return {"surface": surface, "assumed_surface": False, "shear_source": "calibrated",
+            "grip_n_mm": record["grip_n_mm"], "confidence": "medium", "calibration_temp_c": record["bed_temp_c"],
+            "calibration_temp_differs": profile.material["bed_temp_c"] != record["bed_temp_c"]}
+
+
+def calibrate_bed_grip(profile: Profile, longest_flat_mm: int, shells: Shells = Shells(),
+                       lengths: tuple[int, ...] = WARPING_TEST_MM) -> dict:
+    """Fit an effective grip between the observed flat bar and the first lifted bar.
+
+    Equality at a bar's lift threshold predicts lift. A missing threshold means
+    the bar holds even at zero grip, usually because of the free-curl screen.
+    """
+    if longest_flat_mm not in (0, *lengths):
+        raise ValueError(f"Choose 0 or a length from the warping test: {lengths}")
+    surface = profile.printer.get("bed_surface", "unknown")
+    record = {"surface": surface, "bed_temp_c": profile.material["bed_temp_c"],
+              "longest_flat_mm": longest_flat_mm}
+    if surface == "unknown":
+        return {**record, "status": "unknown_plate"}
+
+    next_length = next((n for n in lengths if n > longest_flat_mm), None)
+    bounds = {}
+    for key, length in (("lower_n_mm", longest_flat_mm), ("upper_n_mm", next_length)):
+        if length:
+            result = simulate(_reference_bar(length), [0, 0, 1], profile, shells, h=1.0, grip_trial=True)
+            if not result["peel_solved"]:
+                return {**record, "status": "unresolved"}
+            if result["lift_grip_n_mm"] is not None:
+                bounds[key] = result["lift_grip_n_mm"]
+    lower, upper = bounds.get("lower_n_mm"), bounds.get("upper_n_mm")
+    if next_length is None:
+        return {**record, "status": "lower_only", "lower_n_mm": lower if lower is not None else 0.0}
+    if upper is None:
+        return {**record, "status": "incompatible"}
+    if not longest_flat_mm:
+        return {**record, "status": "upper_only", "upper_n_mm": upper}
+    if upper <= (lower if lower is not None else 0):
+        return {**record, "status": "incompatible"}
+    # When the short bar holds at any grip, use the midpoint between zero and the upper bound.
+    grip = float(np.sqrt(lower * upper)) if lower else upper / 2
+    return {**record, **bounds, "status": "calibrated", "grip_n_mm": grip}
 
 
 def residual_stress(result: dict) -> np.ndarray:
@@ -306,10 +375,13 @@ def reference(profile: Profile, h: float, shells: Shells = Shells()) -> float | 
     length = warp_limit(profile)
     if not length:
         return None
+    return curl(simulate(_reference_bar(length), [0, 0, 1], profile, shells, h=h))
+
+
+def _reference_bar(length: float) -> Mesh:
     from shapely.geometry import box
 
     from .additions import extrude
 
     w, t = REF_BAR
-    bar = Mesh(extrude(box(0, 0, length, w), 0, t))
-    return curl(simulate(bar, [0, 0, 1], profile, shells, h=h))
+    return Mesh(extrude(box(0, 0, length, w), 0, t))
