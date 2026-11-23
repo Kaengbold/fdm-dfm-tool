@@ -1,7 +1,8 @@
 // Do STEP face ids agree between the importer (occt-import-js, web/step-worker.js) and OpenCascade (replicad's build,
 // which the edit worker uses)? Reads every test STEP both ways and compares each body's faces by area and centre, and
 // finds the L-bracket's inside corner as the edge its two faces share (T-527). Prints JSON; core/tests/test_step_faces.py
-// runs it. ``--dump DIR`` also writes the bracket's triangles (STL) and face ids for the engine side of that test.
+// runs it. ``--dump DIR`` also writes each file's first body as the engine gets it: triangles (NAME.stl) and the face
+// id of each (NAME_faces.json), for the engine side of that test and for core/tests/step/.
 // Dev-only:
 //   npm install --no-save --no-package-lock --prefix tools replicad-opencascadejs@1.1.0 occt-import-js@0.0.23
 //   node tools/check_step_faces.mjs [--dump DIR]
@@ -65,15 +66,16 @@ for (const file of files) {
     // And the comparison does catch ids that drifted: the same triangles with the face order turned round.
     const turned = bodies[0].faceIds.map((f) => sig.length - 1 - f);
     out.corner = { faces: [top, wall], edges, apart: apart.length, driftCaught: !B.checkFaceOrder(oc, all[0], bodies[0].soup, turned).ok };
-    if (dump) {
-      fs.mkdirSync(dump, { recursive: true });
-      const { soup, faceIds } = bodies[0];
-      const stl = Buffer.alloc(84 + faceIds.length * 50);
-      stl.writeUInt32LE(faceIds.length, 80);
-      for (let t = 0; t < faceIds.length; t++) for (let k = 0; k < 9; k++) stl.writeFloatLE(soup[t * 9 + k], 84 + t * 50 + 12 + k * 4);
-      fs.writeFileSync(path.join(dump, "l_bracket.stl"), stl);
-      fs.writeFileSync(path.join(dump, "l_bracket_faces.json"), JSON.stringify(Array.from(faceIds)));
-    }
+  }
+  if (dump) {
+    fs.mkdirSync(dump, { recursive: true });
+    const { soup, faceIds } = bodies[0];
+    const stl = Buffer.alloc(84 + faceIds.length * 50);
+    stl.writeUInt32LE(faceIds.length, 80);
+    for (let t = 0; t < faceIds.length; t++) for (let k = 0; k < 9; k++) stl.writeFloatLE(soup[t * 9 + k], 84 + t * 50 + 12 + k * 4);
+    const name = path.basename(file).replace(/\.ste?p$/i, "");
+    fs.writeFileSync(path.join(dump, `${name}.stl`), stl);
+    fs.writeFileSync(path.join(dump, `${name}_faces.json`), JSON.stringify(Array.from(faceIds)));
   }
   oc.FS.unlink("/in.step");
 }

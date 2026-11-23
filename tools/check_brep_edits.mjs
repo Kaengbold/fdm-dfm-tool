@@ -24,13 +24,13 @@ const reader = new oc.STEPControl_Reader();
 reader.ReadFile("/in.step");
 reader.TransferRoots(new oc.Message_ProgressRange());
 const solid = B.solids(oc, reader.OneShape())[0];
-const before = { faces: B.faces(oc, solid).length, volume: B.volume(oc, solid) };
+const before = { faces: B.faces(oc, solid).length, volume: B.volume(oc, solid), surfaces: B.surfaces(oc, solid) };
 
 function run(list, exact) {
   const t = performance.now();
   const { shape, notes } = B.applyEdits(oc, solid, list, { exact });
   const mesh = B.tessellate(oc, shape);
-  return { notes, ms: Math.round(performance.now() - t), valid: B.isValid(oc, shape), faces: B.faces(oc, shape).length,
+  return { notes, ms: Math.round(performance.now() - t), valid: B.isValid(oc, shape), faces: B.faces(oc, shape).length, surfaces: B.surfaces(oc, shape),
     dV: B.volume(oc, shape) - before.volume, triangles: mesh.faceIds.length,
     meshFaces: new Set(mesh.faceIds).size };
 }
