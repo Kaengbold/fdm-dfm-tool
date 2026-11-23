@@ -1188,7 +1188,7 @@ def _try_fillets(mesh, cases, edges: list[dict], i: int, up, pose_up: list[float
     for size, sh_try in winners:
         if size not in built_edits:
             edits = _stress_chamfers(mesh, weak_spot, model.grid.h, size, hot_spots=hot_spots, up=up,
-                                     max_overhang_deg=p0.material["max_overhang_deg"])
+                                     max_overhang_deg=p0.material["max_overhang_deg"], repeated_load=p0.repeated_load)
             if not edits:
                 built_edits[size] = None
                 continue

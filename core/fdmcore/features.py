@@ -20,6 +20,7 @@ from shapely.geometry import LineString
 
 from .checks import _safe_overlay, orient
 from .mesh import Mesh
+from .messages import format_message
 from .orientation import rotation_to_z
 from .profile import load_data
 from .slicer import slice_mesh
@@ -201,10 +202,8 @@ CHAMFER_REACH_VOXELS = 8  # the nearest inside edge this close to the weak spot 
 HOT_SHARE = 0.65  # other inside corners get a chamfer too where the stress is at least this share of the highest
 HOT_REACH_VOXELS = 3  # ... within this many analysis voxels of the corner
 MAX_STRESS_CORNERS = 4
-# A round as wide as gives the same plastic as the chamfer it replaces (square corner: c²/2 = r²(1 − π/4)).
-# Just as wide, a round fills less than half as much and checked weaker (mushroom: 1.78 vs 1.92); with the
-# same plastic both check the same (1.91 vs 1.92), and the round has no small corners for cracks to start
-# at (rules.yaml stress_at_inside_corner).
+# Keep the 2 mm default chamfer and match its added cross-section with a round (c²/2 = r²(1 − π/4)).
+# These are practical starting sizes. Printed PLA tests do not establish a best radius (T-342).
 ROUND_SAME_PLASTIC = float(np.sqrt(0.5 / (1 - np.pi / 4)))
 MAX_FILLET_PIECES = 400
 
@@ -413,7 +412,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     edits += foot_edits
     if strength_verdict != "fine":
         edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
-                                  profile.material["max_overhang_deg"], region)
+                                  profile.material["max_overhang_deg"], region, repeated_load=profile.repeated_load)
         edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
     part_pts = mesh.triangles.reshape(-1, 3)
     part_lo, part_hi = part_pts.min(axis=0) - GROW_TOL_MM, part_pts.max(axis=0) + GROW_TOL_MM
@@ -1562,10 +1561,17 @@ def _sweep(rings: list[np.ndarray], closed: bool) -> np.ndarray:
     return t[:, ::-1] if Mesh(t).volume() < 0 else t
 
 
+def inside_corner_load_advice(repeated_load: bool | None) -> str:
+    """Describe the evidence for printed PLA without changing the strength estimate."""
+    key = {True: "fillet.load.repeated", False: "fillet.load.steady", None: "fillet.load.general"}[repeated_load]
+    return f"{format_message(key)} {format_message('fillet.load.orientation')}"
+
+
 def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=None, up=None,
-                     max_overhang_deg: float = 45.0, region: np.ndarray | None = None) -> list[dict]:
+                     max_overhang_deg: float = 45.0, region: np.ndarray | None = None, *,
+                     repeated_load: bool | None = None) -> list[dict]:
     """Rounds (fillets) along the inside corner nearest the weak spot from the strength check (e.g. where
-    a stem meets a plate): sharp inside corners concentrate stress, a round spreads it out best. Where a
+    a stem meets a plate): sharp inside corners concentrate stress. Where a
     round would hang over (a corner under a ledge: its surface faces down) it is a 45° chamfer instead,
     which supports itself (rules.yaml stress_at_inside_corner; ``up`` is the print direction). Takes the
     whole connected corner (all inside edges linked to the ones near the weak spot), and the other
@@ -1606,18 +1612,14 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
         title = f"{shape} at the {len(corners)} inside corners with the most stress"
         found = ("The strength check found the most stress at these sharp inside corners, each nearly as weak as the "
                  "worst one: fixing only one would just move the weak spot to the next. ")
-    how = ("A round spreads the load over more material, often the cheapest way to make a part much stronger."
-           if rounds == every else
-           "A 45° chamfer spreads the load over more material and prints without support where a round would hang over."
-           if not rounds else
-           "Rounds spread the load best; where one would hang over in this orientation it is a 45° chamfer, which prints "
-           "without support.")
+    how = "A 45° chamfer prints without support where a round would hang over. " if rounds < every else ""
     advice_text = (f"Round this inside corner with r {r_mm:.1f} mm" if rounds == every
                    else f"Add a {size:.1f} mm 45° chamfer at this inside corner" if not rounds
                    else f"Round this inside corner with r {r_mm:.1f} mm (or {size:.1f} mm 45° chamfer where it overhangs)")
     every_k = [k for c in corners for k in c]
-    return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how, pieces, op="add", param="stress_chamfer_mm",
-                  advice={"text": advice_text, "now": None,
+    load_advice = inside_corner_load_advice(repeated_load)
+    return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how + load_advice, pieces, op="add",
+                  param="stress_chamfer_mm", advice={"text": f"{advice_text}. {load_advice}", "now": None,
                           "target": round(float(r_mm if rounds else size), 1), "unit": "mm", "point": spot.tolist()},
                   intent=_corner_intent(edges, every_k, size, up, max_overhang_deg, True, region))]
 
@@ -1656,8 +1658,7 @@ def _foot_fillet_text(noun: str, place: str, r: float, rounds: int, total: int) 
     if rounds == total:
         return (f"Round the inside corner at the {place} of this {noun} with r {r:.1f} mm",
                 f"{r:.1f} mm round at the {place} of the {noun}",
-                f"Rounds the sharp inside corner at the {place} of this {noun} (r {r:.1f} mm) to spread stress "
-                "without changing the rest of the part.")
+                f"Rounds the sharp inside corner at the {place} of this {noun} (r {r:.1f} mm).")
     if not rounds:
         return (f"Add a {r:.1f} mm 45° chamfer at the {place} of this {noun} (prints without support)",
                 f"{r:.1f} mm 45° chamfer at the {place} of the {noun}",
@@ -1752,6 +1753,7 @@ def _foot_fillet_edits(mesh: Mesh, edits: list[dict], findings: list[dict], prof
     inside the part's bounding box."""
     r = float(load_data("thresholds")["fillets"]["foot_radius_mm"])
     max_oh = float(profile.material["max_overhang_deg"])
+    load_advice = inside_corner_load_advice(profile.repeated_load)
     out = []
     for g in _foot_edge_groups(mesh, edits, findings, to_print, up, max_oh):
         edges, ks = g["edges"], g["ks"]
@@ -1764,8 +1766,8 @@ def _foot_fillet_edits(mesh: Mesh, edits: list[dict], findings: list[dict], prof
         if not (np.all(pts >= part_lo) and np.all(pts <= part_hi)):
             continue
         advice_text, title, desc = _foot_fillet_text(g["noun"], g["place"], r, rounds, total)
-        out.append(_edit(f"foot-fillet-{len(out)}", "foot_fillet", title, desc, pieces, op="add",
-                         advice={"text": advice_text, "now": None, "target": round(r, 1),
+        out.append(_edit(f"foot-fillet-{len(out)}", "foot_fillet", title, f"{desc} {load_advice}", pieces, op="add",
+                         advice={"text": f"{advice_text}. {load_advice}", "now": None, "target": round(r, 1),
                                  "unit": "mm", "point": g["point"].tolist()},
                          intent=_corner_intent(edges, ks, r, up, max_oh, False, region)))
     return out
@@ -1776,13 +1778,14 @@ def _foot_fillet_advice(mesh: Mesh, edits: list[dict], findings: list[dict], pro
     """Exact-number CAD advice for load-bearing foot inside corners that have no edit yet."""
     r = float(load_data("thresholds")["fillets"]["foot_radius_mm"])
     max_oh = float(profile.material["max_overhang_deg"])
+    load_advice = inside_corner_load_advice(profile.repeated_load)
     out = []
     for i, g in enumerate(_foot_edge_groups(mesh, edits, findings, to_print, up, max_oh)):
         f = g["finding"]
         fid = f.get("finding_id")
         advice_text, _, _ = _foot_fillet_text(g["noun"], g["place"], r, g["rounds"], len(g["ks"]))
         out.append({
-            "id": f"advice-foot-fillet-{i}", "rule": "foot_fillet", "text": advice_text, "now": None,
+            "id": f"advice-foot-fillet-{i}", "rule": "foot_fillet", "text": f"{advice_text}. {load_advice}", "now": None,
             "target": round(r, 1), "unit": "mm", "point": clamp(g["point"]),
             "fixes": {"rule": f["rule"], "title": f.get("title", f["rule"]), "finding_id": fid},
             "edit_id": None,

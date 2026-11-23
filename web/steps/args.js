@@ -144,10 +144,16 @@ export function optimizeArgs(state) {
     : (TEMP_TIERS[env.temp] ?? 20);
   const touches = [...new Set((env.touches ?? []).filter((x) => TOUCH_IDS.includes(x)))];
 
+  const details = state?.details;
+  const skipStrength = goal === "quality" || Boolean(state?.noLoads);
   const profile = {
     use_temp_c: tempC,
-    constant_load: state?.details?.duration === "always" || state?.details?.duration === "constant",
+    constant_load: details?.duration === "always" || details?.duration === "constant",
   };
+  if (!skipStrength) {
+    if (details?.vibration === "vibration" || details?.duration === "often") profile.repeated_load = true;
+    else if (profile.constant_load || details?.duration === "short") profile.repeated_load = false;
+  }
   if (prof.printer) profile.printer = prof.printer;
   if (prof.nozzle) profile.nozzle = String(prof.nozzle);
   if (goal === "quality") profile.looks = true; // settings for parts people look at (recommend.py, T-572)
@@ -166,7 +172,6 @@ export function optimizeArgs(state) {
 
   const owned = Array.isArray(state?.catalog?.owned) ? [...state.catalog.owned] : [];
   const materials = Array.isArray(state?.materials) && state.materials.length ? [...state.materials] : null;
-  const skipStrength = goal === "quality" || Boolean(state?.noLoads);
   const rawLoads = [...(state?.holds ?? []).map(holdToEngine), ...(state?.loads ?? []).map(loadToEngine)];
   const loads = skipStrength || !rawLoads.length ? null : rawLoads;
 
