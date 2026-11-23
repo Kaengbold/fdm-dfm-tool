@@ -2463,7 +2463,7 @@ def _paths(tp, lines: np.ndarray, heat) -> tuple[np.ndarray, np.ndarray, np.ndar
     length = np.linalg.norm(b - a, axis=1)
     cell = heat.cell_mm
     piece = max(2 * cell, float(length.sum()) / DETAIL_MAX_PIECES)
-    n = np.maximum(np.ceil(length / piece).astype(np.int64), 1)
+    n = np.maximum(np.ceil(length / piece).astype(np.intp), 1)  # np.repeat needs intp (32 bits in Pyodide)
     if n.sum() > DETAIL_MAX_PIECES:
         n[:] = 1
     src = np.repeat(np.arange(len(lines)), n)
