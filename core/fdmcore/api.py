@@ -1248,8 +1248,8 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
     reinforcements at Complete depth (or whenever ``change="design"``).
 
     ``loads`` as for strength (none, or goal quality: no strength solve). ``depth``: fast / extended / complete.
-    ``profile``: printer, nozzle, use_temp_c, constant_load (its material and goal are ignored; lock a material
-    with ``constraints``). ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
+    ``profile``: printer, nozzle, use_temp_c, constant_load and repeated_load (fillet advice only).
+    Lock a material with ``constraints``. ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
     to consider (nozzles = the ticked sizes). ``environment``: {"temp_c", "touches": [water, food, outdoors,
     abrasion, oil_fuel, solvent, skin]}. ``constraints`` ("Your choices", hard limits): material, nozzle,
     layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both. ``faces`` as in orientations
@@ -3186,7 +3186,7 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
     """What helps besides slicer settings and orientation: a design change at the weak spot, another
     material, or a lighter load (that still reaches ``need``, default the usual safety). Also the way
     out when even the strongest settings aren't enough."""
-    from .features import concave_edges
+    from .features import concave_edges, inside_corner_load_advice
     from .strength import verdict
 
     s = _require()
@@ -3204,10 +3204,9 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
         edges = concave_edges(s.mesh)
         if edges and min(np.linalg.norm((e["a"] + e["b"]) / 2 - spot) for e in edges) <= 8 * s.weak_spot[1]:
             add("Round off the weak inside corners (design change)", "design", None,
-                "The most stress sits at a sharp inside corner; a 2–4 mm round spreads it out (a 45° chamfer where a "
-                "round would hang over in this orientation). Every inside corner that is nearly as weak gets one too, "
-                "so the weak spot doesn't just move to the next corner. On a test part a 2 mm chamfer gave about +15 %, "
-                "4 mm about +40 %. Preview it under Design changes, then check strength again.",
+                "The strength check found a sharp inside corner near the weak spot. "
+                f"{inside_corner_load_advice(p.repeated_load)} "
+                "Preview the round or self-supporting 45° chamfer under Design changes, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
