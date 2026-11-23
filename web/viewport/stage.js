@@ -137,6 +137,7 @@ export class Stage {
     if (this.part) { this.scene.remove(this.part.group); this.part.geo.dispose(); }
     this.part = partGroup(triangles, palette());
     this.scene.add(this.part.group);
+    if (this.printUp) this.orient(this.printUp); // an edited part comes back as loaded: stand it as it prints again
     this.view("iso");
   }
 
@@ -172,6 +173,10 @@ export class Stage {
     g.updateMatrixWorld(true);
     this.render();
   }
+
+  /** Back to the resting pose: as it prints once an option is chosen (``printUp``, set by main.js, T-585), else as
+   * loaded. Overlays that turned the part themselves (the heat view) call this when they go. */
+  rest() { this.orient(this.printUp ?? null); }
 
   /** Turn the part with the engine's own rotation (3 × 3 rows: oriented = part @ rotation.T), resting on the bed and
    * centred like the engine's oriented frame, so overlays in that frame (heat spots, G-code lines) sit on it. */

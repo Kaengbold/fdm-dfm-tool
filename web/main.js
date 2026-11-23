@@ -65,7 +65,12 @@ const services = {
     services.stage.showPart(trianglesOf(info));
     app.go(last.state.step);
   },
-  cameraBar: () => cameraBar(services.stage, { title: t("camera.title"), iso: t("camera.iso"), top: t("camera.top"), front: t("camera.front"), fit: t("camera.fit") }),
+  cameraBar: () => {
+    const bar = cameraBar(services.stage, { title: t("camera.title"), iso: t("camera.iso"), top: t("camera.top"), front: t("camera.front"), fit: t("camera.fit") });
+    const note = turnedNote(store.get());
+    if (note) bar.append(note);
+    return bar;
+  },
   // Direction gizmo for a load at ``point`` with face ``normal`` (part coordinates). The Loads step (T-543) uses it;
   // until then it is the dev hook for trying it out.
   openGizmo: (point, normal, options = {}) => openGizmo(services.stage, { point, normal, ...options,
@@ -91,6 +96,8 @@ services.picker = new Picker(services.stage, { label: pickLabel });
 attachKeyboard(services.stage, services.picker, { label: pickLabel, placeholder: t("picker.search"), title: t("picker.title") });
 // Picking happens on Holds and Loads (T-541, T-543); the face regions come once per part.
 const PICK_STEPS = new Set(["holds", "loads"]);
+// Steps after Options that show the part turned the way it prints.
+const TURNED = new Set(["sim", "problems", "done", "lighter", "tuned"]);
 // Quality marks its show faces on Analyse (T-563).
 const picks = (s) => PICK_STEPS.has(s.step) || s.step === "tolerances" || s.step === "tools" || (s.step === "analyse" && s.goal === "quality");
 let regionsFor = null;
@@ -103,7 +110,18 @@ async function preparePicker() {
     services.rerender(); // steps tint their faces once the regions are there
   }
   services.picker.enable(on);
-  if (s.step !== "options" && services.stage.oriented) services.stage.orient(null);
+  // Once an option is chosen the part stands the way it prints (T-585); picking maps points as loaded, so not there.
+  const up = !on && TURNED.has(s.step) ? s.option?.up ?? null : null;
+  services.stage.printUp = up;
+  if (s.step !== "options" && JSON.stringify(services.stage.oriented ?? null) !== JSON.stringify(up)) services.stage.orient(up);
+}
+/** The note beside the camera bar while the part is turned to print: how it is turned. */
+function turnedNote(s) {
+  if (!TURNED.has(s.step) || !s.option?.up || picks(s)) return null;
+  const note = document.createElement("span");
+  note.className = "stage-turned";
+  note.textContent = t("camera.turned", { orientation: s.option.orientation ?? t("sim.custom") });
+  return note;
 }
 const app = startShell(document.getElementById("app"), { store, saving, services });
 // Load persisted settings, populate store.catalog (printers + nozzles + owned materials), and push to the engine once ready.
@@ -111,7 +129,7 @@ initSettings({ store, saving, engine, services });
 store.subscribe((_, changed) => {
   if (changed.includes("part") && services.stage.part) saving.putExtra("thumb", thumbnail(services.stage.part.geo.attributes.position.array));
 });
-store.subscribe((_, changed) => { if (changed.includes("step") || changed.includes("part") || changed.includes("goal")) preparePicker(); });
+store.subscribe((_, changed) => { if (["step", "part", "goal", "option"].some((k) => changed.includes(k))) preparePicker(); });
 globalThis.fdmUI = app; // for the browser tests and for agents driving the page
 document.body.dataset.ready = "1";
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js");

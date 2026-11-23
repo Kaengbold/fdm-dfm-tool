@@ -83,7 +83,8 @@ PRINTER_FIELDS = {
     "speed": (("fast", "medium"), None, None),
     "multi_material": (("none", "optional", "builtin"), None, None),
     "moving_bed": (bool, None, None),
-    "bed_surface": (("unknown", "textured_pei", "smooth_pei", "glass", "cool_plate"), None, None),
+    "bed_surface": (("unknown", "textured_pei", "smooth_pei", "glass", "cool_plate",
+                     "polyimide", "aluminium", "glass_glue", "buildtak"), None, None),
 }
 MATERIAL_FIELDS = {
     "name": (str, None, None),
@@ -99,6 +100,7 @@ MATERIAL_FIELDS = {
     "modulus_xy_mpa": (float, 10, 50000),
     "density_g_cm3": (float, 0.5, 3.0),
     "shrinkage_pct": (float, 0, 5),
+    "bed_temp_c": (float, 0, 200),
     "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
     "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
     "uv_resistance": (("good", "fair", "poor"), None, None),
@@ -204,6 +206,8 @@ def set_custom_presets(printers: dict | None = None, materials: dict | None = No
 
 
 GOALS = ("balanced", "strength", "speed", "material")
+# The app's names for the same goals (T-580, T-584); "quality" is balanced settings for parts people look at.
+GOAL_ALIASES = {"strong": "strength", "fast": "speed", "light": "material", "quality": "balanced"}
 
 
 def _tuning(d: dict, key: str, lo: float, hi: float) -> float | None:
@@ -234,6 +238,7 @@ class Profile:
     # them; when not given, the material preset's own (My materials) count.
     tuned_sag_c: float | None = None
     tuned_bond: float | None = None
+    repeated_load: bool | None = None  # known use pattern for advice; None when not supplied
 
     def __post_init__(self) -> None:
         lh = self.layer_height_mm
@@ -285,6 +290,8 @@ class Profile:
     @classmethod
     def from_dict(cls, d: dict | None) -> "Profile":
         d = d or {}
+        constant_load = bool(d.get("constant_load", False))
+        repeated_load = d.get("repeated_load")
         raw_lh = d.get("layer_height")
         if raw_lh in (None, ""):
             lh = None
@@ -297,13 +304,14 @@ class Profile:
             material_id=d.get("material", cls.material_id),
             nozzle=str(d.get("nozzle", cls.nozzle)),
             multi_material=bool(d.get("multi_material", False)),
-            goal=d.get("goal", "balanced"),
-            looks=bool(d.get("looks", False)),
+            goal=GOAL_ALIASES.get(d.get("goal"), d.get("goal", "balanced")),
+            looks=bool(d.get("looks", False)) or d.get("goal") == "quality",
             use_temp_c=None if d.get("use_temp_c") in (None, "") else float(d["use_temp_c"]),
-            constant_load=bool(d.get("constant_load", False)),
+            constant_load=constant_load,
             layer_height_mm=lh,
             tuned_sag_c=_tuning(d, "sag_limit_c", 30, 300),
             tuned_bond=_tuning(d, "min_bond", 0.02, 1.0),
+            repeated_load=repeated_load if isinstance(repeated_load, bool) else (False if constant_load else None),
         )
         if p.goal not in GOALS:
             raise ValueError(f"Unknown goal: {p.goal} (use one of {', '.join(GOALS)})")

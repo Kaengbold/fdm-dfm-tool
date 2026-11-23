@@ -177,7 +177,7 @@ _SEV = {"info": 0, "warn": 1, "problem": 2}
 
 def print_risk(profile: Profile, findings: list[dict], height_mm: float, warp_verdict: str | None = None) -> dict:
     """How likely the whole print fails on the bed: comes loose at the corners, tips over or splits (T-391).
-    Adds up the signs the check found (warping, a small base, a tall narrow part, a shrinking plastic on an
+    Adds up the signs the check found (warping, bed grip, a small base, a tall narrow part, a shrinking plastic on an
     open printer) and the warping simulation's verdict when it ran (``warp_verdict``), into ``level`` low /
     medium / high with plain ``reasons``, and what holds it down: ``hold`` no_brim / brim_ears / outer_only / raft.
     A raft only as the last resort: a tiny base that also warps or tips, or a part the simulation says will
@@ -188,8 +188,12 @@ def print_risk(profile: Profile, findings: list[dict], height_mm: float, warp_ve
         worst[f["rule"]] = max(worst.get(f["rule"], -1), _SEV.get(f.get("severity", "info"), 0))
     mat, open_printer = profile.material, profile.enclosure == "none"
     score, reasons = 0, []
-    warps = worst.get("warping", -1) >= 1 or warp_verdict in ("might lift", "likely to lift")
-    if warp_verdict == "likely to lift" or worst.get("warping", -1) >= 2:
+    peels = "bed_adhesion" in worst
+    warps = peels or worst.get("warping", -1) >= 1 or warp_verdict in ("might lift", "likely to lift")
+    if peels:
+        score += 2
+        reasons.append("a corner may come loose on this build plate")
+    elif warp_verdict == "likely to lift" or worst.get("warping", -1) >= 2:
         score += 2
         reasons.append("the corners will likely lift off the bed" + (" (warping simulation)" if warp_verdict == "likely to lift" else ""))
     elif warps:

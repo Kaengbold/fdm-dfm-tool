@@ -132,6 +132,95 @@ warping:
   fillet_radius_mm: 3.0           # suggested corner radius [problem_warping_and_corner_lifting]
   brim_width_mm: 8                # [corner_mouse_ears_vs_brim]
 
+bed_adhesion:
+  # Grip estimates for a bare model on a hot bed. Leoben PLA strand shear: https://doi.org/10.1080/14658011.2017.1399531
+  # PETG surface comparison: https://doi.org/10.3390/app14020945 (PEI/glass 0.98, PI/glass 1.06, aluminium/glass 0.60).
+  # PEI and aluminium follow those ratios from the nearest glass estimate, extended to other plastics with low confidence.
+  # ABS-family PEI uses 0.92 × PI, from Kaščak's PEI/PI ratio. Surface texture was unspecified, so both PEI types start alike.
+  # Cool plates, BuildTak-style sheets and glass with glue vary by brand and application. They use rounded estimates in the range of glass, PEI and PI.
+  # All peel energy values derived from these inputs are low confidence. See research/bed_adhesion.md.
+  min_curl_layers: 2.0  # Free curl needed to open a meaningful gap, in layer heights. Estimate from reference bars.
+  effective_slip_mm: 0.30  # Estimated distance over which the bond gives way. Sets how strongly the bed holds in the model.
+  pla_hot_shear_share: 0.55  # Low confidence. Above 75 °C, use the initial fall to about 50–60% of the peak reported by Leoben for PLA.
+  pla_strand_shear_n_mm:
+    glass:
+      at_60_c: 0.73  # Measured PLA strand shear per mm on glass at 60 °C (Leoben).
+      at_70_c: 6.51  # Measured PLA strand shear per mm on glass at 70 °C (Leoben).
+    polyimide:
+      at_60_c: 0.51  # Measured PLA strand shear per mm on polyimide at 60 °C (Leoben).
+      at_70_c: 3.22  # Measured PLA strand shear per mm on polyimide at 70 °C (Leoben).
+  nominal_shear_n_mm:
+    pla:  # Low confidence. PLA at 55 °C uses the nearest Leoben measurement (60 °C).
+      textured_pei: 0.714
+      smooth_pei: 0.714
+      cool_plate: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.441
+      glass_glue: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+    pla_plus:  # Low confidence. PLA+ at 55 °C borrows PLA at 60 °C. Blends vary.
+      textured_pei: 0.714
+      smooth_pei: 0.714
+      glass: 0.730
+      polyimide: 0.510
+      cool_plate: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.441
+      glass_glue: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+    petg:  # Low confidence. PETG at 80 °C is near its glass transition. Uses PLA at 60 °C and Kaščak's PETG surface ratios.
+      textured_pei: 0.714
+      smooth_pei: 0.714
+      glass: 0.730
+      polyimide: 0.774
+      cool_plate: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.441
+      glass_glue: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+    abs:  # Low confidence. ABS on a 100 °C bed is below its glass transition. Uses the weaker PLA/PI anchor, with glass lower, as reported for ABS by Leoben.
+      textured_pei: 0.470
+      smooth_pei: 0.470
+      glass: 0.400
+      polyimide: 0.510
+      cool_plate: 0.480  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.242
+      glass_glue: 0.480  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.480  # Low confidence. Borrows a rounded value from nearby plate estimates.
+    asa:  # Low confidence. ASA at 100 °C is closer to its glass transition than ABS. Uses 1.25× the ABS estimate.
+      textured_pei: 0.588
+      smooth_pei: 0.588
+      glass: 0.500
+      polyimide: 0.640
+      cool_plate: 0.600  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.303
+      glass_glue: 0.600  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.600  # Low confidence. Borrows a rounded value from nearby plate estimates.
+    pc:  # Low confidence. PC at 110 °C is well below its glass transition. Uses 0.83× the ABS estimate.
+      textured_pei: 0.392
+      smooth_pei: 0.392
+      glass: 0.330
+      polyimide: 0.430
+      cool_plate: 0.400  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.200
+      glass_glue: 0.400  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.400  # Low confidence. Borrows a rounded value from nearby plate estimates.
+    pa_cf:  # Low confidence. PA-CF at 100 °C borrows the weaker PC estimate. The nylon blend and fibre content matter.
+      textured_pei: 0.392
+      smooth_pei: 0.392
+      glass: 0.330
+      polyimide: 0.430
+      cool_plate: 0.400  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.200
+      glass_glue: 0.400  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.400  # Low confidence. Borrows a rounded value from nearby plate estimates.
+    tpu_95a:  # Low confidence. TPU 95A at 35 °C borrows the lower-temperature PLA estimate. Flexible blends vary.
+      textured_pei: 0.714
+      smooth_pei: 0.714
+      glass: 0.730
+      polyimide: 0.510
+      cool_plate: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      aluminium: 0.441
+      glass_glue: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+      buildtak: 0.730  # Low confidence. Borrows a rounded value from nearby plate estimates.
+
 pins:
   max_width_mm: 8.0               # upright pins/posts thinner than this break along layers [mistake_01_z_axis_tension_orientation]
   min_aspect: 3.0                 # ... when height >= this × width
@@ -452,12 +541,8 @@ wall_advice:
   uneven_min_height_mm: 4.0
 
 fillets:
-  # Inside-corner round at the foot of a load-bearing feature (pin, neck, snap tab): 1-3 mm reduces
-  # notch stress concentration; where a round would hang over, use a 45 deg chamfer of the same leg
-  # so it prints without support [rules.yaml stress_at_inside_corner: Printed Solid, Stress Concentrations
-  # https://www.printedsolid.com/blogs/news/37036739-3d-printing-design-tips-part-1-stress-concentrations;
-  # Rahix, Design for 3D-Printing https://blog.rahix.de/design-for-3d-printing/;
-  # ETASR (2025) https://etasr.com/index.php/ETASR/article/download/11111/5430/62291].
+  # Keep the existing small starting size at the foot of a pin, neck or snap tab.
+  # Printed PLA tests do not establish a best radius (research/fillet_stress_factors.md).
   foot_radius_mm: 1.0
 
 

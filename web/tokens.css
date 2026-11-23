@@ -102,7 +102,7 @@
   --start-max: 1040px;
   --settings-tabs-w: 220px;
   --settings-max: 880px;
-  --options-strip-h: 220px;
+  --options-col-min: 128px;
 
   --t-fast: 120ms;
   --t: 200ms;

@@ -1,7 +1,7 @@
 """The cooling plan written into the user's own G-code (T-481, option B: opt-in; the original stays theirs).
 
-Only two things change: feed rates (the F of the printed lines the plan slows or speeds up) and the part
-fan (one command where its value changes, in the firmware's own form). Park moves add a retract, a travel
+The plan changes feed rates (the F of the printed lines the plan slows or speeds up) and cooling
+fans (one command where a setting changes, in the firmware's own form). Park moves add a retract, a travel
 beside the part, a pause and the way back. Positions, extrusion amounts and temperatures stay as they are.
 The progress lines (M73) are recomputed, and a header says what changed.
 
@@ -10,7 +10,7 @@ same plastic per layer inside the same bounding box, no speed above the machine'
 filament's flow cap, and a heat simulation of it must leave no spot newly outside its window. If any
 check fails the file isn't offered, and the reason says why.
 
-Plain ``.gcode`` only for now; a ``.gcode.3mf`` needs repacking (plate G-code, md5, slice_info.config),
+Output is plain ``.gcode``, including from a Prusa binary input. A ``.gcode.3mf`` needs repacking (plate G-code, md5, slice_info.config),
 which waits for a test on a real printer.
 """
 
@@ -21,9 +21,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .gcode import Toolpath, _line_blocks, _number, flow_cap, parse
+from .gcode import Toolpath, _line_blocks, _number, _words, fan_levels, flow_cap, parse
 from .kinematics import _defaults, timing
-from .thermal_opt import Plan, apply, park_moves
+from .thermal_opt import Plan, apply, aux_schedule, park_moves
 
 PA_TOLERANCE = 0.25  # with adaptive pressure advance (no table to redo it), speeds change at most this much
 RETRACT_MM, RETRACT_MM_S = 0.8, 35.0  # for a park move when the file's settings don't say
@@ -83,6 +83,8 @@ def rewrite(data, tp: Toolpath, plan: Plan, note: list[str] | None = None) -> Re
         new.speed[:] = speed
     changed = np.abs(speed - tp.speed) > 1e-3
     fan = new.part_fan.astype(float)
+    change_part = np.isfinite(plan.fan).any()
+    aux_override, aux = aux_schedule(tp, plan)
     t_old, t_new = timing(tp), timing(new)
 
     # Per text line: the first printed line it holds (lines from one arc share their text line).
@@ -110,6 +112,9 @@ def rewrite(data, tp: Toolpath, plan: Plan, note: list[str] | None = None) -> Re
             cmd = head.split(None, 1)[0] if head else ""
             i = first_of.get(src)
             if i is not None:
+                if i in aux:
+                    out.append(f"M106 P2 S{round(aux[i] * 255)}")
+                    n_fan += 1
                 if i in parks:  # a cooling park move before this layer starts
                     m = parks[i]
                     back = (f"G1 E{retract:.3f} F{retract_f:.0f}" if e_rel else f"G1 E{e_abs:.5f} F{retract_f:.0f}")
@@ -118,11 +123,14 @@ def rewrite(data, tp: Toolpath, plan: Plan, note: list[str] | None = None) -> Re
                             f"G1 X{m['away'][0]:.3f} Y{m['away'][1]:.3f} F{travel_f:.0f}", f"G4 S{m['seconds']:g}",
                             f"G1 X{m['here'][0]:.3f} Y{m['here'][1]:.3f} F{travel_f:.0f}", back]
                     out_feed = None  # the moves above set their own F: the next move sets it again
-                if fan_now is None or abs(fan[i] - fan_now) > 1e-3:
+                if change_part and (fan_now is None or abs(fan[i] - fan_now) > 1e-3):
                     out.append(_fan_command(tp, fan[i]))
                     fan_now, n_fan = fan[i], n_fan + 1
-            if cmd in ("M106", "M107") and lo_src <= src <= hi_src and _is_part_fan(line, tp):
-                continue  # the part fan comes from the plan's per-line values (written above)
+            if cmd in ("M106", "M107"):
+                if change_part and lo_src <= src <= hi_src and _is_part_fan(line, tp):
+                    continue  # the part fan comes from the plan's per-line values (written above)
+                if aux and _words(head).get("P") == 2 and aux_override[np.searchsorted(tp.src, src)]:
+                    continue  # the auxiliary fan follows the plan over this span
             if cmd == "M73" and (now := progress(src)) is not None:
                 pct, scale = now
                 line = re.sub(r"\b([PQ])\d+", lambda m: f"{m.group(1)}{pct}", line)
@@ -144,10 +152,13 @@ def rewrite(data, tp: Toolpath, plan: Plan, note: list[str] | None = None) -> Re
                     line = _set_feed(line, want)
                     out_feed = want
             out.append(line)
+            if src == hi_src and len(tp.src) in aux:
+                out.append(f"M106 P2 S{round(aux[len(tp.src)] * 255)}")
+                n_fan += 1
     old_min, new_min = t_old.total_s / 60, t_new.total_s / 60
     header = ["; FDM DFM Tool cooling plan (opt-in). The original G-code is unchanged on your disk.",
               f"; Estimated print time {old_min:.1f} min -> {new_min:.1f} min.",
-              f"; Changed: the speed of {int(changed.sum())} printed lines, {n_fan} part fan commands, {len(parks)} cooling park moves."
+              f"; Changed: the speed of {int(changed.sum())} printed lines, {n_fan} cooling fan commands, {len(parks)} cooling park moves."
               + (" Speed changes kept within 25 % (adaptive pressure advance)." if clamped else ""),
               *[f"; {x}" for x in note or []]]
     # After the slicer's own header block when there is one (printers read it for the time and thumbnails).
@@ -210,4 +221,6 @@ def check(original: Toolpath, text: str, plan_toolpath: Toolpath) -> list[str]:
         problems.append(f"Some lines would need more plastic per second than the filament can melt ({float(np.min(cap)):g} mm³/s)")
     if np.any(np.abs(back.speed - plan_toolpath.speed) > 0.05 * np.maximum(plan_toolpath.speed, 1)):
         problems.append("The speeds read back don't match the plan")
+    if "P2" in plan_toolpath.fan_names and not np.allclose(fan_levels(back, "P2"), fan_levels(plan_toolpath, "P2"), atol=1 / 255):
+        problems.append("The auxiliary fan settings read back don't match the plan")
     return problems

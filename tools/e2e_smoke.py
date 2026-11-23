@@ -639,6 +639,14 @@ def check_new_ui_analyse(browser, port: int) -> str:
         page.close()
 
 
+def show_comparison_row(page, key: str):
+    """Open the shared settings when a check needs a collapsed row."""
+    row = page.locator(f'.ui-col__cell[data-row="{key}"]')
+    if not row.count():
+        page.locator(".options-shared").get_by_role("button", name="Show", exact=True).click()
+    return row
+
+
 def check_new_ui_options(browser, port: int) -> str:
     """The new UI's Options step (T-551): aligned columns from a real optimizer run; pin PLA, re-optimize, every new
     column uses PLA; an option below the target warns before it can be used. T-553: walls edited inside a column
@@ -668,12 +676,43 @@ def check_new_ui_options(browser, port: int) -> str:
         page.wait_for_selector(".ui-col")
         n = page.locator(".ui-col").count()
         assert n >= 2, f"{n} columns"
-        # Rows line up: the same row's cells share one height across all columns.
-        tops = page.evaluate("() => [...document.querySelectorAll('.ui-col')].map((c) => Math.round(c.querySelectorAll('.ui-col__cell')[1].getBoundingClientRect().top))")
-        assert len(set(tops)) == 1, tops
+        page.set_viewport_size({"width": 1920, "height": 1080})
+        assert page.evaluate("""() => {
+          const stage = document.querySelector('.stage').getBoundingClientRect();
+          const panel = document.querySelector('.compare .panel-body');
+          return Math.abs(stage.right - panel.getBoundingClientRect().left) < 1
+            && panel.scrollHeight <= panel.clientHeight && panel.scrollWidth <= panel.clientWidth;
+        }"""), "The Options comparison should sit beside the stage without scrolling at 1920×1080"
+        assert page.get_by_role("button", name="Keep all", exact=True).count() == n
+        assert page.get_by_role("button", name="Use this option", exact=True).count() == n
+        page.screenshot(path=str(OUT / "options_1920x1080.png"))
+        theme = page.locator(".app-header").get_by_role("button", name="Dark theme")
+        theme.click()
+        page.screenshot(path=str(OUT / "options_dark_1920x1080.png"), animations="disabled")
+        theme.click()
+        page.set_viewport_size({"width": 1280, "height": 720})
+        shared = page.locator(".options-shared")
+        assert "Same for all:" in shared.inner_text()
+        before = page.locator(".ui-col").first.locator(".ui-col__cell").count()
+        shared.get_by_role("button", name="Show", exact=True).click()
+        assert page.locator(".ui-col").first.locator(".ui-col__cell").count() > before
+        assert page.evaluate("""() => {
+          const columns = [...document.querySelectorAll('.ui-col')];
+          const rows = columns.map((col) => [...col.querySelectorAll('.ui-col__cell')]
+            .map((cell) => cell.getBoundingClientRect().top).join(','));
+          return rows.every((row) => row === rows[0]);
+        }"""), "Comparison rows are misaligned"
+        shared.get_by_role("button", name="Hide", exact=True).click()
+        assert page.locator(".ui-col").first.locator(".ui-col__cell").count() == before
         mats = page.evaluate("() => fdmUI.store.result('optimize').options.map((o) => o.material)")
         i = mats.index("pla") if "pla" in mats else 0
-        cell = page.locator(".ui-col").nth(i).locator(".ui-col__cell").nth(1)
+        cell = show_comparison_row(page, "material").nth(i)
+        cell.get_by_role("button", name=re.compile("^Change Material")).click()
+        cell.get_by_role("button", name="Material", exact=True).click()
+        assert cell.get_by_role("listbox", name="Material").is_visible()
+        page.keyboard.press("Escape")
+        cell.get_by_role("button", name="Cancel", exact=True).click()
+        assert cell.get_by_role("button", name=re.compile("^Change Material")).is_visible()
         cell.hover()
         cell.locator(".ui-col__pin").click()
         assert "Material:" in page.locator(".ui-constraints").inner_text()
@@ -685,6 +724,7 @@ def check_new_ui_options(browser, port: int) -> str:
         col = page.locator(".ui-col").last
         walls_now = page.evaluate("() => fdmUI.store.result('optimize').options.at(-1).walls")
         want = 6 if walls_now != 6 else 5
+        show_comparison_row(page, "walls")
         col.get_by_role("button", name=re.compile("^Change Walls")).click()
         page.keyboard.press("Escape")
         assert col.locator(".ui-col__cell.is-editing").count() == 0, "Esc didn't cancel"
@@ -874,6 +914,7 @@ def check_new_ui_quality(browser, port: int) -> str:
         page.get_by_role("button", name="Start optimization").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Options'", timeout=240_000)
         page.wait_for_selector(".ui-col")
+        show_comparison_row(page, "time")
         labels = page.locator(".options-labels").inner_text()
         assert "Safety" not in labels and "Print time" in labels, labels
         assert page.evaluate("() => fdmUI.services.picker.colored?.size ?? 0") == 0, "Analyse's tint stayed on the part"
@@ -1634,8 +1675,9 @@ def check_journey(browser, port: int, viewport=(1280, 720)) -> str:
         wait_step("Options", 600_000)
         done.append("analysis cancelled, then Fast")
         page.wait_for_selector(".ui-col")
+        page.screenshot(path=str(OUT / f"journey_options_{w}x{h}.png"))
         mats = page.evaluate("() => fdmUI.store.result('optimize').options.map((o) => o.material)")
-        cell = page.locator(".ui-col").nth(mats.index("pla") if "pla" in mats else 0).locator(".ui-col__cell").nth(1)
+        cell = show_comparison_row(page, "material").nth(mats.index("pla") if "pla" in mats else 0)
         cell.hover()
         cell.locator(".ui-col__pin").click()
         pinned = page.evaluate("() => fdmUI.store.get().constraints.material")
@@ -1646,6 +1688,10 @@ def check_journey(browser, port: int, viewport=(1280, 720)) -> str:
             page.get_by_role("button", name="Use it anyway").click()
         wait_step("Simulation")
         done.append(f"options pinned to {pinned}")
+        # The part stands the way it prints once an option is chosen (T-585), and says so beside the camera bar.
+        orientation = page.evaluate("() => fdmUI.store.get().option.orientation")
+        assert orientation and orientation in page.locator(".stage-turned").inner_text(), "the part shows how it prints"
+        done.append(f"turned to print ({orientation})")
         page.get_by_role("button", name="Run simulations").click()
         page.wait_for_selector(".sim-status", timeout=300_000)
         nxt()

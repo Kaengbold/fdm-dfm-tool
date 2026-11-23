@@ -61,8 +61,9 @@ def test_the_last_warping_simulation_counts_only_for_its_own_setup():
     api.load(to_binary_stl(Mesh(extrude(Point(0, 0).buffer(10, 32), 0, 5))), "disc")
     s = api._require()
     p = Profile.from_dict({"printer": "bambu_a1", "material": "abs"})
-    s.warp = {"up": np.array([0.0, 0, 1]), "verdict": "likely to lift", "setup": ("abs", "none")}
-    assert api._warp_verdict(s, [0, 0, 1], p) == "likely to lift"
-    assert api._warp_verdict(s, [1, 0, 0], p) is None  # another orientation
-    assert api._warp_verdict(s, [0, 0, 1], Profile.from_dict({"printer": "bambu_a1", "material": "pla"})) is None
+    s.warp = {"up": np.array([0.0, 0, 1]), "verdict": "likely to lift", "setup": api._warp_setup(p),
+              "peel_point": None}
+    assert api._matching_warp(s, [0, 0, 1], p)["verdict"] == "likely to lift"
+    assert api._matching_warp(s, [1, 0, 0], p) is None  # another orientation
+    assert api._matching_warp(s, [0, 0, 1], Profile.from_dict({"printer": "bambu_a1", "material": "pla"})) is None
     assert api.check([0, 0, 1], {"printer": "bambu_a1", "material": "abs"})["print_risk"]["hold"] == "raft"
