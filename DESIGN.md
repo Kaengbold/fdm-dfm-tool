@@ -167,7 +167,8 @@ The app is one grid: a 56 px header, then the screen. Screens have one of four l
 - **part** (before a file is loaded): rail and a stage that is all drop zone.
 - **work** (Setup … Analyse, Simulation, Problems, Done): rail 216 px │ stage │ panel 384 px. The panel scrolls inside;
   its 64 px foot holds Back (left) and Next (right) in the same place on every step.
-- **options**: the rail collapses to 56 px icons, a 220 px 3D strip on top, the option columns below at full width.
+- **options**: the rail collapses to 56 px icons, the 3D stage takes about 40% of the remaining width, and the
+  comparison takes about 60%. The footer spans the stage and comparison.
 
 Spacing comes only from `--s-1` … `--s-7` (4 to 48 px): 8 inside a control, 12 between controls, 24 between groups,
 32 between sections. Stage furniture: camera bar bottom-left, instruction pill top-centre, legend top-right, toasts
