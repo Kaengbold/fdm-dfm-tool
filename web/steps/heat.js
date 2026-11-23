@@ -13,15 +13,17 @@ import { t } from "../i18n.js";
 import { HeatView, heatColors } from "../viewport/heatview.js";
 import { optimizeArgs } from "./args.js";
 import { registerSimulation } from "./simulate.js";
-import { FADED_BELOW, WINDOW, byLayer, decode, explain, series, summary } from "./heatlogic.js";
+import { FADED_BELOW, WINDOW, byLayer, clock, decode, decodeReplay, explain, foundText, planText, problemLayers, series, snapAt, summary, tempAt, tempBand }
+  from "./heatlogic.js";
 
 const PLAY = "M8 5v14l11-7z";
 const PAUSE = ["M7 5h4v14H7z", "M13 5h4v14h-4z"];
 const SVG = "http://www.w3.org/2000/svg";
 
 let fixing = null; // "busy" | {ok, problems, minutes} for "Optimize my G-code directly"
-const view = { mode: "window", which: "after", layer: Infinity, picked: null, playing: null }; // mode: window | importance | lines
-let shown = null; // {result, decoded, layers} drawn on the stage now
+// mode: replay | window | importance | lines; run: the replay's run (before: as sliced, after: with the plan)
+const view = { mode: "replay", which: "after", run: "before", layer: Infinity, picked: null, playing: null };
+let shown = null; // {result, decoded, replay, layers} drawn on the stage now
 
 /** Run simulations, after the print checks and the warping: the cooling plan on the run's G-code. Without a G-code
  * (our own slicer stood in) there is nothing to follow line by line, and the panel says so. */
@@ -29,7 +31,7 @@ async function runHeat({ engine, up, profile, detailed, state, gcode }) {
   if (!detailed || !gcode) return { needsGcode: true };
   const args = { up, profile: { ...profile, goal: state.goal || "balanced" }, loads: optimizeArgs(state).loads };
   fixing = null;
-  Object.assign(view, { which: "after", layer: Infinity, picked: null });
+  Object.assign(view, { mode: "replay", which: "after", run: "before", layer: Infinity, picked: null });
   try {
     const result = await engine.call("optimize_cooling", { ...args, detail: true });
     const hot = result.before.too_hot + result.before.too_cold, left = result.gcode.too_hot + result.gcode.too_cold;
@@ -76,32 +78,40 @@ function showHeat({ services, value }) {
   const hv = services.heatView;
   if (shown?.result !== result) {
     const d = decode(result);
-    const { order, upto } = byLayer(d.layer);
+    const { upto } = byLayer(d.layer);
     services.stage.orientBy(result.rotation);
-    hv.setSpots(d.points, d.cell, order, upto);
+    hv.setPaths(d.lines.segments, d.lines.width, d.lines.height, d.lines.layer, d.lines.spot);
+    hv.setSpots(d.points, d.cell, d.lines.height[0] || 0.2);
     const c = heatColors();
-    hv.setLines(d.lines.segments, d.lines.layer, (i) => {
+    hv.setMarks(d.fanMarks, Math.max(0.4, d.cell * 0.3), c.fan);
+    hv.onPick = (i) => { view.picked = i; services.rerender(); };
+    shown = { result, decoded: d, replay: decodeReplay(result), layers: upto.length };
+    if (!shown.replay && view.mode === "replay") view.mode = "window";
+  }
+  const d = shown.decoded, c = heatColors();
+  hv.upTo(view.layer);
+  if (view.mode === "replay") {
+    paintReplay(hv);
+  } else if (view.mode === "lines") {
+    hv.colorPaths((i) => {
       const f = d.lines.factor[i];
       return f < 0.99 ? c.slower : f > 1.01 ? c.faster : c.same;
     });
-    hv.setMarks(d.fanMarks, Math.max(0.4, d.cell * 0.3), c.fan);
-    hv.onPick = (i) => { view.picked = i; services.rerender(); };
-    shown = { result, decoded: d, layers: upto.length };
-  }
-  const d = shown.decoded, c = heatColors();
-  if (view.mode === "importance") {
-    hv.colorSpots((i) => c.lowImportance.clone().lerp(c.highImportance, Math.min(1, Math.max(0, (d.importance[i] - 0.2) / 0.8))));
+  } else if (view.mode === "importance") {
+    hv.colorPaths((_, s) => (s < 0 ? c.faded : c.lowImportance.clone().lerp(c.highImportance, Math.min(1, Math.max(0, (d.importance[s] - 0.2) / 0.8)))));
   } else {
     const w = d[view.which].window;
-    hv.colorSpots((i) => {
-      const col = c[WINDOW[w[i]]];
-      return w[i] && d.importance[i] < FADED_BELOW ? col.clone().lerp(c.faded, 0.65) : col;
+    hv.colorPaths((_, s) => {
+      if (s < 0) return c.faded;
+      const col = c[WINDOW[w[s]]];
+      return w[s] && d.importance[s] < FADED_BELOW ? col.clone().lerp(c.faded, 0.65) : col;
     });
   }
-  hv.show(view.mode === "lines" ? "lines" : "spots");
-  hv.upTo(view.layer);
-  hv.pick(view.mode === "lines" ? null : view.picked);
-  services.stage.setXray(true);
+  hv.showMarks(view.mode === "lines");
+  hv.pick(view.mode === "window" || view.mode === "importance" ? view.picked : null);
+  // The print the simulation ran on, not the model: the part's own surface steps aside (T-587).
+  if (services.stage.part) services.stage.part.group.visible = false;
+  services.stage.render();
   return true;
 }
 
@@ -110,9 +120,22 @@ function clearHeat(services) {
   stopPlay();
   if (!shown) return;
   services.heatView?.clear();
-  services.stage.setXray(false);
+  if (services.stage.part) services.stage.part.group.visible = true;
   services.stage.rest();
   shown = null;
+}
+
+/** The replay's colours at the current layer limit: each bead by its spot's temperature when that layer was done
+ * (T-588): dark blue set, green to yellow good to build on, orange to red too soft to build on. */
+function paintReplay(hv) {
+  const d = shown.decoded, rp = shown.replay, c = heatColors();
+  const run = view.run === "after" ? 1 : 0, j = snapAt(rp, Number.isFinite(view.layer) ? view.layer : Infinity), tg = d.timeline.tg;
+  hv.colorPaths((_, s) => {
+    const temp = s < 0 ? NaN : tempAt(rp, run, j, s);
+    if (!Number.isFinite(temp)) return c.faded;
+    const { band, f } = tempBand(temp, tg, d.limit[s], rp.lo, rp.hi);
+    return band === "set" ? c.set.clone().lerp(c.cold, f) : band === "warm" ? c.ok.clone().lerp(c.warm, f) : c.warm.clone().lerp(c.hot, 0.5 + f / 2);
+  }, true);
 }
 
 function stopPlay() {
@@ -123,7 +146,8 @@ function stopPlay() {
 // ---- the panel ----
 
 function legend(overlay) {
-  const items = overlay === "importance" ? [["low", "heat.legend.low"], ["high", "heat.legend.high"]]
+  const items = overlay === "replay" ? [["set", "heat.legend.set"], ["ok", "heat.legend.warm"], ["hot", "heat.legend.soft"]]
+    : overlay === "importance" ? [["low", "heat.legend.low"], ["high", "heat.legend.high"]]
     : overlay === "lines" ? [["slower", "heat.legend.slower"], ["faster", "heat.legend.faster"], ["same", "heat.legend.same"], ["fan", "heat.legend.fan"]]
       : [["cold", "heat.legend.cold"], ["ok", "heat.legend.ok"], ["hot", "heat.legend.hot"], ["slow", "heat.legend.slow"], ["faded", "heat.legend.faded"]];
   return h("ul", { class: "heat-legend" }, items.map(([cls, key]) => h("li", {}, h("i", { class: `heat-dot heat-dot--${cls}` }), t(key))));
@@ -132,7 +156,10 @@ function legend(overlay) {
 function layerLabel(d, k) {
   const top = shown.layers - 1;
   const at = Math.min(k, top);
-  return t("heat.layerAt", { layer: at + 1, layers: top + 1, z: Math.round(d.timeline.z[at] * 100) / 100 });
+  const params = { layer: at + 1, layers: top + 1, z: Math.round(d.timeline.z[at] * 100) / 100 };
+  if (view.mode !== "replay" || !shown.replay) return t("heat.layerAt", params);
+  const rp = shown.replay, run = view.run === "after" ? 1 : 0, j = snapAt(rp, at);
+  return t("heat.replay.at", { ...params, time: clock(rp.t[run][j]), fan: Math.round(rp.fan[run][j] * 100) });
 }
 
 function playback(services) {
@@ -146,6 +173,7 @@ function playback(services) {
     slider.value = String(k);
     label.textContent = layerLabel(d, k);
     services.heatView.upTo(view.layer);
+    if (view.mode === "replay") paintReplay(services.heatView);
     marker(k);
   };
   slider.addEventListener("input", () => { stopPlay(); playBtn.replaceWith(playBtn = makePlay()); set(Number(slider.value)); });
@@ -165,6 +193,38 @@ function playback(services) {
     } });
   let playBtn = makePlay();
   return h("section", { class: "heat-block" }, h("div", { class: "heat-play" }, playBtn, slider), label);
+}
+
+/** Play the replay from the first layer (``run``: before / after). */
+function replayFrom(run, services) {
+  stopPlay();
+  Object.assign(view, { mode: "replay", run, layer: 0, picked: null });
+  services.rerender();
+  document.querySelector(".heat-play button")?.click();
+}
+
+/** The replay as a short story (T-588): watch it print, what we found, what we change; the result is the summary. */
+function story(r, services) {
+  const d = shown.decoded;
+  const found = problemLayers(d);
+  const jump = (k) => { stopPlay(); Object.assign(view, { run: "before", layer: k }); services.rerender(); };
+  return [
+    h("section", { class: "heat-block heat-story" }, h("div", { class: "ui-label" }, t("heat.story.watch")),
+      SegmentedControl({ label: t("heat.whichRun"), value: view.run, size: "small",
+        options: [{ value: "before", label: t("heat.before") }, { value: "after", label: t("heat.after") }],
+        onChange: (v) => { view.run = v; services.rerender(); } }),
+      legend("replay"), h("p", { class: "ui-hint" }, t("heat.story.watchHint"))),
+    playback(services),
+    h("section", { class: "heat-block heat-story" }, h("div", { class: "ui-label" }, t("heat.story.found")),
+      found.length ? h("ul", { class: "heat-found" }, found.map((p) => h("li", {},
+        h("span", {}, t(foundText(p))),
+        Button({ label: t("heat.story.show"), size: "small", variant: "ghost", onClick: () => jump(p.layer) }))))
+        : h("p", { class: "ui-hint" }, t("heat.story.none"))),
+    h("section", { class: "heat-block heat-story" }, h("div", { class: "ui-label" }, t("heat.story.change")),
+      r.gcode.plan.length ? h("ul", { class: "heat-changes" }, planText(r.gcode.plan).map((m) => h("li", {}, t(m))))
+        : h("p", { class: "ui-hint" }, t("heat.story.noChange")),
+      r.gcode.plan.length ? Button({ label: t("heat.story.replayPlan"), size: "small", variant: "secondary", onClick: () => replayFrom("after", services) }) : null),
+  ];
 }
 
 let marker = () => {};
@@ -274,13 +334,17 @@ function panel({ body, services, value, overlay }) {
   }
   body.append(h("section", { class: "heat-block" }, h("div", { class: "ui-label" }, t("heat.show")),
     SegmentedControl({ label: t("heat.show"), value: view.mode,
-      options: ["window", "importance", "lines"].map((v) => ({ value: v, label: t(`heat.mode.${v}`) })),
+      options: [...(shown.replay ? ["replay"] : []), "window", "importance", "lines"].map((v) => ({ value: v, label: t(`heat.mode.${v}`) })),
       onChange: (v) => { view.mode = v; services.rerender(); } }),
     view.mode === "window" ? SegmentedControl({ label: t("heat.whichRun"), value: view.which, size: "small",
       options: [{ value: "before", label: t("heat.before") }, { value: "after", label: t("heat.after") }],
       onChange: (v) => { view.which = v; services.rerender(); } }) : null,
-    legend(view.mode),
-    view.mode !== "lines" ? h("p", { class: "ui-hint" }, t("heat.clickSpot")) : null));
+    view.mode !== "replay" ? legend(view.mode) : null,
+    view.mode === "window" || view.mode === "importance" ? h("p", { class: "ui-hint" }, t("heat.clickSpot")) : null));
+  if (view.mode === "replay") {
+    body.append(...story(r, services), timeline(), fixBlock(value, services));
+    return;
+  }
   if (view.picked != null && view.mode !== "lines") body.append(whyCard(r, services));
   body.append(playback(services), timeline(), fixBlock(value, services));
 }

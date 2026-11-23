@@ -52,6 +52,8 @@
   --heat-fan: #7C3AED;
   --heat-low: #E5E7EB;
   --heat-high: #7C3AED;
+  --heat-set: #1E3A8A;
+  --heat-warm: #CA8A04;
 
   --focus: #2563EB;
   --shadow-pop: 0 8px 24px rgb(17 24 39 / 0.14), 0 1px 3px rgb(17 24 39 / 0.10);
@@ -148,6 +150,8 @@
   --heat-fan: #B26BF5;
   --heat-low: #374151;
   --heat-high: #B26BF5;
+  --heat-set: #3B5BDB;
+  --heat-warm: #FACC15;
 
   --focus: #6B98F8;
   --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.40);

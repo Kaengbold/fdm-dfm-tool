@@ -1302,14 +1302,13 @@ Rules for every [UI] task:
 - [x] **T-585 P2** [UI] Keep the chosen option's orientation after Options. · files: `web/main.js`, `web/viewport/stage.js`, steps that pick · owner: Claude (`task/T-585-keep-orientation`)
   - Do: Simulation, Problems and Done show the part turned to print (on the bed); steps that pick faces turn it back while picking; a short line says how it's turned.
   - Outcome: `Stage.printUp` (set in `main.js`) keeps the chosen option's build direction on Simulation, Problems, Done, Make it lighter and Tuned; an edited part is put back in it, the heat view returns to it (`Stage.rest`); "Turned to print: …" sits beside the camera bar. Tolerances / More tools (they pick faces) show the part as loaded. e2e journey checks the note.
-- [ ] **T-585 P2** [UI] Keep the chosen option's orientation after Options. · files: `web/main.js`, `web/viewport/stage.js`, steps that pick · owner: Claude (`task/T-585-keep-orientation`)
-  - Do: Simulation, Problems and Done show the part turned to print (on the bed); steps that pick faces turn it back while picking; a short line says how it's turned.
 - [x] **T-586 P2** [UI] Options screen side by side (layout A). · files: `web/steps/options.js`, `web/steps/options.css`, `web/shell.css`, `web/messages/en.js`, e2e · owner: Codex GPT-6.2 Sol (`task/T-586-options-layout`)
   - Do: the part on the left (smaller), the comparison table on the right (wider, about 60 %); no fixed 136 px head; rows ~24 px; rows that are the same for every option fold into one "Same for all" line; Use buttons in the column head; pointing at a column turns the part; no scrolling at 1920×1080.
   - Outcome: Four options fit beside the 3D preview at 1920×1080, with compact rows, expandable shared settings and per-column editing. [PR](https://github.com/Kaengbold/fdm-dfm-tool/pulls?q=is%3Apr+head%3Atask%2FT-586-options-layout)
-- [ ] **T-587 P2** [UI] Heat result on the sliced paths. · files: `web/viewport/heatview.js`, `web/steps/heat.js`, `core/fdmcore/thermal_opt.py` / `api.py` · owner: Claude (`task/T-587-heat-paths`)
+- [x] **T-587 P2** [UI] Heat result on the sliced paths. · files: `web/viewport/heatview.js`, `web/steps/heat.js`, `core/fdmcore/thermal_opt.py` / `api.py` · owner: Claude (`task/T-587-heat-paths`)
   - Do: hide the STL and draw the G-code paths as thin tubes coloured by the heat window, so it's clear the simulation ran on the real print.
-- [ ] **T-588 P2** [UI] Heat replay and a guided explanation. · files: `core/fdmcore/thermal.py`, `api.py`, `web/steps/heat.js`, `web/viewport/heatview.js`, `web/messages/en.js` · owner: Claude (`task/T-588-heat-replay`)
+  - Outcome: `api._paths` cuts the G-code lines into pieces about two heat cells long (at most 300 000), each with its width, height and the heat spot it lies in; `HeatView.setPaths` draws them as beads (instanced boxes) coloured by that spot's window or importance, or by the plan's speed change, and the part's own surface is hidden while the heat view shows. Checked in `test_heat_step.py` and the e2e heat check (in Edge, via Pyodide).
+- [x] **T-588 P2** [UI] Heat replay and a guided explanation. · files: `core/fdmcore/thermal.py`, `api.py`, `web/steps/heat.js`, `web/viewport/heatview.js`, `web/messages/en.js` · owner: Claude (`task/T-588-heat-replay`)
   - Do: the engine keeps a small surface-temperature snapshot per layer; the step plays the print back with the surface cooling (clock, layer, fan), stops at the problem layers with what we found, then shows the same with the cooling plan and the changes, then the result.
 
 ### Simulation accuracy (2026-11-23, from the owner's review of T-390 and the heat model)
@@ -1351,6 +1350,7 @@ Not reachable: Pollák & Goryl 2025.
 
 ## Done
 
+  - Outcome: `thermal.simulate(snapshots=True)` keeps every spot's temperature when each layer is done (uint8, at most 150 layers; about 90 KB on the test part), for the run as sliced and the G-code plan's run (`api._replay`). The heat panel opens on **Replay**: 1 · Watch it print (beads coloured set / good to build on / too soft, clock, layer, fan; as sliced or with the plan), 2 · What we found (the worst layers, each with Show), 3 · What we change (the plan in sentences, Replay with the plan). Logic in `heatlogic.js` (Node-tested), e2e checks the story, the jump and that the plan's replay differs.
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
 - [x] **T-110 P1** Fix GEOS topology exception in Pyodide on real models; dynamic goal presets (walls/infill/layer height); camera focus & 3D highlight on clicked findings; orientation box clearing; WIP yellow frames on unfinished features. · owner: Antigravity (branch `task/T-110-ux-fixes`)
 - [x] Phase 0–2: engine, Pyodide app, orientation, pseudo-slicer checks, knowledge base, settings, 3MF/STL export, voxel FEA strength, strength-aware orientation.

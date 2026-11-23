@@ -16,6 +16,11 @@
 .heat-legend li { display: flex; align-items: center; gap: var(--s-1); }
 .heat-dot { width: 10px; height: 10px; border-radius: var(--r-sm); }
 .heat-dot--ok { background: var(--heat-ok); }
+.heat-dot--set { background: var(--heat-set); }
+.heat-story .heat-legend .heat-dot--ok { background: linear-gradient(90deg, var(--heat-ok), var(--heat-warm)); }
+.heat-found, .heat-changes { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--s-1); font-size: var(--fs-sm); }
+.heat-found li { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.heat-changes li { padding-left: var(--s-3); border-left: 2px solid var(--heat-fan); }
 .heat-dot--hot { background: var(--heat-hot); }
 .heat-dot--cold { background: var(--heat-cold); }
 .heat-dot--slow { background: var(--heat-slow); }

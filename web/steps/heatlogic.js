@@ -18,7 +18,8 @@ export function decode(r) {
     points: f32(s.points), layer: i32(s.layer), limit: f32(s.limit_c), importance: f32(s.importance), reason: u8(s.reason),
     reasons: s.reasons, cell: s.cell_mm, before: run(0), after: run(1),
     timeline: { z: f32(tl.z), seconds: tl.seconds.map(f32), fan: tl.fan.map(f32), cover: tl.cover_c.map(f32), limit: f32(tl.limit_c), tg: tl.tg_c },
-    lines: { segments: f32(lines.segments), factor: f32(lines.factor), layer: i32(lines.layer), all: lines.all },
+    lines: { segments: f32(lines.segments), factor: f32(lines.factor), layer: i32(lines.layer), width: f32(lines.width), height: f32(lines.height),
+      spot: i32(lines.spot), all: lines.all },
     fanMarks: r.fan_marks ?? [],
   };
 }
@@ -130,4 +131,70 @@ export function byLayer(layer) {
   for (const i of order) upto[layer[i]] += 1;
   for (let k = 1; k <= top; k++) upto[k] += upto[k - 1];
   return { order, upto };
+}
+
+// ---- the replay (T-588) ----
+
+/** The replay's typed arrays: every spot's temperature when each kept layer is done, as sliced (run 0) and with the
+ * plan (run 1); null when the engine sent none. */
+export function decodeReplay(r) {
+  const p = r.replay;
+  if (!p) return null;
+  return { layer: i32(p.layer), start: i32(p.start), t: p.t_s.map(f32), fan: p.fan.map(f32), temp: p.temp.map(u8), lo: p.lo_c, hi: p.hi_c };
+}
+
+/** The snapshot shown with layers up to ``k``: the last one kept at or below it (0 before the first). */
+export function snapAt(rp, k) {
+  let j = 0;
+  for (let i = 0; i < rp.layer.length && rp.layer[i] <= k; i++) j = i;
+  return j;
+}
+
+/** Spot ``s``'s temperature (°C) in snapshot ``j`` of ``run`` (0 as sliced, 1 with the plan); NaN: not printed yet. */
+export function tempAt(rp, run, j, s) {
+  const from = rp.start[j], to = j + 1 < rp.start.length ? rp.start[j + 1] : rp.temp[run].length;
+  return s < to - from ? rp.lo + (rp.temp[run][from + s] / 255) * (rp.hi - rp.lo) : NaN;
+}
+
+/** Seconds as m:ss (h:mm:ss past an hour), for the replay's clock. */
+export function clock(seconds) {
+  const s = Math.max(0, Math.round(seconds)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${m}:${x}`;
+}
+
+/** The layers with the most spots outside their window as sliced (only those that matter), worst first, at most
+ * ``max``: [{layer, z, hot, cold}]. */
+export function problemLayers(d, max = 4) {
+  const per = new Map();
+  for (let i = 0; i < d.layer.length; i++) {
+    const w = WINDOW[d.before.window[i]];
+    if (w === "ok" || d.importance[i] < FADED_BELOW) continue;
+    const k = d.layer[i];
+    const p = per.get(k) ?? { layer: k, z: r1(d.points[i * 3 + 2]), hot: 0, cold: 0 };
+    if (w === "hot") p.hot += 1;
+    else p.cold += 1;
+    per.set(k, p);
+  }
+  return [...per.values()].sort((a, b) => b.hot + b.cold - (a.hot + a.cold) || a.layer - b.layer).slice(0, max);
+}
+
+/** One problem layer in words. */
+export function foundText(p) {
+  const params = { layer: p.layer + 1, z: p.z, hot: p.hot, cold: p.cold, count: p.hot || p.cold };
+  return { key: p.hot && p.cold ? "heat.story.foundBoth" : p.hot ? "heat.story.foundHot" : "heat.story.foundCold", params };
+}
+
+/** The G-code plan, one sentence per row of layers with the same change. */
+export function planText(plan) {
+  return plan.map((row) => ({ key: row.layers[0] === row.layers[1] ? "heat.story.changeOne" : "heat.story.changeRows",
+    params: { from: row.layers[0] + 1, to: row.layers[1] + 1, z0: r1(row.z_mm[0] ?? 0), z1: r1(row.z_mm[1] ?? 0), actions: actions(row) } }));
+}
+
+/** Where a temperature sits for a spot: "set" below the glass transition (too cold for the next layer to bond
+ * well), "warm" between that and the spot's sag limit (good to build on), "hot" above it (too soft to build on),
+ * with how far along that band it is (0–1). */
+export function tempBand(c, tg, limit, lo, hi) {
+  if (c < tg) return { band: "set", f: Math.max(0, Math.min(1, (c - lo) / Math.max(tg - lo, 1e-6))) };
+  if (c < limit) return { band: "warm", f: (c - tg) / Math.max(limit - tg, 1e-6) };
+  return { band: "hot", f: Math.max(0, Math.min(1, (c - limit) / Math.max(hi - limit, 1e-6))) };
 }
