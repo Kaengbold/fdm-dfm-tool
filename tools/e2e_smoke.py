@@ -808,12 +808,12 @@ def check_new_ui_heat(browser, port: int) -> str:
         page.locator(".heat-found").get_by_role("button", name="Show").first.click()
         jumped = page.locator(".heat-slider").input_value()
         assert int(jumped) > 0 and "into the print" in page.locator(".heat-play + .ui-hint").inner_text()
-        colours = "() => Array.from(fdmUI.services.heatView.paths.mesh.instanceColor.array.slice(0, 3000)).join()"
+        colours = "() => { const m = fdmUI.services.heatView.paths.mesh; return Array.from(m.instanceColor.array.slice(0, m.count * 3), (v) => v.toFixed(3)).join(); }"
         sliced = page.evaluate(colours)
         page.get_by_role("radio", name="With the plan").click()
         assert page.evaluate(colours) != sliced, "the plan's replay is coloured by its own temperatures"
         page.screenshot(path=str(OUT / "new-ui-heat-replay.png"))
-        page.locator(".heat-slider").fill(str(10 ** 6))  # all layers again
+        page.locator(".heat-slider").evaluate("(e) => { e.value = e.max; e.dispatchEvent(new Event('input')); }")  # all layers again
         page.get_by_role("radio", name="Too hot / cold").click()
         hot = """() => { const hv = fdmUI.services.heatView, m = hv.paths.mesh, c = m.instanceColor.array;
           let n = 0;  // red: much more red than green and blue (colours are linear here)
