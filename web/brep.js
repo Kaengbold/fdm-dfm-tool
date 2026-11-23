@@ -50,25 +50,29 @@ export function meshSignatures(soup, faceIds) {
 }
 
 /**
- * Do the importer's face ids name the same faces as OpenCascade's order on ``solid``? Compared by area and centre
- * (the triangles only approximate curved faces: ``areaTol`` relative, ``mm`` for the centre). Returns {ok, faces,
- * worst: {id, area, mm}}; an edit worker falls back to the mesh edit when it isn't ok.
+ * Do the importer's face ids name the same faces as OpenCascade's order on ``solid``? Each face is compared by area
+ * and centre. The triangles only approximate curved faces, so a face passes when it is close (``areaTol`` relative;
+ * the centre within ``mm`` or ``share`` of the face's size) and no other face of the solid fits it better. Returns
+ * {ok, faces, worst: {id, area, mm}, misfit}; an edit worker falls back to the mesh edit when it isn't ok.
  */
-export function checkFaceOrder(oc, solid, soup, faceIds, { areaTol = 0.02, mm = 0.25 } = {}) {
+export function checkFaceOrder(oc, solid, soup, faceIds, { areaTol = 0.05, mm = 0.25, share = 0.02 } = {}) {
   const ref = faces(oc, solid).map((f) => faceSignature(oc, f));
   const got = meshSignatures(soup, faceIds);
   const worst = { id: -1, area: 0, mm: 0 }; // the largest misfits (relative area, centre distance) and the worst face
-  let ok = ref.length === got.length, score = 0;
+  const fit = (g, r) => [Math.abs(g.area - r.area) / Math.max(r.area, 1e-9), Math.hypot(...g.centre.map((v, i) => v - r.centre[i]))];
+  let ok = ref.length === got.length, score = 0, misfit = null;
   got.forEach((g, id) => {
-    const r = ref[id];
-    if (!r) { ok = false; return; }
-    const area = Math.abs(g.area - r.area) / Math.max(r.area, 1e-9);
-    const dist = Math.hypot(...g.centre.map((v, i) => v - r.centre[i]));
+    if (!ref[id]) { ok = false; return; }
+    const [area, dist] = fit(g, ref[id]);
     worst.area = Math.max(worst.area, area);
     worst.mm = Math.max(worst.mm, dist);
-    if (Math.max(area / areaTol, dist / mm) > score) { score = Math.max(area / areaTol, dist / mm); worst.id = id; }
+    const s = Math.max(area / areaTol, dist / Math.max(mm, share * Math.sqrt(ref[id].area)));
+    if (s > score) { score = s; worst.id = id; }
+    const mine = area + dist / Math.sqrt(ref[id].area);
+    const other = ref.findIndex((r, j) => j !== id && (([a, d]) => a + d / Math.sqrt(r.area))(fit(g, r)) < mine * 0.5);
+    if (other >= 0 && misfit === null) misfit = { id, fits: other };
   });
-  return { ok: ok && score <= 1, faces: ref.length, worst };
+  return { ok: ok && score <= 1 && misfit === null, faces: ref.length, worst, misfit };
 }
 
 /** The B-rep edges two faces share (an inside corner between faces ``a`` and ``b`` of ``solid``); [] if they don't
@@ -181,13 +185,43 @@ function cornerEdges(oc, solid, intent) {
   return out;
 }
 
-function blend(oc, shape, kind, items) {
-  if (!items.length) return shape;
+/** ``shape`` with rounds or chamfers on ``items`` ([{edge, size}]): {shape, moved} where ``moved(edge)`` is that edge
+ * of ``shape`` as it is in the result (a round trims the edges next to it, so they are new edges there). */
+function blend(oc, shape, kind, items, scale = 1) {
+  if (!items.length) return { shape, moved: (e) => e };
   const mk = kind === "fillet" ? new oc.BRepFilletAPI_MakeFillet(shape, oc.ChFi3d_FilletShape.ChFi3d_Rational) : new oc.BRepFilletAPI_MakeChamfer(shape);
-  for (const { edge, size } of items) mk.Add(size, edge);
-  mk.Build(progress(oc));
+  for (const { edge, size } of items) mk.Add(size * scale, edge);
+  try {
+    mk.Build(progress(oc));
+  } catch {
+    // an OpenCascade exception: treated as not done
+  }
   if (!mk.IsDone()) throw new Error(kind === "fillet" ? "OpenCascade could not make the round" : "OpenCascade could not make the chamfer");
-  return mk.Shape();
+  const moved = (e) => {
+    const list = mk.Modified(e);
+    return list.Size() ? oc.TopoDS.Edge(list.First()) : e;
+  };
+  return { shape: mk.Shape(), moved };
+}
+
+// A round or chamfer wider than the faces beside its edge can't be made; real parts often have narrow faces there
+// (T-535: most failed at 3 mm, all worked at 1 mm). Try smaller before giving up, and say so.
+const BLEND_SCALES = [1, 0.5, 0.25];
+
+/** Rounds then chamfers on ``shape``, at the largest of BLEND_SCALES that gives a valid solid: {shape, scale}. */
+function blendCorner(oc, shape, { fillet, chamfer }) {
+  let err;
+  for (const scale of BLEND_SCALES) {
+    try {
+      const round = blend(oc, shape, "fillet", fillet, scale);
+      const next = blend(oc, round.shape, "chamfer", chamfer.map((c) => ({ ...c, edge: round.moved(c.edge) })), scale).shape;
+      if (!isValid(oc, next)) throw new Error("the result wasn't a valid solid");
+      return { shape: next, scale };
+    } catch (e) {
+      err = e;
+    }
+  }
+  throw err;
 }
 
 function boolean(oc, shape, tool, add) {
@@ -209,11 +243,15 @@ function pieceSolids(oc, edit, op) {
 }
 
 const CORNER_OPS = ["fillet", "chamfer"];
+// Each faceted piece is one boolean on an ever bigger solid: a round along a curved corner comes as dozens of
+// pieces, took a minute and 1.8 GB on a small knob and still came out wrong (T-535). Leave such a change out instead.
+const MAX_FACET_PIECES = 8;
 
 /**
  * ``edits`` ([{id, title, op, mesh, pieces, piece_ops?, intent?}], part coordinates) applied to ``solid``: rounds
  * and chamfers first (they name faces of the solid as read), then every addition, then every cut. Returns
- * {shape, notes: [{id, title, how: "exact" | "mesh" | "skipped", why?}]}. ``exact: false`` forces the mesh path.
+ * {shape, notes: [{id, title, how: "exact" | "mesh" | "skipped", why?, scale?}]} (``scale``: a round or chamfer made
+ * smaller than planned, as a fraction). ``exact: false`` forces the mesh path.
  */
 export function applyEdits(oc, solid, edits, { exact = true } = {}) {
   const notes = new Map(edits.map((e) => [e, { id: e.id, title: e.title, how: exact && e.intent ? "exact" : "mesh" }]));
@@ -223,10 +261,9 @@ export function applyEdits(oc, solid, edits, { exact = true } = {}) {
   for (const e of edits) {
     if (notes.get(e).how !== "exact" || !CORNER_OPS.includes(e.intent.op)) continue;
     try {
-      const { fillet, chamfer } = cornerEdges(oc, solid, e.intent);
-      const next = blend(oc, blend(oc, shape, "fillet", fillet), "chamfer", chamfer);
-      if (!isValid(oc, next)) throw new Error("the result wasn't a valid solid");
-      shape = next;
+      const made = blendCorner(oc, shape, cornerEdges(oc, solid, e.intent));
+      shape = made.shape;
+      if (made.scale < 1) notes.get(e).scale = made.scale;
     } catch (err) {
       toMesh(e, err);
     }
@@ -249,18 +286,24 @@ export function applyEdits(oc, solid, edits, { exact = true } = {}) {
       }
       if (note.how === "skipped") continue;
       try {
+        const ops = e.pieces.filter((_, i) => (e.piece_ops?.[i] ?? e.op) === op).length;
+        if (ops > MAX_FACET_PIECES) throw new Error("too many faceted pieces to add to the CAD part");
         let next = shape;
         for (const piece of pieceSolids(oc, e, op)) next = boolean(oc, next, piece, op === "add");
         if (!isValid(oc, next)) throw new Error("the faceted change wasn't a valid solid either");
+        const before = volume(oc, shape);
+        if (ops && (volume(oc, next) - before) * (op === "add" ? 1 : -1) < -1e-6 * before) throw new Error("the faceted change came out the wrong way round");
         shape = next;
       } catch (err) {
-        Object.assign(note, { how: "skipped", why: err?.message ?? String(err) });
+        Object.assign(note, { how: "skipped", why: [note.why, err?.message ?? String(err)].filter(Boolean).join("; ") });
       }
     }
   }
+  // Merge faces the edits split (a slab's top and the part's); keep the unmerged solid if merging breaks it.
   const unify = new oc.ShapeUpgrade_UnifySameDomain(shape, true, true, false);
   unify.Build();
-  return { shape: unify.Shape(), notes: [...notes.values()] };
+  const merged = unify.Shape();
+  return { shape: isValid(oc, merged) ? merged : shape, notes: [...notes.values()] };
 }
 
 /** Triangles of a shape with the face id (explorer order) of each, for display and the engine's re-check. */

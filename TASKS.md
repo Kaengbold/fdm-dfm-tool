@@ -1182,11 +1182,15 @@ Rules for every [UI] task:
     - `test_exact_fillets.py` (Node, via `check_brep_edits.mjs`):
       - the L-bracket's stress corner becomes one new cylindrical face with exactly the engine's radius;
       - printed upside down, the corner would hang over, so it becomes a 45° chamfer: one new flat face;
-      - on `gen_block` (corpus) the pocket's own round is exact, while a 9 mm round in the 10 mm pocket can't be made, so the faceted wedge goes in with "OpenCascade could not make the round".
+      - on `gen_block` (corpus) the pocket's own round is exact, while a 9 mm round in the 10 mm pocket can't be made, so the faceted wedge goes in with "OpenCascade could not make the round" (since T-535: it is made smaller instead, still exact).
     - `check_step_faces.mjs --dump` now writes every test STEP's body (`core/tests/step/` has the bracket and `gen_block`).
-- [ ] **T-535 P3** [UI] STEP corpus and robustness report for B-rep edits. · plan: §16.4; research/cad_engine.md ("Risks") · files: `core/tests/corpus_step/` (new), a report under `research/` · owner: —
+- [x] **T-535 P3** [UI] STEP corpus and robustness report for B-rep edits. · plan: §16.4; research/cad_engine.md ("Risks") · files: `core/tests/corpus_step/` (new), a report under `research/` · owner: Claude (`task/T-535-step-corpus`)
   - Do: 8–12 real-world STEP parts (open licences, sources noted); run every intent kind on each; record success rate, time and memory in a browser.
   - Done when: the report lists which edit kinds are reliable enough to be on by default.
+  - Outcome: `research/brep_robustness.md` (made by `python tools/step_robustness.py`, headless Edge via `tools/brep_bench.html`): 12 real parts (11 NIST MBE PMI test parts, public domain; OpenCascade's screw) + 3 generated, 155 edits. Hole resizes, slabs, voids, chamfers 100 % exact, teardrops 92 % (3 faceted: outline not flat); rounds 54 % exact, the rest left out and named in the status. All 15 parts write one valid solid with every edit together, 0.1–7.4 s, 100–811 MB. Verdict: every kind stays on.
+    - Fixed on the way: a faceted fallback of dozens of pieces took a minute and 1.8 GB on a small knob and came out wrong. Now it is capped at 8 pieces and its volume change has to go the right way.
+    - Rounds too wide for the faces beside them are retried at ½ and ¼ size (the note says so; message `stepfile.smaller` for when the new app downloads STEP files). Chamfers after rounds follow the edges the round trimmed, and one CAD edge gets one kind (the engine had asked for a round and a chamfer on the same edge).
+    - Validity is checked before meshing, because BRepCheck trips over the triangles it adds. The final face merge is kept only if it stays valid. Left: weak-spot corners with many mixed edges on real parts still fail about half the time.
 
 ### Phase 3: new shell, first steps, Settings (after T-512 is approved)
 

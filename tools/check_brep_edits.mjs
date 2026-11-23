@@ -29,8 +29,9 @@ const before = { faces: B.faces(oc, solid).length, volume: B.volume(oc, solid), 
 function run(list, exact) {
   const t = performance.now();
   const { shape, notes } = B.applyEdits(oc, solid, list, { exact });
+  const valid = B.isValid(oc, shape); // before meshing: BRepCheck can trip over the triangles it adds
   const mesh = B.tessellate(oc, shape);
-  return { notes, ms: Math.round(performance.now() - t), valid: B.isValid(oc, shape), faces: B.faces(oc, shape).length, surfaces: B.surfaces(oc, shape),
+  return { notes, ms: Math.round(performance.now() - t), valid, faces: B.faces(oc, shape).length, surfaces: B.surfaces(oc, shape),
     dV: B.volume(oc, shape) - before.volume, triangles: mesh.faceIds.length,
     meshFaces: new Set(mesh.faceIds).size };
 }
