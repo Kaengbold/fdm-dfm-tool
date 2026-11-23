@@ -1291,6 +1291,19 @@ Rules for every [UI] task:
   - Do: describe the new flow, desktop only, the `optimize` tool for agents, the new design system.
   - Outcome: README's "What it does" is the new flow step by step (plus Quality, Settings & calibration, agents; a changed STEP part comes back as STL for now); PRODUCT.md names the flow, the goals with their safety targets and picking on the part; DESIGN.md is Style A from `web/tokens.css` (colours, type, the four layouts, components in `web/ui/` and `web/viewport/`, both themes) instead of the old green workbench; PLAN.md: goals and "what may change" instead of the mode toggle, the new UI and the browser OrcaSlicer in the architecture, phase 12 (UI revision) with its status; the agent guide (`SKILL.md`, `AGENTS-snippet.md`) leads with `optimize_print` and the goal's safety targets, with `guess_visible_faces` for Quality; AGENTS.md's layout table and e2e commands match the new app.
 
+### Phase 9: owner feedback (2026-11-23)
+
+- [ ] **T-584 P1** [UI] The heat check fails on the new goal names ("Unknown goal: strong"). · files: `core/fdmcore/profile.py`, `web/steps/heat.js`, tests · owner: Claude (`task/T-584-goal-names`)
+  - Do: the profile accepts the new goals (strong / fast / light / quality) beside the old ones; a test runs the heat check with every goal.
+- [ ] **T-585 P2** [UI] Keep the chosen option's orientation after Options. · files: `web/main.js`, `web/viewport/stage.js`, steps that pick · owner: Claude (`task/T-585-keep-orientation`)
+  - Do: Simulation, Problems and Done show the part turned to print (on the bed); steps that pick faces turn it back while picking; a short line says how it's turned.
+- [ ] **T-586 P2** [UI] Options screen side by side (layout A). · files: `web/steps/options.js`, `web/steps/options.css`, `web/shell.css`, `web/messages/en.js`, e2e · owner: Codex GPT-6.2 Sol (`task/T-586-options-layout`)
+  - Do: the part on the left (smaller), the comparison table on the right (wider, about 60 %); no fixed 136 px head; rows ~24 px; rows that are the same for every option fold into one "Same for all" line; Use buttons in the column head; pointing at a column turns the part; no scrolling at 1920×1080.
+- [ ] **T-587 P2** [UI] Heat result on the sliced paths. · files: `web/viewport/heatview.js`, `web/steps/heat.js`, `core/fdmcore/thermal_opt.py` / `api.py` · owner: Claude (`task/T-587-heat-paths`)
+  - Do: hide the STL and draw the G-code paths as thin tubes coloured by the heat window, so it's clear the simulation ran on the real print.
+- [ ] **T-588 P2** [UI] Heat replay and a guided explanation. · files: `core/fdmcore/thermal.py`, `api.py`, `web/steps/heat.js`, `web/viewport/heatview.js`, `web/messages/en.js` · owner: Claude (`task/T-588-heat-replay`)
+  - Do: the engine keeps a small surface-temperature snapshot per layer; the step plays the print back with the surface cooling (clock, layer, fan), stops at the problem layers with what we found, then shows the same with the cooling plan and the changes, then the result.
+
 ## Done
 
 - [x] Fixed a T-110 regression: grid-snapping layer outlines crashed Pyodide's GEOS on the L-bracket; now only invalid outlines are repaired (`tools/pyodide_check.mjs` added).
