@@ -141,15 +141,19 @@ bed_adhesion:
   # All peel energy values derived from these inputs are low confidence. See research/bed_adhesion.md.
   min_curl_layers: 2.0  # Free curl needed to open a meaningful gap, in layer heights. Estimate from reference bars.
   effective_slip_mm: 0.30  # Estimated distance over which the bond gives way. Sets how strongly the bed holds in the model.
-  pla_hot_shear_share: 0.55  # Low confidence. Above 75 °C, use the initial fall to about 50–60% of the peak reported by Leoben for PLA.
+  pla_hot_shear_share: 0.55  # Low confidence. Estimated PLA grip at 80 °C as a share of its peak. Leoben reports 50–60% of peak above 70 °C.
   pla_strand_shear_n_mm:
     glass:
+      at_50_c: 0.55  # Measured PLA strand shear per mm on glass at 50 °C (Leoben).
       at_60_c: 0.73  # Measured PLA strand shear per mm on glass at 60 °C (Leoben).
       at_70_c: 6.51  # Measured PLA strand shear per mm on glass at 70 °C (Leoben).
     polyimide:
+      at_50_c: 0.70  # Measured PLA strand shear per mm on polyimide at 50 °C (Leoben).
       at_60_c: 0.51  # Measured PLA strand shear per mm on polyimide at 60 °C (Leoben).
       at_70_c: 3.22  # Measured PLA strand shear per mm on polyimide at 70 °C (Leoben).
   nominal_shear_n_mm:
+    # Anchors at the built-in bed temperatures. The estimated curves scale these
+    # using the difference between bed temperature and the material's heat limit.
     pla:  # Low confidence. PLA at 55 °C uses the nearest Leoben measurement (60 °C).
       textured_pei: 0.714
       smooth_pei: 0.714

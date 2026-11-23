@@ -29,6 +29,7 @@ reference, not for exact numbers.
 from __future__ import annotations
 
 from itertools import product
+from math import exp, log, tanh
 
 import numpy as np
 from scipy.ndimage import binary_dilation
@@ -143,30 +144,40 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     return out
 
 
-def bed_grip(profile: Profile) -> dict | None:
-    """Effective peel-work estimate from strand shear, with the measured inputs identified."""
-    calibrated = _calibrated_grip(profile)
-    if calibrated is not None:
-        return calibrated
+def bed_grip(profile: Profile, temp: float | None = None, calibrated: bool = True) -> dict | None:
+    """Effective peel-work estimate from strand shear, with the measured inputs identified. ``temp``: bed
+    temperature (default the material's); a matching warping-bar calibration comes first unless ``calibrated``
+    is off."""
+    if calibrated and (fit := _calibrated_grip(profile)) is not None:
+        return fit
     settings = load_data("thresholds")["bed_adhesion"]
     mat = profile.material.get("based_on", profile.material_id)
     surface = profile.printer.get("bed_surface", "unknown")
     assumed_surface = surface == "unknown"
     if assumed_surface:
         surface = "textured_pei"
-    shear = settings["nominal_shear_n_mm"].get(mat, {}).get(surface)
-    source = "estimated"
-    if mat == "pla" and surface in settings["pla_strand_shear_n_mm"]:
-        temp = profile.material["bed_temp_c"]
-        # Keep the measured jump near Tg rather than smoothing it across the whole range.
-        anchor = "at_70_c" if temp > 65 else "at_60_c"
-        shear = settings["pla_strand_shear_n_mm"][surface][anchor]
-        if temp > 75:
-            shear *= settings["pla_hot_shear_share"]
-        elif temp in (60, 70):
-            source = "measured shear anchor"
-    if shear is None:
-        return None
+    temp = float(profile.material["bed_temp_c"] if temp is None else temp)
+    pla_anchors = settings["pla_strand_shear_n_mm"].get(surface)
+    if mat == "pla" and pla_anchors is not None:
+        shear, source = _pla_shear(temp, surface, pla_anchors, settings["pla_hot_shear_share"])
+    elif mat == "pla" and surface in settings["nominal_shear_n_mm"]["pla"]:
+        # Other plates follow the measured glass curve's shape: the nominal PLA values were
+        # set from the 60 °C glass measurement, so they scale it by plate.
+        glass = settings["pla_strand_shear_n_mm"]["glass"]
+        shear, _ = _pla_shear(temp, "glass", glass, settings["pla_hot_shear_share"])
+        shear *= settings["nominal_shear_n_mm"]["pla"][surface] / glass["at_60_c"]
+        source = "estimated"
+    else:
+        nominal = settings["nominal_shear_n_mm"].get(mat, {}).get(surface)
+        if nominal is None:
+            return None
+        anchor_temp = load_data("presets")["materials"][mat]["bed_temp_c"]
+        softening = profile.material["heat_limit_c"]
+        # Spoerk saw ABS grip rise through the hottest bed tested. Hold the estimate
+        # at the endpoints outside the experiment's 30–120 °C range.
+        evaluated = min(120.0, max(30.0, temp)) if mat == "abs" else temp
+        shear = nominal * (_shear_weight(evaluated - softening) / _shear_weight(anchor_temp - softening))
+        source = "estimated" if evaluated == temp else "clamped extrapolation"
     # (peak N / strand length) / strand width gives apparent shear traction.
     # Integrate a triangular traction-slip law over an assumed effective slip
     # distance to estimate work per area, in N/mm. The slip and transfer to
@@ -174,7 +185,38 @@ def bed_grip(profile: Profile) -> dict | None:
     strand_width_mm = 1.8  # Leoben's apparent strand width was 1.65–1.9 mm.
     grip = max(0.0, shear) * max(0.0, settings["effective_slip_mm"]) / (2 * strand_width_mm)
     return {"surface": surface, "assumed_surface": assumed_surface, "shear_source": source,
-            "shear_n_mm": shear, "grip_n_mm": grip, "confidence": "low"}
+            "bed_temp_c": temp, "shear_n_mm": shear, "grip_n_mm": grip, "confidence": "low"}
+
+
+def _pla_shear(temp: float, surface: str, anchors: dict, hot_share: float) -> tuple[float, str]:
+    """Use geometric interpolation across the measured jump near PLA's glass transition."""
+    measured = {t: max(0.0, anchors[f"at_{t}_c"]) for t in (50, 60, 70)}
+    if temp in measured:
+        return measured[temp], "measured shear anchor"
+    if temp < 50:
+        return measured[50], "clamped extrapolation"
+    hot = measured[70] * min(1.0, max(0.0, hot_share))
+    if temp >= 80:
+        # Glass plateaus up to 120 °C. PI climbs again, but the available numbers
+        # do not establish how much, so carry the estimated 80 °C value forward.
+        extrapolated = temp > (120 if surface == "glass" else 80)
+        return hot, "clamped extrapolation" if extrapolated else "estimated hot tail"
+    points = {**measured, 80: hot}
+    upper = next(t for t in (60, 70, 80) if t > temp)
+    lower = upper - 10
+    below, above = points[lower], points[upper]
+    fraction = (temp - lower) / (upper - lower)
+    # Expert can set an anchor to zero, where log interpolation is undefined.
+    if below and above:
+        shear = exp((1 - fraction) * log(below) + fraction * log(above))
+    else:
+        shear = (1 - fraction) * below + fraction * above
+    return shear, "interpolated shear" if upper <= 70 else "estimated hot tail"
+
+
+def _shear_weight(offset_c: float) -> float:
+    """Estimated grip rises fastest near softening, with bounded cold and hot ends."""
+    return 1.125 + 0.875 * tanh(offset_c / 24)
 
 
 def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray, bed: np.ndarray,
@@ -250,9 +292,16 @@ def _calibrated_grip(profile: Profile) -> dict | None:
     record = profile.material.get("bed_grip_calibration", {}).get(profile.enclosure, {})
     if surface == "unknown" or record.get("surface") != surface or record["status"] != "calibrated":
         return None
-    return {"surface": surface, "assumed_surface": False, "shear_source": "calibrated",
-            "grip_n_mm": record["grip_n_mm"], "confidence": "medium", "calibration_temp_c": record["bed_temp_c"],
-            "calibration_temp_differs": profile.material["bed_temp_c"] != record["bed_temp_c"]}
+    temp, measured_at = float(profile.material["bed_temp_c"]), float(record["bed_temp_c"])
+    grip = record["grip_n_mm"]
+    if temp != measured_at:
+        # The calibration fixes the level; the estimated curve (T-591) says how grip changes with bed temperature.
+        now, then = (bed_grip(profile, t, calibrated=False) for t in (temp, measured_at))
+        if now and then and then["grip_n_mm"] > 0:
+            grip *= now["grip_n_mm"] / then["grip_n_mm"]
+    return {"surface": surface, "assumed_surface": False, "shear_source": "calibrated", "bed_temp_c": temp,
+            "grip_n_mm": grip, "confidence": "medium", "calibration_temp_c": measured_at,
+            "calibration_temp_differs": temp != measured_at}
 
 
 def calibrate_bed_grip(profile: Profile, longest_flat_mm: int, shells: Shells = Shells(),
