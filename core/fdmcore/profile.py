@@ -204,6 +204,8 @@ def set_custom_presets(printers: dict | None = None, materials: dict | None = No
 
 
 GOALS = ("balanced", "strength", "speed", "material")
+# The app's names for the same goals (T-580, T-584); "quality" is balanced settings for parts people look at.
+GOAL_ALIASES = {"strong": "strength", "fast": "speed", "light": "material", "quality": "balanced"}
 
 
 def _tuning(d: dict, key: str, lo: float, hi: float) -> float | None:
@@ -297,8 +299,8 @@ class Profile:
             material_id=d.get("material", cls.material_id),
             nozzle=str(d.get("nozzle", cls.nozzle)),
             multi_material=bool(d.get("multi_material", False)),
-            goal=d.get("goal", "balanced"),
-            looks=bool(d.get("looks", False)),
+            goal=GOAL_ALIASES.get(d.get("goal"), d.get("goal", "balanced")),
+            looks=bool(d.get("looks", False)) or d.get("goal") == "quality",
             use_temp_c=None if d.get("use_temp_c") in (None, "") else float(d["use_temp_c"]),
             constant_load=bool(d.get("constant_load", False)),
             layer_height_mm=lh,
