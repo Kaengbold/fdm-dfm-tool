@@ -68,6 +68,7 @@ def test_peel_finding_is_local_and_contributes_to_print_risk():
         assert not any(f["rule"] == "bed_adhesion" for f in api.check(up, ABS_OPEN)["findings"])
         r = api.warping(up, ABS_OPEN)
         assert r["adhesion"]["assumed_surface"] and r["adhesion"]["surface"] == "textured_pei"
+        assert r["adhesion"]["bed_temp_c"] == 100
         check = api.check(up, ABS_OPEN)
         finding = next(f for f in check["findings"] if f["rule"] == "bed_adhesion")
         assert finding["title"] == "May come loose here"
@@ -91,20 +92,67 @@ def test_expert_grip_override_can_stop_peel():
         api.set_expert({})
 
 
-def test_pla_grip_uses_the_anchor_for_the_plate_and_bed_temperature():
-    api.custom_presets(
-        printers={s: {"based_on": "prusa_mk4s", "bed_surface": s} for s in ("glass", "polyimide")},
-        materials={str(t): {"based_on": "pla", "bed_temp_c": t} for t in (60, 70)},
-    )
-    try:
-        for plate, temp, shear in (("glass", 60, 0.73), ("glass", 70, 6.51),
-                                   ("polyimide", 60, 0.51), ("polyimide", 70, 3.22)):
-            grip = warp.bed_grip(Profile.from_dict({"material": f"my_{temp}", "printer": f"my_{plate}"}))
-            assert grip["shear_source"] == "measured shear anchor" and grip["confidence"] == "low"
-            assert grip["shear_n_mm"] == shear
-            assert grip["grip_n_mm"] == pytest.approx(shear * 0.30 / (2 * 1.8))
-    finally:
-        api.custom_presets()
+@pytest.fixture
+def bed_grips():
+    def calculate(material, plate, temps, **overrides):
+        api.custom_presets(
+            printers={"test_plate": {"based_on": "prusa_mk4s", "bed_surface": plate}},
+            materials={str(i): {"based_on": material, "bed_temp_c": t, **overrides} for i, t in enumerate(temps)},
+        )
+        return [warp.bed_grip(Profile.from_dict({"material": f"my_{i}", "printer": "my_test_plate"}))
+                for i in range(len(temps))]
+
+    yield calculate
+    api.custom_presets()
+
+
+@pytest.mark.parametrize("plate, anchors", [("glass", (0.55, 0.73, 6.51)), ("polyimide", (0.70, 0.51, 3.22))])
+def test_pla_grip_uses_measured_shear_and_is_continuous_and_bounded(bed_grips, plate, anchors):
+    hot = 0.55 * anchors[-1]
+    for temp, shear in zip((50, 60, 70, 80), (*anchors, hot)):
+        before, at, after = bed_grips("pla", plate, [temp - 0.001, temp, temp + 0.001])
+        assert at["bed_temp_c"] == temp
+        assert at["shear_source"] == ("measured shear anchor" if temp < 80 else "estimated hot tail")
+        assert at["confidence"] == "low"
+        assert at["shear_n_mm"] == shear
+        assert at["grip_n_mm"] == pytest.approx(shear * 0.30 / (2 * 1.8))
+        assert before["shear_n_mm"] == pytest.approx(shear, rel=0.001)
+        assert after["shear_n_mm"] == pytest.approx(shear, rel=0.001)
+
+    cold, mid, hot_mid, tail, beyond = bed_grips("pla", plate, [0, 65, 75, 100, 200])
+    assert mid["shear_n_mm"] == pytest.approx(np.sqrt(anchors[1] * anchors[2]))
+    assert hot_mid["shear_n_mm"] == pytest.approx(np.sqrt(anchors[2] * hot))
+    assert cold["shear_n_mm"] == anchors[0] and cold["shear_source"] == "clamped extrapolation"
+    assert tail["shear_n_mm"] == beyond["shear_n_mm"] == hot
+    assert tail["shear_source"] == ("estimated hot tail" if plate == "glass" else "clamped extrapolation")
+    assert beyond["shear_source"] == "clamped extrapolation"
+
+
+def test_abs_grip_keeps_rising_to_120_c_and_pi_holds_better_than_glass(bed_grips):
+    temps = [0, 30, 60, 100, 105, 110, 115, 120, 200]
+    glass = bed_grips("abs", "glass", temps)
+    pi = bed_grips("abs", "polyimide", temps)
+    for curve, anchor in ((glass, 0.40), (pi, 0.51)):
+        shear = [g["shear_n_mm"] for g in curve]
+        assert shear[3] == anchor
+        assert shear[0] == shear[1] < shear[2] < shear[3]
+        assert all(np.diff(shear[3:-1]) > 0)
+        assert shear[-1] == shear[-2]
+        assert curve[-1]["shear_source"] == "clamped extrapolation"
+        assert all(g["confidence"] == "low" for g in curve)
+    assert all(g["grip_n_mm"] < p["grip_n_mm"] for g, p in zip(glass, pi))
+
+
+def test_estimated_grip_changes_fastest_near_the_materials_softening_point(bed_grips):
+    temps = [80, 85, 115, 120]
+    standard = bed_grips("petg", "glass", temps)
+    higher_tg = bed_grips("petg", "glass", temps, heat_limit_c=115)
+    for curve in (standard, higher_tg):
+        assert curve[0]["shear_n_mm"] == 0.73
+        assert all(g["confidence"] == "low" for g in curve)
+    early, late = (curve[1]["shear_n_mm"] / curve[0]["shear_n_mm"] for curve in (standard, higher_tg))
+    assert early > late > 1
+    assert higher_tg[3]["shear_n_mm"] / higher_tg[2]["shear_n_mm"] == pytest.approx(early)
 
 
 def test_thick_sections_stay_warm_higher_up():
@@ -145,3 +193,18 @@ def test_abs_curls_more_than_pla():
     pla, abs_ = (api.warping([0, 0, 1], {"material": m}) for m in ("pla", "abs"))
     assert abs_["max_mm"] > 2.5 * pla["max_mm"]
     assert "curl up to" in abs_["explanation"] and abs_["verdict"] != "fine"
+
+
+def test_pla_on_pei_follows_the_measured_glass_curve():
+    """The default plate gets the measured jump near PLA's softening point too, not the generic curve."""
+    def grip(surface, temp):
+        api.custom_presets(printers={"plate": {"based_on": "bambu_p1s", "bed_surface": surface}},
+                           materials={"bed": {"based_on": "pla", "bed_temp_c": temp}})
+        return warp.bed_grip(Profile.from_dict({"material": "my_bed", "printer": "my_plate"}))["grip_n_mm"]
+
+    try:
+        for temp in (50, 65, 70, 80):
+            assert grip("textured_pei", temp) / grip("glass", temp) == pytest.approx(0.714 / 0.73)
+        assert grip("textured_pei", 70) > 5 * grip("textured_pei", 60)
+    finally:
+        api.custom_presets()
