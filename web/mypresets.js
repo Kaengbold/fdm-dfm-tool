@@ -170,6 +170,7 @@ export function toSpec(kind, values) {
     else if (key === "fit_snug" || key === "fit_sliding") spec.fit_gap_mm = { ...spec.fit_gap_mm, ...fitGaps(key, Number(v)) };
     else spec[key] = ["name", "warp_risk", "fibre"].includes(key) ? v : Number(v);
   }
+  if (Array.isArray(values.creep_readings)) spec.creep_readings = values.creep_readings;
   return spec;
 }
 

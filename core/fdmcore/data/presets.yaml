@@ -23,6 +23,7 @@ printers:
     name: Bambu Lab P1S
     bed: [256, 256, 256]
     enclosure: passive
+    aux_fan: true
     hardened_nozzle: false   # stock stainless steel
     speed: fast
     multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
@@ -30,6 +31,7 @@ printers:
     name: Bambu Lab X1 Carbon
     bed: [256, 256, 256]
     enclosure: passive
+    aux_fan: true
     hardened_nozzle: true
     speed: fast
     multi_material: optional       # none | optional (AMS/MMU add-on) | builtin
@@ -37,6 +39,7 @@ printers:
     name: Bambu Lab H2D
     bed: [325, 320, 325]
     enclosure: heated
+    aux_fan: true
     hardened_nozzle: true
     speed: fast
     multi_material: builtin       # none | optional (AMS/MMU add-on) | builtin

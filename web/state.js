@@ -8,6 +8,7 @@ export const INPUTS = {
   part: "model",
   design: "model",
   profile: "profile",
+  creepReadings: "profile",
   goal: "goal",
   change: "goal",
   environment: "environment",

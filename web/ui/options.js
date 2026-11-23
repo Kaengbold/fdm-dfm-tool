@@ -10,13 +10,18 @@ import { t } from "../i18n.js";
 /** option: {badge, pros[], cons[], rows: [{key, value, pinnable?, pinned?, tone?, editable?, edited?}], recommended?}. */
 export function OptionColumn({ option, labels, onPin, onKeepAll, onUse, onEdit, editing = null, editor = null, needsRecheck = false }) {
   const rows = option.rows.map((row) => {
-    if (row.key === editing && editor) return h("div", { class: "ui-col__cell is-editing", role: "cell" }, editor);
+    const dataset = { row: row.key };
+    if (row.key === "why") return h("div", { class: "ui-col__cell", dataset },
+      h("ul", { class: "ui-col__pc" },
+        (option.pros ?? []).map((p) => h("li", { class: "is-pro" }, p)),
+        (option.cons ?? []).map((c) => h("li", { class: "is-con" }, c))));
+    if (row.key === editing && editor) return h("div", { class: "ui-col__cell is-editing", dataset }, editor);
     const cls = ["ui-col__value", row.tone && `is-${row.tone}`, row.edited && "is-edited"];
     const value = row.editable && onEdit
       ? h("button", { type: "button", class: [...cls, "ui-col__edit"], title: t("ui.editValue"),
         "aria-label": t("ui.editValueOf", { name: labels[row.key], value: row.value }), onclick: () => onEdit(row) }, row.value)
       : h("span", { class: cls }, row.value);
-    const cell = h("div", { class: ["ui-col__cell", row.pinned && "is-pinned"], role: "cell" }, value);
+    const cell = h("div", { class: ["ui-col__cell", row.pinned && "is-pinned"], dataset }, value);
     if (row.pinnable !== false) {
       cell.append(h("button", {
         type: "button", class: "ui-col__pin", "aria-pressed": String(Boolean(row.pinned)),
@@ -29,14 +34,10 @@ export function OptionColumn({ option, labels, onPin, onKeepAll, onUse, onEdit, 
   return h("section", { class: ["ui-col", option.recommended && "is-recommended", needsRecheck && "is-stale"], "aria-label": option.badge },
     h("header", { class: "ui-col__head" },
       h("span", { class: "ui-badge ui-col__badge" }, option.badge),
-      h("ul", { class: "ui-col__pc" },
-        option.pros.map((p) => h("li", { class: "is-pro" }, p)),
-        option.cons.map((c) => h("li", { class: "is-con" }, c))),
-      h("button", { type: "button", class: "ui-link", onclick: () => onKeepAll?.(option) }, t("ui.keepAll"))),
-    h("div", { class: "ui-col__rows", role: "list" }, rows),
-    h("footer", { class: "ui-col__foot" },
       needsRecheck ? h("span", { class: "ui-hint" }, t("ui.needsRecheck"))
-        : Button({ label: t("ui.useOption"), variant: option.recommended ? "primary" : "secondary", onClick: () => onUse?.(option) })));
+        : Button({ label: t("ui.useOption"), size: "small", variant: option.recommended ? "primary" : "secondary", onClick: () => onUse?.(option) }),
+      h("button", { type: "button", class: "ui-link", onclick: () => onKeepAll?.(option) }, t("ui.keepAll"))),
+    rows);
 }
 
 /** choices: [{key, label}] — pinned or edited values as removable chips, plus "Re-optimize with my choices". */

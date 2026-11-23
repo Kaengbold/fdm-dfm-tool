@@ -26,9 +26,19 @@
 .stage--part .panel-foot { border-top: 0; }
 .screen-body { height: 100%; overflow: auto; }
 
-/* Options: the comparison takes the full width under the 3D strip. */
-.app-screen[data-layout="options"] > .stage { grid-column: 2; grid-row: 1; }
-.app-screen[data-layout="options"] > .compare { grid-column: 2; grid-row: 2; border-left: 0; border-top: 1px solid var(--line); }
+/* Options: the canvas and comparison sit above a shared Back/Next footer. */
+.app-screen[data-layout="options"] {
+  display: grid;
+  grid-template-columns: var(--rail-w-collapsed) minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-rows: auto minmax(0, 1fr) var(--panel-foot-h);
+}
+.app-screen[data-layout="options"] > .rail { grid-area: 1 / 1 / -1 / 2; }
+.app-screen[data-layout="options"] > .stage { grid-area: 1 / 2 / 3 / 3; }
+.app-screen[data-layout="options"] > .compare { display: contents; }
+.app-screen[data-layout="options"] .compare > * { background: var(--surface-raised); }
+.app-screen[data-layout="options"] .compare > .panel-head { grid-area: 1 / 3; border-left: 1px solid var(--line); }
+.app-screen[data-layout="options"] .compare > .panel-body { grid-area: 2 / 3; border-left: 1px solid var(--line); }
+.app-screen[data-layout="options"] .compare > .panel-foot { grid-area: 3 / 2 / 4 / -1; }
 
 .start .row { display: flex; gap: var(--s-3); }
 .part-pill[hidden] { display: none; }

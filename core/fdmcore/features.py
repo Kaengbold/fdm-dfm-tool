@@ -298,13 +298,16 @@ def _polygon_prism(poly, frame, z0: float, z1: float, add: bool = True) -> dict:
 def _corner_intent(edges: list[dict], ks: list[int], size: float, up, max_overhang_deg: float, scale_round: bool,
                    region: np.ndarray | None) -> dict:
     """Inside corners ``ks`` as fillets (rounds) or chamfers on the edge between two faces: one entry per pair of
-    regions (or per corner when the regions aren't known), with points along it."""
+    regions (or per corner when the regions aren't known), with points along it. One CAD edge gets one kind: a
+    chamfer when any stretch of it would print as an overhanging round (a round and a chamfer on the same edge is
+    something CAD can't make, T-535)."""
     groups: dict = {}
     for k in ks[:MAX_FILLET_PIECES]:
         e = edges[k]
         rounded = up is None or _round_prints(e, up, max_overhang_deg)
         pair = tuple(sorted((int(region[e["f1"]]), int(region[e["f2"]])))) if region is not None else None
-        g = groups.setdefault((pair, rounded), {"points": [], "rounded": rounded, "pair": pair})
+        g = groups.setdefault((pair, None if pair else rounded), {"points": [], "rounded": rounded, "pair": pair})
+        g["rounded"] = g["rounded"] and rounded
         g["points"].append((e["a"] + e["b"]) / 2)
     out = []
     for g in groups.values():

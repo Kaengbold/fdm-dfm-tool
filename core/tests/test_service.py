@@ -1,8 +1,12 @@
+from math import log
+
+import numpy as np
 import pytest
 
 from fdmcore import api
+from fdmcore.mesh import load_stl, mesh_health
 from fdmcore.profile import Profile
-from fdmcore.service import heat_factor
+from fdmcore.service import CREEP_TIMES_MIN, creep_estimate, heat_factor, required_safety
 
 from test_strength import SAMPLES, hook_loads
 
@@ -34,6 +38,75 @@ def test_constant_load_needs_more_margin():
     assert type(stays["required_safety"]) is float and stays["required_safety"] == 3.0
     assert r["verdict"] == "fine" and stays["verdict"] == "borderline"
     assert "creep" in stays["explanation"]
+
+
+def test_creep_print_geometry_and_stress():
+    part = api.calibration_part("creep")
+    mesh = load_stl(part["stl"])
+    lo, hi = mesh.bounds()
+    assert lo == pytest.approx([0, 0, 0])
+    assert hi == pytest.approx([113, 24, 4])
+    assert mesh.volume() > 0
+    assert all(count == 0 for defect, count in mesh_health(mesh).items() if defect != "points")
+    vertices = mesh.triangles.reshape(-1, 3)
+    shoulder = vertices[vertices[:, 0] == 30]
+    assert np.ptp(shoulder[:, 1]) == 15  # width at the clamped edge
+    hole = vertices[np.isclose(np.linalg.norm(vertices[:, :2] - [105, 12], axis=1), 3)]
+    assert len(np.unique(hole[:, :2], axis=0)) == 64
+    test = part["creep_test"]
+    assert (test["lever_mm"], test["width_mm"], test["thickness_mm"], test["hole_mm"], test["mass_g"]) == (75, 15, 4, 6, 500)
+    assert test["stress_mpa"] == pytest.approx(9.19)
+    assert "9.19 MPa" in part["how"]
+
+
+@pytest.fixture
+def measured_pla():
+    def save(readings):
+        api.custom_presets(materials={"creep": {"based_on": "pla", "creep_readings": readings}})
+        return Profile.from_dict({"material": "my_creep", "constant_load": True})
+
+    yield save
+    api.custom_presets()
+
+
+def test_creep_fit_recovers_a_log_time_curve(measured_pla):
+    readings = [[t, 4 + 0.2 * log(t)] for t in CREEP_TIMES_MIN]
+    estimate = creep_estimate(measured_pla(readings[::-1]))
+    assert estimate == {"days": 365, "points": 5, "provisional": False,
+                        "factor": pytest.approx((4 + 0.2 * log(365 * 1440)) / 4)}
+    assert creep_estimate(measured_pla(readings[:2]))["provisional"]
+    assert creep_estimate(measured_pla([[1, 4], [60, 3.9]]))["factor"] == 1.0
+    for incomplete in ([], [[1, 4]], [[60, 4], [1440, 5]], [[1, 4], [30, 4.5]]):
+        p = measured_pla(incomplete)
+        assert creep_estimate(p) is None and required_safety(p) == 3.0
+
+
+@pytest.mark.parametrize("readings", [[[1, 4], [1, 5]], [[0, 4]], [[1, 0]], [[60, float("nan")]], [1]])
+def test_invalid_creep_readings_are_rejected(measured_pla, readings):
+    with pytest.raises(ValueError, match="creep_readings"):
+        measured_pla(readings)
+
+
+def test_creep_calibration_changes_live_strength_target(measured_pla):
+    fixed, force = hook_loads()
+    loads = [fixed, {**force, "kg": 7.5}]
+    p = {"material": "my_creep", "constant_load": True}
+    measured_pla([[1, 4]])
+    before = api.strength([1, 0, 0], loads, p)
+    assert before["required_safety"] == 3 and before["verdict"] == "borderline"
+    measured_pla([[1, 4], [60, 4.1]])
+    early = api.strength([1, 0, 0], loads, p)
+    assert early["required_safety"] == 3 and "early estimate" in early["explanation"]  # an early estimate can't lower ×3
+    measured_pla([[1, 4], [60, 4.1], [1440, 4.18], [10080, 4.22], [40320, 4.26]])
+    after = api.strength([1, 0, 0], loads, p)
+    assert after["safety_factor"] == before["safety_factor"]
+    assert not after["creep"]["provisional"]
+    assert after["required_safety"] == pytest.approx(2 * after["creep"]["factor"])
+    assert after["required_safety"] < 3 and after["verdict"] == "fine"
+    measured_pla([[1, 4], [60, 5]])
+    assert api.strength([1, 0, 0], loads, p)["required_safety"] > 3  # fast early sag raises it at once
+    assert api.strength([1, 0, 0], loads, {**p, "constant_load": False})["required_safety"] == 2
+    assert api.strength([1, 0, 0], loads, {**p, "use_temp_c": 40})["required_safety"] == 3
 
 
 def test_heat_finding():

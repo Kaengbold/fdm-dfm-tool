@@ -299,13 +299,17 @@ function isMeasuredSpec(spec) {
     spec.z_strength_factor != null ||
     spec.fit_gap_mm != null ||
     spec.hole_error_mm != null ||
-    spec.outer_error_mm != null
+    spec.outer_error_mm != null ||
+    spec.creep_readings?.length
   );
 }
 
 function pushCatalog() {
   if (!ctx?.store) return;
-  ctx.store.set({ catalog: buildCatalog() }, { undoable: false });
+  const creepReadings = Object.fromEntries(Object.entries(settings.mine.materials)
+    .filter(([, spec]) => spec.creep_readings?.length)
+    .map(([id, spec]) => [id, spec.creep_readings]));
+  ctx.store.set({ catalog: buildCatalog(), creepReadings }, { undoable: false });
 }
 
 function cleanSpecForEngine(spec) {
@@ -1471,6 +1475,10 @@ const CAL_TESTS = [
   // Quality (T-572): the material's own temperature and ironing flow.
   { id: "temp", apiKind: "temp", steps: 4 },
   { id: "ironing", apiKind: "ironing", steps: 3 },
+  { id: "creep", apiKind: "creep", steps: 4 },
+];
+const CREEP_READINGS = [
+  [1, "minute"], [60, "hour"], [1440, "day"], [10080, "week"], [40320, "month"],
 ];
 // The temperature tower's blocks against the material's usual temperature, bottom first (api.TEMP_TOWER_STEPS_C).
 const TEMP_TOWER_STEPS_C = [10, 5, 0, -5, -10, -15];
@@ -1478,6 +1486,13 @@ const IRONING_TEST_PCT = [6, 9, 12, 15, 18]; // api.IRONING_TEST_PCT
 const towerTemps = (mat) => TEMP_TOWER_STEPS_C.map((d) => Math.round((mat?.nozzle_temp_c ?? 220) + d));
 
 function testMeasuredInfo(testId, { matId, mat, spec, enc }) {
+  if (testId === "creep" && spec?.creep_readings?.length) {
+    const readings = spec.creep_readings;
+    const ready = readings.some(([time]) => time === 1) && readings.some(([time]) => time >= 60);
+    const complete = readings.length >= 4 && readings.some(([time]) => time >= 40320);
+    const key = !ready ? "pending" : complete ? "summary" : "early";
+    return { measured: true, summary: t(`settings.cal.creep.${key}`) };
+  }
   if (testId === "starter") {
     const checked = settings.starterChecked[matId];
     if (spec?.hole_error_mm != null) {
@@ -1536,6 +1551,15 @@ function makeSvg(viewBox, children) {
 }
 
 function calDiagram(testId) {
+  if (testId === "creep") {
+    return makeSvg("0 0 200 100", [
+      ["path", { d: "M 16 20 H 54 L 64 25 H 149 L 160 31 L 149 37 H 64 L 54 42 H 16 Z", fill: "currentColor", opacity: 0.75 }],
+      ["circle", { cx: 142, cy: 31, r: 4, fill: "var(--surface-sunken)" }],
+      ["path", { d: "M 142 32 V 55 M 168 20 V 70 M 168 31 H 176 M 168 40 H 172 M 168 49 H 176 M 168 58 H 172 M 168 67 H 176",
+        fill: "none", stroke: "currentColor", "stroke-width": 2 }],
+      ["rect", { x: 130, y: 55, width: 24, height: 31, rx: 5, fill: "currentColor", opacity: 0.45 }],
+    ]);
+  }
   if (testId === "temp") { // six blocks, each with an overhang on its right
     return makeSvg("0 0 200 100", [
       ["rect", { x: 70, y: 88, width: 70, height: 5, rx: 2, fill: "currentColor", opacity: 0.3 }],
@@ -1658,6 +1682,8 @@ function openCalibrationTest(testId) {
     view.calDraft = { c: spec?.nozzle_temp_c ?? null };
   } else if (testId === "ironing") {
     view.calDraft = { pct: spec?.ironing_flow_pct ?? null };
+  } else if (testId === "creep") {
+    view.calDraft = Object.fromEntries(spec?.creep_readings ?? []);
   } else if (testId === "starter") {
     view.calDraft = {
       look: settings.starterChecked[matId]?.note ?? "ok",
@@ -1707,6 +1733,8 @@ function renderCalibrationDetail() {
   const info = calContext();
   const status = testMeasuredInfo(testDef.id, info);
   const steps = Array.from({ length: testDef.steps }, (_, i) => h("li", {}, t(`settings.cal.${testDef.id}.s${i + 1}`)));
+  const creepTest = testDef.id === "creep" ? info.catalog.creep_test : null;
+  let creepFields = [];
 
   const backBtn = h("button", {
     type: "button",
@@ -1864,6 +1892,19 @@ function renderCalibrationDetail() {
         renderVisual: (o) => makeSvg("0 0 30 20", IRONING_TEST_PCT.map((p, i) => ["rect",
           { x: 2 + i * 5.4, y: 4 + i * 2.2, width: 5, height: 14 - i * 2.2, fill: "currentColor", opacity: p === o.value ? 0.9 : 0.22 }])),
       })));
+  } else if (testDef.id === "creep") {
+    creepFields = CREEP_READINGS.map(([minutes, label]) => NumberField({
+      label: t(`settings.cal.creep.${label}`),
+      value: view.calDraft[minutes] ?? "",
+      min: 0.1,
+      max: 25,
+      units: [{ value: "mm", label: "mm" }],
+      onChange: (value) => { view.calDraft[minutes] = value; },
+    }));
+    pickerBox.append(
+      h("p", { class: "hint" }, t("settings.cal.creep.readingsHint")),
+      h("div", { class: "set-grid-2" }, creepFields),
+      status.measured && h("p", { class: "hint" }, status.summary));
   } else if (testDef.id === "starter") {
     const lookSeg = SegmentedControl({
       label: t("settings.cal.starter.firstLayer"),
@@ -1927,6 +1968,12 @@ function renderCalibrationDetail() {
       } else if (testDef.id === "ironing") {
         if (view.calDraft.pct == null) return showToast({ message: t("settings.cal.pickFirst"), tone: "warn" });
         patch.ironing_flow_pct = view.calDraft.pct;
+      } else if (testDef.id === "creep") {
+        const invalid = creepFields.find(({ input }) => input.getAttribute("aria-invalid") === "true");
+        if (invalid) return invalid.input.focus();
+        patch.creep_readings = Object.entries(view.calDraft)
+          .filter(([, drop]) => drop != null).map(([minutes, drop]) => [Number(minutes), drop]);
+        if (!patch.creep_readings.length) return showToast({ message: t("settings.cal.creep.needReading"), tone: "warn" });
       } else if (testDef.id === "starter") {
         starterNote = view.calDraft.look || "ok";
         if (view.calDraft.hole !== "" && view.calDraft.hole != null) {
@@ -1955,6 +2002,7 @@ function renderCalibrationDetail() {
         layer_strength: "z_strength_factor",
         temp: "nozzle_temp_c",
         ironing: "ironing_flow_pct",
+        creep: "creep_readings",
       };
       clearCalibrationField(map[testDef.id]);
       openCalibrationTest(testDef.id);
@@ -1978,7 +2026,8 @@ function renderCalibrationDetail() {
         h("div", { class: "cal-diagram" }, calDiagram(testDef.id)),
         h("div", { class: "set-section" },
           h("h2", { class: "ui-label" }, t("settings.cal.stepsTitle")),
-          h("ol", { class: "cal-steps" }, steps))),
+          h("ol", { class: "cal-steps" }, steps),
+          creepTest && h("p", { class: "hint" }, t("settings.cal.creep.stress", creepTest)))),
       pickerBox),
   ];
 }

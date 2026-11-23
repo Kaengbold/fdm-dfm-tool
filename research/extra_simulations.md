@@ -29,14 +29,26 @@ where they are), sunlight on the box, hot spots right next to a chip.
 
 `api.box_heat`, card in Optional simulations.
 
-## Creep under a constant load: no new simulation
+## Creep under a constant load
 
-Already covered: "the load is on all the time" asks for ×3 safety instead of ×2, and warmth lowers
-strength (`service.heat_factor`). A real creep curve (strain over months) needs creep data per
-material and temperature (e.g. Findley power-law fits); filament makers don't publish it, and
-printed parts creep differently along and across layers. Without that data a curve would look
-precise and be a guess. Revisit if calibration prints for creep are added (a hook with a weight,
-measured over weeks).
+T-343 adds a calibration print for a user's own filament. The arm sits flat in the printer, then
+clamps to a table by its wide end. A 500 g load hangs 75 mm from the clamp and the test section is
+15 mm wide by 4 mm thick. The nominal bending stress at the clamp is
+`6 × (0.5 kg × 9.80665 m/s²) × 75 mm / (15 mm × (4 mm)²) = 9.19 MPa`.
+The lower edge of the pointed tip can be read against a fixed ruler. Record its drop from unloaded
+after 1 minute, 1 hour, 1 day, 1 week and 4 weeks with the weight left in place.
+
+The app fits drop against log(time), anchored at the 1-minute reading, with a nonnegative slope.
+For steady loads at 18–30 °C, the strength check multiplies its usual ×2 margin by the predicted
+365-day drop divided by the initial drop. The optimizer also keeps the goal's minimum margin.
+The ×3 fallback applies outside that temperature range or until the initial reading and a reading
+from at least 1 hour are available. An estimate from fewer than four readings or less than
+four weeks is marked provisional and can only raise the ×3 margin, never lower it:
+a year extrapolated from hours or days can miss the late speed-up of creep.
+
+This is a sag-based margin, with extrapolation beyond the last reading. Print settings, load
+direction, temperature, and stress can all change how the plastic creeps. Estimating time to
+rupture requires separate failure testing.
 
 ## Wear: no
 

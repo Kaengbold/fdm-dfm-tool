@@ -12,6 +12,9 @@ differs per slicer, see export3mf.py). A 40 mm flat block checks ironing, brim e
 it has none) and the raft. Not measured (no clear trace in the G-code): precise outer wall, scarf seam,
 "make overhangs printable".
 
+The advanced design checks (T-251) compare the G-code for a part with and without support boxes
+and a hidden gap, measuring where the slicer actually puts plastic.
+
     python tools/slicer_check.py            # all slicers found in the default install folders
     python tools/slicer_check.py --keep     # keep the G-code in e2e-output/slicer-check
 
@@ -32,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "core"))
 
 from fdmcore import api  # noqa: E402
+from fdmcore import gcode as gc  # noqa: E402
 from fdmcore.mesh import Mesh, to_binary_stl  # noqa: E402
 
 import numpy as np  # noqa: E402
@@ -107,6 +111,9 @@ def slice_with(name: str, cfg: dict, model: Path, out: Path) -> Path:
         p = cfg["profiles"]
         cmd = [str(cfg["exe"]), "--slice", "0", "--outputdir", str(out),
                "--load-settings", f"{p / BBL_MACHINE};{p / BBL_PROCESS}", "--load-filaments", str(p / BBL_FILAMENT), str(model)]
+    # With --keep, a failed slice must not leave us measuring the previous run's G-code.
+    for old in out.glob("*.gcode"):
+        old.unlink()
     subprocess.run(cmd, capture_output=True, timeout=600, cwd=out)  # the slicer leaves a 00000.log where it runs
     found = sorted(out.glob("*.gcode"))
     if not found:
@@ -267,6 +274,101 @@ def measure_zone(gcode: Path) -> dict:
     inner = np.isin(tp.kind, [gc.SPARSE, gc.SOLID])
     return {"zone": round(float(tp.volume[inner & (x < cx)].sum()) / 1000, 2), "rest": round(float(tp.volume[inner & (x >= cx)].sum()) / 1000, 2),
             "width": round(float(np.ptp(np.concatenate([a[part, 1], b[part, 1]]))), 1)}
+
+
+def volume_part() -> bytes:
+    """A 20 mm wide stem with two 18 mm overhangs, each 16 mm above the bed."""
+    from shapely.geometry import Polygon
+
+    from fdmcore.additions import extrude
+
+    profile = Polygon([(-10, 0), (10, 0), (10, 16), (28, 16), (28, 22),
+                       (-28, 22), (-28, 16), (-10, 16)])
+    tris = extrude(profile, -10, 10)[:, :, [0, 2, 1]]
+    return to_binary_stl(Mesh(tris[:, ::-1]))  # swapping axes mirrors the winding
+
+
+def volume_checks(name: str, cfg: dict, work: Path, layout: str) -> dict:
+    up = [0, 0, 1]
+    profile = {"printer": "bambu_p1s"}
+    api.load(volume_part(), "advanced_volumes")
+    box = {"point": [-30, -12, 0], "point2": [-9, 12, 17], "margin": 0}
+    enforcer = api.volume_at(up, "support", profile=profile, **box)
+    blocker = api.volume_at(up, "blocker", profile=profile, **box)
+    gap = api.volume_at(up, "void", point=[-4, -4, 4], point2=[4, 4, 12], margin=0, profile=profile)
+
+    def slice_volume(label: str, auto: bool, zones: list[dict]) -> gc.Toolpath:
+        dest = work / f"{name}_volume_{label}"
+        model = dest.with_suffix(".3mf")
+        settings = {"enable_support": str(int(auto)), "support_type": "normal(auto)",
+                    "brim_type": "no_brim", "sparse_infill_density": "35%", "wall_loops": "2"}
+        model.write_bytes(api.export(up, profile, settings, zones=zones, slicer=layout))
+        return gc.parse(slice_with(name, cfg, model, dest).read_text(errors="replace"))
+
+    plain = slice_volume("plain", False, [])
+    forced = slice_volume("enforcer", False, [enforcer])
+    auto = slice_volume("auto", True, [])
+    blocked = slice_volume("blocker", True, [blocker])
+    hollow = slice_volume("gap", False, [gap])
+
+    no_support, enforced, automatic, reduced = (measure_support(tp) for tp in (plain, forced, auto, blocked))
+    spill = support_outside(forced, enforcer)
+    filled, cut = (measure_hidden_gap(tp, gap) for tp in (plain, hollow))
+    return {
+        "support_enforcer": (support_summary(no_support), f"{support_summary(enforced)}, {spill:.2f} mm³ beyond box tolerance",
+                             sum(no_support) == 0 and enforced[0] > 10 and enforced[1] == spill == 0),
+        "support_blocker": (support_summary(automatic), support_summary(reduced),
+                            min(automatic) > 10 and reduced[0] == 0 and reduced[1] >= 0.9 * automatic[1]),
+        "negative_volume": (filled, cut, filled[0] > 10 and filled[1] == 0 and cut[0] == 0 and cut[1] > 10),
+    }
+
+
+def volume_frame(tp: gc.Toolpath) -> tuple[np.ndarray, np.ndarray]:
+    """Recover the fixture's XY offset from the walls on the 20 mm square stem."""
+    stem = (tp.kind == gc.WALL) & (2 < tp.p1[:, 2]) & (tp.p1[:, 2] < 4)
+    points = np.concatenate((tp.p0[stem, :2], tp.p1[stem, :2]))
+    centre = (points.min(axis=0) + points.max(axis=0)) / 2
+    return tp.p0 - np.r_[centre, 0], tp.p1 - np.r_[centre, 0]
+
+
+def measure_support(tp: gc.Toolpath) -> tuple[float, float]:
+    """Support plastic (mm³) on the selected and opposite sides of the stem."""
+    a, b = volume_frame(tp)
+    selected = (a[:, 0] + b[:, 0]) < 0
+    plastic = tp.volume[tp.kind == gc.SUPPORT]
+    side = selected[tp.kind == gc.SUPPORT]
+    return float(plastic[side].sum()), float(plastic[~side].sum())
+
+
+def support_summary(volumes: tuple[float, float]) -> str:
+    return f"{volumes[0]:.1f} mm³ selected side, {volumes[1]:.1f} mm³ opposite side"
+
+
+def support_outside(tp: gc.Toolpath, box: dict) -> float:
+    """Support beyond the enforcer, allowing for the wider foot near the bed."""
+    a, b = volume_frame(tp)
+    xy_slack = np.where(b[:, 2:3] <= 0.5, 2.5, 0.1)
+    lo, hi = np.asarray(box["lo"]), np.asarray(box["hi"])
+    beyond = ((np.minimum(a[:, :2], b[:, :2]) < lo[:2] - xy_slack)
+              | (np.maximum(a[:, :2], b[:, :2]) > hi[:2] + xy_slack)).any(axis=1) | (b[:, 2] > hi[2])
+    return float(tp.volume[(tp.kind == gc.SUPPORT) & beyond].sum())
+
+
+def measure_hidden_gap(tp: gc.Toolpath, gap: dict) -> tuple[float, float]:
+    """Millimetres of printed line in the cavity core and of new wall just outside it."""
+    import shapely
+    from shapely.geometry import box
+
+    a, b = volume_frame(tp)
+    lo, hi = np.array(gap["lo"]), np.array(gap["hi"])
+    middle = (lo[2] + 1 < b[:, 2]) & (b[:, 2] < hi[2] - 1)
+    core = box(*(lo[:2] + 0.25), *(hi[:2] - 0.25))
+    rim = box(*(lo[:2] - 1.5), *(hi[:2] + 1.5)).difference(core)
+    part = middle & tp.part()
+    wall = middle & (tp.kind == gc.WALL)
+    return tuple(float(shapely.length(shapely.intersection(
+        shapely.linestrings(np.stack((a[mask, :2], b[mask, :2]), axis=1)), area
+    )).sum()) for mask, area in ((part, core), (wall, rim)))
 
 
 def measure_holes(gcode: Path) -> dict:
@@ -475,6 +577,7 @@ def main():
         z = measure_zone(slice_with(name, cfg, model, work / f"{name}_zone"))
         # The zone half is filled (≥ 2.5× the plastic of the 10 % half), and the part didn't grow by the zone's box.
         checks["zone_modifier"] = (z["zone"], z["rest"], z["zone"] >= 2.5 * z["rest"] and z["width"] < 20.0)
+        checks.update(volume_checks(name, cfg, work, layout))
         model = work / f"{name}_seam_free.3mf"
         model.write_bytes(seam_block(None))
         free = measure_seams(slice_with(name, cfg, model, work / f"{name}_seam_free"))

@@ -1,0 +1,1829 @@
+{
+ "gen_block.step": {
+  "faces": 26,
+  "readMs": 330,
+  "one": [
+   {
+    "id": "fit-13",
+    "title": "\u00d86.00 \u2192 \u00d86.90 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 220,
+    "valid": true,
+    "faces": 26
+   },
+   {
+    "id": "fit-19",
+    "title": "\u00d810.00 \u2192 \u00d810.90 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 82,
+    "valid": true,
+    "faces": 26
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 133,
+    "valid": true,
+    "faces": 27
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 122,
+    "valid": true,
+    "faces": 38
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 86,
+    "valid": true,
+    "faces": 38
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 56,
+    "valid": true,
+    "faces": 38
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 111,
+    "valid": true,
+    "faces": 33
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 50,
+    "valid": true,
+    "faces": 30
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 99,
+   "triangles": 3458,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "mesh",
+    "mesh",
+    "exact",
+    "exact"
+   ],
+   "ms": 3956
+  },
+  "heapMb": 127,
+  "jsHeapMb": 24
+ },
+ "gen_knob.step": {
+  "faces": 10,
+  "readMs": 263,
+  "one": [
+   {
+    "id": "fit-2",
+    "title": "\u00d85.00 \u2192 \u00d85.90 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 206,
+    "valid": true,
+    "faces": 10
+   },
+   {
+    "id": "corner-0",
+    "title": "2.0 mm 45\u00b0 chamfer where the part is weakest",
+    "how": "exact",
+    "kind": "chamfer",
+    "ms": 76,
+    "valid": true,
+    "faces": 11
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 38,
+    "valid": true,
+    "faces": 11
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 65,
+    "valid": true,
+    "faces": 17
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 89,
+    "valid": true,
+    "faces": 16
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 24,
+   "triangles": 4341,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 559
+  },
+  "heapMb": 144,
+  "jsHeapMb": 15
+ },
+ "gen_two_bodies.step": {
+  "faces": 6,
+  "readMs": 252,
+  "one": [
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 160,
+    "valid": true,
+    "faces": 11
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 34,
+    "valid": true,
+    "faces": 9
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 14,
+   "triangles": 40,
+   "how": [
+    "exact",
+    "exact"
+   ],
+   "ms": 101
+  },
+  "heapMb": 100,
+  "jsHeapMb": 16
+ },
+ "nist_ctc_01_asme1_rd.stp.gz": {
+  "faces": 139,
+  "readMs": 612,
+  "one": [
+   {
+    "id": "teardrop-74",
+    "title": "Teardrop for the horizontal \u00d820.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 581,
+    "valid": true,
+    "faces": 145
+   },
+   {
+    "id": "teardrop-76",
+    "title": "Teardrop for the horizontal \u00d820.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 332,
+    "valid": true,
+    "faces": 145
+   },
+   {
+    "id": "fit-5",
+    "title": "\u00d840.00 \u2192 \u00d840.90 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 252,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "fit-59",
+    "title": "\u00d840.00 \u2192 \u00d840.90 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 225,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "fit-74",
+    "title": "\u00d820.00 \u2192 \u00d821.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 258,
+    "valid": true,
+    "faces": 140
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the chamfer; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 1198,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the chamfer; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 916,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 305,
+    "valid": true,
+    "faces": 159
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 302,
+    "valid": true,
+    "faces": 159
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 218,
+    "valid": true,
+    "faces": 144
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 244,
+    "valid": true,
+    "faces": 145
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 183,
+   "triangles": 7872,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "skipped",
+    "skipped",
+    "exact",
+    "skipped",
+    "exact",
+    "exact"
+   ],
+   "ms": 3134
+  },
+  "heapMb": 239,
+  "jsHeapMb": 36
+ },
+ "nist_ctc_02_asme1_rc.stp.gz": {
+  "faces": 663,
+  "readMs": 1508,
+  "one": [
+   {
+    "id": "fit-1",
+    "title": "\u00d810.10 \u2192 \u00d811.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 1739,
+    "valid": true,
+    "faces": 494
+   },
+   {
+    "id": "fit-2",
+    "title": "\u00d810.10 \u2192 \u00d811.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 1309,
+    "valid": true,
+    "faces": 494
+   },
+   {
+    "id": "fit-5",
+    "title": "\u00d810.10 \u2192 \u00d811.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 1311,
+    "valid": true,
+    "faces": 494
+   },
+   {
+    "id": "corner-0",
+    "title": "2.0 mm 45\u00b0 chamfer where the part is weakest",
+    "how": "exact",
+    "kind": "chamfer",
+    "ms": 979,
+    "valid": true,
+    "faces": 505
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the chamfer; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 663,
+    "valid": true,
+    "faces": 493
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the chamfer; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 668,
+    "valid": true,
+    "faces": 493
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 1240,
+    "valid": true,
+    "faces": 499
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 1511,
+    "valid": true,
+    "faces": 499
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 519,
+   "triangles": 85404,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "skipped",
+    "skipped",
+    "exact",
+    "exact"
+   ],
+   "ms": 7439
+  },
+  "heapMb": 595,
+  "jsHeapMb": 54
+ },
+ "nist_ctc_03_asme1_rc.stp.gz": {
+  "faces": 139,
+  "readMs": 600,
+  "one": [
+   {
+    "id": "fit-58",
+    "title": "\u00d811.13 \u2192 \u00d812.03 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 546,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "fit-59",
+    "title": "\u00d811.13 \u2192 \u00d812.03 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 368,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "fit-60",
+    "title": "\u00d811.13 \u2192 \u00d812.03 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 269,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the round; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 1357,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the round; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 1042,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the round; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 397,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the round; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 430,
+    "valid": true,
+    "faces": 139
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 221,
+    "valid": true,
+    "faces": 145
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 238,
+    "valid": true,
+    "faces": 144
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 150,
+   "triangles": 5282,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "skipped",
+    "skipped",
+    "skipped",
+    "skipped",
+    "exact",
+    "exact"
+   ],
+   "ms": 3132
+  },
+  "heapMb": 163,
+  "jsHeapMb": 26
+ },
+ "nist_ctc_04_asme1_rd.stp.gz": {
+  "faces": 517,
+  "readMs": 895,
+  "one": [
+   {
+    "id": "fit-3",
+    "title": "\u00d812.10 \u2192 \u00d813.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 1243,
+    "valid": true,
+    "faces": 406
+   },
+   {
+    "id": "fit-4",
+    "title": "\u00d812.10 \u2192 \u00d813.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 949,
+    "valid": true,
+    "faces": 406
+   },
+   {
+    "id": "fit-5",
+    "title": "\u00d814.00 \u2192 \u00d814.90 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 827,
+    "valid": true,
+    "faces": 406
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "the result wasn't a valid solid; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 1725,
+    "valid": true,
+    "faces": 405
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "the result wasn't a valid solid; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 1385,
+    "valid": true,
+    "faces": 405
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "kind": "chamfer",
+    "ms": 507,
+    "valid": true,
+    "faces": 406
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "kind": "chamfer",
+    "ms": 534,
+    "valid": true,
+    "faces": 407
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 774,
+    "valid": true,
+    "faces": 410
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 814,
+    "valid": true,
+    "faces": 411
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 421,
+   "triangles": 36976,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "skipped",
+    "skipped",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 5741
+  },
+  "heapMb": 595,
+  "jsHeapMb": 63
+ },
+ "nist_ctc_05_asme1_rd.stp.gz": {
+  "faces": 208,
+  "readMs": 740,
+  "one": [
+   {
+    "id": "fit-5",
+    "title": "\u00d838.10 \u2192 \u00d839.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 689,
+    "valid": true,
+    "faces": 163
+   },
+   {
+    "id": "fit-21",
+    "title": "\u00d838.10 \u2192 \u00d839.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 379,
+    "valid": true,
+    "faces": 162
+   },
+   {
+    "id": "fit-22",
+    "title": "\u00d838.10 \u2192 \u00d839.00 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 390,
+    "valid": true,
+    "faces": 162
+   },
+   {
+    "id": "corner-0",
+    "title": "2.0 mm 45\u00b0 chamfer where the part is weakest",
+    "how": "exact",
+    "kind": "chamfer",
+    "ms": 278,
+    "valid": true,
+    "faces": 163
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 245,
+    "valid": true,
+    "faces": 165
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 230,
+    "valid": true,
+    "faces": 165
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 302,
+    "valid": true,
+    "faces": 165
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 388,
+    "valid": true,
+    "faces": 167
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 436,
+    "valid": true,
+    "faces": 168
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 183,
+   "triangles": 23912,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 3033
+  },
+  "heapMb": 264,
+  "jsHeapMb": 32
+ },
+ "nist_ftc_06_asme1_rd.stp.gz": {
+  "faces": 144,
+  "readMs": 662,
+  "one": [
+   {
+    "id": "teardrop-47",
+    "title": "Teardrop for the horizontal \u00d810.5 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 726,
+    "valid": true,
+    "faces": 149
+   },
+   {
+    "id": "teardrop-49",
+    "title": "Teardrop for the horizontal \u00d815.9 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 370,
+    "valid": true,
+    "faces": 150
+   },
+   {
+    "id": "teardrop-50",
+    "title": "Teardrop for the horizontal \u00d810.5 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 247,
+    "valid": true,
+    "faces": 149
+   },
+   {
+    "id": "teardrop-52",
+    "title": "Teardrop for the horizontal \u00d815.9 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 253,
+    "valid": true,
+    "faces": 150
+   },
+   {
+    "id": "teardrop-53",
+    "title": "Teardrop for the horizontal \u00d810.5 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 232,
+    "valid": true,
+    "faces": 149
+   },
+   {
+    "id": "teardrop-55",
+    "title": "Teardrop for the horizontal \u00d815.9 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 249,
+    "valid": true,
+    "faces": 150
+   },
+   {
+    "id": "teardrop-56",
+    "title": "Teardrop for the horizontal \u00d810.5 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 224,
+    "valid": true,
+    "faces": 149
+   },
+   {
+    "id": "teardrop-58",
+    "title": "Teardrop for the horizontal \u00d815.9 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 229,
+    "valid": true,
+    "faces": 150
+   },
+   {
+    "id": "teardrop-107",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 255,
+    "valid": true,
+    "faces": 150
+   },
+   {
+    "id": "teardrop-109",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 239,
+    "valid": true,
+    "faces": 150
+   },
+   {
+    "id": "fit-47",
+    "title": "\u00d810.54 \u2192 \u00d811.54 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 215,
+    "valid": true,
+    "faces": 144
+   },
+   {
+    "id": "fit-49",
+    "title": "\u00d815.87 \u2192 \u00d816.87 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 220,
+    "valid": true,
+    "faces": 144
+   },
+   {
+    "id": "fit-50",
+    "title": "\u00d810.54 \u2192 \u00d811.54 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 232,
+    "valid": true,
+    "faces": 144
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "the result wasn't a valid solid; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 691,
+    "valid": true,
+    "faces": 144
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "the result wasn't a valid solid; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 598,
+    "valid": true,
+    "faces": 144
+   },
+   {
+    "id": "corner-2",
+    "title": "2.0 mm 45\u00b0 chamfer where the part is weakest",
+    "how": "exact",
+    "kind": "chamfer",
+    "ms": 262,
+    "valid": true,
+    "faces": 147
+   },
+   {
+    "id": "corner-3",
+    "title": "2.0 mm 45\u00b0 chamfer where the part is weakest",
+    "how": "exact",
+    "kind": "chamfer",
+    "ms": 189,
+    "valid": true,
+    "faces": 147
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 225,
+    "valid": true,
+    "faces": 149
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 244,
+    "valid": true,
+    "faces": 150
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 213,
+   "triangles": 23608,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "skipped",
+    "skipped",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 4225
+  },
+  "heapMb": 413,
+  "jsHeapMb": 33
+ },
+ "nist_ftc_07_asme1_rd.stp.gz": {
+  "faces": 269,
+  "readMs": 704,
+  "one": [
+   {
+    "id": "teardrop-185",
+    "title": "Teardrop for the horizontal \u00d822.2 mm hole",
+    "how": "mesh",
+    "why": "the outline isn't flat",
+    "kind": "teardrop",
+    "ms": 992,
+    "valid": true,
+    "faces": 276
+   },
+   {
+    "id": "teardrop-186",
+    "title": "Teardrop for the horizontal \u00d822.2 mm hole",
+    "how": "mesh",
+    "why": "the outline isn't flat",
+    "kind": "teardrop",
+    "ms": 658,
+    "valid": true,
+    "faces": 276
+   },
+   {
+    "id": "teardrop-187",
+    "title": "Teardrop for the horizontal \u00d822.2 mm hole",
+    "how": "mesh",
+    "why": "the outline isn't flat",
+    "kind": "teardrop",
+    "ms": 586,
+    "valid": true,
+    "faces": 276
+   },
+   {
+    "id": "teardrop-210",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 476,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-212",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 440,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-214",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 418,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-216",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 412,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-218",
+    "title": "Teardrop for the horizontal \u00d811.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 395,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-219",
+    "title": "Teardrop for the horizontal \u00d87.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 397,
+    "valid": true,
+    "faces": 274
+   },
+   {
+    "id": "teardrop-221",
+    "title": "Teardrop for the horizontal \u00d811.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 382,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-222",
+    "title": "Teardrop for the horizontal \u00d87.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 396,
+    "valid": true,
+    "faces": 274
+   },
+   {
+    "id": "teardrop-224",
+    "title": "Teardrop for the horizontal \u00d811.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 395,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-225",
+    "title": "Teardrop for the horizontal \u00d87.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 382,
+    "valid": true,
+    "faces": 274
+   },
+   {
+    "id": "teardrop-227",
+    "title": "Teardrop for the horizontal \u00d811.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 438,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-228",
+    "title": "Teardrop for the horizontal \u00d87.1 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 389,
+    "valid": true,
+    "faces": 274
+   },
+   {
+    "id": "teardrop-246",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 364,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-248",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 374,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-250",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 355,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "teardrop-252",
+    "title": "Teardrop for the horizontal \u00d86.4 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 359,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "fit-180",
+    "title": "\u00d84.39 \u2192 \u00d85.29 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 355,
+    "valid": true,
+    "faces": 269
+   },
+   {
+    "id": "fit-181",
+    "title": "\u00d84.39 \u2192 \u00d85.29 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 323,
+    "valid": true,
+    "faces": 269
+   },
+   {
+    "id": "fit-182",
+    "title": "\u00d84.39 \u2192 \u00d85.29 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 337,
+    "valid": true,
+    "faces": 269
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 251,
+    "valid": true,
+    "faces": 270
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 214,
+    "valid": true,
+    "faces": 270
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 213,
+    "valid": true,
+    "faces": 270
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 217,
+    "valid": true,
+    "faces": 270
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 304,
+    "valid": true,
+    "faces": 275
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 395,
+    "valid": true,
+    "faces": 275
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 398,
+   "triangles": 17896,
+   "how": [
+    "mesh",
+    "mesh",
+    "mesh",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 7165
+  },
+  "heapMb": 811,
+  "jsHeapMb": 31
+ },
+ "nist_ftc_08_asme1_rc.stp.gz": {
+  "faces": 270,
+  "readMs": 645,
+  "one": [
+   {
+    "id": "fit-127",
+    "title": "\u00d86.03 \u2192 \u00d86.93 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 726,
+    "valid": true,
+    "faces": 247
+   },
+   {
+    "id": "fit-128",
+    "title": "\u00d86.03 \u2192 \u00d86.93 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 501,
+    "valid": true,
+    "faces": 247
+   },
+   {
+    "id": "fit-129",
+    "title": "\u00d86.03 \u2192 \u00d86.93 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 474,
+    "valid": true,
+    "faces": 247
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the chamfer; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 1162,
+    "valid": true,
+    "faces": 247
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "OpenCascade could not make the chamfer; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 959,
+    "valid": true,
+    "faces": 247
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 492,
+    "valid": true,
+    "faces": 267
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 472,
+    "valid": true,
+    "faces": 267
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 402,
+    "valid": true,
+    "faces": 253
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 419,
+    "valid": true,
+    "faces": 252
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 278,
+   "triangles": 14484,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "skipped",
+    "skipped",
+    "exact",
+    "skipped",
+    "exact",
+    "exact"
+   ],
+   "ms": 3484
+  },
+  "heapMb": 287,
+  "jsHeapMb": 35
+ },
+ "nist_ftc_09_asme1_rd.stp.gz": {
+  "faces": 158,
+  "readMs": 505,
+  "one": [
+   {
+    "id": "fit-1",
+    "title": "\u00d85.94 \u2192 \u00d86.94 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 637,
+    "valid": true,
+    "faces": 126
+   },
+   {
+    "id": "fit-4",
+    "title": "\u00d86.35 \u2192 \u00d87.35 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 280,
+    "valid": true,
+    "faces": 125
+   },
+   {
+    "id": "fit-5",
+    "title": "\u00d86.35 \u2192 \u00d87.35 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 250,
+    "valid": true,
+    "faces": 125
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "the result wasn't a valid solid; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 970,
+    "valid": true,
+    "faces": 125
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "skipped",
+    "why": "the result wasn't a valid solid; too many faceted pieces to add to the CAD part",
+    "kind": "fillet",
+    "ms": 722,
+    "valid": true,
+    "faces": 125
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.25,
+    "kind": "fillet",
+    "ms": 380,
+    "valid": true,
+    "faces": 145
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.25,
+    "kind": "fillet",
+    "ms": 372,
+    "valid": true,
+    "faces": 145
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 284,
+    "valid": true,
+    "faces": 133
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 247,
+    "valid": true,
+    "faces": 129
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 158,
+   "triangles": 9882,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "skipped",
+    "skipped",
+    "exact",
+    "skipped",
+    "exact",
+    "exact"
+   ],
+   "ms": 2647
+  },
+  "heapMb": 199,
+  "jsHeapMb": 36
+ },
+ "nist_ftc_10_asme1_rb.stp.gz": {
+  "faces": 214,
+  "readMs": 691,
+  "one": [
+   {
+    "id": "teardrop-115",
+    "title": "Teardrop for the horizontal \u00d810.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 815,
+    "valid": true,
+    "faces": 220
+   },
+   {
+    "id": "teardrop-116",
+    "title": "Teardrop for the horizontal \u00d86.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 490,
+    "valid": true,
+    "faces": 219
+   },
+   {
+    "id": "teardrop-118",
+    "title": "Teardrop for the horizontal \u00d810.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 515,
+    "valid": true,
+    "faces": 220
+   },
+   {
+    "id": "teardrop-119",
+    "title": "Teardrop for the horizontal \u00d86.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 462,
+    "valid": true,
+    "faces": 219
+   },
+   {
+    "id": "teardrop-121",
+    "title": "Teardrop for the horizontal \u00d810.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 478,
+    "valid": true,
+    "faces": 220
+   },
+   {
+    "id": "teardrop-122",
+    "title": "Teardrop for the horizontal \u00d86.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 456,
+    "valid": true,
+    "faces": 219
+   },
+   {
+    "id": "teardrop-124",
+    "title": "Teardrop for the horizontal \u00d810.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 473,
+    "valid": true,
+    "faces": 220
+   },
+   {
+    "id": "teardrop-125",
+    "title": "Teardrop for the horizontal \u00d86.0 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 466,
+    "valid": true,
+    "faces": 219
+   },
+   {
+    "id": "teardrop-175",
+    "title": "Teardrop for the horizontal \u00d85.5 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 550,
+    "valid": true,
+    "faces": 221
+   },
+   {
+    "id": "teardrop-177",
+    "title": "Teardrop for the horizontal \u00d85.5 mm hole",
+    "how": "exact",
+    "kind": "teardrop",
+    "ms": 488,
+    "valid": true,
+    "faces": 221
+   },
+   {
+    "id": "fit-0",
+    "title": "\u00d82.50 \u2192 \u00d83.50 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 467,
+    "valid": true,
+    "faces": 216
+   },
+   {
+    "id": "fit-1",
+    "title": "\u00d82.50 \u2192 \u00d83.50 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 439,
+    "valid": true,
+    "faces": 216
+   },
+   {
+    "id": "fit-2",
+    "title": "\u00d82.50 \u2192 \u00d83.50 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 444,
+    "valid": true,
+    "faces": 216
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 329,
+    "valid": true,
+    "faces": 215
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 293,
+    "valid": true,
+    "faces": 215
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 293,
+    "valid": true,
+    "faces": 215
+   },
+   {
+    "id": "corner-3",
+    "title": "3.1 mm round / 2.0 mm chamfer where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "chamfer",
+    "ms": 298,
+    "valid": true,
+    "faces": 215
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 450,
+    "valid": true,
+    "faces": 220
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 424,
+    "valid": true,
+    "faces": 219
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 293,
+   "triangles": 23288,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 5259
+  },
+  "heapMb": 496,
+  "jsHeapMb": 32
+ },
+ "nist_ftc_11_asme1_rb.stp.gz": {
+  "faces": 6,
+  "readMs": 229,
+  "one": [
+   {
+    "id": "fit-0",
+    "title": "\u00d832.00 \u2192 \u00d832.90 mm hole for a loose fit",
+    "how": "exact",
+    "kind": "hole_resize",
+    "ms": 189,
+    "valid": true,
+    "faces": 7
+   },
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 112,
+    "valid": true,
+    "faces": 7
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 29,
+    "valid": true,
+    "faces": 7
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 156,
+    "valid": true,
+    "faces": 12
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 34,
+    "valid": true,
+    "faces": 11
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 20,
+   "triangles": 7868,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 643
+  },
+  "heapMb": 178,
+  "jsHeapMb": 29
+ },
+ "occt_screw.step.gz": {
+  "faces": 10,
+  "readMs": 278,
+  "one": [
+   {
+    "id": "corner-0",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "kind": "fillet",
+    "ms": 153,
+    "valid": true,
+    "faces": 10
+   },
+   {
+    "id": "corner-1",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 270,
+    "valid": true,
+    "faces": 10
+   },
+   {
+    "id": "corner-2",
+    "title": "3.1 mm round where the part is weakest",
+    "how": "exact",
+    "scale": 0.5,
+    "kind": "fillet",
+    "ms": 136,
+    "valid": true,
+    "faces": 10
+   },
+   {
+    "id": "solid-0",
+    "title": "Add a 10 \u00d7 10 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "slab",
+    "ms": 255,
+    "valid": true,
+    "faces": 15
+   },
+   {
+    "id": "solid-1",
+    "title": "Cut away a 2 \u00d7 2 \u00d7 2 mm block",
+    "how": "exact",
+    "kind": "void",
+    "ms": 72,
+    "valid": true,
+    "faces": 15
+   }
+  ],
+  "together": {
+   "valid": true,
+   "faces": 15,
+   "triangles": 1097,
+   "how": [
+    "exact",
+    "exact",
+    "exact",
+    "exact",
+    "exact"
+   ],
+   "ms": 453
+  },
+  "heapMb": 120,
+  "jsHeapMb": 16
+ }
+}

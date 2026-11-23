@@ -1,5 +1,5 @@
 // Load details step (T-543, plan §9): three questions, no scrolling. How long does it act (all the time = creep,
-// which raises the target to ×3), the use temperature from Environment confirmed (Yes / Change), and shaking or
+// which adjusts the strength target), the use temperature from Environment confirmed (Yes / Change), and shaking or
 // knocks (light vibration with an optional mounted weight, or hits and drops with a drop height). No print-strength
 // or layer-adhesion inputs.
 import { h } from "../ui/dom.js";
