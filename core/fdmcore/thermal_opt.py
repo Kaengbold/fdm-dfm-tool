@@ -360,18 +360,18 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
     c = constants(profile, tp.settings)
     stages = iter(np.linspace(0, 1, 7))
 
-    def run(path: Toolpath) -> tuple[Heat, float]:
+    def run(path: Toolpath, snapshots: bool = False) -> tuple[Heat, float]:
         lo = next(stages)
         with progress.stage(lo, lo + 1 / 6):
             tm = timing(path)
-            return simulate(path, tm, profile, tier), tm.total_s
+            return simulate(path, tm, profile, tier, snapshots=snapshots), tm.total_s
 
     def judge(h: Heat) -> tuple[dict, np.ndarray]:
         w = np.ones(len(h.layer)) * 0.5 if weight_at is None else np.asarray(weight_at(h), float)
         return window(h, profile, None if intents_at is None else intents_at(h), w), w
 
     layers = int(tp.layer.max()) + 1
-    base, t_base = run(tp)
+    base, t_base = run(tp, snapshots=True)  # the replay (T-588) shows the print as sliced and with the G-code plan
     ref = Plan.none(layers)
     ref_fan = 0.2 if float(np.median(tp.part_fan[tp.layer >= FIRST_LAYER])) > 0.6 else 1.0
     ref.fan[FIRST_LAYER:] = ref_fan
@@ -382,7 +382,7 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
 
     def plan_and_check(allow_fan: bool, allow_undo: bool) -> tuple[Plan, Heat, float, dict, np.ndarray]:
         plan = _search(tp, base, law, win0, weight, allow_fan, allow_undo, budget)
-        h, t = run(apply(tp, plan))
+        h, t = run(apply(tp, plan), snapshots=allow_fan)
         win, w = judge(h)
         # One correction, layer k by its spots: the layer below it still too hot -> the next stronger choice on
         # k; k's own joints made too cold by the plan -> one step back; both -> whichever weighs more.
@@ -415,7 +415,7 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
             changed = True
         if changed:
             plan = _smooth(plan)
-            h, t = run(apply(tp, plan))
+            h, t = run(apply(tp, plan), snapshots=allow_fan)
             win, w = judge(h)
         else:
             next(stages)

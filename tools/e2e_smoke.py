@@ -801,6 +801,20 @@ def check_new_ui_heat(browser, port: int) -> str:
         page.wait_for_selector(".heat-slider")
         # The sliced paths stand in for the part (T-587); red beads as sliced, none with the plan (instance colours).
         assert page.evaluate("() => fdmUI.services.heatView.paths.mesh.count > 1000 && !fdmUI.services.stage.part.group.visible")
+        # The replay comes first (T-588): what we found (the hot pin's layers) and what we change, then a jump to a layer.
+        story = page.locator("aside.panel").inner_text()
+        assert "1 · Watch it print" in story and "2 · What we found" in story and "3 · What we change" in story, story
+        assert "spots still too hot" in story or "spot still too hot" in story, story
+        page.locator(".heat-found").get_by_role("button", name="Show").first.click()
+        jumped = page.locator(".heat-slider").input_value()
+        assert int(jumped) > 0 and "into the print" in page.locator(".heat-play + .ui-hint").inner_text()
+        colours = "() => Array.from(fdmUI.services.heatView.paths.mesh.instanceColor.array.slice(0, 3000)).join()"
+        sliced = page.evaluate(colours)
+        page.get_by_role("radio", name="With the plan").click()
+        assert page.evaluate(colours) != sliced, "the plan's replay is coloured by its own temperatures"
+        page.screenshot(path=str(OUT / "new-ui-heat-replay.png"))
+        page.locator(".heat-slider").fill(str(10 ** 6))  # all layers again
+        page.get_by_role("radio", name="Too hot / cold").click()
         hot = """() => { const hv = fdmUI.services.heatView, m = hv.paths.mesh, c = m.instanceColor.array;
           let n = 0;  // red: much more red than green and blue (colours are linear here)
           for (let i = 0; i < m.count; i++) if (c[i * 3] > 0.4 && c[i * 3 + 1] < 0.1 && c[i * 3 + 2] < 0.1) n++; return n; }"""

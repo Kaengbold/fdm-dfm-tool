@@ -122,3 +122,35 @@ def test_every_message_the_step_can_show_exists():
     used |= {f"heat.confidence.{c}" for c in ("rough", "partly", "tuned")}
     used |= {f"heat.legend.{k}" for k in ("cold", "ok", "hot", "slow", "faded", "low", "high", "slower", "faster", "same", "fan")}
     assert not used - table, used - table
+
+
+def test_detail_has_a_replay_of_the_print(detail):
+    """Every spot's temperature when each layer is done, as sliced and with the plan (T-588): blocks grow with the
+    layers, the top layer is warm when it is done, and the plan's run is cooler where it fixed the hot pin."""
+    rp = detail["replay"]
+    layer, start = (np.frombuffer(rp[k], np.int32) for k in ("layer", "start"))
+    before, after = (np.frombuffer(t, np.uint8) for t in rp["temp"])
+    n = len(np.frombuffer(detail["spots"]["layer"], np.int32))
+    assert list(layer) == list(range(50)) and len(before) == len(after) and len(before) - start[-1] == n
+    assert (np.diff(start) > 0).all() and np.all(np.diff(np.frombuffer(rp["t_s"][0], np.float32)) > 0)
+    temp = lambda q: rp["lo_c"] + q.astype(float) / 255 * (rp["hi_c"] - rp["lo_c"])
+    spot_layer = np.frombuffer(detail["spots"]["layer"], np.int32)
+    j = 25
+    block = temp(before[start[j]:start[j + 1]])
+    assert block[spot_layer[: len(block)] == 25].mean() > block[spot_layer[: len(block)] < 20].mean() + 10
+
+
+def test_the_replay_tells_the_story():
+    out = run_js(DATA + """const r = { replay: { layer: new Int32Array([0, 4, 8]).buffer, start: new Int32Array([0, 1, 2]).buffer,
+        t_s: [new Float32Array([5, 20, 40]).buffer, new Float32Array([5, 26, 47]).buffer], fan: [new Float32Array([0, 1, 1]).buffer, new Float32Array([0, 1, 1]).buffer],
+        temp: [new Uint8Array([200, 150, 120, 100, 80, 60]), new Uint8Array([200, 140, 110, 90, 70, 50])], lo_c: 20, hi_c: 220 } };
+      const rp = M.decodeReplay(r);
+      return [M.snapAt(rp, 6), M.tempAt(rp, 0, 1, 0), M.tempAt(rp, 0, 1, 2), M.problemLayers(d), M.foundText(M.problemLayers(d)[0]),
+        M.planText(plan), M.clock(75), M.clock(3725), M.tempBand(50, 60, 90, 20, 220).band, M.tempBand(70, 60, 90, 20, 220).band,
+        M.tempBand(120, 60, 90, 20, 220).band];""")
+    snap, t1, missing, found, text, plan, c1, c2, *bands = out
+    assert snap == 1 and abs(t1 - (20 + 150 / 255 * 200)) < 1e-3 and missing is None  # NaN: not printed yet
+    assert found == [{"layer": 4, "z": 1.0, "hot": 1, "cold": 0}]  # the cold spot hardly matters
+    assert text == {"key": "heat.story.foundHot", "params": {"layer": 5, "z": 1.0, "hot": 1, "cold": 0, "count": 1}}
+    assert plan[0]["key"] == "heat.story.changeOne" and [a["key"] for a in plan[0]["params"]["actions"]] == ["heat.do.fan", "heat.do.park"]
+    assert (c1, c2) == ("1:15", "1:02:05") and bands == ["set", "warm", "hot"]

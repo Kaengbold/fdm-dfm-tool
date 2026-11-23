@@ -17,6 +17,7 @@ export function heatColors() {
     faster: new THREE.Color(token("--heat-faster", "#EA580C")), same: new THREE.Color(token("--heat-same", "#9CA3AF")),
     fan: new THREE.Color(token("--heat-fan", "#7C3AED")), lowImportance: new THREE.Color(token("--heat-low", "#E5E7EB")),
     highImportance: new THREE.Color(token("--heat-high", "#7C3AED")),
+    set: new THREE.Color(token("--heat-set", "#1E3A8A")), warm: new THREE.Color(token("--heat-warm", "#EAB308")),
   };
 }
 
@@ -78,11 +79,13 @@ export class HeatView {
   /** Where the spots are (for the outline of a picked one). */
   setSpots(points, cell, dz) { this.spotAt = { points, cell, dz }; }
 
-  /** Colour each bead: ``colorOf(piece index, spot index or -1)`` → THREE.Color. */
-  colorPaths(colorOf) {
+  /** Colour each bead: ``colorOf(piece index, spot index or -1)`` → THREE.Color. ``shownOnly``: only the beads up
+   * to the layer limit (the replay recolours every frame). */
+  colorPaths(colorOf, shownOnly = false) {
     if (!this.paths) return;
     const { mesh, order, spot } = this.paths;
-    order.forEach((i, j) => mesh.setColorAt(j, colorOf(i, spot[j])));
+    const n = shownOnly ? mesh.count : order.length;
+    for (let j = 0; j < n; j++) mesh.setColorAt(j, colorOf(order[j], spot[j]));
     mesh.instanceColor.needsUpdate = true;
     this.stage.render();
   }

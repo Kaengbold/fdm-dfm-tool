@@ -2488,6 +2488,28 @@ def _paths(tp, lines: np.ndarray, heat) -> tuple[np.ndarray, np.ndarray, np.ndar
     return pa, pb, src, spot
 
 
+def _replay(base, after, idx: np.ndarray) -> dict | None:
+    """The print played back (T-588): every spot's temperature when each kept layer is done, as sliced and with
+    the G-code plan, both on the spots of ``base`` (``idx``: base spot -> after node, ``_match_nodes``). ``temp``
+    (before, after) are uint8 blocks from ``lo_c`` to ``hi_c``, one per entry of ``layer``, starting at ``start``
+    (a block holds the spots up to that layer); ``t_s`` and ``fan`` (0–1) at that moment, for each run."""
+    sb, sa = base.snaps, after.snaps
+    if not sb or not sa or sb["layer"] != sa["layer"]:
+        return None
+    ends = np.append(sb["start"], len(sb["data"]))
+    after_ends = np.append(sa["start"], len(sa["data"]))
+    moved = np.zeros(len(sb["data"]), np.uint8)
+    for j in range(len(sb["layer"])):
+        block = sa["data"][after_ends[j]:after_ends[j + 1]]
+        sel = idx[: ends[j + 1] - ends[j]]
+        ok = (sel >= 0) & (sel < len(block))
+        moved[ends[j]:ends[j + 1]][ok] = block[sel[ok]]
+    f32 = lambda a: np.asarray(a, np.float32).tobytes()
+    return {"layer": np.asarray(sb["layer"], np.int32).tobytes(), "start": np.asarray(sb["start"], np.int32).tobytes(),
+            "t_s": [f32(sb["t_s"]), f32(sa["t_s"])], "fan": [f32(sb["fan"]), f32(sa["fan"])],
+            "temp": [np.asarray(sb["data"], np.uint8).tobytes(), moved.tobytes()], "lo_c": sb["lo_c"], "hi_c": sb["hi_c"]}
+
+
 def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     """What the simulation step shows (T-478), before and after the G-code plan. ``spots`` (heat nodes as
     sliced, in the oriented part's frame; the after values are the same spots in the planned run): ``points``,
@@ -2581,7 +2603,7 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     fan_marks = [{"layer": int(tp.layer[i]), "point": to_oriented(np.asarray(tp.p0[i], float)[None])[0].round(2).tolist(),
                   "fan": round(float(planned.part_fan[i]), 2)} for i in starts[tp.part()[starts]][:200]]
     lost = time_lost(tp)
-    return {"spots": spots, "timeline": timeline, "rotation": np.round(rot, 6).tolist(),
+    return {"spots": spots, "timeline": timeline, "rotation": np.round(rot, 6).tolist(), "replay": _replay(base, after, idx),
             "lines": {"segments": f32(seg), "factor": f32(factor[keep][src]), "layer": np.asarray(tp.layer[chosen][src], np.int32).tobytes(),
                       "width": f32(np.clip(width, 0.1, 3.0)[src]), "height": f32(tp.layer_height[chosen][src]),
                       "spot": np.asarray(spot, np.int32).tobytes(), "all": int(len(part))},

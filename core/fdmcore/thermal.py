@@ -70,6 +70,13 @@ class Heat:
     tg_c: float
     seconds: float  # computing time
     steps: int
+    # With ``snapshots``: every node's temperature when a layer is done (T-588, the replay). ``layer`` (the layer
+    # just finished), ``t_s``, ``fan`` (0-1); ``data`` uint8 from ``lo_c`` (0) to ``hi_c`` (255) for the nodes up to
+    # that layer (nodes are sorted by layer), one block after the other; ``start`` where each block begins.
+    snaps: dict | None = None
+
+
+SNAP_MAX = 150  # at most this many replay snapshots (evenly spaced layers, always the last one)
 
 
 def _solve(A, b: np.ndarray, x: np.ndarray, tol: float = 1e-7, max_iter: int = 200) -> np.ndarray:
@@ -257,11 +264,12 @@ def _islands(n: int, layer: np.ndarray, side: np.ndarray, up: np.ndarray) -> tup
 
 
 def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", overrides: dict | None = None,
-             region=None) -> Heat:
+             region=None, snapshots: bool = False) -> Heat:
     """Run the heat network over the whole print. ``overrides`` replaces constants (tests, tuning).
     ``region`` (x0, y0, x1, y1, printer frame): only the plastic inside it gets cells, with the timing and the
     nozzle of the whole print: a cheap detail run around a spot (its cut sides lose no heat sideways, so keep a
-    margin around what you look at)."""
+    margin around what you look at). ``snapshots``: keep the temperatures after each layer for a replay
+    (``Heat.snaps``; about one byte per node and layer, at most ``SNAP_MAX`` layers)."""
     from scipy.sparse import coo_matrix
 
     started = time.time()
@@ -361,6 +369,10 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     air_of = lambda zz: c["chamber_c"] + (c["bed_c"] - c["chamber_c"]) * np.exp(-zz / c["air_bed_mm"])
     eps_sigma = c["emissivity"] * SIGMA
     report_at = 0.0
+    born_last = float(d["born"].max())
+    snap_layers = sorted(set(range(n_layers - 1, -1, -max(1, -(-n_layers // SNAP_MAX))))) if snapshots else []
+    snap_lo, snap_hi = min(float(c["chamber_c"]), 20.0), float(c["nozzle_c"])
+    snaps = {"layer": [], "t_s": [], "fan": [], "blocks": []}
 
     while t < t_stop:
         dt = float(np.clip(layer_time[cur] / cfg["steps_per_layer"], cfg["dt_min"], cfg["dt_max"]))
@@ -470,6 +482,12 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
                              np.where((lo_t > c["tg"]) | (hi_t > c["tg"]), np.clip(frac, 0, 1), 0.0))
             above_tg[j] += span * above
             weld[j] += span / _reptation_s((lo_t + hi_t) / 2, c)
+        # A layer is done once the nozzle is on a later one (or the print is over): keep everyone's temperature.
+        while snap_layers and (snap_layers[0] < cur or t_next >= born_last):
+            k = snap_layers.pop(0)
+            temp = T[rep[: lay_start[k + 1]]]
+            snaps["blocks"].append(np.clip(np.round((temp - snap_lo) / (snap_hi - snap_lo) * 255), 0, 255).astype(np.uint8))
+            snaps["layer"].append(k), snaps["t_s"].append(round(t_next, 2)), snaps["fan"].append(round(float(fan_eff), 3))
         t = t_next
         steps += 1
         if (t - t_begin) / (t_stop - t_begin) >= report_at:
@@ -484,7 +502,11 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     return Heat(layer=layer, xy=xy, z=z, volume=d["volume"], born_s=d["born"], birth_c=d["birth"], cover_c=cover_c,
                 cover_s=cover_s, joint_c=joint, above_tg_s=above_tg, bond=bond,
                 overhang=d["overhang"], cooled=d["cooled"], shell=d["shell"], island=island, column=column, cell_mm=cell, tier=tier,
-                material=c["material"], tg_c=c["tg"], seconds=time.time() - started, steps=steps)
+                material=c["material"], tg_c=c["tg"], seconds=time.time() - started, steps=steps,
+                snaps=None if not snapshots else {
+                    "layer": snaps["layer"], "t_s": snaps["t_s"], "fan": snaps["fan"], "lo_c": snap_lo, "hi_c": snap_hi,
+                    "start": np.cumsum([0] + [len(b) for b in snaps["blocks"]])[:-1].tolist(),
+                    "data": np.concatenate(snaps["blocks"]) if snaps["blocks"] else np.zeros(0, np.uint8)})
 
 
 def bond_strength(bond: np.ndarray, most: float | None = None) -> np.ndarray:
