@@ -53,6 +53,17 @@ def test_a_pin_that_stays_too_hot_is_cooled(pin):
     assert 8 <= tower["diameter"] <= 25 and tower["height"] > 6
 
 
+def test_auxiliary_boost_requires_an_equipped_printer(pin):
+    tp, r = pin
+    assert r["aux_fan_estimated"]
+    assert any(row["aux_fan"] == 1 for row in r["gcode"]["plan"])
+    assert r["plans"]["slicer"].aux is None
+    a1 = Profile.from_dict({"printer": "bambu_a1"})
+    unsupported = thermal_opt.optimize(tp, a1)
+    assert not unsupported["aux_fan_estimated"]
+    assert unsupported["plans"]["gcode"].aux is None
+
+
 def test_the_plan_leaves_protected_lines_alone(pin):
     """Overhang and bridge slowdowns, layers 0–1 and anything not part of the part keep their speed; nothing
     goes faster than its speed setting; fan commands stay in order; park moves add travel and pauses."""

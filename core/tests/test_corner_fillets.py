@@ -41,7 +41,12 @@ def _extrude_xz(boxes: list, depth: float) -> Mesh:
     return Mesh(mesh.triangles[:, ::-1]) if mesh.volume() < 0 else mesh
 
 
-def test_tall_pin_offers_foot_fillet_without_strength():
+@pytest.mark.parametrize("profile, phrase", [
+    ({}, "matters more for clips"),
+    ({"repeated_load": True}, "worth trying here"),
+    ({"repeated_load": False}, "helps a little"),
+])
+def test_tall_pin_offers_foot_fillet_without_strength(profile, phrase):
     """tall_pin gets one foot fillet advice at z=3 without running strength (no duplicate for both pin findings)."""
     r_expected = float(load_data("thresholds")["fillets"]["foot_radius_mm"])
     api.load((CORPUS / "tall_pin.stl").read_bytes(), "tall_pin")
@@ -49,12 +54,13 @@ def test_tall_pin_offers_foot_fillet_without_strength():
     chk = api.check(up)
     assert any(f["rule"] == "weak_upright_pin" for f in chk["findings"])
 
-    des = api.design(up, findings=chk["findings"])
+    des = api.design(up, profile, findings=chk["findings"])
     fillets = [a for a in des["advice"] if a["rule"] == "foot_fillet"]
     assert len(fillets) == 1, fillets
     a = fillets[0]
     assert f"r {r_expected:.1f} mm" in a["text"]
     assert "foot" in a["text"] and "pin" in a["text"]
+    assert phrase in a["text"] and "load runs along the layers" in a["text"]
     assert a["target"] == pytest.approx(r_expected)
     assert a["unit"] == "mm"
     assert a["fixes"]["rule"] in ("weak_upright_pin", "tall_thin_feature")
@@ -174,17 +180,20 @@ def test_no_duplication_with_boss_ribs_or_strength_chamfer():
     regs = api.regions()["regions"]
     bot = min((r for r in regs if r["normal"][2] < -0.9), key=lambda r: r["centroid"][2])
     top = max((r for r in regs if r["normal"][2] > 0.9), key=lambda r: r["centroid"][2])
-    st = api.strength([0, 0, 1], [
+    loads = [
         {"region": bot["id"], "kind": "fixed"},
         {"region": top["id"], "kind": "force", "kg": 50, "direction": "pull"},
-    ])
+    ]
+    st = api.strength([0, 0, 1], loads)
     assert st["verdict"] != "fine"
-    des_s = api.design([0, 0, 1])
-    assert any(e["id"] == "stress-chamfer" for e in des_s["edits"])
+    des_s = api.design([0, 0, 1], {"repeated_load": True})
+    stress_edit = next(e for e in des_s["edits"] if e["id"] == "stress-chamfer")
+    assert "worth trying here" in stress_edit["description"]
+    ideas = api.strength_options([0, 0, 1], loads, {"repeated_load": False})
+    fillet_idea = next(o for o in ideas if o.get("edit") == "stress-chamfer")
+    assert "helps a little" in fillet_idea["why"] and fillet_idea["safety_factor"] is None
     # The corner covered by stress-chamfer must not also be emitted as a foot_fillet.
-    stress_pts = np.frombuffer(
-        next(e for e in des_s["edits"] if e["id"] == "stress-chamfer")["mesh"], "<f4"
-    ).reshape(-1, 3)
+    stress_pts = np.frombuffer(stress_edit["mesh"], "<f4").reshape(-1, 3)
     s_lo, s_hi = stress_pts.min(axis=0), stress_pts.max(axis=0)
     for a in des_s["advice"]:
         if a["rule"] == "foot_fillet":

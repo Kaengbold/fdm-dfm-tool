@@ -115,13 +115,13 @@ function showHeat({ services, value }) {
   return true;
 }
 
-/** Another view, or leaving the step: the overlay goes, the part stands as loaded again. */
+/** Another view, or leaving the step: the overlay goes, the part stands as it prints again (as loaded before an option). */
 function clearHeat(services) {
   stopPlay();
   if (!shown) return;
   services.heatView?.clear();
   if (services.stage.part) services.stage.part.group.visible = true;
-  services.stage.orient(null);
+  services.stage.rest();
   shown = null;
 }
 
@@ -298,6 +298,9 @@ function fixBlock(value, services) {
   const busy = fixing === "busy";
   const out = [Button({ label: busy ? t("heat.fixBusy") : t("heat.fix"), variant: "secondary", disabled: busy, onClick: () => fixGcode(value, services) }),
     h("p", { class: "ui-hint" }, t("heat.fixHint"))];
+  if (value.gcode && String.fromCharCode(...value.gcode.subarray(0, 4)) === "GCDE") {
+    out.push(h("p", { class: "ui-hint" }, t("heat.fixBinary")));
+  }
   if (fixing && fixing !== "busy") {
     out.push(fixing.ok
       ? h("p", { class: "heat-ok", role: "status" }, t("heat.fixDone", { from: fixing.minutes[0], to: fixing.minutes[1] }))

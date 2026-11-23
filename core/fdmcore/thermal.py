@@ -5,7 +5,7 @@ The simple level (heat.py) treats each layer as one lump, and the line-by-line c
 lines are drawn into small cells, every cell becomes a node the moment the nozzle puts it down
 (at nozzle temperature, less at high flow), and heat flows sideways, down through the contact
 between layers and into the bed, and out to the air: by convection that follows the part fan
-(its speed, spin-up and distance below the nozzle), by radiation, and back in where the nozzle
+and, where fitted, the side fan (speed, spin-up and distance below the nozzle), by radiation, and back in where the nozzle
 passes over again. Heat capacity rises above the glass transition; semi-crystalline plastics
 release their latent heat as they crystallise.
 
@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import importance, progress
-from .gcode import LAYER_TIME, PART_KINDS, SOLID, SUPPORT, WALL, Toolpath, _role
+from .gcode import LAYER_TIME, PART_KINDS, SOLID, SUPPORT, WALL, Toolpath, _role, fan_mask
 from .kinematics import Timing, nozzle_at
 from .profile import Profile, load_data
 
@@ -136,6 +136,12 @@ def constants(profile: Profile, settings: dict | None = None) -> dict:
     chamber = {"none": air["open"], "passive": air["closed_bed_100"] if bed >= 90 else air["closed_bed_60"],
                "heated": air["heated_chamber"]}[enclosure]
     tc = m.get("tc_c", {}).get("value")
+    aux_h = 0.0
+    if profile.printer.get("aux_fan"):
+        model = str(s.get("printer_model", "")).strip().casefold()
+        supported = {p["name"].casefold() for p in load_data("presets")["printers"].values() if p.get("aux_fan")}
+        if not model or model in supported:
+            aux_h = _value(pr["h_aux_fan"])
     return {
         "material": mid, "rho": _value(m["density"]), "cp_glassy": _value(m["cp_glassy"]), "cp_melt": _value(m["cp_melt"]),
         "k": _value(m["k"]), "emissivity": _value(m["emissivity"]), "tg": _value(m["tg_c"]),
@@ -143,6 +149,7 @@ def constants(profile: Profile, settings: dict | None = None) -> dict:
         "nozzle_c": setting("nozzle_temperature", "temperature", default=float(profile.material["nozzle_temp_c"])),
         "bed_c": bed, "chamber_c": _value(chamber), "air_bed_mm": _value(pr["air_bed_layer_mm"]),
         "h_still": _value(pr["h_still_air"]), "h_fan": pr["h_fan"]["points"], "fan_falloff_mm": _value(pr["h_fan"]["falloff_mm"]),
+        "aux_fan_h": aux_h,
         "fan_spin_up_s": _value(pr["fan_spin_up_s"]), "contact": _value(pr["bead_contact_conductance"]),
         "z_ratio": _value(pr["z_conductivity_ratio"]),
         "bed_contact": float(pr["bed_contact_conductance"]["smooth_pei"]),
@@ -151,6 +158,11 @@ def constants(profile: Profile, settings: dict | None = None) -> dict:
         "reptation_s": _value(m["reptation_s"]), "reptation_ref": float(m["reptation_s"]["t_ref_c"]),
         "no_sag_c": _value(m["no_sag_c"]),
     }
+
+
+def aux_cooling(tp: Toolpath, c: dict) -> float:
+    """Only Bambu's P2 channel represents this blower."""
+    return c["aux_fan_h"] if tp.firmware == "bambu" else 0.0
 
 
 def _heat_capacity(T: np.ndarray, c: dict) -> np.ndarray:
@@ -327,12 +339,17 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     hit = np.searchsorted(d["keys"], want)
     hit = np.where(inside & (hit < n) & (d["keys"][np.minimum(hit, n - 1)] == want), hit, -1)
 
-    # Part fan over time, by print timing (fan commands sit between lines), with the blower's spin-up.
-    part = [k for k, name in enumerate(tp.fan_names) if name == "part"]
-    fan_mask = np.isin(tp.fans["fan"], part)
-    fan_line = tp.fans["line"][fan_mask]
-    fan_t = np.where(fan_line < len(tm.t0), tm.t0[np.minimum(fan_line, len(tm.t0) - 1)], tm.total_s)
-    fan_v = tp.fans["value"][fan_mask].astype(float)
+    # Fan commands sit between lines. Each blower has its own state and spin-up.
+    def fan_timeline(name):
+        mask = fan_mask(tp, name)
+        line = tp.fans["line"][mask]
+        ts = np.where(line < len(tm.t0), tm.t0[np.minimum(line, len(tm.t0) - 1)], tm.total_s)
+        return ts, np.r_[0.0, tp.fans["value"][mask]]
+
+    fan_t, fan_v = fan_timeline("part")
+    aux_h = aux_cooling(tp, c) if "P2" in tp.fan_names else 0.0
+    if aux_h:
+        aux_t, aux_v = fan_timeline("P2")
 
     # Steps: births quantised to step ends; steps per layer from each layer's print time.
     order = np.argsort(d["born"], kind="stable")
@@ -365,7 +382,7 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     local = np.full(len(T), -1)
     window = None
     nb = 0
-    t, steps, fan_eff, cur = t_begin, 0, 0.0, 0
+    t, steps, fan_eff, aux_eff, cur = t_begin, 0, 0.0, 0.0, 0
     air_of = lambda zz: c["chamber_c"] + (c["bed_c"] - c["chamber_c"]) * np.exp(-zz / c["air_bed_mm"])
     eps_sigma = c["emissivity"] * SIGMA
     report_at = 0.0
@@ -430,16 +447,18 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
             window = (cur, idx)
 
         # Fan with spin-up (first order), at this step.
-        k = np.searchsorted(fan_t, t_next, side="right") - 1
-        fan_set = fan_v[k] if k >= 0 else 0.0
-        fan_eff += (fan_set - fan_eff) * (1 - np.exp(-dt / c["fan_spin_up_s"]))
+        settle = 1 - np.exp(-dt / c["fan_spin_up_s"])
+        fan_eff += (fan_v[np.searchsorted(fan_t, t_next, side="right")] - fan_eff) * settle
+        if aux_h:
+            aux_eff += (aux_v[np.searchsorted(aux_t, t_next, side="right")] - aux_eff) * settle
         z_print = float(tp.layer_z[cur])
 
         Tn, Tl = T[nodes], T[lumps]
         # Losses to the air: the top until the next layer covers it, and the outer walls.
         covered = (up[nodes] >= 0) & born[np.maximum(up[nodes], 0)]
         area_air = top_area[nodes] * ~covered + side_area[nodes]
-        h_fan = _interp(c["h_fan"], fan_eff * 100) * np.exp(-np.maximum(z_print - z[nodes], 0) / c["fan_falloff_mm"])
+        h_fan = (_interp(c["h_fan"], fan_eff * 100) + aux_h * aux_eff) * np.exp(
+            -np.maximum(z_print - z[nodes], 0) / c["fan_falloff_mm"])
         air = air_of(z[nodes])
         h_rad = eps_sigma * ((Tn + 273.15) ** 2 + (air + 273.15) ** 2) * (Tn + air + 546.3)
         air_l = air_of(0.0)

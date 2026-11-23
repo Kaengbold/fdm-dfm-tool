@@ -124,6 +124,21 @@ def test_every_message_the_step_can_show_exists():
     assert not used - table, used - table
 
 
+@pytest.mark.parametrize("goal", ["balanced", "strong", "fast", "light", "quality"])
+def test_the_heat_check_takes_the_apps_goal_names(detail, goal):
+    """The app sends its own goal names (T-580); the heat check used to stop with "Unknown goal: strong" (T-584)."""
+    r = api.optimize_cooling([0, 0, 1], profile={"goal": goal})
+    assert r["before"]["too_hot"] + r["before"]["too_cold"] >= 0
+
+
+def test_the_apps_goal_names_mean_the_engines_goals():
+    from fdmcore.profile import Profile
+
+    assert [Profile.from_dict({"goal": g}).goal for g in ("strong", "fast", "light", "quality", "speed")] == [
+        "strength", "speed", "material", "balanced", "speed"]
+    assert Profile.from_dict({"goal": "quality"}).looks and not Profile.from_dict({"goal": "strong"}).looks
+
+
 def test_detail_has_a_replay_of_the_print(detail):
     """Every spot's temperature when each layer is done, as sliced and with the plan (T-588): blocks grow with the
     layers, the top layer is warm when it is done, and the plan's run is cooler where it fixed the hot pin."""

@@ -111,6 +111,7 @@ process:
     confidence: estimated
     falloff_mm: {value: 30, range: [10, 60], source: "estimate: the fan's effect fades with distance below the nozzle", confidence: estimated}
   fan_spin_up_s:  {value: 0.4, range: [0.2, 1.0], unit: s, source: "estimate for small DC blowers (time constant)", confidence: estimated}
+  h_aux_fan:      {value: 20, range: [10, 40], unit: W/m2K, source: "estimated increment from the upper end of Costa et al. 2014's convection bracket (150), allowing for Bambu's separate side blower", confidence: estimated}
   bead_contact_conductance: {value: 500, range: [100, 5000], unit: W/m2K, source: "estimate; Costa et al. 2014 only bracket 0 / 100 / 1e6 (no measured value)", confidence: estimated}
   z_conductivity_ratio:     {value: 0.7, range: [0.5, 0.9], unit: "-", source: "estimate: voids and the narrow bead contact lower k across layers", confidence: estimated}
   bed_contact_conductance:  {smooth_pei: 300, textured_pei: 150, range: [50, 1000], unit: W/m2K, source: "estimate (textured: less contact area)", confidence: estimated}

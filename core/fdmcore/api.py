@@ -23,7 +23,7 @@ from .checks import RULE_IMPACT, orient, run_checks, slice_mesh
 from .export3mf import export_3mf
 from .formats import read_bodies, unit_hint
 from .mesh import Mesh, mesh_health, to_binary_stl
-from .messages import summarize_finding
+from .messages import format_message, summarize_finding
 from .orientation import OrientationResult, OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
 from .placement import plate_layout, print_rotation
 from .profile import DATA as DATA_DIR, Profile, load_data, presets
@@ -173,6 +173,7 @@ def set_expert(values: dict[str, float]) -> dict:
     _analysis.update(grids)
     if _session is not None:
         _session.solved = None  # results depend on these
+        _session.warp = None
     return expert_settings()
 
 
@@ -1248,8 +1249,8 @@ def optimize(goal: str = "balanced", loads: list[dict] | None = None, depth: str
     reinforcements at Complete depth (or whenever ``change="design"``).
 
     ``loads`` as for strength (none, or goal quality: no strength solve). ``depth``: fast / extended / complete.
-    ``profile``: printer, nozzle, use_temp_c, constant_load (its material and goal are ignored; lock a material
-    with ``constraints``). ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
+    ``profile``: printer, nozzle, use_temp_c, constant_load and repeated_load (fillet advice only).
+    Lock a material with ``constraints``. ``owned``: materials on the user's shelf. ``materials`` / ``nozzles``: the only ones
     to consider (nozzles = the ticked sizes). ``environment``: {"temp_c", "touches": [water, food, outdoors,
     abrasion, oil_fuel, solvent, skin]}. ``constraints`` ("Your choices", hard limits): material, nozzle,
     layer_height, walls, top, bottom, infill, up. ``change``: slicer / design / both. ``faces`` as in orientations
@@ -1866,7 +1867,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     p = Profile.from_dict(profile)
     sh = _shells(p)
     warm = _warm_layers(up, p) if detailed else None
-    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm)
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, adhesion=True)
     model, turn = r["model"], r["rotation"]  # model in the print frame; turn: part -> print
     s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"] @ turn, "turn": turn}  # set_fit / set_gap use it
     key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
@@ -1876,7 +1877,9 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     curl = warp.curl(r)
     ratio = float(np.sqrt(curl / ref)) if ref else None
     verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
-    s.warp.update(verdict=verdict, setup=(p.material_id, p.enclosure))  # check() rates the print risk with it (T-391)
+    adhesion = r.get("adhesion")
+    peel_point = adhesion["point"] @ turn if adhesion and adhesion.get("may_lift") else None
+    s.warp.update(verdict=verdict, setup=_warp_setup(p), adhesion=adhesion, peel_point=peel_point)
     # Shape for the view: the part's own movement without the rigid shift and tilt it gets off the bed.
     pos = (model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h) @ turn  # part frame
     u = _without_rigid_motion(pos, r["u"] @ turn)
@@ -1886,7 +1889,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     pull = r["pull"]
     order = np.argsort(-pull)
-    spots = []
+    spots = [peel_point] if peel_point is not None else []
     for i in order[: 40]:
         if pull[i] <= 0 or len(spots) == 3:
             break
@@ -1897,6 +1900,11 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
            "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
            "from_gcode": warm is not None}
+    if adhesion is not None:
+        out["adhesion"] = {k: v for k, v in adhesion.items() if k != "point"}
+        if peel_point is not None:
+            out["lift_points_print"][0][2] = 0
+            out["adhesion"]["point_print"] = out["lift_points_print"][0]
     vm = warp.residual_stress(r)
     out["stress_value"] = surface_values(model, vm, fine @ turn.T).astype(np.float32).tobytes()
     out["stress_max"] = round(float(np.percentile(vm, 99)), 2) if len(vm) else 0.0
@@ -1934,12 +1942,28 @@ def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
     return u - (a @ coef).reshape(-1, 3)
 
 
-def _warp_verdict(s: Session, up, p: Profile) -> str | None:
-    """The last warping simulation's verdict, if it ran for this orientation, material and enclosure."""
+def _warp_setup(p: Profile) -> tuple:
+    return (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure,
+            p.printer.get("bed_surface", "unknown"), p.nozzle, p.layer_height, _shells(p))
+
+
+def _matching_warp(s: Session, up, p: Profile) -> dict | None:
+    """A change to the orientation or to inputs that drive shrinkage or grip needs another solve."""
     w = s.warp
-    if not w or "verdict" not in w or w["setup"] != (p.material_id, p.enclosure):
+    if not w or w.get("setup") != _warp_setup(p):
         return None
-    return w["verdict"] if np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999 else None
+    return w if np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999 else None
+
+
+def _adhesion_finding(s: Session, w: dict, rotation: np.ndarray) -> dict:
+    point = _print_frame_map(s.mesh, rotation)(w["peel_point"])
+    point[2] = 0  # The voxelised footprint can sit a fraction of a cube below the mesh.
+    h = w["model"].grid.h
+    bbox = [(point - [h, h, 0]).tolist(), (point + [h, h, h]).tolist()]
+    metrics = {k: v for k, v in w["adhesion"].items() if k not in ("point", "curls")}
+    message = {"key": "finding.bed_adhesion.one_liner", "params": {}}
+    return {"rule": "bed_adhesion", "severity": "warn", "impact": "fails", "bbox": bbox,
+            "metrics": metrics, "detail": format_message(message), "message": message}
 
 
 def _warp_story(r: dict, p: Profile) -> str:
@@ -2210,8 +2234,8 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
     """Read the G-code the part was sliced to (from our 3MF, in this orientation ``up``) for the
     detailed level: strength with the real walls, infill and line directions. Checks that it is this
     part (sizes, and most of the plastic inside the model; a quarter turn on the bed is found).
-    Plain G-code, or a Bambu Studio / OrcaSlicer ``.gcode.3mf`` (the G-code is inside, and its
-    settings next to it)."""
+    Plain G-code, Prusa binary G-code, or a Bambu Studio / OrcaSlicer ``.gcode.3mf``
+    (the G-code is inside, and its settings next to it)."""
     from .gcode import CAUSE_NAMES, KIND_NAMES, PART_KINDS, parse, placement, time_lost
     from .voxel import voxelize
 
@@ -2236,9 +2260,7 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
                     settings = json.loads(read_zip(z, "Metadata/project_settings.config"))
                 except ValueError:
                     pass
-    if isinstance(data, (bytes, bytearray)) and data[:4] == b"GCDE":
-        raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
-    tp = parse(data, settings)  # bytes are read a piece at a time: a big G-code is never copied as text
+    tp = parse(data, settings)  # read plain or binary G-code a piece at a time
     rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     turned = s.mesh.triangles.reshape(-1, 3) @ rot.T
     lo, hi = turned.min(axis=0), turned.max(axis=0)
@@ -2521,7 +2543,7 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     ``width`` / ``height`` (mm) and ``spot`` (the heat spot each lies in, -1: none; ``_paths``); ``fan_marks``
     where the plan changes the fan. ``slowdown_min``: minutes each slicer slowdown cause costs (what limits
     the print). ``rotation``: the oriented frame (part @ rotation.T, centred, on z = 0)."""
-    from .gcode import CAUSE_NAMES, time_lost
+    from .gcode import CAUSE_NAMES, fan_levels, time_lost
     from .importance import REASONS
     from .kinematics import timing
     from .thermal_opt import apply
@@ -2598,10 +2620,15 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     a, b = np.asarray(tp.p0[chosen], float), np.asarray(tp.p1[chosen], float)
     width = tp.volume[chosen] / np.maximum(np.linalg.norm(b - a, axis=1) * tp.layer_height[chosen], 1e-6)
     # Where the plan sets a fan the slicer didn't: the first line of each stretch with a new value.
-    new_fan = np.abs(planned.part_fan - tp.part_fan) > 0.01
-    starts = np.flatnonzero(new_fan & (np.concatenate([[True], np.abs(np.diff(planned.part_fan)) > 0.01]) | ~np.concatenate([[False], new_fan[:-1]])))
-    fan_marks = [{"layer": int(tp.layer[i]), "point": to_oriented(np.asarray(tp.p0[i], float)[None])[0].round(2).tolist(),
-                  "fan": round(float(planned.part_fan[i]), 2)} for i in starts[tp.part()[starts]][:200]]
+    fan_marks = []
+    fans = [("part", tp.part_fan, planned.part_fan)]
+    if plan.aux is not None and np.isfinite(plan.aux).any():
+        fans.append(("aux", fan_levels(tp, "P2"), fan_levels(planned, "P2")))
+    for channel, old, new in fans:
+        changed = np.abs(new - old) > 0.01
+        starts = np.flatnonzero(changed & (np.r_[True, np.abs(np.diff(new)) > 0.01] | ~np.r_[False, changed[:-1]]))
+        fan_marks.extend({"layer": int(tp.layer[i]), "point": to_oriented(np.asarray(tp.p0[i], float)[None])[0].round(2).tolist(),
+                          "fan": round(float(new[i]), 2), "channel": channel} for i in starts[tp.part()[starts]][:200])
     lost = time_lost(tp)
     return {"spots": spots, "timeline": timeline, "rotation": np.round(rot, 6).tolist(), "replay": _replay(base, after, idx),
             "lines": {"segments": f32(seg), "factor": f32(factor[keep][src]), "layer": np.asarray(tp.layer[chosen][src], np.int32).tobytes(),
@@ -2614,8 +2641,8 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
 def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dict] | None = None,
                    intents: list[dict] | None = None, fine: bool = False) -> dict:
     """Option B (opt-in): the cooling plan written into the user's own G-code (gcode_rewrite.py): only speeds,
-    part fan commands and cooling park moves change; the original file stays theirs. ``data``: the plain
-    G-code loaded with load_gcode. Before it is offered it is read back and checked (same paths and plastic
+    fan commands and cooling park moves change; the original file stays theirs. ``data``: the plain
+    or binary G-code loaded with load_gcode. The output is plain G-code, read back and checked (same paths and plastic
     per layer, machine speed and flow limits) and simulated again: no spot may end up outside its window that
     wasn't before. ``ok`` False: no ``data``, and ``problems`` says why. Else ``data`` (the new G-code),
     ``minutes`` (before, after) and ``changes``."""
@@ -2675,7 +2702,8 @@ def _cooling_view(r: dict, imp, p: Profile) -> dict:
                 "weighted_too_hot": round(part["weighted_hot"], 1), "weighted_too_cold": round(part["weighted_cold"], 1)}
 
     out = {"before": view(r["before"]), "gcode": {**view(r["gcode"]), "plan": r["gcode"]["plan"]},
-           "slicer": {**view(r["slicer"]), "cooling": r["slicer"]["cooling"]}, "guessed": imp.guessed, "confidence": confidence(p)}
+           "slicer": {**view(r["slicer"]), "cooling": r["slicer"]["cooling"]}, "guessed": imp.guessed, "confidence": confidence(p),
+           "aux_fan_estimated": r["aux_fan_estimated"]}
     out["summary"] = _cooling_summary(out)
     return out
 
@@ -2695,7 +2723,10 @@ def _cooling_summary(r: dict) -> list[str]:
         return f"{x['too_hot']} spots too hot, {x['too_cold']} too cold to bond well"
 
     if not g["plan"] and b["too_hot"] == 0 and b["too_cold"] == 0:
-        return ["Nothing to gain: every spot stays in its temperature window, and the slicer slowed no layer for cooling it didn't need."]
+        lines = ["Nothing to gain: every spot stays in its temperature window, and the slicer slowed no layer for cooling it didn't need."]
+        if r["aux_fan_estimated"]:
+            lines.append("The side fan's extra cooling is an estimate.")
+        return lines
     lines = [f"As sliced: {b['print_min']:.1f} min, {spots(b)}."]
     if g["plan"]:
         lines.append(f"With the cooling plan in the G-code: {g['print_min']:.1f} min, {spots(g)}.")
@@ -2708,6 +2739,8 @@ def _cooling_summary(r: dict) -> list[str]:
     if sl["cooling"]["ranges"] or sl["cooling"].get("tower"):
         lines.append(f"With your slicer's settings only (slower heights{extra}): {sl['print_min']:.1f} min, {spots(sl)}. "
                      "Fan changes and undoing the slicer's slowdown need the G-code.")
+    if r["aux_fan_estimated"]:
+        lines.append("The side fan's extra cooling is an estimate.")
     lines.append(CONFIDENCE_TEXT[r["confidence"]] + (" Which spots matter is guessed from the shape: add the loads for a real answer." if r["guessed"] else ""))
     return lines
 
@@ -3241,7 +3274,7 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
     """What helps besides slicer settings and orientation: a design change at the weak spot, another
     material, or a lighter load (that still reaches ``need``, default the usual safety). Also the way
     out when even the strongest settings aren't enough."""
-    from .features import concave_edges
+    from .features import concave_edges, inside_corner_load_advice
     from .strength import verdict
 
     s = _require()
@@ -3259,10 +3292,9 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
         edges = concave_edges(s.mesh)
         if edges and min(np.linalg.norm((e["a"] + e["b"]) / 2 - spot) for e in edges) <= 8 * s.weak_spot[1]:
             add("Round off the weak inside corners (design change)", "design", None,
-                "The most stress sits at a sharp inside corner; a 2–4 mm round spreads it out (a 45° chamfer where a "
-                "round would hang over in this orientation). Every inside corner that is nearly as weak gets one too, "
-                "so the weak spot doesn't just move to the next corner. On a test part a 2 mm chamfer gave about +15 %, "
-                "4 mm about +40 %. Preview it under Design changes, then check strength again.",
+                "The strength check found a sharp inside corner near the weak spot. "
+                f"{inside_corner_load_advice(p.repeated_load)} "
+                "Preview the round or self-supporting 45° chamfer under Design changes, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
@@ -4029,7 +4061,10 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         result["findings"].append({"rule": "turned_to_fit", "severity": "info", "bbox": None, "metrics": fit,
                                    "detail": f"Turned {fit['turned_deg']:.0f}° on the bed so it fits the {p.printer['name']}"})
     height = float(np.ptp(oriented.triangles[..., 2])) if len(oriented.triangles) else 0.0
-    risk = print_risk(p, result["findings"], height, _warp_verdict(s, up, p))
+    w = _matching_warp(s, up, p)
+    if w and w["peel_point"] is not None:
+        result["findings"].append(_adhesion_finding(s, w, rotation))
+    risk = print_risk(p, result["findings"], height, w["verdict"] if w else None)
     if risk["level"] == "high":
         result["findings"].append({"rule": "print_may_fail", "severity": "warn", "bbox": None,
                                    "metrics": {"score": risk["score"], "hold": risk["hold"]},

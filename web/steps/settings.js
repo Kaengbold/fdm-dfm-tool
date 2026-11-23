@@ -844,6 +844,10 @@ function renderPrinterEditor() {
       { value: "smooth_pei", label: t("settings.printers.plateSmooth") },
       { value: "glass", label: t("settings.printers.plateGlass") },
       { value: "cool_plate", label: t("settings.printers.plateCool") },
+      { value: "polyimide", label: t("settings.printers.platePolyimide") },
+      { value: "aluminium", label: t("settings.printers.plateAluminium") },
+      { value: "glass_glue", label: t("settings.printers.plateGlassGlue") },
+      { value: "buildtak", label: t("settings.printers.plateBuildtak") },
     ],
     onChange: (val) => { v.bed_surface = val; },
   });
@@ -1252,6 +1256,7 @@ function renderMaterialEditor() {
   const grams = NumberField({ label: t("settings.materials.gramsLeft"), value: v.spool_left_g ?? "", min: 0, max: 100000, units: [{ value: "g", label: t("settings.materials.gramsUnit") }], onChange: (n) => { v.spool_left_g = n ?? ""; } });
 
   const layerTime = NumberField({ label: t("settings.materials.fieldLayerTime"), value: v.min_layer_time_s ?? 8, min: 0, max: 60, units: [{ value: "s", label: "s" }], onChange: (n) => { if (n != null) v.min_layer_time_s = n; } });
+  const bedTemp = NumberField({ label: t("settings.materials.fieldBedTemp"), value: v.bed_temp_c ?? "", min: 0, max: 200, units: [{ value: "c", label: "°C" }], onChange: (n) => { v.bed_temp_c = n ?? ""; } });
   const flow = NumberField({ label: t("settings.materials.fieldFlow"), value: v.max_flow_mm3s ?? 15, min: 1, max: 100, units: [{ value: "mm3s", label: "mm³/s" }], onChange: (n) => { if (n != null) v.max_flow_mm3s = n; } });
   const density = NumberField({ label: t("settings.materials.fieldDensity"), value: v.density_g_cm3 ?? 1.24, min: 0.5, max: 3, units: [{ value: "g", label: "g/cm³" }], onChange: (n) => { if (n != null) v.density_g_cm3 = n; } });
   const shrinkage = NumberField({ label: t("settings.materials.fieldShrinkage"), value: v.shrinkage_pct ?? 0.3, min: 0, max: 5, units: [{ value: "pct", label: "%" }], onChange: (n) => { if (n != null) v.shrinkage_pct = n; } });
@@ -1289,7 +1294,7 @@ function renderMaterialEditor() {
       label: t("ui.more"),
       content: h("div", { class: "set-section" },
         h("div", { class: "set-grid-3" }, layerTime, flow, density),
-        h("div", { class: "set-grid-2" }, shrinkage, tensile),
+        h("div", { class: "set-grid-3" }, shrinkage, tensile, bedTemp),
         h("div", { class: "set-grid-2" },
           h("div", { class: "set-field" }, h("span", { class: "ui-label" }, t("settings.materials.fieldWarp")), warpSeg),
           h("div", { class: "set-field" }, h("span", { class: "ui-label" }, t("settings.materials.fieldFibre")), fibreSeg))),

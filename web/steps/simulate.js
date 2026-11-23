@@ -144,12 +144,12 @@ async function runSimulations(store, services) {
       }
     }
     const detailed = Boolean(gcode);
-    run.stage = "check";
-    services.rerender();
-    const check = await engine.call("check", { up: o.up, profile, detailed, faces: markedFaces(s) });
     run.stage = "warp";
     services.rerender();
     const warp = await engine.call("warping", { up: o.up, profile, detailed });
+    run.stage = "check";
+    services.rerender();
+    const check = await engine.call("check", { up: o.up, profile, detailed, faces: markedFaces(s) });
     const more = [];
     for (const sim of extra) {
       run.stage = sim.stage ?? run.stage;
@@ -295,6 +295,8 @@ registerStep("sim", {
       body.append(list, h("p", { class: "ui-hint" }, result.detailed
         ? t(result.source === "file" ? "sim.basis.file" : "sim.basis.orca", { minutes: Math.round(result.gcode.print_time_min) })
         : result.gcodeError ? t("sim.basis.wrongFile", { reason: result.gcodeError }) : t("sim.basis.ours")));
+      if (result.warp.adhesion) body.append(h("p", { class: "ui-hint" },
+        t(result.warp.adhesion.assumed_surface ? "sim.adhesion.assumed" : "sim.adhesion.estimated")));
       for (const sim of extra) sim.panel?.({ body, store, services, value: extraValue(result, sim), overlay });
     } else {
       body.append(h("p", { class: "ui-hint" }, t("sim.skipNote")));

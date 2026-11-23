@@ -93,7 +93,8 @@ def test_optimize_args_matches_api_signature_and_maps_all_fields():
     lk = out["locked"]
     assert lk["goal"] == "strong"
     assert lk["change"] == "both"
-    assert lk["profile"] == {"printer": "bambu_p1s", "nozzle": "0.6", "use_temp_c": 50, "constant_load": True}
+    assert lk["profile"] == {"printer": "bambu_p1s", "nozzle": "0.6", "use_temp_c": 50,
+                             "constant_load": True, "repeated_load": False}
     assert lk["constraints"] == {"material": "petg", "nozzle": "0.6"}
     assert lk["nozzles"] == ["0.4", "0.6"]
     assert lk["owned"] == ["petg", "pla"]
@@ -106,6 +107,18 @@ def test_optimize_args_matches_api_signature_and_maps_all_fields():
     assert ul["constraints"] == {}
     assert ul["nozzles"] == ["0.2", "0.4", "0.6", "0.8", "1.0"]
     assert ul["loads"] is None  # quality skips strength
+    assert "repeated_load" not in ul["profile"]
+
+
+def test_load_details_map_to_fillet_advice_without_changing_constant_load():
+    profiles = run_js("""
+      return [undefined, {duration: 'short', vibration: 'drop'}, {duration: 'often'},
+              {duration: 'always'}, {duration: 'always', vibration: 'vibration'}]
+        .map(details => A.optimizeArgs({details}).profile);
+    """)
+    parsed = [Profile.from_dict(p) for p in profiles]
+    assert [p.repeated_load for p in parsed] == [None, False, True, False, True]
+    assert [p.constant_load for p in parsed] == [False, False, False, True, True]
 
 
 def test_evaluate_materials_matches_python_allowed_materials():

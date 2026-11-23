@@ -45,6 +45,7 @@ export function actions(row) {
   if (!row) return [];
   const out = [];
   if (row.fan != null) out.push({ key: "heat.do.fan", params: { fan: Math.round(row.fan * 100) } });
+  if (row.aux_fan != null) out.push({ key: "heat.do.auxFan", params: { fan: Math.round(row.aux_fan * 100) } });
   if (row.slower < 1) out.push({ key: "heat.do.slower", params: { pct: Math.round(row.slower * 100) } });
   if (row.faster > 1) out.push({ key: "heat.do.faster" });
   if (row.park_s > 0) out.push({ key: "heat.do.park", params: { s: row.park_s } });
@@ -109,6 +110,7 @@ export function summary(r, d) {
     if (after.hot && after.hot < before.hot) lines.push({ key: "heat.sum.tradeoff" });
   }
   if (after.accepted) lines.push({ key: "heat.sum.accepted", params: { count: after.accepted } });
+  if (r.aux_fan_estimated) lines.push({ key: "heat.sum.auxEstimated" });
   const slow = Object.entries(r.slowdown_min ?? {}).filter(([c]) => CAUSES.includes(c)).sort((x, y) => y[1] - x[1]);
   if (slow.length) lines.push({ key: "heat.sum.limit", params: { what: { key: `heat.cause.${slow[0][0]}` }, min: slow[0][1] } });
   return lines;
