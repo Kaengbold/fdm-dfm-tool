@@ -73,6 +73,7 @@ export const MATERIAL_FIELDS = [
   ["sag_limit_c", "Too hot to keep its shape above (°C, from the sag test)", "number", 1],
   ["min_bond", "Layer bond it needs (0–1, from the snap test)", "number", 0.01],
   ["nozzle_temp_c", "Nozzle temperature (°C, from the temperature tower)", "number", 1],
+  ["bed_temp_c", "Bed temperature for checks (°C)", "number", 1],
   ["ironing_flow_pct", "Ironing flow (%, from the ironing test)", "number", 1],
   ["price_per_kg", "Price per kg (your currency, for the cost of a print)", "number", 0.01],
   ["spool_left_g", "Grams left on the spool (warns when a print won't fit)", "number", 1],
@@ -87,7 +88,8 @@ export const PRINTER_FIELDS = [
   ["multi_material", "Multi-material", ["none", "optional", "builtin"]],
   ["hardened_nozzle", "Hardened nozzle", "checkbox"],
   ["moving_bed", "Bed moves back and forth (bed slinger)", "checkbox"],
-  ["bed_surface", "Build plate", ["unknown", "textured_pei", "smooth_pei", "glass", "cool_plate"]],
+  ["bed_surface", "Build plate", ["unknown", "textured_pei", "smooth_pei", "glass", "cool_plate",
+    "polyimide", "aluminium", "glass_glue", "buildtak"]],
 ];
 const ENCLOSURES = ["none", "passive", "heated"];
 

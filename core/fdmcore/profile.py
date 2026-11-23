@@ -83,7 +83,8 @@ PRINTER_FIELDS = {
     "speed": (("fast", "medium"), None, None),
     "multi_material": (("none", "optional", "builtin"), None, None),
     "moving_bed": (bool, None, None),
-    "bed_surface": (("unknown", "textured_pei", "smooth_pei", "glass", "cool_plate"), None, None),
+    "bed_surface": (("unknown", "textured_pei", "smooth_pei", "glass", "cool_plate",
+                     "polyimide", "aluminium", "glass_glue", "buildtak"), None, None),
 }
 MATERIAL_FIELDS = {
     "name": (str, None, None),
@@ -99,6 +100,7 @@ MATERIAL_FIELDS = {
     "modulus_xy_mpa": (float, 10, 50000),
     "density_g_cm3": (float, 0.5, 3.0),
     "shrinkage_pct": (float, 0, 5),
+    "bed_temp_c": (float, 0, 200),
     "warp_length_mm": (dict, 10, 1000),  # measured with the warping calibration print (overrides thresholds.yaml)
     "heat_limit_c": (float, 20, 400),  # where printed parts lose most stiffness (glass transition)
     "uv_resistance": (("good", "fair", "poor"), None, None),

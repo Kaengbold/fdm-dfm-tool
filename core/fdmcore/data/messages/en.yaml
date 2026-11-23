@@ -197,6 +197,8 @@ finding.fine_detail_rough.one_liner_size: "{width} mm feature is too fine for a 
 finding.warping.title: "Base corners can lift"
 finding.warping.one_liner: "Long flat base shrinks as it cools and pulls corners off the bed."
 finding.warping.one_liner_len: "{length} mm {material} base cools and lifts corners off the bed."
+finding.bed_adhesion.title: "May come loose here"
+finding.bed_adhesion.one_liner: "This corner may lift as the print shrinks. Bed grip is estimated."
 
 finding.weak_upright_pin.title: "Upright pin snaps easily"
 finding.weak_upright_pin.one_liner: "Layers run across the stem; a sideways bump snaps it off."

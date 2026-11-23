@@ -82,3 +82,11 @@ The force increases by approximately 8.9? on glass and 6.3? on PI from 60 to 70 
 - [Bechtel et al., *Materials* 13 (2020) 3371](https://www.mdpi.com/1996-1944/13/15/3371): PLA/aluminium joints printed on substrates at 150?200 ?C and assessed after a special cooling/tempering cycle. Relevant to thermal history and lap-joint adhesion, but not a hot ordinary printer-bed peel threshold.
 
 Confidence is moderate for the transcribed PLA shear forces and their arithmetic under the reported test setup, low for transfer to ordinary first-layer printing, and insufficient for numerical corner-peel defaults. The unusually slow 50 mm/min print speed, wide strands, loading mode, surface preparation, temperature history and material formulation all affect transfer. Calibration against a measured peel test and independent bars remains necessary.
+
+## Screening model used in T-390
+
+The checker uses the shear measurements as inputs to an editable grip estimate. A triangular traction-slip curve gives `Gc ≈ (F/L) × 0.30 mm / (2 × 1.8 mm)`, with 1.8 mm the approximate strand width and 0.30 mm an assumed slip distance. All resulting peel-work values are low confidence. The Expert table lists the PLA shear measurements separately from the material and plate estimates. The latter borrow a nearby PLA or ABS-family estimate and use the Kaščak comparison for relative plate grip.
+
+At the end of the clamped simulation, the checker tries a seed patch at the strongest upward edge reaction, followed by up to two front advances. At fixed thermal state, applying the reversed clamp reactions as loads about the held equilibrium gives released energy `W = f·u/2`. Each trial compares `(W_new − W_old)/ΔA` with `Gc`, using the bottom faces to weight the released area. A corner flags when the opening front advances at least 2 mm beyond the starter patch.
+
+The experimentally uncalibrated screening model also requires the calculated free curl to reach two profile layer heights. The local energy release by itself plateaued between the 40 mm and 90 mm ABS bars. At 1 mm voxel spacing, free curl was 0.29 mm and 1.20 mm respectively. The opening screen and peel solve together flagged the 90 mm bar on an open printer. The solver checks the final shrink state of the bare model and assumes linear elasticity. Testing against real hot-bed prints remains open.

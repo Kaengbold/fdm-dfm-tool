@@ -871,6 +871,27 @@ rules:
     - CNC Kitchen — How to Prevent Warping in 3D Printing — https://www.youtube.com/watch?v=HNAtHl6kB7Y
     - 'OrcaSlicer Wiki — Others Settings: Brim type (Mouse ear) — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_brim'
     - Bambu Lab Wiki — ASA CF / PAHT CF Usage Guide — https://wiki.bambulab.com/en/filament/asacf_pahtcf
+  bed_adhesion:
+    title: May come loose here
+    why: As the print cools and shrinks, this spot may pull free of the build plate. The check estimates how well
+      the material sticks to the plate.
+    fixes:
+    - domain: slicer
+      text: Add mouse ears to anchor the lifting corner, or use a wide outer brim.
+      settings:
+        brim_type: brim_ears
+        brim_width: '8'
+    - domain: process
+      text: Try a warmer bed within the filament maker's range. Clean the plate and use a surface suitable for this
+        filament. Use glue only if the plate maker recommends it for the combination.
+    - domain: process
+      text: Keep drafts away. Close the enclosure when printing ABS, ASA or PC.
+    tags:
+    - warping
+    - bed adhesion
+    sources:
+    - Prusa Knowledge Base — Warping — https://help.prusa3d.com/article/warping_2011
+    - Prusa Knowledge Base — Steel sheets — https://help.prusa3d.com/article/steel-sheets_2195
   weak_upright_pin:
     title: Upright pin snaps along its layers
     why: A narrow pin stands upright on the print bed. Horizontal layer lines run across the stem, so a sideways bump

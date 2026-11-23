@@ -31,8 +31,9 @@ from __future__ import annotations
 from itertools import product
 
 import numpy as np
+from scipy.ndimage import binary_dilation
 
-from .fea import b_matrix, build_model, element_stiffness, solve
+from .fea import Model, b_matrix, build_model, element_stiffness, solve
 from .heat import H_FAN, H_STILL, K_PLASTIC
 from .mesh import Mesh
 from .orientation import rotation_to_z
@@ -56,14 +57,15 @@ def warp_limit(profile: Profile) -> float | None:
 
 
 def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None,
-             warm: tuple | None = None) -> dict:
+             warm: tuple | None = None, *, adhesion: bool = False) -> dict:
     """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model (voxelised in the
     print frame: ``rotation`` turns part coordinates into it, so a tilted part sits flat on the grid's
     bottom layer instead of touching the bed with one stair-step corner), displacement after coming off
     the bed (n_nodes, 3, print frame), the bed's pull at each bed node while printing
     (N, positive = the part pulls away from the bed) and the bed nodes. ``warm`` (heights, °C): how warm
     each height still is when more goes on top (the layer heat model with the G-code's real layer
-    times); plastic still warm then shrinks less while printing."""
+    times); plastic still warm then shrinks less while printing. With ``adhesion``, test whether a
+    bed edge peels in the final shrink state."""
     rotation = rotation_to_z(up)
     # Rounded: float noise from the turn (3.0000000001 mm) would add a whole voxel layer.
     model = build_model(voxelize(Mesh(np.round(mesh.triangles @ rotation.T, 9)), target_voxels, h))
@@ -125,8 +127,104 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     u_free, _ = solve(model, c, scale, -held_total, np.zeros(model.n_nodes, dtype=bool), springs=springs)
     strain += u_free.ravel()[model.edof] @ b_mid.T
     pull = -(held_total @ up)  # the bed pulling the part down = the part pulling away from the bed
-    return {"model": model, "u": u_total + u_free, "pull": pull, "bed": bed, "up": up, "rotation": rotation,
-            "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat}
+    out = {"model": model, "u": u_total + u_free, "pull": pull, "bed": bed, "up": up, "rotation": rotation,
+           "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat}
+    if adhesion:
+        grip = bed_grip(profile)
+        if grip is not None:
+            # Local energy saturates even for finite cracks on long bars. Screen for
+            # enough overall bending to open a meaningful gap before trying the peel.
+            settings = load_data("thresholds")["bed_adhesion"]
+            curls = curl(out) >= settings["min_curl_layers"] * profile.layer_height
+            peel = _edge_peel(model, c, scale, held_total, bed, springs, grip["grip_n_mm"]) if curls else {}
+            out["adhesion"] = {**grip, "may_lift": False, "advance_mm": 0.0, **peel, "curls": curls}
+    return out
+
+
+def bed_grip(profile: Profile) -> dict | None:
+    """Effective peel-work estimate from strand shear, with the measured inputs identified."""
+    settings = load_data("thresholds")["bed_adhesion"]
+    mat = profile.material.get("based_on", profile.material_id)
+    surface = profile.printer.get("bed_surface", "unknown")
+    assumed_surface = surface == "unknown"
+    if assumed_surface:
+        surface = "textured_pei"
+    shear = settings["nominal_shear_n_mm"].get(mat, {}).get(surface)
+    source = "estimated"
+    if mat == "pla" and surface in settings["pla_strand_shear_n_mm"]:
+        temp = profile.material["bed_temp_c"]
+        # Keep the measured jump near Tg rather than smoothing it across the whole range.
+        anchor = "at_70_c" if temp > 65 else "at_60_c"
+        shear = settings["pla_strand_shear_n_mm"][surface][anchor]
+        if temp > 75:
+            shear *= settings["pla_hot_shear_share"]
+        elif temp in (60, 70):
+            source = "measured shear anchor"
+    if shear is None:
+        return None
+    # (peak N / strand length) / strand width gives apparent shear traction.
+    # Integrate a triangular traction-slip law over an assumed effective slip
+    # distance to estimate work per area, in N/mm. The slip and transfer to
+    # mixed-mode opening are approximations even for measured shear inputs.
+    strand_width_mm = 1.8  # Leoben's apparent strand width was 1.65–1.9 mm.
+    grip = max(0.0, shear) * max(0.0, settings["effective_slip_mm"]) / (2 * strand_width_mm)
+    return {"surface": surface, "assumed_surface": assumed_surface, "shear_source": source,
+            "shear_n_mm": shear, "grip_n_mm": grip, "confidence": "low"}
+
+
+def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray, bed: np.ndarray,
+               springs: tuple, grip: float) -> dict:
+    """Release a finite patch at the most-pulled edge, then follow its front."""
+
+    h = model.grid.h
+    bottom = model.elems[:, 2].min()
+    footprint = model.grid.solid[:, :, bottom]
+    area = np.zeros(np.array(footprint.shape) + 1)
+    for x, y in product((0, 1), repeat=2):
+        area[x:x + footprint.shape[0], y:y + footprint.shape[1]] += footprint * h**2 / 4
+    ids = model.node_index[:, :, bottom]
+    edge = (area > 0) & (area < h**2)
+    pull = np.where(edge, -held[ids, 2], 0)
+    if pull.max(initial=0) <= 0:
+        return {}
+    seed = np.unravel_index(pull.argmax(), pull.shape)
+    released = np.zeros_like(edge)
+    released[seed] = True
+    # A finite starter patch spans several voxels. Across a one-voxel front,
+    # the energy is dominated by discretization of the fully clamped edge.
+    starter_mm, advance_mm = 8.0, 2.0
+    energy = 0.0
+    u = None
+    loads = -held
+    released_area = 0.0
+    advance = 0.0
+    starter_extent = 0.0
+    rate = None
+    for i, distance in enumerate((starter_mm, advance_mm, advance_mm)):
+        grown = binary_dilation(released, mask=area > 0, iterations=max(1, round(distance / h)))
+        grown_area = area[grown].sum()
+        added = grown_area - released_area
+        if not added or np.count_nonzero((area > 0) & ~grown) < 3:
+            break
+        trial = bed.copy()
+        trial[ids[grown]] = False
+        step, info = solve(model, c, scale, loads, trial, springs=springs, x0=u)
+        if info or not np.isfinite(step).all():
+            break
+        # About the held equilibrium, release is equivalent to reversing the
+        # accumulated bed reactions. Minimum potential is -f·u/2 (N mm).
+        work = 0.5 * np.sum(loads * step)
+        rate = float((work - energy) / added)
+        if rate < grip or step[ids[seed], 2] <= 0:
+            break
+        released, energy, u = grown, work, step
+        released_area = grown_area
+        extent = h * np.abs(np.argwhere(released) - seed).sum(axis=1).max()
+        if i == 0:
+            starter_extent = extent
+        advance = float(extent - starter_extent)
+    point = model.grid.origin + h * np.array([*seed, bottom])
+    return {"point": point, "energy_release_n_mm": rate, "advance_mm": advance, "may_lift": advance >= advance_mm}
 
 
 def residual_stress(result: dict) -> np.ndarray:
