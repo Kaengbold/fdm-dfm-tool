@@ -28,7 +28,6 @@ reference, not for exact numbers.
 
 from __future__ import annotations
 
-from bisect import bisect_right
 from itertools import product
 
 import numpy as np
@@ -239,11 +238,9 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray,
         if grip is None:
             rates.append(rate)
             if advance >= advance_mm:
-                # Lift occurs only when every step up to this advance passes.
-                # The changeover is at one of the cached step rates.
-                candidates = sorted(rates, reverse=True)
-                first_lifting = bisect_right(candidates, False, key=lambda g: all(r >= g for r in rates))
-                return {"lift_grip_n_mm": candidates[first_lifting]}
+                # The path doesn't depend on the grip until a step fails, so the front reaches this
+                # advance (lift) exactly when every step's release rate is at least the grip.
+                return {"lift_grip_n_mm": min(rates)}
     point = model.grid.origin + h * np.array([*seed, bottom])
     return {"point": point, "energy_release_n_mm": rate, "advance_mm": advance, "may_lift": advance >= advance_mm}
 
