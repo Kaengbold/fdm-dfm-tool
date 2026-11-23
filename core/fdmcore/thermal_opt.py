@@ -35,10 +35,11 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from . import progress
-from .gcode import BRIDGE, LAYER_TIME, NOT_SLOWED, OVERHANG, PART_KINDS, SMALL_PERIMETER, UNKNOWN, VOLUMETRIC_CAP, Toolpath, flow_cap
+from .gcode import (BRIDGE, LAYER_TIME, NOT_SLOWED, OVERHANG, PART_KINDS, SMALL_PERIMETER, UNKNOWN, VOLUMETRIC_CAP,
+                    Toolpath, fan_levels, fan_mask, flow_cap)
 from .kinematics import timing
 from .profile import Profile, load_data
-from .thermal import Heat, _interp, constants, simulate, window
+from .thermal import Heat, _interp, aux_cooling, constants, simulate, window
 
 PROTECTED = (OVERHANG, BRIDGE, SMALL_PERIMETER, VOLUMETRIC_CAP, UNKNOWN)  # slowdowns that protect the print
 FIRST_LAYER = 2  # layers 0 and 1 keep the slicer's settings (bed adhesion)
@@ -65,6 +66,7 @@ class Plan:
     slow: np.ndarray
     fast: np.ndarray
     park: np.ndarray
+    aux: np.ndarray | None = None  # auxiliary fan per layer, when the printer supports it
 
     @classmethod
     def none(cls, layers: int) -> "Plan":
@@ -80,8 +82,34 @@ def adjustable(tp: Toolpath) -> np.ndarray:
             & ~skip[tp.feature] & np.isfinite(tp.set_speed))
 
 
+def aux_schedule(tp: Toolpath, plan: Plan) -> tuple[np.ndarray, dict]:
+    """P2 commands to insert and which original commands they override, by printed line."""
+    if tp.firmware != "bambu" or plan.aux is None or not np.isfinite(plan.aux).any():
+        return np.empty(0, bool), {}
+    count = len(tp.layer)
+    first = np.searchsorted(tp.layer, np.arange(len(plan.aux) + 1))
+    want = np.full(count + 1, np.nan)
+    lead = float(settings()["fan_lead_spin_ups"]) * float(load_data("thermal")["process"]["fan_spin_up_s"]["value"])
+    for k in np.flatnonzero(np.isfinite(plan.aux[FIRST_LAYER:])) + FIRST_LAYER:
+        if first[k] < count:
+            start = np.searchsorted(tp.t0, tp.t0[first[k - 1]] - lead)
+            lo, hi = max(first[FIRST_LAYER], start), first[k + 1]
+            want[lo:hi] = np.fmax(want[lo:hi], round(255 * plan.aux[k]) / 255)
+    # Change at a span boundary, including restoring the slicer's setting at the end.
+    override = np.isfinite(want)
+    sliced = fan_levels(tp, "P2")
+    original = set(tp.fans["line"][fan_mask(tp, "P2")])
+    events = {}
+    for i in np.flatnonzero(np.diff(np.r_[-1.0, np.nan_to_num(want, nan=-1)]) != 0):
+        if override[i]:
+            events[i] = want[i]
+        elif i == count or i not in original:
+            events[i] = sliced[min(i, count - 1)]
+    return override, events
+
+
 def apply(tp: Toolpath, plan: Plan) -> Toolpath:
-    """A copy of ``tp`` with the plan's speeds and part fan (fan commands rewritten where it sets one)."""
+    """A copy of ``tp`` with the plan's speeds, fans and cooling parks."""
     cfg = settings()
     speed, cause = tp.speed.astype(float), tp.cause.copy()
     ok = adjustable(tp)
@@ -117,11 +145,22 @@ def apply(tp: Toolpath, plan: Plan) -> Toolpath:
     change = change[np.isfinite(want[change]) | (np.concatenate([[False], np.isfinite(want[:-1])])[change])]
     fans = {key: np.concatenate([np.asarray(tp.fans[key])[keep], new])
             for key, new in (("line", change), ("t", tp.t0[change]), ("fan", np.full(len(change), part[0])), ("value", fan[change]))}
+    names = tp.fan_names
+    override, aux = aux_schedule(tp, plan)
+    if aux:
+        if "P2" not in names:
+            names += ("P2",)
+        channel = names.index("P2")
+        keep = (fans["fan"] != channel) | ~override[fans["line"]]
+        # Insert first so that any shutdown command at the very end takes precedence.
+        aux_lines = np.array(list(aux))
+        added = {"line": aux_lines, "t": np.r_[tp.t0, tp.t1[-1]][aux_lines],
+                 "fan": np.full(len(aux), channel), "value": np.array(list(aux.values()))}
+        fans = {key: np.r_[added[key], v[keep]] for key, v in fans.items()}
     order = np.argsort(fans["line"], kind="stable")
-    fans = {key: np.asarray(v)[order].astype(np.asarray(tp.fans[key]).dtype if len(tp.fans[key]) else np.asarray(v).dtype)
-            for key, v in fans.items()}
+    fans = {key: v[order].astype(tp.fans[key].dtype) for key, v in fans.items()}
     travel, dwells = _parks(tp, plan)
-    return replace(tp, speed=speed.astype(np.float32), cause=cause, part_fan=fan.astype(np.float32), fans=fans,
+    return replace(tp, speed=speed.astype(np.float32), cause=cause, part_fan=fan.astype(np.float32), fans=fans, fan_names=names,
                    travel=travel, dwells=dwells)
 
 
@@ -237,7 +276,7 @@ def _choices(tp: Toolpath, k: int, base_fan: float, ok: np.ndarray, allow_fan: b
 
 
 def _search(tp: Toolpath, h: Heat, law: _Law, win: dict, weight: np.ndarray, allow_fan: bool, allow_undo: bool,
-            budget_s: float) -> Plan:
+            budget_s: float, aux_h: float = 0.0) -> Plan:
     """Layer by layer from the bottom: the cheapest choice by the fitted law (module docstring, step 3)."""
     cfg = settings()
     c_fan = load_data("thermal")["process"]["h_fan"]["points"]
@@ -249,6 +288,10 @@ def _search(tp: Toolpath, h: Heat, law: _Law, win: dict, weight: np.ndarray, all
     undoable = ok & (tp.cause == LAYER_TIME)
     layer_fan = np.zeros(layers)
     np.maximum.at(layer_fan, tp.layer, tp.part_fan)
+    aux = np.zeros(layers)
+    if aux_h:
+        plan.aux = np.full(layers, np.nan)
+        np.maximum.at(aux, tp.layer, fan_levels(tp, "P2"))
     hot_worth, bond_worth = float(cfg["seconds_per_degree"]), float(cfg["seconds_per_bond"])
     saved = 0.0
     by_layer = np.split(np.argsort(h.layer, kind="stable"), np.searchsorted(np.sort(h.layer), np.arange(1, layers)))
@@ -258,11 +301,13 @@ def _search(tp: Toolpath, h: Heat, law: _Law, win: dict, weight: np.ndarray, all
         if not len(under) and not len(own):
             continue
         lines = tp.layer == k
-        best, best_cost, best_saving = (np.nan, 1.0, 1.0, 0.0), np.inf, 0.0
+        best, best_cost, best_saving = (np.nan, 1.0, 1.0, 0.0, False), np.inf, 0.0
         hot_groups = np.unique(h.column[under], return_inverse=True)[1] if len(under) else None
         own_groups = np.unique(h.column[own], return_inverse=True)[1] if len(own) else None
         cover = np.array([])
-        for fan, slow, fast, park in _choices(tp, k, layer_fan[k], ok, allow_fan, allow_undo and saved < budget_s):
+        choices = _choices(tp, k, layer_fan[k], ok, allow_fan, allow_undo and saved < budget_s)
+        boosts = (False, True) if aux_h and aux[k] < 0.95 and len(under) else (False,)
+        for fan, slow, fast, park, boost in ((*choice, b) for b in boosts for choice in choices):
             t_new = np.where(ok & lines, base_time / slow, base_time)[lines]
             if fast > 1:
                 quick = length[lines] / np.maximum(np.minimum(tp.speed[lines] * fast, tp.set_speed[lines]), 1e-3)
@@ -271,10 +316,12 @@ def _search(tp: Toolpath, h: Heat, law: _Law, win: dict, weight: np.ndarray, all
             if fast > 1 and saved - extra > budget_s:
                 continue  # the total speed-up is capped
             h_fan = float(_interp(c_fan, 100.0 * fan)) if np.isfinite(fan) else None
-            cost = extra + (0.5 if np.isfinite(fan) else 0.0)  # a fan change is not free (noise, wear)
+            cost = extra + 0.5 * (int(np.isfinite(fan)) + int(boost))  # noise and wear
             if len(under):
                 # Anchored on the run as sliced: only the change the choice makes comes from the fitted law.
-                hf = law.h_base[under] if h_fan is None else np.full(len(under), h_fan)
+                hf = law.h_base[under] if h_fan is None else h_fan
+                if boost:
+                    hf = hf + aux_h * (1.0 - aux[k])
                 t0 = h.cover_s[under]
                 t = np.maximum(t0 + extra, 0.05)
                 k0 = law.a[under] + law.b[under] * law.h_base[under]
@@ -298,8 +345,10 @@ def _search(tp: Toolpath, h: Heat, law: _Law, win: dict, weight: np.ndarray, all
                     bond = np.clip(np.nan_to_num(b0 + slope * (cov_new - c0), nan=1.0), 0, 1)
                     cost += bond_worth * _by_column(win["min_bond"][own][has] - bond, weight[own][has], own_groups[has])
             if cost < best_cost - 1e-9:
-                best, best_cost, best_saving = (fan, slow, fast, park), cost, -extra
-        plan.fan[k], plan.slow[k], plan.fast[k], plan.park[k] = best
+                best, best_cost, best_saving = (fan, slow, fast, park, boost), cost, -extra
+        plan.fan[k], plan.slow[k], plan.fast[k], plan.park[k], boost = best
+        if boost:
+            plan.aux[k] = 1.0
         if best[2] > 1:
             saved += best_saving
     return _smooth(plan)
@@ -330,7 +379,7 @@ def _smooth(plan: Plan) -> Plan:
     for k in range(len(slow) - 2, -1, -1):
         slow[k] = min(slow[k], slow[k + 1] / step)
     slow = np.where(slow > 0.97, 1.0, np.minimum(slow, 1.0))
-    return Plan(fan, slow, plan.fast.copy(), plan.park.copy())
+    return Plan(fan, slow, plan.fast.copy(), plan.park.copy(), None if plan.aux is None else plan.aux.copy())
 
 
 def _same(flags: np.ndarray, h: Heat, base: Heat) -> np.ndarray:
@@ -379,9 +428,14 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
     law = _fit(tp, base, reference, c, ref_fan)
     win0, weight = judge(base)
     budget = float(cfg["max_speedup"]) * t_base
+    aux_h = aux_cooling(tp, c)
+    filament = tp.settings.get("filament_type", "PLA").upper().replace(";", ",").split(",")
+    try_aux = aux_h and c["material"] == "pla" and all(f.strip().startswith("PLA") for f in filament)
 
     def plan_and_check(allow_fan: bool, allow_undo: bool) -> tuple[Plan, Heat, float, dict, np.ndarray]:
-        plan = _search(tp, base, law, win0, weight, allow_fan, allow_undo, budget)
+        # A side blower can warp materials that need to stay warm. Offer a boost only for PLA.
+        plan = _search(tp, base, law, win0, weight, allow_fan, allow_undo, budget,
+                       aux_h if allow_fan and try_aux else 0.0)
         h, t = run(apply(tp, plan))
         win, w = judge(h)
         # One correction, layer k by its spots: the layer below it still too hot -> the next stronger choice on
@@ -402,7 +456,9 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
                 else:
                     continue
             elif new_cold[k] > 0:
-                if plan.park[k] > 0:
+                if plan.aux is not None and np.isfinite(plan.aux[k]):
+                    plan.aux[k] = np.nan
+                elif plan.park[k] > 0:
                     plan.park[k] = max([p for p in cfg["park_steps"] if p < plan.park[k]] or [0.0])
                 elif plan.slow[k] < 1:
                     plan.slow[k] = min([x for x in cfg["slow_steps"] if x > plan.slow[k] + 1e-9] or [1.0])
@@ -429,6 +485,8 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
         "slicer": {"print_s": round(t_s, 1), **_score(sheat, swin, weight), "cooling": slicer_plan(tp, splan)},
         "heat": {"before": base, "gcode": gheat, "slicer": sheat}, "windows": {"before": win0, "gcode": gwin, "slicer": swin},
         "plans": {"gcode": gplan, "slicer": splan},
+        "aux_fan_estimated": bool(aux_h and (fan_levels(tp, "P2").any() or
+                                            (gplan.aux is not None and np.isfinite(gplan.aux).any()))),
     }
 
 
@@ -436,9 +494,10 @@ def _plan_rows(tp: Toolpath, plan: Plan) -> list[dict]:
     """The G-code plan as rows of layers in a row with the same choice (only those with a change)."""
     rows = []
     for k in range(len(plan.fan)):
+        aux = None if plan.aux is None or not np.isfinite(plan.aux[k]) else round(float(plan.aux[k]), 2)
         choice = (None if not np.isfinite(plan.fan[k]) else round(float(plan.fan[k]), 2), round(float(plan.slow[k]), 2),
-                  round(float(plan.fast[k]), 2), round(float(plan.park[k]), 1))
-        if choice == (None, 1.0, 1.0, 0.0):
+                  round(float(plan.fast[k]), 2), round(float(plan.park[k]), 1), aux)
+        if choice == (None, 1.0, 1.0, 0.0, None):
             continue
         z = float(tp.layer_z[k]) if k < len(tp.layer_z) else None
         if rows and rows[-1]["choice"] == choice and rows[-1]["last"] == k - 1:
@@ -446,7 +505,7 @@ def _plan_rows(tp: Toolpath, plan: Plan) -> list[dict]:
         else:
             rows.append({"first": k, "last": k, "z0": z, "z1": z, "choice": choice})
     return [{"layers": [r["first"], r["last"]], "z_mm": [r["z0"], r["z1"]], "fan": r["choice"][0], "slower": r["choice"][1],
-             "faster": r["choice"][2], "park_s": r["choice"][3]} for r in rows]
+             "faster": r["choice"][2], "park_s": r["choice"][3], "aux_fan": r["choice"][4]} for r in rows]
 
 
 TOWER_MM = (8.0, 25.0)  # cooling tower diameters the slicer plan picks from (bigger ones waste too much plastic)
