@@ -28,3 +28,21 @@ doi:10.1016/j.addma.2020.101488 (robocasting), "Brenken 2018" doi:10.1016/j.addm
 - **Contact conductances** (bead to bead, to the bed) are estimates; the one paper only brackets them.
 - **TDS values** (density, Tg, Tm) match `presets.yaml` and the usual datasheets. The datasheets were not re-read one by one.
 - Not found in open papers: melt temperature drop against flow for a standard hotend. An estimate is used, and T-482 can measure it.
+# 2026-11-23 owner-supplied papers
+
+Costa, Duarte and Covas, “Thermal conditions affecting heat transfer in FDM/FFE,” *Virtual and Physical Prototyping* 10 (2015), 35–46, online 2014, https://doi.org/10.1080/17452759.2014.984042. This is a numerical sensitivity study, not a measurement of printer coefficients. Journal page references follow.
+
+| Model input or outcome | Number and context | Reference / uncertainty |
+| --- | --- | --- |
+| Case study | ABS-P400; extrusion 270 °C, environment 70 °C, speed 0.025 m/s, 0.3 mm circular filament; 0.1 s increment, 5% nominal contact area. Four-filament sequence 1 s per bead. No experimental sample count: simulations only. | pp. 37–40, Tables 1, 4, Fig. 7; uncertainty not quantified. ABS properties Tg 108 °C, conductivity 0.18 W/mK, heat capacity 2020 J/kgK, density 1050 kg/m³. |
+| Convection | 5, 60, 150 W/m²K tested; 5 → 60 reduces time to Tg from 66 to 3 s; paper considers about 60 and above representative of most practical conditions. Rodriguez natural-convection calculation quoted as 67 W/m²K for a hot elliptical ABS filament, 270 °C into 70 °C environment. | pp. 38–39, Fig. 4. No fan percentage, fan curve, or calibrated still-air value measured. |
+| Bead-to-bead gap conductance | 0, 100, and 10⁶ W/m²K (no, low, near-perfect contact) used as sensitivity cases; support 10 W/m²K, air h=60. A newly contacted cooler filament's central node rises 158.1 → 165.6 °C; surface node 167.8 → 192.8 °C in the illustrated case. | p. 40, Fig. 7. These are assumed conditions and simulated outcomes, not estimates with statistical uncertainty. |
+| Support contact | 10 and 500 W/m²K tested with convection 60; 5% contact for circular vs 25% for square cross-section. Gap conductance and contact area both matter. | pp. 39–40, Fig. 6. Not measured PEI or glass interfaces. |
+| Radiation and pockets | Emissivity 0.96; at h=5, including environmental radiation changes 15 s temperature by up to 10 °C; around h≥60 convection dominates. Inter-filament radiation changes <0.3 °C; trapped-air treatment <1.1 °C over 70–180 °C. | pp. 38–41, Figs. 5 and 7. Model-specific, not universal error bounds. |
+
+**What to change in code (T-596):**
+
+- `bead_contact_conductance` 500 [100, 5000] W/m²K → retain estimated central value and range, confidence low. Costa's 0/100/10⁶ cases do not calibrate 500 or constrain its range; investigate zero/near-perfect cases in a sensitivity study, not as a credible measured uncertainty interval. Contact area and conductance must be accounted for separately to avoid double counting when introducing bead necks.
+- `h_still_air` 10 [5, 30] and `h_fan` 0/30/50/70/100% = 10/35/60/85/120 W/m²K → retain estimates, low confidence. Costa's 67 is natural convection for a hot, tiny bead, not a measured fan setting; 60 cannot validate the 50% anchor. Revise that source description to say it is a provisional scenario, not a fan calibration. Check whether environmental radiation is independently included at low h before using the paper's comparison.
+- `bed_contact_conductance` smooth/textured PEI 300/150 [50, 1000] → retain estimates, low confidence; Costa's 10 and 500 are hypothetical support cases, with geometry-dependent area, not PEI measurements.
+- `nozzle_reheat` 70 [30, 120] W/m²K, reach 1.5 [0.5, 3] mm → retain, low confidence; paper does not quantify nozzle radiation or reheating. No new value justified.

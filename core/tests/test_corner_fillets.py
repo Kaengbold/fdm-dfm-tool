@@ -44,7 +44,7 @@ def _extrude_xz(boxes: list, depth: float) -> Mesh:
 @pytest.mark.parametrize("profile, phrase", [
     ({}, "matters more for clips"),
     ({"repeated_load": True}, "worth trying here"),
-    ({"repeated_load": False}, "helps a little"),
+    ({"repeated_load": False}, "varies between tests"),
 ])
 def test_tall_pin_offers_foot_fillet_without_strength(profile, phrase):
     """tall_pin gets one foot fillet advice at z=3 without running strength (no duplicate for both pin findings)."""
@@ -191,7 +191,7 @@ def test_no_duplication_with_boss_ribs_or_strength_chamfer():
     assert "worth trying here" in stress_edit["description"]
     ideas = api.strength_options([0, 0, 1], loads, {"repeated_load": False})
     fillet_idea = next(o for o in ideas if o.get("edit") == "stress-chamfer")
-    assert "helps a little" in fillet_idea["why"] and fillet_idea["safety_factor"] is None
+    assert "varies between tests" in fillet_idea["why"] and fillet_idea["safety_factor"] is None
     # The corner covered by stress-chamfer must not also be emitted as a foot_fillet.
     stress_pts = np.frombuffer(stress_edit["mesh"], "<f4").reshape(-1, 3)
     s_lo, s_hi = stress_pts.min(axis=0), stress_pts.max(axis=0)
