@@ -168,22 +168,27 @@ def _boss_ribs(mesh: Mesh, features: list[dict]) -> list[dict]:
         r, h = f["radius"], BOSS_RIB_HEIGHT * f["length"]
         w0 = np.cross(d, [1.0, 0, 0] if abs(d[0]) < 0.9 else [0, 1.0, 0])
         w0 /= np.linalg.norm(w0)
-        pieces = []
+        pieces, shapes = [], []
         for k in range(4):
             w = w0 * np.cos(k * np.pi / 2) + np.cross(d, w0) * np.sin(k * np.pi / 2)
             reach = next((L for L in (h, 0.75 * h, 0.5 * h, 0.3 * h) if _covered(mesh, base, end + w * (r + L), d)), None)
             if reach is None or reach < 1.0:
                 continue
-            tri = extrude(Polygon([(r - 0.3, -0.3), (r + reach, -0.3), (r + reach, 0.0), (r - 0.3, h)]), -BOSS_RIB_MM / 2, BOSS_RIB_MM / 2)
+            rib = Polygon([(r - 0.3, -0.3), (r + reach, -0.3), (r + reach, 0.0), (r - 0.3, h)])
+            tri = extrude(rib, -BOSS_RIB_MM / 2, BOSS_RIB_MM / 2)
             v = np.cross(w, d)
-            placed = end + tri[..., :1] * w + tri[..., 1:2] * d + tri[..., 2:] * v
+            frame = lambda p, w=w, v=v: end + p[..., :1] * w + p[..., 1:2] * d + p[..., 2:] * v
+            placed = frame(tri)
             pieces.append(placed if np.linalg.det(np.stack([w, d, v])) > 0 else placed[:, ::-1])
+            shapes.append(_polygon_prism(rib, frame, -BOSS_RIB_MM / 2, BOSS_RIB_MM / 2))
         if pieces:
             out.append(_edit(f"boss-ribs-{f['region']}", "tall_boss", f"{len(pieces)} ribs for the Ø{f['diameter']:.1f} mm boss",
                              f"The boss is {f['length']:.0f} mm tall, more than {BOSS_TALL_RATIO:g} × its width: {BOSS_RIB_MM:g} mm thick ribs at its foot keep it "
                              "from snapping or wobbling there (and let it take a screw's load).", pieces, op="add",
                              advice={"text": f"Add {len(pieces)} ribs ({BOSS_RIB_MM:g} mm thick, {h:.1f} mm tall) at the foot of this Ø{f['diameter']:.1f} mm post",
-                                     "now": round(float(f["diameter"]), 2), "target": round(BOSS_RIB_MM, 2), "unit": "mm", "point": end.tolist()}))
+                                     "now": round(float(f["diameter"]), 2), "target": round(BOSS_RIB_MM, 2), "unit": "mm", "point": end.tolist()},
+                             intent=_intent("rib", {"count": len(pieces), "thickness_mm": BOSS_RIB_MM, "height_mm": h}, shapes,
+                                            regions=[f["region"]])))
     return out
 
 
@@ -224,10 +229,11 @@ def edit_params(params: dict | None) -> dict:
 
 
 def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", param=None,
-          advice: dict | None = None) -> dict:
+          advice: dict | None = None, intent: dict | None = None) -> dict:
     """A design edit. An edit that both adds and cuts (grip fins) also gets ``piece_ops``, "add" or "cut" per
     piece; then, as for whole edits, every addition is made before any cut. ``advice`` holds exact CAD advice
-    numbers built alongside the edit and popped by ``design_advice`` so edit and advice never disagree."""
+    numbers built alongside the edit and popped by ``design_advice`` so edit and advice never disagree.
+    ``intent`` (see ``_intent``): the same edit as exact shapes, for a CAD engine working on the STEP part."""
     # A piece with a non-finite corner can't be built (the browser's manifold refuses it with an error, T-367):
     # leave it out rather than fail the whole change.
     pieces = [q for q in pieces if np.isfinite(q).all()]
@@ -238,7 +244,80 @@ def _edit(id_, rule, title, description, pieces: list[np.ndarray], op="cut", par
     }
     if advice is not None:
         out["_advice"] = advice
+    if intent is not None:
+        out["intent"] = intent
     return out
+
+
+# Edit intents (T-528, research/cad_engine.md): beside its triangle pieces, an edit says what it is in exact terms,
+# so a CAD engine can make it on the B-rep of a STEP part with real faces (a hole resize stays one cylinder, a round
+# stays a fillet); the pieces stay the mesh path and the fallback. Part coordinates, mm, JSON-friendly:
+#   {"op": hole_resize | teardrop | slab | void | rib | fillet | chamfer, "params": {numbers},
+#    "shapes": [{"kind": "prism", "outline": [[x, y, z] …] (a flat polygon), "holes": [[…]], "extrude": [dx, dy, dz],
+#                "add": bool} | {"kind": "ring", "center", "axis", "inner", "outer", "from", "to", "add"} …],
+#    "refs": {"regions": [region ids]} or {"edges": [{"regions": [a, b], "points": [[x, y, z] …], "op", "size"}]}}
+# api.design adds the B-rep face ids (``faces``) beside the regions on a STEP part.
+INTENT_EDGE_POINTS = 16  # an inside corner names at most this many points along it (to find its edge by place too)
+
+
+def _r(v, nd: int = 4):
+    """Plain rounded floats (nested lists too) for JSON."""
+    if isinstance(v, (list, tuple, np.ndarray)):
+        return [_r(x, nd) for x in v]
+    return round(float(v), nd)
+
+
+def _intent(op: str, params: dict, shapes: list[dict], regions=None, edges=None) -> dict:
+    refs = {}
+    if regions is not None:
+        refs["regions"] = [int(r) for r in regions]
+    if edges is not None:
+        refs["edges"] = edges
+    return {"op": op, "params": {k: (_r(v) if isinstance(v, (int, float, np.floating, np.integer)) else v) for k, v in params.items()},
+            "shapes": shapes, "refs": refs}
+
+
+def _prism_shape(outline, extrude, holes=(), add: bool = True) -> dict:
+    """A flat polygon (3D points, part coordinates) pushed along ``extrude``."""
+    return {"kind": "prism", "outline": _r(np.asarray(outline, float)), "holes": [_r(np.asarray(h, float)) for h in holes],
+            "extrude": _r(np.asarray(extrude, float)), "add": bool(add)}
+
+
+def _ring_shape(f: dict, inner: float, outer: float, z0: float, z1: float, add: bool) -> dict:
+    """A ring (inner 0: a disc) round a hole / post's axis from ``z0`` to ``z1`` along it (from its centre)."""
+    return {"kind": "ring", "center": _r(f["center"]), "axis": _r(f["axis"]), "inner": _r(inner), "outer": _r(outer),
+            "from": _r(z0), "to": _r(z1), "add": bool(add)}
+
+
+def _polygon_prism(poly, frame, z0: float, z1: float, add: bool = True) -> dict:
+    """A shapely polygon in a frame's plane (``frame(points (n, 3)) -> part``), from height z0 to z1."""
+    lift = lambda ring, z: frame(np.column_stack([np.asarray(ring.coords)[:-1, :2], np.full(len(ring.coords) - 1, z)]))
+    bottom = lift(poly.exterior, z0)
+    return _prism_shape(bottom, lift(poly.exterior, z1)[0] - bottom[0], [lift(h, z0) for h in poly.interiors], add)
+
+
+def _corner_intent(edges: list[dict], ks: list[int], size: float, up, max_overhang_deg: float, scale_round: bool,
+                   region: np.ndarray | None) -> dict:
+    """Inside corners ``ks`` as fillets (rounds) or chamfers on the edge between two faces: one entry per pair of
+    regions (or per corner when the regions aren't known), with points along it."""
+    groups: dict = {}
+    for k in ks[:MAX_FILLET_PIECES]:
+        e = edges[k]
+        rounded = up is None or _round_prints(e, up, max_overhang_deg)
+        pair = tuple(sorted((int(region[e["f1"]]), int(region[e["f2"]])))) if region is not None else None
+        g = groups.setdefault((pair, rounded), {"points": [], "rounded": rounded, "pair": pair})
+        g["points"].append((e["a"] + e["b"]) / 2)
+    out = []
+    for g in groups.values():
+        pts = g["points"][:: max(1, len(g["points"]) // INTENT_EDGE_POINTS)][:INTENT_EDGE_POINTS]
+        d = size * ROUND_SAME_PLASTIC if (g["rounded"] and scale_round) else size
+        item = {"points": _r(np.asarray(pts)), "op": "fillet" if g["rounded"] else "chamfer", "size": _r(d)}
+        if g["pair"] is not None:
+            item["regions"] = list(g["pair"])
+        out.append(item)
+    rounds = sum(1 for g in out if g["op"] == "fillet")
+    op = "fillet" if rounds else "chamfer"
+    return _intent(op, {"size": out[0]["size"] if out else size}, [], edges=out)
 
 
 GROW_TOL_MM = 0.05  # ignore sub-0.05 mm noise when reporting outer-size growth
@@ -306,12 +385,15 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
         # Not for a screw / nut hole: it gets its own size (a teardrop at the old size would undo it).
         if (f["type"] == "hole" and f["full_circle"] and abs(axis @ up) < 0.2 and f["diameter"] >= TEARDROP_MIN_DIAMETER
                 and f["region"] not in (fasteners or {})):
+            kite, half = _teardrop_profile(f, up, angle)
             edits.append(_edit(
                 f"teardrop-{f['region']}", "short_bridge", f"Teardrop for the horizontal Ø{f['diameter']:.1f} mm hole",
                 f"Makes the top of the hole a {angle:.0f}° point so it prints without sagging or support.",
-                [_teardrop_cutter(f, up, angle)], param="teardrop_angle_deg",
+                [_prism(kite, half)], param="teardrop_angle_deg",
                 advice={"text": f"Give this sideways Ø{f['diameter']:.1f} mm hole a {angle:.0f}° teardrop top",
-                        "now": None, "target": round(float(angle), 1), "unit": "°", "point": f["center"]}))
+                        "now": None, "target": round(float(angle), 1), "unit": "°", "point": f["center"]},
+                intent=_intent("teardrop", {"diameter_mm": f["diameter"], "angle_deg": angle},
+                               [_prism_shape([q - half for q in kite], 2 * half, add=False)], regions=[f["region"]])))
     edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _grip_fins(mesh, accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
     edits += _gap_edits(mesh, region, gaps or {}, up, profile)
@@ -331,7 +413,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     edits += foot_edits
     if strength_verdict != "fine":
         edits += _stress_chamfers(mesh, weak_spot, voxel_mm, prm["stress_chamfer_mm"], hot_spots, up,
-                                  profile.material["max_overhang_deg"])
+                                  profile.material["max_overhang_deg"], region)
         edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
     part_pts = mesh.triangles.reshape(-1, 3)
     part_lo, part_hi = part_pts.min(axis=0) - GROW_TOL_MM, part_pts.max(axis=0) + GROW_TOL_MM
@@ -374,9 +456,11 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
             "much stronger. It grows on both sides; check that nothing needs to fit there.",
             [to_part(p) for p in w["pieces"]], op="add", param="wall_lines",
             advice={"text": f"Make this wall {w['target']:.2f} mm = {n_lines} lines (now {w['width']:.2f})",
-                    "now": round(float(w["width"]), 2), "target": round(float(w["target"]), 2), "unit": "mm"}))
+                    "now": round(float(w["width"]), 2), "target": round(float(w["target"]), 2), "unit": "mm"},
+            intent=_intent("slab", {"from_mm": w["width"], "to_mm": w["target"]},
+                           [_polygon_prism(poly, _points_to_part(mesh, r), z0, z1) for poly, z0, z1 in w["prisms"]])))
     if findings and to_print is not None:
-        edits += _foot_fillet_edits(mesh, edits, findings, profile, up, to_print, part_lo, part_hi)
+        edits += _foot_fillet_edits(mesh, edits, findings, profile, up, to_print, part_lo, part_hi, region)
     return _annotate_growth(edits, mesh)
 
 
@@ -788,7 +872,9 @@ def _fit_edits(features: list[dict], fits: dict, up, profile=None) -> list[dict]
         out.append(_edit(f"fit-{f['region']}", "fit_size", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm {name} for a {want['fit']} fit",
                          why, [_ring(f, inner, outer, grow_part)], op="add" if grow_part else "cut",
                          advice={"text": f"Make this {name} Ø{size:.2f} mm (now Ø{f['diameter']:.2f})",
-                                 "now": round(float(f["diameter"]), 2), "target": round(float(size), 2), "unit": "mm", "point": f["center"]}))
+                                 "now": round(float(f["diameter"]), 2), "target": round(float(size), 2), "unit": "mm", "point": f["center"]},
+                         intent=_intent("hole_resize", {"kind": name, "from_mm": f["diameter"], "to_mm": size},
+                                        [_ring_shape(f, inner, outer, *_ends(f, grow_part), grow_part)], regions=[f["region"]])))
     return out
 
 
@@ -883,17 +969,27 @@ def _ring(f: dict, inner: float, outer: float, add: bool = False) -> np.ndarray:
 
 def _to_part(mesh: Mesh, r: np.ndarray):
     """Map triangles from the oriented part (orient(mesh, r)) back to part coordinates."""
+    points = _points_to_part(mesh, r)
+    return lambda tris: points(tris).reshape(-1, 3, 3)
+
+
+def _points_to_part(mesh: Mesh, r: np.ndarray):
+    """The same as ``_to_part`` for points (n, 3) instead of triangles."""
     pts = mesh.triangles.reshape(-1, 3) @ r.T
     lo, hi = pts.min(axis=0), pts.max(axis=0)
     shift = np.array([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
-    return lambda tris: ((np.asarray(tris).reshape(-1, 3) - shift) @ r).reshape(-1, 3, 3)  # r.T @ v per point
+    return lambda p: (np.asarray(p, float).reshape(-1, 3) - shift) @ r  # r.T @ v per point
 
 
 TEARDROP_FLAT_MM = 0.5  # the point ends in a flat about one line wide
 
 
 def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.ndarray:
-    """Kite-shaped prism (centre, two tangent points, roof) along the hole axis. The roof
+    return _prism(*_teardrop_profile(f, up, angle_deg))
+
+
+def _teardrop_profile(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> tuple[list[np.ndarray], np.ndarray]:
+    """The teardrop cutter's kite (3D points across the hole) and half its sweep along the axis: a kite-shaped prism (centre, two tangent points, roof) along the hole axis. The roof
     lines are ``angle_deg`` from vertical: they touch the circle at r·(sin θ up ± cos θ side)
     and would meet at r / sin θ above the centre. They stop ``TEARDROP_FLAT_MM`` apart instead: a
     knife-sharp tip is a hairline slit in the last layer it reaches, narrower than any gap that prints
@@ -911,7 +1007,7 @@ def _teardrop_cutter(f: dict, up: np.ndarray, angle_deg: float = 45.0) -> np.nda
     flat_k = r / np.sin(th) - half / np.tan(th)  # height of the flat above the centre
     profile = [c - 0.5 * r * u, c + side_k * s + up_k * u, c + half * s + flat_k * u,
                c - half * s + flat_k * u, c - side_k * s + up_k * u]
-    return _prism(profile, axis * (f["length"] / 2 + 5 * OFF_CORNER))
+    return profile, axis * (f["length"] / 2 + 5 * OFF_CORNER)
 
 
 SKIP_ORDER = ("teeth", "thread", "fit", "fine")
@@ -1467,7 +1563,7 @@ def _sweep(rings: list[np.ndarray], closed: bool) -> np.ndarray:
 
 
 def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=None, up=None,
-                     max_overhang_deg: float = 45.0) -> list[dict]:
+                     max_overhang_deg: float = 45.0, region: np.ndarray | None = None) -> list[dict]:
     """Rounds (fillets) along the inside corner nearest the weak spot from the strength check (e.g. where
     a stem meets a plate): sharp inside corners concentrate stress, a round spreads it out best. Where a
     round would hang over (a corner under a ledge: its surface faces down) it is a 45° chamfer instead,
@@ -1519,9 +1615,11 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
     advice_text = (f"Round this inside corner with r {r_mm:.1f} mm" if rounds == every
                    else f"Add a {size:.1f} mm 45° chamfer at this inside corner" if not rounds
                    else f"Round this inside corner with r {r_mm:.1f} mm (or {size:.1f} mm 45° chamfer where it overhangs)")
+    every_k = [k for c in corners for k in c]
     return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how, pieces, op="add", param="stress_chamfer_mm",
                   advice={"text": advice_text, "now": None,
-                          "target": round(float(r_mm if rounds else size), 1), "unit": "mm", "point": spot.tolist()})]
+                          "target": round(float(r_mm if rounds else size), 1), "unit": "mm", "point": spot.tolist()},
+                  intent=_corner_intent(edges, every_k, size, up, max_overhang_deg, True, region))]
 
 
 def _fillet_pieces(edges: list[dict], ks: list[int], size: float, up, max_overhang_deg: float,
@@ -1648,7 +1746,7 @@ def _foot_edge_groups(mesh: Mesh, edits: list[dict], findings: list[dict], to_pr
 
 
 def _foot_fillet_edits(mesh: Mesh, edits: list[dict], findings: list[dict], profile, up, to_print,
-                       part_lo: np.ndarray, part_hi: np.ndarray) -> list[dict]:
+                       part_lo: np.ndarray, part_hi: np.ndarray, region: np.ndarray | None = None) -> list[dict]:
     """Clean mesh edits for load-bearing foot inside corners without a strength run: emitted only for
     vertex-disjoint straight edges (where no coplanar ``_corner_pieces`` junctions occur) that stay
     inside the part's bounding box."""
@@ -1668,7 +1766,8 @@ def _foot_fillet_edits(mesh: Mesh, edits: list[dict], findings: list[dict], prof
         advice_text, title, desc = _foot_fillet_text(g["noun"], g["place"], r, rounds, total)
         out.append(_edit(f"foot-fillet-{len(out)}", "foot_fillet", title, desc, pieces, op="add",
                          advice={"text": advice_text, "now": None, "target": round(r, 1),
-                                 "unit": "mm", "point": g["point"].tolist()}))
+                                 "unit": "mm", "point": g["point"].tolist()},
+                         intent=_corner_intent(edges, ks, r, up, max_oh, False, region)))
     return out
 
 
@@ -2032,8 +2131,8 @@ def concave_edges(mesh: Mesh, min_angle_deg: float = 30.0) -> list[dict]:
     t1, t2 = np.cross(n1, d), np.cross(n2, d)
     t1 *= np.where(np.einsum("ij,ij->i", centroids[f1] - pa, t1) > 0, 1.0, -1.0)[:, None]
     t2 *= np.where(np.einsum("ij,ij->i", centroids[f2] - pa, t2) > 0, 1.0, -1.0)[:, None]
-    return [{"a": pa[i], "b": pb[i], "va": int(a[i]), "vb": int(b[i]), "n1": n1[i], "n2": n2[i], "t1": t1[i], "t2": t2[i]}
-            for i in range(len(a))]
+    return [{"a": pa[i], "b": pb[i], "va": int(a[i]), "vb": int(b[i]), "n1": n1[i], "n2": n2[i], "t1": t1[i], "t2": t2[i],
+             "f1": int(f1[i]), "f2": int(f2[i])} for i in range(len(a))]
 
 
 def _connected(edges: list[dict], seeds) -> list[int]:
@@ -2474,7 +2573,10 @@ def _fastener_edits(mesh: Mesh, features: list[dict], fasteners: dict, up, profi
             out.append(_edit(f"fastener-{rid}", "fastener", f"Ø{f['diameter']:.2f} → Ø{size:.2f} mm hole for {what} ({plan['size']})",
                              plan["explanation"], [_axis_prism(f, ring, *_ends(f, smaller))], op="add" if smaller else "cut",
                              advice={"text": f"Make this {plan['size']} hole Ø{size:.2f} mm (now Ø{f['diameter']:.2f})",
-                                     "now": round(float(f["diameter"]), 2), "target": round(float(size), 2), "unit": "mm", "point": f["center"]}))
+                                     "now": round(float(f["diameter"]), 2), "target": round(float(size), 2), "unit": "mm", "point": f["center"]},
+                             intent=_intent("hole_resize", {"kind": "hole", "from_mm": f["diameter"], "to_mm": size},
+                                            [_ring_shape(f, r_new if smaller else 0.0, r_old + 0.3 if smaller else r_new, *_ends(f, smaller), smaller)],
+                                            regions=[rid])))
         if plan["walls"]:
             boss = Point(0, 0).buffer(size / 2 + plan["need_wall_mm"], 64).difference(Point(0, 0).buffer(size / 2, 64))
             s_now = f" (now {plan['wall_mm']:.1f})" if plan["wall_mm"] is not None else ""
