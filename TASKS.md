@@ -1299,7 +1299,9 @@ Rules for every [UI] task:
 
 - [x] **T-584 P1** [UI] The heat check fails on the new goal names ("Unknown goal: strong"). · files: `core/fdmcore/profile.py`, `web/steps/heat.js`, tests · owner: Claude (`task/T-584-goal-names`)
   - Do: the profile accepts the new goals (strong / fast / light / quality) beside the old ones; a test runs the heat check with every goal.
-  - Outcome: `Profile.from_dict` maps the app's goal names to the engine's (`GOAL_ALIASES`: strong → strength, fast → speed, light → material, quality → balanced with `looks`), so every engine call takes either; `test_heat_step.py` runs the heat check with each app goal.
+- [x] **T-585 P2** [UI] Keep the chosen option's orientation after Options. · files: `web/main.js`, `web/viewport/stage.js`, steps that pick · owner: Claude (`task/T-585-keep-orientation`)
+  - Do: Simulation, Problems and Done show the part turned to print (on the bed); steps that pick faces turn it back while picking; a short line says how it's turned.
+  - Outcome: `Stage.printUp` (set in `main.js`) keeps the chosen option's build direction on Simulation, Problems, Done, Make it lighter and Tuned; an edited part is put back in it, the heat view returns to it (`Stage.rest`); "Turned to print: …" sits beside the camera bar. Tolerances / More tools (they pick faces) show the part as loaded. e2e journey checks the note.
 - [ ] **T-585 P2** [UI] Keep the chosen option's orientation after Options. · files: `web/main.js`, `web/viewport/stage.js`, steps that pick · owner: Claude (`task/T-585-keep-orientation`)
   - Do: Simulation, Problems and Done show the part turned to print (on the bed); steps that pick faces turn it back while picking; a short line says how it's turned.
 - [x] **T-586 P2** [UI] Options screen side by side (layout A). · files: `web/steps/options.js`, `web/steps/options.css`, `web/shell.css`, `web/messages/en.js`, e2e · owner: Codex GPT-6.2 Sol (`task/T-586-options-layout`)

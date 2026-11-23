@@ -1687,6 +1687,10 @@ def check_journey(browser, port: int, viewport=(1280, 720)) -> str:
             page.get_by_role("button", name="Use it anyway").click()
         wait_step("Simulation")
         done.append(f"options pinned to {pinned}")
+        # The part stands the way it prints once an option is chosen (T-585), and says so beside the camera bar.
+        orientation = page.evaluate("() => fdmUI.store.get().option.orientation")
+        assert orientation and orientation in page.locator(".stage-turned").inner_text(), "the part shows how it prints"
+        done.append(f"turned to print ({orientation})")
         page.get_by_role("button", name="Run simulations").click()
         page.wait_for_selector(".sim-status", timeout=300_000)
         nxt()

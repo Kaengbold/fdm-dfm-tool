@@ -105,13 +105,13 @@ function showHeat({ services, value }) {
   return true;
 }
 
-/** Another view, or leaving the step: the overlay goes, the part stands as loaded again. */
+/** Another view, or leaving the step: the overlay goes, the part stands as it prints again (as loaded before an option). */
 function clearHeat(services) {
   stopPlay();
   if (!shown) return;
   services.heatView?.clear();
   services.stage.setXray(false);
-  services.stage.orient(null);
+  services.stage.rest();
   shown = null;
 }
 
