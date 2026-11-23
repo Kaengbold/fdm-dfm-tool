@@ -235,6 +235,7 @@ let view = {
   expertData: null, // result of engine.call("expert_settings")
   expertOpen: false,
   downloading: null,
+  savingWarp: false,
 };
 
 let pendingFocusSelector = null;
@@ -528,11 +529,15 @@ function cleanupEmptyCalSpec(id) {
   }
 }
 
-function saveCalibrationPatch(patch, { starterNote = null } = {}) {
-  const { matId, baseId, base } = calContext();
+function saveCalibrationPatch(patch, { starterNote = null, grip = null } = {}) {
+  const { matId, baseId, base, enc } = calContext();
   const { id, spec } = ensureCalSpec(matId, baseId, base);
   const converted = Object.keys(patch).length ? toSpec("materials", { based_on: spec.based_on, name: spec.name, ...patch }) : {};
   const mergedFits = spec.fit_gap_mm || converted.fit_gap_mm ? { fit_gap_mm: { ...spec.fit_gap_mm, ...converted.fit_gap_mm } } : {};
+  if (grip) {
+    converted.warp_length_mm = { ...spec.warp_length_mm, [enc]: Math.max(10, warpLength(grip.longest_flat_mm)) };
+    converted.bed_grip_calibration = { ...spec.bed_grip_calibration, [enc]: grip };
+  }
   settings.mine.materials[id] = { ...spec, ...converted, ...mergedFits };
   if (starterNote) {
     settings.starterChecked[id] = { note: starterNote, measuredAt: Date.now() };
@@ -546,7 +551,7 @@ function saveCalibrationPatch(patch, { starterNote = null } = {}) {
 }
 
 function clearCalibrationField(field) {
-  const { matId } = calContext();
+  const { matId, enc } = calContext();
   const spec = settings.mine.materials[matId];
   if (field === "starter") {
     delete settings.starterChecked[matId];
@@ -562,6 +567,12 @@ function clearCalibrationField(field) {
     delete spec.fit_gap_mm.sliding;
     delete spec.fit_gap_mm.loose;
     if (!Object.keys(spec.fit_gap_mm).length) delete spec.fit_gap_mm;
+  } else if (field === "warp_length_mm" && spec) {
+    for (const key of ["warp_length_mm", "bed_grip_calibration"]) {
+      if (!spec[key]) continue;
+      delete spec[key][enc];
+      if (!Object.keys(spec[key]).length) delete spec[key];
+    }
   } else if (spec) {
     delete spec[field];
   }
@@ -838,17 +849,7 @@ function renderPrinterEditor() {
     label: t("settings.printers.fieldPlate"),
     value: v.bed_surface || "unknown",
     searchable: false,
-    options: [
-      { value: "unknown", label: t("settings.printers.plateUnknown") },
-      { value: "textured_pei", label: t("settings.printers.plateTextured") },
-      { value: "smooth_pei", label: t("settings.printers.plateSmooth") },
-      { value: "glass", label: t("settings.printers.plateGlass") },
-      { value: "cool_plate", label: t("settings.printers.plateCool") },
-      { value: "polyimide", label: t("settings.printers.platePolyimide") },
-      { value: "aluminium", label: t("settings.printers.plateAluminium") },
-      { value: "glass_glue", label: t("settings.printers.plateGlassGlue") },
-      { value: "buildtak", label: t("settings.printers.plateBuildtak") },
-    ],
+    options: Object.keys(PLATE_LABELS).map((value) => ({ value, label: plateLabel(value) })),
     onChange: (val) => { v.bed_surface = val; },
   });
   const speedSeg = SegmentedControl({
@@ -1245,6 +1246,8 @@ function renderMaterialEditor() {
     options: Object.entries(builtins).map(([id, m]) => ({ value: id, label: m.name })),
     onChange: (baseId) => {
       const keepName = v.name;
+        delete v.bed_grip_calibration;
+        delete v.warp_length_mm;
       Object.assign(v, toForm("materials", builtins[baseId]), { based_on: baseId, name: keepName });
       ctx?.services?.rerender?.();
     },
@@ -1524,6 +1527,8 @@ function testMeasuredInfo(testId, { matId, mat, spec, enc }) {
     return { measured: false, summary: "" };
   }
   if (testId === "warping") {
+    const grip = spec?.bed_grip_calibration?.[enc];
+    if (grip?.longest_flat_mm === 0) return { measured: true, summary: t("settings.cal.warping.noneFlat") };
     if (spec?.warp_length_mm?.[enc] != null) return { measured: true, summary: t("settings.cal.warping.summary", { mm: Math.round(spec.warp_length_mm[enc] * 0.65) }) };
     return { measured: false, summary: "" };
   }
@@ -1666,6 +1671,14 @@ function visualRadioGroup({ label, options, value, onChange, renderVisual }) {
   return group;
 }
 
+const WARP_LENGTHS = [40, 80, 120, 160];
+const PLATE_LABELS = {
+  unknown: "plateUnknown", textured_pei: "plateTextured", smooth_pei: "plateSmooth",
+  glass: "plateGlass", cool_plate: "plateCool", polyimide: "platePolyimide",
+  aluminium: "plateAluminium", glass_glue: "plateGlassGlue", buildtak: "plateBuildtak",
+};
+const plateLabel = (surface) => t(`settings.printers.${PLATE_LABELS[surface] ?? PLATE_LABELS.unknown}`);
+
 function openCalibrationTest(testId) {
   const { matId, spec, enc } = calContext();
   view.calTest = testId;
@@ -1674,8 +1687,8 @@ function openCalibrationTest(testId) {
   } else if (testId === "bridge") {
     view.calDraft = { mm: spec?.max_bridge_mm ?? null };
   } else if (testId === "warping") {
-    const flat = spec?.warp_length_mm?.[enc] != null ? Math.round((spec.warp_length_mm[enc] * 0.65) / 40) * 40 : null;
-    view.calDraft = { mm: flat && [40, 80, 120, 160].includes(flat) ? flat : null };
+    const oldLength = Math.round((spec?.warp_length_mm?.[enc] * 0.65) / 40) * 40;
+    view.calDraft = { mm: spec?.bed_grip_calibration?.[enc]?.longest_flat_mm ?? (WARP_LENGTHS.includes(oldLength) ? oldLength : null) };
   } else if (testId === "fit") {
     view.calDraft = {
       snug: spec?.fit_gap_mm?.snug ?? null,
@@ -1790,16 +1803,21 @@ function renderCalibrationDetail() {
           h("span", { class: "cal-bridge-pillar" })),
       })));
   } else if (testDef.id === "warping") {
-    const lengths = [40, 80, 120, 160];
+    const grip = info.spec?.bed_grip_calibration?.[info.enc];
+    const surface = info.printer?.bed_surface ?? "unknown";
     pickerBox.append(h("div", { class: "cal-picker-group" },
       h("span", { class: "ui-label" }, t("settings.cal.warping.pick")),
       visualRadioGroup({
         label: t("settings.cal.warping.pick"),
         value: view.calDraft.mm,
-        options: lengths.map((mm) => ({ value: mm, label: `${mm} mm` })),
+        options: [{ value: 0, label: t("settings.cal.warping.noneFlat") },
+          ...WARP_LENGTHS.map((mm) => ({ value: mm, label: t("settings.active.mm", { v: mm }) }))],
         onChange: (val) => { view.calDraft.mm = Number(val); },
-        renderVisual: (o) => h("span", { class: "cal-bar-vis", style: { width: `${18 + o.value * 0.35}px` } }),
-      })));
+        renderVisual: (o) => o.value ? h("span", { class: "cal-bar-vis", style: { width: `${18 + o.value * 0.35}px` } }) : null,
+      })),
+      surface === "unknown" && h("p", { class: "hint" }, t("settings.cal.warping.grip.unknown_plate")),
+      grip && (grip.status !== "unknown_plate" || surface !== "unknown") && h("p", { class: "hint" },
+        t(`settings.cal.warping.grip.${grip.status}`, { plate: plateLabel(grip.surface), c: grip.bed_temp_c })));
   } else if (testDef.id === "fit") {
     const gaps = [0, 0.1, 0.2, 0.3, 0.4, 0.5];
     const holeOpts = gaps.map((g) => ({
@@ -1942,11 +1960,13 @@ function renderCalibrationDetail() {
   }
 
   const saveBtn = Button({
-    label: t("settings.cal.saveResult"),
+    label: t(testDef.id === "warping" && view.savingWarp ? "settings.cal.warping.solving" : "settings.cal.saveResult"),
     variant: "primary",
-    onClick: () => {
+    disabled: testDef.id === "warping" && view.savingWarp,
+    onClick: async () => {
       const patch = {};
       let starterNote = null;
+      let grip = null;
       if (testDef.id === "overhang") {
         if (view.calDraft.deg == null) return showToast({ message: t("settings.cal.pickFirst"), tone: "warn" });
         patch.max_overhang_deg = view.calDraft.deg;
@@ -1955,7 +1975,27 @@ function renderCalibrationDetail() {
         patch.max_bridge_mm = view.calDraft.mm;
       } else if (testDef.id === "warping") {
         if (view.calDraft.mm == null) return showToast({ message: t("settings.cal.pickFirst"), tone: "warn" });
-        patch.warp_length = warpLength(view.calDraft.mm);
+        if (!engineReady) return showToast({ message: t("settings.cal.warping.needEngine"), tone: "warn" });
+        const draft = view.calDraft;
+        const longest = draft.mm;
+        const profile = ctx.store.get().profile;
+        view.savingWarp = true;
+        ctx.services.rerender();
+        try {
+          const { enclosure, ...record } = await ctx.engine.call("calibrate_bed_grip", {
+            longest_flat_mm: longest,
+            profile: { ...profile, printer: profile.printer || "bambu_p1s", nozzle: profile.nozzle || "0.4", material: info.matId },
+          });
+          if (view.calTest !== "warping" || view.calDraft !== draft || draft.mm !== longest ||
+              calContext().matId !== info.matId || ctx.store.get().profile !== profile || enclosure !== info.enc) return;
+          grip = record;
+        } catch (err) {
+          showToast({ message: t("settings.cal.warping.solveFailed", { reason: err.message }), tone: "bad" });
+          return;
+        } finally {
+          view.savingWarp = false;
+          ctx.services.rerender();
+        }
       } else if (testDef.id === "fit") {
         if (view.calDraft.snug == null && view.calDraft.sliding == null) {
           return showToast({ message: t("settings.cal.pickFirst"), tone: "warn" });
@@ -1988,7 +2028,7 @@ function renderCalibrationDetail() {
           patch.outer_error_mm = Number((Number(view.calDraft.outer) - 20).toFixed(2));
         }
       }
-      saveCalibrationPatch(patch, { starterNote });
+      saveCalibrationPatch(patch, { starterNote, grip });
       const updated = calContext();
       showToast({ message: t("settings.cal.saved", { test: t(`settings.cal.${testDef.id}.title`), material: updated.mat.name }), tone: "good" });
     },
@@ -1997,6 +2037,7 @@ function renderCalibrationDetail() {
   const resetBtn = status.measured && Button({
     label: t("settings.cal.resetTest"),
     variant: "ghost",
+    disabled: testDef.id === "warping" && view.savingWarp,
     onClick: () => {
       const map = {
         starter: "starter",

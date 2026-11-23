@@ -295,8 +295,13 @@ registerStep("sim", {
       body.append(list, h("p", { class: "ui-hint" }, result.detailed
         ? t(result.source === "file" ? "sim.basis.file" : "sim.basis.orca", { minutes: Math.round(result.gcode.print_time_min) })
         : result.gcodeError ? t("sim.basis.wrongFile", { reason: result.gcodeError }) : t("sim.basis.ours")));
-      if (result.warp.adhesion) body.append(h("p", { class: "ui-hint" },
-        t(result.warp.adhesion.assumed_surface ? "sim.adhesion.assumed" : "sim.adhesion.estimated")));
+      const grip = result.warp.adhesion;
+      if (grip) {
+        const note = grip.shear_source === "calibrated"
+          ? (grip.calibration_temp_differs ? "calibratedTempDiffers" : "calibrated")
+          : (grip.assumed_surface ? "assumed" : "estimated");
+        body.append(h("p", { class: "ui-hint" }, t(`sim.adhesion.${note}`, { c: grip.calibration_temp_c })));
+      }
       for (const sim of extra) sim.panel?.({ body, store, services, value: extraValue(result, sim), overlay });
     } else {
       body.append(h("p", { class: "ui-hint" }, t("sim.skipNote")));

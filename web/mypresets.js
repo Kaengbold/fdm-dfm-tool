@@ -173,6 +173,8 @@ export function toSpec(kind, values) {
     else spec[key] = ["name", "warp_risk", "fibre"].includes(key) ? v : Number(v);
   }
   if (Array.isArray(values.creep_readings)) spec.creep_readings = values.creep_readings;
+  if (values.warp_length_mm) spec.warp_length_mm = values.warp_length_mm;
+  if (values.bed_grip_calibration) spec.bed_grip_calibration = values.bed_grip_calibration;
   return spec;
 }
 

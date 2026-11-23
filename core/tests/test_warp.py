@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pytest
 from shapely.geometry import box
@@ -20,6 +22,85 @@ def test_longer_bars_curl_more_and_the_reference_bar_rates_one():
     curls = [warp.curl(warp.simulate(bar(n), [0, 0, 1], p, h=1.0)) for n in (20, 45, 90)]
     assert curls[0] < curls[1] < curls[2]
     assert np.sqrt(curls[1] / ref) == pytest.approx(1.0, abs=0.05)  # 45 mm is the ABS / open printer limit
+
+
+CAL_PRINTERS = {
+    "pei": {"based_on": "prusa_mk4s", "bed_surface": "textured_pei"},
+    "glass": {"based_on": "prusa_mk4s", "bed_surface": "glass"},
+    "enclosed": {"based_on": "bambu_p1s", "bed_surface": "textured_pei"},
+}
+
+
+@pytest.fixture
+def abs_on_pei():
+    api.custom_presets(printers=CAL_PRINTERS)
+    try:
+        yield {**ABS_OPEN, "printer": "my_pei"}
+    finally:
+        api.custom_presets()
+
+
+def test_fit_grip_from_synthetic_bar_results(abs_on_pei):
+    def outcomes(profile):
+        p = Profile.from_dict(profile)
+        return [warp.simulate(bar(n), [0, 0, 1], p, api._shells(p), h=1, adhesion=True)["adhesion"]["may_lift"]
+                for n in (40, 80)]
+
+    known_grip = warp.bed_grip(Profile.from_dict(abs_on_pei))["grip_n_mm"]
+    assert outcomes(abs_on_pei) == [False, True]
+    r = api.dispatch("calibrate_bed_grip", json.dumps({"longest_flat_mm": 40, "profile": abs_on_pei}))
+    enc = r.pop("enclosure")
+    assert known_grip < r["upper_n_mm"] and enc == "none"
+    assert r["grip_n_mm"] == pytest.approx(known_grip, rel=0.15)
+
+    api.custom_presets(CAL_PRINTERS, materials={"abs_test": {
+        "based_on": "abs", "bed_temp_c": 105, "bed_grip_calibration": {enc: r}, "warp_length_mm": {enc: 62},
+    }})
+    measured = {**abs_on_pei, "material": "my_abs_test"}
+    p = Profile.from_dict(measured)
+    grip = warp.bed_grip(p)
+    assert grip["shear_source"] == "calibrated" and grip["confidence"] == "medium"
+    curve = [warp.bed_grip(p, t, calibrated=False)["grip_n_mm"] for t in (105, 100)]
+    assert grip["grip_n_mm"] == pytest.approx(r["grip_n_mm"] * curve[0] / curve[1])  # measured at 100 °C, used at 105 °C
+    assert grip["calibration_temp_differs"] and grip["calibration_temp_c"] == 100
+    assert outcomes(measured) == [False, True]
+    assert warp.warp_limit(p) == 62
+    for pid in ("my_glass", "my_enclosed", "prusa_mk4s"):
+        q = Profile.from_dict({**measured, "printer": pid})
+        assert warp.bed_grip(q)["shear_source"] != "calibrated"
+    enclosed = Profile.from_dict({**measured, "printer": "my_enclosed"})
+    assert warp.warp_limit(enclosed) == warp.warp_limit(Profile.from_dict({"material": "abs"}))
+
+
+def test_fit_grip_bounds_and_outcomes_the_model_cannot_fit(abs_on_pei):
+    all_flat = api.calibrate_bed_grip(160, abs_on_pei)
+    assert all_flat["status"] == "lower_only" and all_flat["lower_n_mm"] > 0
+    assert "grip_n_mm" not in all_flat and "upper_n_mm" not in all_flat
+    none_flat = api.calibrate_bed_grip(0, {**abs_on_pei, "layer_height": 0.1})
+    assert none_flat["status"] == "upper_only" and none_flat["upper_n_mm"] > 0
+    assert "grip_n_mm" not in none_flat and "lower_n_mm" not in none_flat
+    assert api.calibrate_bed_grip(0, abs_on_pei)["status"] == "incompatible"  # the fixed curl screen holds the 40 mm bar
+    assert api.calibrate_bed_grip(80, abs_on_pei)["status"] == "incompatible"  # longer bar has a lower threshold
+    assert api.calibrate_bed_grip(40, ABS_OPEN)["status"] == "unknown_plate"
+    with pytest.raises(ValueError, match="length from the warping test"):
+        api.calibrate_bed_grip(90, abs_on_pei)
+
+
+def test_fit_grip_uses_geometric_middle_of_positive_bracket(abs_on_pei, monkeypatch):
+    calls = []
+
+    def simulate_bar(mesh, *_args, **kwargs):
+        length = int(np.ptp(mesh.triangles[..., 0]))
+        calls.append(length)
+        assert kwargs["grip_trial"]
+        return {"lift_grip_n_mm": {80: 0.04, 120: 0.09}[length], "peel_solved": True}
+
+    monkeypatch.setattr(warp, "simulate", simulate_bar)
+    r = api.calibrate_bed_grip(80, abs_on_pei)
+    assert calls == [80, 120]
+    assert r["status"] == "calibrated"
+    assert r["lower_n_mm"] < r["grip_n_mm"] < r["upper_n_mm"]
+    assert r["grip_n_mm"] == pytest.approx(0.06)
 
 
 def test_bottom_layers_on_the_warm_bed_shrink_less():
@@ -206,5 +287,24 @@ def test_pla_on_pei_follows_the_measured_glass_curve():
         for temp in (50, 65, 70, 80):
             assert grip("textured_pei", temp) / grip("glass", temp) == pytest.approx(0.714 / 0.73)
         assert grip("textured_pei", 70) > 5 * grip("textured_pei", 60)
+    finally:
+        api.custom_presets()
+
+
+def test_calibrated_grip_follows_the_bed_temperature_curve():
+    """The bar calibration sets the level; at another bed temperature it scales like the estimate."""
+    record = {"none": {"status": "calibrated", "surface": "glass", "bed_temp_c": 60, "longest_flat_mm": 80,
+                       "lower_n_mm": 0.02, "upper_n_mm": 0.08, "grip_n_mm": 0.04}}
+    try:
+        def grip(temp):
+            api.custom_presets(printers={"plate": {"based_on": "prusa_mk4s", "bed_surface": "glass"}},
+                               materials={"bars": {"based_on": "pla", "bed_temp_c": temp, "bed_grip_calibration": record}})
+            p = Profile.from_dict({"material": "my_bars", "printer": "my_plate"})
+            return warp.bed_grip(p), warp.bed_grip(p, calibrated=False)["grip_n_mm"]
+
+        at_60, est_60 = grip(60)
+        at_70, est_70 = grip(70)
+        assert at_60["grip_n_mm"] == pytest.approx(0.04) and not at_60["calibration_temp_differs"]
+        assert at_70["grip_n_mm"] == pytest.approx(0.04 * est_70 / est_60) and at_70["calibration_temp_differs"]
     finally:
         api.custom_presets()

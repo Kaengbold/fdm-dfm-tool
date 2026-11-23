@@ -11,6 +11,17 @@ from fdmcore.mesh import load_stl  # noqa: E402
 SAMPLES = Path(__file__).resolve().parents[2] / "web" / "samples"
 
 
+def test_calibrate_bed_grip():
+    m.set_custom_presets(printers={"pei": {"based_on": "prusa_mk4s", "bed_surface": "textured_pei"}})
+    try:
+        result = m.calibrate_bed_grip(40, printer="my_pei", material="abs")
+        assert result["status"] == "calibrated"
+        assert 0 < result["grip_n_mm"] < result["upper_n_mm"]
+        assert result["enclosure"] == "none" and result["surface"] == "textured_pei"
+    finally:
+        m.set_custom_presets()
+
+
 def test_agent_workflow(tmp_path):
     assert "pla" in m.list_presets()["materials"]
     info = m.load_part(str(SAMPLES / "l_bracket.stl"))

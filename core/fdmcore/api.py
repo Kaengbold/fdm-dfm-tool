@@ -26,7 +26,7 @@ from .mesh import Mesh, mesh_health, to_binary_stl
 from .messages import format_message, summarize_finding
 from .orientation import OrientationResult, OrientationSettings, classify_faces, evaluate, find_orientations, rotation_to_z, support_summary
 from .placement import plate_layout, print_rotation
-from .profile import DATA as DATA_DIR, Profile, load_data, presets
+from .profile import DATA as DATA_DIR, WARPING_TEST_MM, Profile, load_data, presets
 from . import progress
 from .progress import stage
 from .recommend import bambu, cooling_ranges, goal_plan, grip_settings, print_risk, recommend_settings
@@ -231,7 +231,6 @@ FIT_GAUGE_GAPS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5)  # hole sizes of the fit gauge: 
 DOGBONE = {"end_w": 34.0, "end_l": 22.0, "hole_d": 6.0, "mid_w": 3.0, "mid_l": 30.0, "round": 12.0, "thick": 4.0}
 OVERHANG_TEST_DEG = (40, 45, 50, 55, 60, 65, 70)  # from vertical
 BRIDGE_TEST_MM = (10, 20, 30, 40, 50)
-WARPING_TEST_MM = (40, 80, 120, 160)
 
 
 LABEL_MM = 0.6  # raised numbers: three 0.2 mm layers, readable and quick to print
@@ -531,6 +530,14 @@ def _all_tests() -> list[np.ndarray]:
             bone + [0, 64, 0], *(t + [104, 64, 0] for t in _fit_test()),
             *(t + [0, 104, 0] for t in _overhang_test(10)), *(t + [56, 104, 0] for t in _bridge_test(10)),
             standing + [124, 110, 0]]
+
+
+def calibrate_bed_grip(longest_flat_mm: int, profile: dict | None = None) -> dict:
+    """Estimate bed grip from the warping bars, using 0 if every bar lifted."""
+    from . import warp
+
+    p = Profile.from_dict(profile)
+    return {"enclosure": p.enclosure, **warp.calibrate_bed_grip(p, longest_flat_mm, _shells(p))}
 
 
 def calibration_part(kind: str, profile: dict | None = None) -> dict:
@@ -4645,6 +4652,7 @@ METHODS = {
     "presets": get_presets,
     "custom_presets": custom_presets,
     "calibration_part": calibration_part,
+    "calibrate_bed_grip": calibrate_bed_grip,
     "load": load,
     "set_cad_checks": set_cad_checks,
     "load_gcode": load_gcode,
