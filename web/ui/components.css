@@ -123,20 +123,21 @@
 .ui-pop__title { font-weight: var(--fw-bold); }
 
 /* ---------- OptionColumn and ConstraintsBar ---------- */
-.ui-col { display: grid; grid-template-rows: auto 1fr auto; min-width: 200px; padding: 0 var(--s-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); }
-.ui-col.is-recommended { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ui-col { display: grid; grid-template-rows: subgrid; min-width: 0; padding: 0 var(--s-2); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); }
+.ui-col.is-recommended { background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface-raised)); }
 .ui-col.is-stale { opacity: 0.7; }
 .ui-col__head { display: grid; gap: var(--s-1); align-content: start; padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
 .ui-col__badge { justify-self: start; }
-.is-recommended .ui-col__badge { background: var(--accent); color: var(--text-on-accent); }
+.is-recommended .ui-col__badge { background: var(--accent-soft); color: var(--accent-text); }
 .ui-col__pc { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); font-size: var(--fs-sm); }
 .ui-col__pc li::before { display: inline-block; width: 16px; font-weight: var(--fw-bold); }
 .ui-col__pc .is-pro::before { content: "+"; color: var(--good); }
 .ui-col__pc .is-con::before { content: "–"; color: var(--warn); }
 .ui-col__head .ui-link { justify-self: start; }
-.ui-col__cell { display: flex; align-items: center; gap: var(--s-2); min-height: 32px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.ui-col__cell { display: flex; align-items: center; gap: var(--s-1); min-height: var(--s-5); border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.ui-col__cell:last-child { border-bottom: 0; }
 .ui-col__value.is-good { color: var(--good); } .ui-col__value.is-warn { color: var(--warn); }
-.ui-col__pin { margin-left: auto; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3);
+.ui-col__pin { flex: none; margin-left: auto; display: grid; place-items: center; width: var(--s-5); height: var(--s-5); border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3);
   opacity: 0; cursor: pointer; }
 .ui-col__cell:hover .ui-col__pin, .ui-col__pin:focus-visible, .ui-col__pin[aria-pressed="true"] { opacity: 1; }
 .ui-col__pin[aria-pressed="true"] { color: var(--accent); }
@@ -144,11 +145,7 @@
 .ui-col__edit { padding: 0; border: 0; border-bottom: 1px dashed var(--line-strong); background: none; color: inherit; font: inherit; cursor: pointer; }
 .ui-col__edit:hover, .ui-col__edit:focus-visible { border-bottom-color: var(--accent); color: var(--accent); }
 .ui-col__value.is-edited { font-weight: var(--fw-bold); color: var(--accent); }
-.ui-col__cell.is-editing { position: relative; overflow: visible; z-index: 5; }
-.ui-col__cell.is-editing > * { position: absolute; top: 0; left: calc(-1 * var(--s-2)); right: calc(-1 * var(--s-2)); display: grid; gap: var(--s-2); padding: var(--s-2);
-  border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); box-shadow: var(--shadow-pop); }
 .ui-col__cell.is-pinned { background: linear-gradient(90deg, var(--accent-soft), transparent); }
-.ui-col__foot { padding: var(--s-3) 0; display: grid; }
 .ui-constraints { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); }
 
 /* ---------- FindingRow and PendingBar ---------- */

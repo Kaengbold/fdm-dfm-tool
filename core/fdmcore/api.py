@@ -2210,8 +2210,8 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
     """Read the G-code the part was sliced to (from our 3MF, in this orientation ``up``) for the
     detailed level: strength with the real walls, infill and line directions. Checks that it is this
     part (sizes, and most of the plastic inside the model; a quarter turn on the bed is found).
-    Plain G-code, or a Bambu Studio / OrcaSlicer ``.gcode.3mf`` (the G-code is inside, and its
-    settings next to it)."""
+    Plain G-code, Prusa binary G-code, or a Bambu Studio / OrcaSlicer ``.gcode.3mf``
+    (the G-code is inside, and its settings next to it)."""
     from .gcode import CAUSE_NAMES, KIND_NAMES, PART_KINDS, parse, placement, time_lost
     from .voxel import voxelize
 
@@ -2236,9 +2236,7 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
                     settings = json.loads(read_zip(z, "Metadata/project_settings.config"))
                 except ValueError:
                     pass
-    if isinstance(data, (bytes, bytearray)) and data[:4] == b"GCDE":
-        raise ValueError("This is binary G-code (.bgcode). Turn off “binary G-code” in PrusaSlicer's printer settings and export again")
-    tp = parse(data, settings)  # bytes are read a piece at a time: a big G-code is never copied as text
+    tp = parse(data, settings)  # read plain or binary G-code a piece at a time
     rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     turned = s.mesh.triangles.reshape(-1, 3) @ rot.T
     lo, hi = turned.min(axis=0), turned.max(axis=0)
@@ -2461,7 +2459,7 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     lines (``segments``: x0 y0 z0 x1 y1 z1) with ``factor`` (new speed / old) and ``layer``; ``fan_marks``
     where the plan changes the fan. ``slowdown_min``: minutes each slicer slowdown cause costs (what limits
     the print). ``rotation``: the oriented frame (part @ rotation.T, centred, on z = 0)."""
-    from .gcode import CAUSE_NAMES, time_lost
+    from .gcode import CAUSE_NAMES, fan_levels, time_lost
     from .importance import REASONS
     from .kinematics import timing
     from .thermal_opt import apply
@@ -2535,10 +2533,15 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
     chosen = part[keep]
     seg = np.column_stack([to_oriented(np.asarray(tp.p0[chosen], float)), to_oriented(np.asarray(tp.p1[chosen], float))])
     # Where the plan sets a fan the slicer didn't: the first line of each stretch with a new value.
-    new_fan = np.abs(planned.part_fan - tp.part_fan) > 0.01
-    starts = np.flatnonzero(new_fan & (np.concatenate([[True], np.abs(np.diff(planned.part_fan)) > 0.01]) | ~np.concatenate([[False], new_fan[:-1]])))
-    fan_marks = [{"layer": int(tp.layer[i]), "point": to_oriented(np.asarray(tp.p0[i], float)[None])[0].round(2).tolist(),
-                  "fan": round(float(planned.part_fan[i]), 2)} for i in starts[tp.part()[starts]][:200]]
+    fan_marks = []
+    fans = [("part", tp.part_fan, planned.part_fan)]
+    if plan.aux is not None and np.isfinite(plan.aux).any():
+        fans.append(("aux", fan_levels(tp, "P2"), fan_levels(planned, "P2")))
+    for channel, old, new in fans:
+        changed = np.abs(new - old) > 0.01
+        starts = np.flatnonzero(changed & (np.r_[True, np.abs(np.diff(new)) > 0.01] | ~np.r_[False, changed[:-1]]))
+        fan_marks.extend({"layer": int(tp.layer[i]), "point": to_oriented(np.asarray(tp.p0[i], float)[None])[0].round(2).tolist(),
+                          "fan": round(float(new[i]), 2), "channel": channel} for i in starts[tp.part()[starts]][:200])
     lost = time_lost(tp)
     return {"spots": spots, "timeline": timeline, "rotation": np.round(rot, 6).tolist(),
             "lines": {"segments": f32(seg), "factor": f32(factor[keep]), "layer": np.asarray(tp.layer[chosen], np.int32).tobytes(),
@@ -2550,8 +2553,8 @@ def _cooling_detail(tp, r: dict, up, p: Profile, mark) -> dict:
 def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dict] | None = None,
                    intents: list[dict] | None = None, fine: bool = False) -> dict:
     """Option B (opt-in): the cooling plan written into the user's own G-code (gcode_rewrite.py): only speeds,
-    part fan commands and cooling park moves change; the original file stays theirs. ``data``: the plain
-    G-code loaded with load_gcode. Before it is offered it is read back and checked (same paths and plastic
+    fan commands and cooling park moves change; the original file stays theirs. ``data``: the plain
+    or binary G-code loaded with load_gcode. The output is plain G-code, read back and checked (same paths and plastic
     per layer, machine speed and flow limits) and simulated again: no spot may end up outside its window that
     wasn't before. ``ok`` False: no ``data``, and ``problems`` says why. Else ``data`` (the new G-code),
     ``minutes`` (before, after) and ``changes``."""
@@ -2611,7 +2614,8 @@ def _cooling_view(r: dict, imp, p: Profile) -> dict:
                 "weighted_too_hot": round(part["weighted_hot"], 1), "weighted_too_cold": round(part["weighted_cold"], 1)}
 
     out = {"before": view(r["before"]), "gcode": {**view(r["gcode"]), "plan": r["gcode"]["plan"]},
-           "slicer": {**view(r["slicer"]), "cooling": r["slicer"]["cooling"]}, "guessed": imp.guessed, "confidence": confidence(p)}
+           "slicer": {**view(r["slicer"]), "cooling": r["slicer"]["cooling"]}, "guessed": imp.guessed, "confidence": confidence(p),
+           "aux_fan_estimated": r["aux_fan_estimated"]}
     out["summary"] = _cooling_summary(out)
     return out
 
@@ -2631,7 +2635,10 @@ def _cooling_summary(r: dict) -> list[str]:
         return f"{x['too_hot']} spots too hot, {x['too_cold']} too cold to bond well"
 
     if not g["plan"] and b["too_hot"] == 0 and b["too_cold"] == 0:
-        return ["Nothing to gain: every spot stays in its temperature window, and the slicer slowed no layer for cooling it didn't need."]
+        lines = ["Nothing to gain: every spot stays in its temperature window, and the slicer slowed no layer for cooling it didn't need."]
+        if r["aux_fan_estimated"]:
+            lines.append("The side fan's extra cooling is an estimate.")
+        return lines
     lines = [f"As sliced: {b['print_min']:.1f} min, {spots(b)}."]
     if g["plan"]:
         lines.append(f"With the cooling plan in the G-code: {g['print_min']:.1f} min, {spots(g)}.")
@@ -2644,6 +2651,8 @@ def _cooling_summary(r: dict) -> list[str]:
     if sl["cooling"]["ranges"] or sl["cooling"].get("tower"):
         lines.append(f"With your slicer's settings only (slower heights{extra}): {sl['print_min']:.1f} min, {spots(sl)}. "
                      "Fan changes and undoing the slicer's slowdown need the G-code.")
+    if r["aux_fan_estimated"]:
+        lines.append("The side fan's extra cooling is an estimate.")
     lines.append(CONFIDENCE_TEXT[r["confidence"]] + (" Which spots matter is guessed from the shape: add the loads for a real answer." if r["guessed"] else ""))
     return lines
 
