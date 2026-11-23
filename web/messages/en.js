@@ -904,6 +904,8 @@ export default {
   "heat.why.matters": "How much it matters: {what}.",
   "heat.why.accepted": "It hardly matters for strength, so the risk here is accepted.",
   "heat.do.fan": "the fan goes to {fan} % early",
+  "heat.do.auxFan": "the side fan goes to {fan} % early",
+  "heat.sum.auxEstimated": "The side fan's extra cooling is an estimate.",
   "heat.do.slower": "it prints at {pct} % speed",
   "heat.do.faster": "the slicer's slowdown is undone",
   "heat.do.park": "the nozzle waits {s} s beside the part",
@@ -918,6 +920,7 @@ export default {
   "heat.fix": "Optimize my G-code directly",
   "heat.fixBusy": "Writing the G-code…",
   "heat.fixHint": "Writes a copy with the cooling plan (speeds, fan and short waits only) and checks it again. Your file stays as it is.",
+  "heat.fixBinary": "The optimized copy downloads as a plain .gcode file.",
   "heat.fixDone": "Downloaded: {from} min → {to} min.",
   "heat.fixRefused": "No new G-code: it didn't pass its checks.",
   // Show faces for the Quality goal (T-563).

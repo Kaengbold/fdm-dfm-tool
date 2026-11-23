@@ -1026,9 +1026,10 @@ Order: T-470 → T-477. T-477 (real prints) decides whether to go on to T-480 an
 
       Slower than Orca here, because cooling the pin takes time; the summary says so. About 1.5 min locally.
     - The browser slicer half waits for T-127 / T-525.
-- [~] **T-484 P3** [TO] Later. · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-484-thermal-later`)
+- [x] **T-484 P3** [TO] Later. · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-484-thermal-later`)
   - Extra fans (Bambu aux / chamber, `M106 P2/P3`), `.bgcode`, GPU / voxel tier for hot spots.
   - Island reordering (research only): single material, same object, travel-collision checks, seams kept; better as a hint to the slicer than a G-code edit.
+  - Outcome: separate P2/P3 fan records, estimated P2 cooling and checked PLA boosts on equipped Bambu printers, and Prusa binary import with plain G-code download. [Research](research/thermal_optimizer_later.md) records the voxel follow-up and island-order slicer hint.
 - [x] **T-485 P2** Placing a hollow (`volume_at`, kind "void") on a wall fails with "That spot isn't on the part". · files: `core/fdmcore/api.py` (`_solid_run`, `volume_at`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-485-void-on-wall`)
   - Seen: `node tools/pyodide_check.mjs` on `core/tests/corpus/spool_hub.stl` (also on `main`, natively too?): `volume_at` at the centre of the first triangle (a spot on the surface) raises it. Most likely the click is on a vertical wall, so the straight up-and-down line runs along the surface and the inside test misses it.
   - Do: find the cause, then for a click on the surface step a little into the part (along the face normal) before the up-and-down search, or say in plain words why a hollow can't go there.
