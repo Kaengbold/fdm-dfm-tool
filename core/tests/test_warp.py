@@ -193,3 +193,18 @@ def test_abs_curls_more_than_pla():
     pla, abs_ = (api.warping([0, 0, 1], {"material": m}) for m in ("pla", "abs"))
     assert abs_["max_mm"] > 2.5 * pla["max_mm"]
     assert "curl up to" in abs_["explanation"] and abs_["verdict"] != "fine"
+
+
+def test_pla_on_pei_follows_the_measured_glass_curve():
+    """The default plate gets the measured jump near PLA's softening point too, not the generic curve."""
+    def grip(surface, temp):
+        api.custom_presets(printers={"plate": {"based_on": "bambu_p1s", "bed_surface": surface}},
+                           materials={"bed": {"based_on": "pla", "bed_temp_c": temp}})
+        return warp.bed_grip(Profile.from_dict({"material": "my_bed", "printer": "my_plate"}))["grip_n_mm"]
+
+    try:
+        for temp in (50, 65, 70, 80):
+            assert grip("textured_pei", temp) / grip("glass", temp) == pytest.approx(0.714 / 0.73)
+        assert grip("textured_pei", 70) > 5 * grip("textured_pei", 60)
+    finally:
+        api.custom_presets()

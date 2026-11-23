@@ -154,6 +154,13 @@ def bed_grip(profile: Profile) -> dict | None:
     pla_anchors = settings["pla_strand_shear_n_mm"].get(surface)
     if mat == "pla" and pla_anchors is not None:
         shear, source = _pla_shear(temp, surface, pla_anchors, settings["pla_hot_shear_share"])
+    elif mat == "pla" and surface in settings["nominal_shear_n_mm"]["pla"]:
+        # Other plates follow the measured glass curve's shape: the nominal PLA values were
+        # set from the 60 °C glass measurement, so they scale it by plate.
+        glass = settings["pla_strand_shear_n_mm"]["glass"]
+        shear, _ = _pla_shear(temp, "glass", glass, settings["pla_hot_shear_share"])
+        shear *= settings["nominal_shear_n_mm"]["pla"][surface] / glass["at_60_c"]
+        source = "estimated"
     else:
         nominal = settings["nominal_shear_n_mm"].get(mat, {}).get(surface)
         if nominal is None:
