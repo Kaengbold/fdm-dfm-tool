@@ -90,9 +90,9 @@ finding.dry_filament.one_liner_mat: "{material} absorbs moisture; wet spools pri
 
 finding.stress_at_inside_corner.title: "Sharp inside corner can crack"
 finding.stress_at_inside_corner.one_liner: "Stress builds up here. Repeated loads make cracks more likely."
-fillet.load.general: "In printed PLA, rounding helps a little under a steady load. It matters more for clips, hinges and brackets that flex or shake repeatedly."
-fillet.load.repeated: "Rounding is worth trying here. In printed PLA it matters more when the part flexes or shakes repeatedly."
-fillet.load.steady: "For a load applied once or held steady, rounding helps a little in printed PLA."
+fillet.load.general: "In printed parts, rounding helps a little under a steady load. It matters more for clips, hinges and brackets that flex or shake repeatedly."
+fillet.load.repeated: "Rounding is worth trying here. In printed parts it matters more when the part flexes or shakes repeatedly."
+fillet.load.steady: "For a load applied once or held steady, rounding helps a little in printed parts."
 fillet.load.orientation: "Start by printing the part so the load runs along the layers and is less likely to pull them apart."
 
 finding.too_hot_in_use.title: "Too hot where used"

@@ -1619,7 +1619,7 @@ def _stress_chamfers(mesh: Mesh, weak_spot, h: float, size: float, hot_spots=Non
     every_k = [k for c in corners for k in c]
     load_advice = inside_corner_load_advice(repeated_load)
     return [_edit("stress-chamfer", "stress_at_inside_corner", title, found + how + load_advice, pieces, op="add",
-                  param="stress_chamfer_mm", advice={"text": f"{advice_text}. {load_advice}", "now": None,
+                  param="stress_chamfer_mm", advice={"text": advice_text, "now": None,
                           "target": round(float(r_mm if rounds else size), 1), "unit": "mm", "point": spot.tolist()},
                   intent=_corner_intent(edges, every_k, size, up, max_overhang_deg, True, region))]
 
@@ -1767,7 +1767,7 @@ def _foot_fillet_edits(mesh: Mesh, edits: list[dict], findings: list[dict], prof
             continue
         advice_text, title, desc = _foot_fillet_text(g["noun"], g["place"], r, rounds, total)
         out.append(_edit(f"foot-fillet-{len(out)}", "foot_fillet", title, f"{desc} {load_advice}", pieces, op="add",
-                         advice={"text": f"{advice_text}. {load_advice}", "now": None, "target": round(r, 1),
+                         advice={"text": advice_text, "now": None, "target": round(r, 1),
                                  "unit": "mm", "point": g["point"].tolist()},
                          intent=_corner_intent(edges, ks, r, up, max_oh, False, region)))
     return out

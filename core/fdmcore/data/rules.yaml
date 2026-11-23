@@ -322,6 +322,7 @@ rules:
     - Seifollahi and Kabir (2026) — Static and repeated loading of printed PLA with notches and holes — https://doi.org/10.3390/polym18010001
     - Ezeh and Susmel (2020) — Repeated loading of printed PLA with blunt and sharp notches — https://eprints.whiterose.ac.uk/158161/1/PLA_Notch_Fatigue_Accpeted%20Manuscript_LS.pdf
     - Materials (2024) — Print direction and strength under pin loading in PLA — https://doi.org/10.3390/ma17225394
+    - ETASR (2025) — FEA of shoulder fillets, chamfers and key-seats under tension, torsion and bending (fillets give the lowest stress concentration) — https://etasr.com/index.php/ETASR/article/download/11111/5430/62291
     - Rahix — Design for 3D-Printing (fillets vs chamfers by print direction) — https://blog.rahix.de/design-for-3d-printing/
   too_hot_in_use:
     title: Gets too hot where it's used
