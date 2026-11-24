@@ -171,6 +171,7 @@ optimizer:
   max_speedup: 0.3          # undoing the slicer's slowdowns saves at most this share of the print time
   fan_steps: [0.2, 0.4, 0.6, 0.8, 1.0]  # part fan values a layer may get (up when too hot, down when too cold)
   slow_steps: [0.85, 0.7, 0.55, 0.4]    # speed factors a layer may get, mildest first
+  slowdown_correction_share: 0.5       # use half the estimated extra time: the fitted cooling rate ignores nozzle heating and changing bond conditions
   fast_steps: [1.5, 2.0, 3.0, 10.0]     # how much of the slicer's layer-time slowdown a layer may undo (x, up to its set speed)
   park_steps: [3, 6, 12, 24]           # cooling park moves (s waiting beside the part before a layer)
   park_cost: 1.2            # a parked second costs a bit more than a printed one (the moves there and back)

@@ -89,7 +89,7 @@ def test_optimize_cooling_in_plain_words():
     api.load_gcode((FIXTURES / "bambu.gcode.3mf").read_bytes(), [0, 0, 1])
     r = api.optimize_cooling([0, 0, 1], {"material": "pla", "printer": "bambu_p1s"})
     assert r["confidence"] == "rough" and r["guessed"]
-    assert [r[plan]["too_hot"] for plan in ("before", "gcode", "slicer")] == [40, 40, 10]
+    assert [r[plan]["too_hot"] for plan in ("before", "gcode", "slicer")] == [40, 20, 10]
     assert [r[plan]["too_cold"] for plan in ("before", "gcode", "slicer")] == [0, 0, 0]
     assert r["summary"][0].startswith("As sliced") and any("cooling plan in the G-code" in line for line in r["summary"])
     assert "Rough" in r["summary"][-1]
