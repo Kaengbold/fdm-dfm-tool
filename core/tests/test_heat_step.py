@@ -27,20 +27,20 @@ NODE = shutil.which("node")
 @pytest.fixture(scope="module")
 def detail():
     api.load((FIXTURES / "part.stl").read_bytes(), "fixture")
-    api.load_gcode(gzip.decompress((FIXTURES / "orca.gcode.gz").read_bytes()), [0, 0, 1])
+    data = b"M191 S35\n" + gzip.decompress((FIXTURES / "orca.gcode.gz").read_bytes())
+    api.load_gcode(data, [0, 0, 1])
     return api.optimize_cooling([0, 0, 1], detail=True)
 
 
 def test_detail_has_every_spot_before_and_after(detail):
-    """The same spots in both runs; the plan's run has fewer too hot ones left, the lines it slowed or sped
+    """The same spots in both runs; the plan's run has none of the 40 too hot ones left, the lines it slowed or sped
     up are marked, and everything sits on the oriented part (the frame the stage turns the part into)."""
     sp = detail["spots"]
     n = len(sp["points"]) // 12
     assert n > 100 and all(len(sp[k][i]) == n * 4 for k in ("cover_c", "cover_s", "bond") for i in (0, 1))
     before, after = (np.frombuffer(w, np.uint8) for w in sp["window"])
-    hot_before, hot_after = (before == 1).sum(), (after == 1).sum()
-    assert hot_before == detail["before"]["too_hot"]
-    assert hot_after == detail["gcode"]["too_hot"] < hot_before
+    assert (before == 1).sum() == detail["before"]["too_hot"] == 40
+    assert (after == 1).sum() == detail["gcode"]["too_hot"] == 0
     tl = detail["timeline"]
     layers = len(tl["z"]) // 4
     assert layers == 50 and all(len(tl[k][i]) == layers * 4 for k in ("seconds", "fan", "cover_c") for i in (0, 1))

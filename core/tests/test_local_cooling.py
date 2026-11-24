@@ -1,5 +1,7 @@
 """Local mode (T-483): slice with OrcaSlicer without its slowdown for layer cooling, then our cooling plan."""
 
+import re
+
 import pytest
 
 from fdmcore import api, mcp_server
@@ -16,20 +18,47 @@ def test_only_the_cooling_slowdown_is_switched_off():
     assert off["machine"] is chosen["machine"] and off["process"] is chosen["process"]
 
 
-@pytest.mark.skipif(find_orca() is None, reason="needs an installed OrcaSlicer")
-def test_the_local_tool_returns_checked_gcode(tmp_path):
-    """Orca without its slowdown is faster but hotter. Only write the cooling plan if it stays safe to print:
-    the cold chamber can leave joints too cold to bond, in which case use Orca's untouched slice."""
+@pytest.fixture
+def slice_with_chamber(monkeypatch):
     api.load((FIXTURES / "part.stl").read_bytes(), "part.stl")
+    original_slice = mcp_server._slice
+
+    def set_startup(command):
+        slices = {}
+
+        def slice_part(*args, cooling_slowdown=True, **kwargs):
+            result = original_slice(*args, cooling_slowdown=cooling_slowdown, **kwargs)
+            sliced = result["orcaslicer"]
+            sliced["gcode"] = f"{command} S35\n" + sliced["gcode"]
+            slices[cooling_slowdown] = sliced["gcode"]
+            return result
+
+        monkeypatch.setattr(mcp_server, "_slice", slice_part)
+        return slices
+
+    return set_startup
+
+
+@pytest.mark.skipif(find_orca() is None, reason="needs an installed OrcaSlicer")
+def test_the_local_tool_returns_checked_gcode(tmp_path, slice_with_chamber):
+    """With the chamber preheated, the checked plan beats Orca's own slowdown on the hot pin."""
+    slice_with_chamber("M191")
     out = tmp_path / "cooled.gcode"
     r = mcp_server.optimize_print_cooling([0, 0, 1], str(out))
     m = r["minutes"]
-    text = out.read_text()
-    assert text.startswith("; ") and m["without_slowdown"] < m["orca_with_its_slowdown"]
-    if r["source"] == "OrcaSlicer's own":
-        assert "newly too cold to bond" in r["why"] and "cooling plan" not in text[:4000]
-        return
-    assert r["source"] == "cooling plan" and "cooling plan" in text[:4000]
+    assert r["source"] == "cooling plan", r
+    assert "; FDM DFM Tool cooling plan" in out.read_text(encoding="utf-8")[:4000]
+    assert m["without_slowdown"] < m["orca_with_its_slowdown"]
     assert r["changes"]["park_moves"] + r["changes"]["speed_lines"] > 0
     hot = r["spots_too_hot"]
     assert hot["with_cooling_plan"] < hot["orca_with_its_slowdown"] < hot["without_slowdown"] and "OrcaSlicer's own" in r["summary"]
+
+
+@pytest.mark.skipif(find_orca() is None, reason="needs an installed OrcaSlicer")
+def test_the_local_tool_keeps_orcas_slice_when_the_cold_start_fails_the_check(tmp_path, slice_with_chamber):
+    slices = slice_with_chamber("M141")
+    out = tmp_path / "fallback.gcode"
+    r = mcp_server.optimize_print_cooling([0, 0, 1], str(out))
+    assert r["source"] == "OrcaSlicer's own", r
+    assert re.search(r"\b[1-9]\d* newly too cold to bond", r["why"]), r
+    assert out.read_text(encoding="utf-8") == slices[True]

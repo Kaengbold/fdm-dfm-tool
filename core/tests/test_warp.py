@@ -318,6 +318,7 @@ def test_abs_curls_more_than_pla():
 
     api.load(box(120, 20, 5), "bar")
     pla, abs_ = (api.warping([0, 0, 1], {"material": m}) for m in ("pla", "abs"))
+    # A cold chamber start increases PLA's shrink relatively more, narrowing the curl ratio.
     assert abs_["max_mm"] > 1.5 * pla["max_mm"]
     assert "curl up to" in abs_["explanation"] and abs_["verdict"] != "fine"
 
