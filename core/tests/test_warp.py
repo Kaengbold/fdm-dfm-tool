@@ -2,10 +2,12 @@ import json
 
 import numpy as np
 import pytest
+from scipy import sparse
 from shapely.geometry import box
 
 from fdmcore import api, warp
 from fdmcore.additions import extrude
+from fdmcore.fea import cohesive_bed
 from fdmcore.mesh import Mesh, to_binary_stl
 from fdmcore.profile import Profile
 
@@ -14,6 +16,11 @@ ABS_OPEN = {"material": "abs", "printer": "prusa_mk4s"}
 
 def bar(length, height=3.0):
     return Mesh(extrude(box(0, 0, length, 10), 0, height))
+
+
+def bar_adhesion(length, profile):
+    api.load(to_binary_stl(bar(length)), "bar")
+    return api.warping([0, 0, 1], profile)["adhesion"]
 
 
 def test_longer_bars_curl_more_and_the_reference_bar_rates_one():
@@ -42,16 +49,13 @@ def abs_on_pei():
 
 def test_fit_grip_from_synthetic_bar_results(abs_on_pei):
     def outcomes(profile):
-        p = Profile.from_dict(profile)
-        return [warp.simulate(bar(n), [0, 0, 1], p, api._shells(p), h=1, adhesion=True)["adhesion"]["may_lift"]
-                for n in (40, 80)]
+        return [bar_adhesion(n, profile)["may_lift"] for n in (40, 80)]
 
     known_grip = warp.bed_grip(Profile.from_dict(abs_on_pei))["grip_n_mm"]
     assert outcomes(abs_on_pei) == [False, True]
     r = api.dispatch("calibrate_bed_grip", json.dumps({"longest_flat_mm": 40, "profile": abs_on_pei}))
     enc = r.pop("enclosure")
-    assert known_grip < r["upper_n_mm"] and enc == "none"
-    assert r["grip_n_mm"] == pytest.approx(known_grip, rel=0.15)
+    assert r["lower_n_mm"] < known_grip < r["upper_n_mm"] and enc == "none"
 
     api.custom_presets(CAL_PRINTERS, materials={"abs_test": {
         "based_on": "abs", "bed_temp_c": 105, "bed_grip_calibration": {enc: r}, "warp_length_mm": {enc: 62},
@@ -72,18 +76,29 @@ def test_fit_grip_from_synthetic_bar_results(abs_on_pei):
     assert warp.warp_limit(enclosed) == warp.warp_limit(Profile.from_dict({"material": "abs"}))
 
 
-def test_fit_grip_bounds_and_outcomes_the_model_cannot_fit(abs_on_pei):
+def test_fit_grip_one_sided_results_and_unknown_plate(abs_on_pei):
     all_flat = api.calibrate_bed_grip(160, abs_on_pei)
     assert all_flat["status"] == "lower_only" and all_flat["lower_n_mm"] > 0
     assert "grip_n_mm" not in all_flat and "upper_n_mm" not in all_flat
-    none_flat = api.calibrate_bed_grip(0, {**abs_on_pei, "layer_height": 0.1})
+    none_flat = api.calibrate_bed_grip(0, abs_on_pei)
     assert none_flat["status"] == "upper_only" and none_flat["upper_n_mm"] > 0
     assert "grip_n_mm" not in none_flat and "lower_n_mm" not in none_flat
-    assert api.calibrate_bed_grip(0, abs_on_pei)["status"] == "incompatible"  # the fixed curl screen holds the 40 mm bar
-    assert api.calibrate_bed_grip(80, abs_on_pei)["status"] == "incompatible"  # longer bar has a lower threshold
     assert api.calibrate_bed_grip(40, ABS_OPEN)["status"] == "unknown_plate"
     with pytest.raises(ValueError, match="length from the warping test"):
         api.calibrate_bed_grip(90, abs_on_pei)
+
+
+def test_fit_grip_when_80_mm_holds_and_120_mm_lifts(abs_on_pei):
+    r = api.calibrate_bed_grip(80, abs_on_pei)
+    assert r["status"] == "calibrated"
+    assert r["upper_n_mm"] > 1.15 * r["lower_n_mm"]
+    assert r["lower_n_mm"] < r["grip_n_mm"] < r["upper_n_mm"]
+    api.custom_presets(CAL_PRINTERS, materials={"long_bars": {
+        "based_on": "abs", "bed_grip_calibration": {r["enclosure"]: r},
+    }})
+    results = [bar_adhesion(n, {**abs_on_pei, "material": "my_long_bars"}) for n in (80, 120)]
+    assert all(r["shear_source"] == "calibrated" and not r["solver_failed"] for r in results)
+    assert [r["may_lift"] for r in results] == [False, True]
 
 
 def test_fit_grip_uses_geometric_middle_of_positive_bracket(abs_on_pei, monkeypatch):
@@ -135,10 +150,27 @@ def test_warping_result_for_the_view():
 def test_open_abs_short_bar_holds_and_long_bar_peels(h):
     p = Profile.from_dict(ABS_OPEN)
     short, long = (warp.simulate(bar(n), [0, 0, 1], p, h=h, adhesion=True)["adhesion"] for n in (40, 90))
-    assert not short.get("may_lift")
-    assert long["may_lift"] and long["advance_mm"] >= 2
-    assert long["energy_release_n_mm"] > long["grip_n_mm"] > 0
+    assert not short["solver_failed"] and not long["solver_failed"]
+    assert not short["may_lift"] and long["may_lift"]
+    assert short["grip_n_mm"] == long["grip_n_mm"] > 0
     assert min(abs(long["point"][0] - x) for x in (0, 90)) < 2
+
+
+def test_cohesive_peel_transfers_load_and_breaks_the_next_spring():
+    k = np.eye(6)
+    normal = [2, 5]
+    k[np.ix_(normal, normal)] = [[2, -1], [-1, 2]]
+    load = np.zeros(6)
+    load[normal] = [0.9, 0.4]
+    slope, peak, failure = 4, 0.1, 0.2
+    elastic_opening = np.linalg.solve(k[np.ix_(normal, normal)] + slope * np.eye(2), load[normal])
+    assert elastic_opening[1] < peak < elastic_opening[0] < failure
+
+    lift, separation, converged = cohesive_bed(sparse.csr_matrix(k), load, np.arange(6).reshape(2, 3),
+                                               np.ones(2), slope, peak, failure, 30.0, {})
+
+    assert converged and np.all(separation >= failure)
+    assert lift == pytest.approx(np.linalg.solve(k[np.ix_(normal, normal)], load[normal]))
 
 
 def test_peel_finding_is_local_and_contributes_to_print_risk():
@@ -167,8 +199,8 @@ def test_expert_grip_override_can_stop_peel():
         api.set_expert({path: 10})
         p = Profile.from_dict(ABS_OPEN)
         r = warp.simulate(bar(90), [0, 0, 1], p, h=1, adhesion=True)["adhesion"]
-        assert r["curls"] and r["advance_mm"] == 0 and not r["may_lift"]
-        assert r["energy_release_n_mm"] < r["grip_n_mm"]
+        assert not r["solver_failed"] and not r["may_lift"]
+        assert r["detached_area_mm2"] == 0
     finally:
         api.set_expert({})
 

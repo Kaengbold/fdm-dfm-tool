@@ -16,6 +16,18 @@ def test_every_threshold_is_listed_with_its_source():
     assert sum(len(s["values"]) for s in sections.values()) > 100
 
 
+def test_saved_expert_settings_can_contain_the_retired_peel_gate():
+    old_path = "thresholds.bed_adhesion.min_curl_layers"
+    active_path = "thresholds.features.vanish_below_nozzle"
+    try:
+        result = api.set_expert({old_path: 3.0, active_path: 0.6})
+        values = {v["path"]: v["value"] for section in result["sections"] for v in section["values"]}
+        assert old_path not in values
+        assert values[active_path] == 0.6
+    finally:
+        api.set_expert({})
+
+
 def test_changes_reach_the_checks_and_reset():
     api.load((SAMPLES / "test_block.stl").read_bytes(), "test_block")
     thin = lambda: sum(f["rule"] == "too_thin_to_print" for f in api.check([0, 0, 1])["findings"])  # noqa: E731

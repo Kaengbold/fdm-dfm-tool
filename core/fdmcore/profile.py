@@ -44,6 +44,12 @@ def load_data(name: str) -> dict:
 def set_expert(changes: dict[str, dict[str, float]]) -> None:
     """Replace the Expert changes: ``{"thresholds": {"features.vanish_below_nozzle": 0.6}}``. Unknown
     paths raise KeyError, so a stale saved setting doesn't silently do nothing."""
+    # Older saved settings can still contain the retired peel gate. Drop it
+    # before validation so the engine can restore the other overrides.
+    if "thresholds" in changes:
+        thresholds = changes["thresholds"].copy()
+        thresholds.pop("bed_adhesion.min_curl_layers", None)
+        changes = {**changes, "thresholds": thresholds}
     for name, over in changes.items():
         data = _read_data(name)
         for path in over:
