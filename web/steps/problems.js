@@ -18,6 +18,7 @@ import { holdToEngine, loadToEngine, markedFaces } from "./args.js";
 import { setupLine, simProfile } from "./simulate.js";
 import { trianglesOf } from "./part.js";
 import * as F from "./fixes.js";
+import { problemPreview } from "./problemanim.js";
 import { openTool } from "./tools.js";
 
 const DEPENDS = ["model", "option"];
@@ -261,27 +262,35 @@ function review(store) {
 function frameFinding(f, res, services) {
   const stage = services.stage;
   const rotation = res?.check?.rotation;
-  if (!f.bbox || !rotation || !stage.part) return;
+  if (!f.bbox || !rotation || !stage.part) { stage.clearMarker(); return; }
   const [lo, hi] = F.turnedBounds(stage.partTriangles(), rotation);
-  stage.frameBox(F.boxToPart(f.bbox, rotation, lo, hi));
+  const corners = F.boxToPart(f.bbox, rotation, lo, hi);
+  stage.showMarker(corners, F.severityOf(f));
+  stage.frameBox(corners);
   framed = true;
 }
 
-function showGhosts(store, services) {
-  const s = store.get();
-  const res = store.result("check");
-  const key = JSON.stringify([s.pending.map((p) => p.id), store.deps(...DEPENDS)]);
-  if (key === ghostKey) return;
-  ghostKey = key;
-  const edits = s.pending.filter((p) => p.kind === "design").flatMap((p) => editsOf(p, res));
-  services.stage.showGhosts(edits.flatMap((e) => {
+function editPieces(edits) {
+  return edits.flatMap((e) => {
     let start = 0;
     return e.pieces.map((n, i) => {
       const piece = { mesh: e.mesh.subarray(start * 9, (start + n) * 9), op: e.piece_ops?.[i] ?? e.op };
       start += n;
       return piece;
     });
-  }));
+  });
+}
+
+function showGhosts(store, services, hoverFix = null) {
+  const s = store.get();
+  const res = store.result("check");
+  const hoverIds = hoverFix?.tag === "design" && hoverFix.editIds?.length ? hoverFix.editIds : [];
+  const key = JSON.stringify([s.pending.map((p) => p.id), hoverIds, store.deps(...DEPENDS)]);
+  if (key === ghostKey) return;
+  ghostKey = key;
+  const pendingEdits = s.pending.filter((p) => p.kind === "design").flatMap((p) => editsOf(p, res));
+  const hoverEdits = hoverIds.map((id) => res?.design?.edits.find((e) => e.id === id)).filter((e) => e && !pendingEdits.includes(e));
+  services.stage.showGhosts(editPieces([...pendingEdits, ...hoverEdits]));
 }
 
 function batchCard(store, services) {
@@ -339,19 +348,26 @@ registerStep("problems", {
     const left = F.openProblems(findings, ctx);
     if (ctx.newIds.length) body.append(h("p", { class: "prob-new", role: "alert" }, t("problems.caused", { count: ctx.newIds.length })));
     const modelLocked = s.change === "slicer";
-    const row = (f) => FindingRow({
-      finding: {
-        title: f.short_title ?? f.title, place: f.instance_label, line: f.one_liner ?? f.detail, severity: F.severityOf(f),
-        state: ((st) => (st === "open" ? "pending" : st))(F.statusOf(f, ctx)),
-        fixes: [...F.fixesFor(f, res.design, { modelLocked }).map((fx) => ({ ...fx, added: s.pending.some((p) => p.id === fx.id),
-          text: fx.changesModel ? t("problems.changesModel", { text: fx.text }) : fx.text })), ...toolFixes(f, s)],
-      },
-      expanded: openId === f.finding_id,
-      onFocus: () => { openId = f.finding_id; frameFinding(f, res, services); },
-      onAdd: (fx) => addFix([...F.fixesFor(f, res.design, { modelLocked }), ...toolFixes(f, s)].find((x) => x.id === fx.id), f, store),
-      onAccept: () => store.set({ accepted: [...new Set([...(s.accepted ?? []), f.finding_id])] }),
-      onMore: () => showMore(f),
-    });
+    const row = (f) => {
+      const isOpen = openId === f.finding_id;
+      const preview = isOpen ? problemPreview(f) : null;
+      return FindingRow({
+        finding: {
+          title: f.short_title ?? f.title, place: f.instance_label, line: f.one_liner ?? f.detail, severity: F.severityOf(f),
+          state: ((st) => (st === "open" ? "pending" : st))(F.statusOf(f, ctx)),
+          fixes: [...F.fixesFor(f, res.design, { modelLocked }).map((fx) => ({ ...fx, added: s.pending.some((p) => p.id === fx.id),
+            text: fx.changesModel ? t("problems.changesModel", { text: fx.text }) : fx.text })), ...toolFixes(f, s)],
+        },
+        expanded: isOpen,
+        preview,
+        onFocus: () => { openId = f.finding_id; frameFinding(f, res, services); services.rerender(); },
+        onBlur: () => { if (openId === f.finding_id) { openId = null; services.stage.clearMarker(); showGhosts(store, services, null); services.rerender(); } },
+        onHoverFix: (fx) => { preview?.setFix(fx); showGhosts(store, services, fx); },
+        onAdd: (fx) => addFix([...F.fixesFor(f, res.design, { modelLocked }), ...toolFixes(f, s)].find((x) => x.id === fx.id), f, store),
+        onAccept: () => store.set({ accepted: [...new Set([...(s.accepted ?? []), f.finding_id])] }),
+        onMore: () => showMore(f),
+      });
+    };
     const groups = F.groupFindings(findings);
     const worse = groups.some((g) => g.impact !== "info");
     const list = h("div", { class: "prob-list" });
@@ -396,6 +412,7 @@ registerStep("problems", {
   },
   leave({ services }) {
     services.stage.clearGhosts();
+    services.stage.clearMarker();
     ghostKey = null;
     if (framed) services.stage.view("iso");
     framed = false;

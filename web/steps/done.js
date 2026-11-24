@@ -17,11 +17,20 @@ import { optionGcode, setupLine, simProfile } from "./simulate.js";
 import { openTool } from "./tools.js";
 import { exportZones } from "./tools/zones.js";
 
-const SLICERS = ["orca", "bambu", "prusa"];
+const SLICERS = ["orca", "bambu", "prusa", "cura"];
+const CURA_GLOBAL_LABELS = {
+  layer_height: "Layer Height",
+  support_type: "Support Structure",
+  brim_type: "Build Plate Adhesion Type",
+  brim_width: "Brim Width",
+  raft_layers: "Build Plate Adhesion Type (Raft)",
+  slow_down_for_layer_cooling: "Minimum Layer Time",
+};
 const SLICER_KEY = "fdm-target-slicer";
 let busy = null; // {what, text} while an export runs
 let error = null;
 let checked = null; // {key, check, design} when Done had to run the check itself
+let gcodeCooled = false; // Download G-code on Done: plain vs cooling-optimized (T-615)
 
 /** The slicer the user exports for, remembered in this browser. */
 export function targetSlicer() {
@@ -102,7 +111,7 @@ export async function export3mf(store, services, slicer = targetSlicer()) {
   const settings = Object.fromEntries(on.filter((r) => r.key !== "fine_layers").map((r) => [r.key, r.value]));
   const bytes = await services.engine.call("export", {
     up: upOf(s), profile: profileOf(s), settings, excluded_settings: rows.filter((r) => off.has(r.key) && r.key !== "fine_layers").map((r) => r.key),
-    slicer: slicer === "prusa" ? "prusa" : "orca", fine_layers: off.has("fine_layers") ? [] : fineLayers(check),
+    slicer: slicer === "prusa" ? "prusa" : slicer === "cura" ? "cura" : "orca", fine_layers: off.has("fine_layers") ? [] : fineLayers(check),
     faces: markedFaces(s), // Quality's show faces: the slicer keeps the seam off them
     // stronger zones from Make it lighter, and the zones and hidden gaps from More tools (for this orientation)
     zones: [...(s.option?.zones ?? []), ...exportZones(s)],
@@ -220,11 +229,21 @@ async function cadChecklist(store, services) {
   }
 }
 
-async function downloadGcode(store, services) {
+async function downloadGcode(store, services, cooled = gcodeCooled) {
   const s = store.get();
   const res = await optionGcode(store, services);
   if (res?.state !== "ready") throw new Error(t(`sim.slice.fallback.${["too_big", "no_profile", "unavailable"].includes(res?.reason) ? res.reason : "failed"}`));
-  download(res.gcode, `${baseName(s)}.gcode`, "text/x.gcode");
+  if (!cooled) {
+    download(res.gcode, `${baseName(s)}.gcode`, "text/x.gcode");
+    return;
+  }
+  const o = s.option;
+  const profile = { ...profileOf(s), goal: s.goal || "balanced" };
+  const data = typeof res.gcode === "string" ? new TextEncoder().encode(res.gcode) : res.gcode;
+  await services.engine.call("load_gcode", { up: o.up, profile }, data);
+  const opt = await services.engine.call("optimize_gcode", { up: o.up, profile, loads: optimizeArgs(s).loads }, data);
+  if (!opt?.ok) throw new Error((opt?.problems ?? []).join(" · ") || t("heat.fixRefused"));
+  download(opt.data, `${baseName(s)}_cooled.gcode`, "text/x.gcode");
 }
 
 const minutes = (m) => (m == null ? "—" : m >= 60 ? t("done.hours", { h: Math.floor(m / 60), m: Math.round(m % 60) }) : t("done.minutes", { m: Math.round(m) }));
@@ -277,6 +296,10 @@ registerStep("done", {
       SegmentedControl({ label: t("done.slicer"), size: "small", value: slicer, options: SLICERS.map((v) => ({ value: v, label: t(`done.slicer.${v}`) })),
         onChange: (v) => { setTargetSlicer(v); services.rerender(); } }),
       Button({ label: t("done.export"), variant: "primary", disabled: Boolean(busy), onClick: () => run("3mf", t("done.exporting"), () => export3mf(store, services, slicer), services) })));
+    if (slicer === "cura") {
+      const curaKeys = Object.entries(CURA_GLOBAL_LABELS).map(([, label]) => label).join(", ");
+      body.append(h("p", { class: "ui-hint" }, t("done.curaNote", { settings: curaKeys })));
+    }
 
     const original = s.part.original ?? s.part.name;
     const fromStep = /\.(step|stp)$/i.test(original);
@@ -296,9 +319,15 @@ registerStep("done", {
     // Extras (§15.1): Tuned settings, Tolerances, Make it lighter; then More tools.
     const card = (title, text, action) => h("div", { class: "done-card" }, h("b", {}, title), h("span", {}, text), action);
     const extras = h("div", { class: "done-cards" },
-      card(t("done.tuned.title"), o.cooling ? t("done.tuned.on") : t("done.tuned.text"), h("div", { class: "row" },
-        Button({ label: t("done.gcode"), size: "small", disabled: Boolean(busy), onClick: () => run("gcode", t("done.slicing"), () => downloadGcode(store, services), services) }),
-        Button({ label: t("done.tuned.open"), size: "small", variant: "ghost", onClick: () => go("tuned") }))),
+      card(t("done.tuned.title"), o.cooling ? t("done.tuned.on") : t("done.tuned.text"), h("div", { class: "done-gcode" },
+        SegmentedControl({ label: t("done.gcodeMode"), size: "small", value: gcodeCooled ? "cooled" : "plain",
+          options: [{ value: "plain", label: t("done.gcodePlain") }, { value: "cooled", label: t("done.gcodeCooled") }],
+          onChange: (v) => { gcodeCooled = v === "cooled"; services.rerender(); } }),
+        h("div", { class: "row" },
+          Button({ label: gcodeCooled ? t("done.gcodeDownloadCooled") : t("done.gcode"), size: "small", disabled: Boolean(busy),
+            onClick: () => run("gcode", gcodeCooled ? t("done.slicingCooled") : t("done.slicing"), () => downloadGcode(store, services, gcodeCooled), services) }),
+          Button({ label: t("done.tuned.open"), size: "small", variant: "ghost", onClick: () => go("tuned") })),
+        h("small", { class: "ui-hint" }, t("done.gcodeSafety")))),
       card(t("done.tol.title"), t("done.tol.text"), Button({ label: t("done.tol.open"), size: "small", onClick: () => go("tolerances") })),
       s.goal === "quality" ? null : card(t("done.lighter.title"), o.lighter ? t("done.lighter.on") : t("done.lighter.text"),
         Button({ label: t("done.lighter.open"), size: "small", onClick: () => go("lighter") })));

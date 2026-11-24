@@ -16,4 +16,5 @@
 .done-tools li { display: flex; gap: var(--s-2); align-items: center; justify-content: space-between; }
 .done-tools span { color: var(--text-2); }
 .done-export { display: grid; gap: var(--s-3); }
+.done-gcode { display: grid; gap: var(--s-2); justify-items: start; }
 .done-pre { margin: 0; white-space: pre-wrap; font-size: var(--fs-sm); }

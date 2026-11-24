@@ -24,14 +24,24 @@ export function printerNozzles(catalog, printerId) {
   return [...new Set(raw.map(String))].sort((a, b) => Number(a) - Number(b));
 }
 
-/** Ticked nozzle sizes for the current profile (all printer sizes by default when profile.nozzles is empty). */
+/** Default nozzles ticked when a printer is chosen (T-609): 0.4 and 0.6 mm when available, else all printer nozzles. */
+export const DEFAULT_NOZZLES = ["0.4", "0.6"];
+
+export function defaultNozzles(catalog, printerId) {
+  const avail = printerNozzles(catalog, printerId);
+  if (!avail.length) return [];
+  const preferred = avail.filter((n) => DEFAULT_NOZZLES.includes(n));
+  return preferred.length ? preferred : avail;
+}
+
+/** Ticked nozzle sizes for the current profile (0.4 and 0.6 mm by default when profile.nozzles is empty). */
 export function activeNozzles(catalog, profile) {
   const avail = printerNozzles(catalog, profile?.printer);
   if (!avail.length) return [];
   const chosen = Array.isArray(profile?.nozzles) ? profile.nozzles.map(String) : [];
-  if (!chosen.length) return avail;
+  if (!chosen.length) return defaultNozzles(catalog, profile?.printer);
   const kept = avail.filter((n) => chosen.includes(n));
-  return kept.length ? kept : avail;
+  return kept.length ? kept : defaultNozzles(catalog, profile?.printer);
 }
 
 /** Materials ordered with owned spools first (when catalog.owned exists), preserving catalog order otherwise. */
@@ -166,8 +176,8 @@ export function optimizeArgs(state) {
   if (Array.isArray(prof.nozzles) && prof.nozzles.length) {
     nozzles = [...new Set(prof.nozzles.map(String))].sort((a, b) => Number(a) - Number(b));
   } else if (state?.catalog) {
-    const avail = printerNozzles(state.catalog, prof.printer);
-    if (avail.length) nozzles = avail;
+    const def = defaultNozzles(state.catalog, prof.printer);
+    if (def.length) nozzles = def;
   }
 
   const owned = Array.isArray(state?.catalog?.owned) ? [...state.catalog.owned] : [];

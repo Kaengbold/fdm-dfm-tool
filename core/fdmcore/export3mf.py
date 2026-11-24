@@ -160,7 +160,7 @@ def export_3mf(mesh: Mesh, name: str = "part", settings: dict[str, str] | None =
     re-arrange them)."""
     layer = (settings or {}).get("layer_height", layer_height)
     extra = {**pause_files(pauses), **range_files(list(ranges), None if layer is None else float(layer))}
-    if modifiers:
+    if modifiers and layout != "cura":
         if layout not in LAYOUTS:
             raise ValueError(f"layout must be one of {LAYOUTS}")
         return _with_modifiers(mesh, name, settings or {}, bed_center, modifiers, layout, extra, seam_block, copies)

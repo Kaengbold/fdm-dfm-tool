@@ -71,7 +71,7 @@ function download(data, name) {
 
 /** Draw a result on the stage once (the part turned the way the engine prints it); later calls only recolour, hide
  * or cut it. */
-function showHeat({ services, value }) {
+function showHeat({ services, value, legend: stageLegend }) {
   const result = value?.result;
   if (!result) return false;
   services.heatView ??= new HeatView(services.stage);
@@ -111,6 +111,9 @@ function showHeat({ services, value }) {
   hv.pick(view.mode === "window" || view.mode === "importance" ? view.picked : null);
   // The print the simulation ran on, not the model: the part's own surface steps aside (T-587).
   if (services.stage.part) services.stage.part.group.visible = false;
+  if (stageLegend) {
+    stageLegend.replaceChildren(h("b", {}, t(`heat.stageLegend.${view.mode}`)), legend(view.mode));
+  }
   services.stage.render();
   return true;
 }

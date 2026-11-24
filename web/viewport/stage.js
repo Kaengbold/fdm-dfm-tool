@@ -134,6 +134,7 @@ export class Stage {
   showPart(triangles) {
     this.hideField();
     this.clearGhosts();
+    this.clearMarker();
     if (this.part) { this.scene.remove(this.part.group); this.part.geo.dispose(); }
     this.part = partGroup(triangles, palette());
     this.scene.add(this.part.group);
@@ -209,6 +210,7 @@ export class Stage {
   clearPart() {
     this.hideField();
     this.clearGhosts();
+    this.clearMarker();
     if (!this.part) return;
     this.scene.remove(this.part.group);
     this.part.geo.dispose();
@@ -294,6 +296,41 @@ export class Stage {
   clearGhosts() {
     for (const g of this.ghosts ?? []) { g.removeFromParent(); g.geometry.dispose(); g.material.dispose(); }
     this.ghosts = [];
+    this.render();
+  }
+
+  /** Highlight one problem's bounding box on the part (T-613): ``corners`` in part coordinates, ``severity`` bad|warn|info. */
+  showMarker(corners, severity = "warn") {
+    this.clearMarker();
+    if (!this.part || !corners?.length) return;
+    const { x, y, z } = this.part.offset;
+    const box = new THREE.Box3();
+    for (const c of corners) box.expandByPoint(new THREE.Vector3(c[0] + x, c[1] + y, c[2] + z));
+    const size = box.getSize(new THREE.Vector3());
+    const pad = Math.max(0.6, size.length() * 0.04);
+    const sx = Math.max(size.x + pad, 1.5), sy = Math.max(size.y + pad, 1.5), sz = Math.max(size.z + pad, 1.5);
+    const centre = box.getCenter(new THREE.Vector3());
+    const css = getComputedStyle(document.documentElement);
+    const tok = severity === "bad" ? "--bad" : severity === "info" ? "--accent" : "--warn";
+    const color = css.getPropertyValue(tok).trim() || (severity === "bad" ? "#DC2626" : "#D97706");
+    const boxGeo = new THREE.BoxGeometry(sx, sy, sz);
+    const fill = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.14, depthWrite: false }));
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false }));
+    const group = new THREE.Group();
+    group.position.copy(centre);
+    group.renderOrder = 5;
+    group.add(fill, edges);
+    this.marker = { group, geos: [boxGeo, edges.geometry], mats: [fill.material, edges.material] };
+    this.part.group.add(group);
+    this.render();
+  }
+
+  clearMarker() {
+    if (!this.marker) return;
+    this.marker.group.removeFromParent();
+    for (const g of this.marker.geos) g.dispose();
+    for (const m of this.marker.mats) m.dispose();
+    this.marker = null;
     this.render();
   }
 
