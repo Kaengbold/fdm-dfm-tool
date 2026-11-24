@@ -2,9 +2,8 @@
 
 Every solid voxel is an 8-node hexahedron. All elements share one stiffness
 matrix (scaled per element for shell vs. infill), assembled into a sparse
-system and solved with preconditioned conjugate gradients.
-
-This is an indication tool: coarse mesh, linear material, no contact.
+system and solved with preconditioned conjugate gradients. The bed bond adds
+nonlinear springs to this coarse, linear-elastic model.
 """
 
 from __future__ import annotations
@@ -228,6 +227,91 @@ def stiffness(model: Model, c: np.ndarray, scale: np.ndarray, springs: tuple | N
         dof = (nodes[:, None] * 3 + np.arange(3)).astype(np.int32)
         k = k + sp.csr_matrix((block.ravel(), (np.repeat(dof, 3, axis=1).ravel(), np.tile(dof, (1, 3)).ravel())), shape=(n, n))
     return k
+
+
+def cohesive_bed(k: sp.csr_matrix, loads: np.ndarray, dofs: np.ndarray, area: np.ndarray,
+                 initial_slope: float, peak: float, failure: float,
+                 contact_slope: float, cache: dict, *, stop_at_lift: bool = False,
+                 coarse_grid: sp.csr_matrix | None = None) -> tuple[np.ndarray, np.ndarray, bool]:
+    """Relax the part after weakening the bond so load transfers to nearby springs.
+
+    Slip and positive opening share an effective separation. Keep its maximum so
+    a weakened spring cannot heal on unloading. Compression still meets the bed
+    after the bond breaks. Return the opening seen during lift, peak separation
+    history and convergence. The cache reuses the linear solver across grip trials.
+    """
+    u = cache["u"].copy() if "u" in cache else np.zeros(k.shape[0])
+    largest = np.zeros(len(dofs))
+    lift = largest.copy()
+    intact = np.ones(len(dofs))
+    diagonal = np.zeros(k.shape[0])
+    normal_dofs = dofs[:, 2]
+    contact_k = area * contact_slope
+    for _ in range(80):
+        opening = u[dofs]
+        contact = opening[:, 2] < 0
+        tension_k = area * initial_slope * intact
+        diagonal[dofs] = tension_k[:, None]
+        diagonal[normal_dofs] = np.where(contact, contact_k, tension_k)
+        tangent = k + sp.diags(diagonal, format="csr")
+        candidate = _bed_step(tangent, loads, u, cache, coarse_grid)
+        if candidate is None or not np.isfinite(candidate).all():
+            break
+        next_gap = candidate[dofs]
+        if np.any((contact != (next_gap[:, 2] < 0)) & (np.abs(next_gap[:, 2]) > 1e-8)):
+            # A full step can cross the stiff contact branch. Backtrack on the
+            # elastic energy before using the new contact set.
+            delta = candidate - u
+            linear = (k @ u - loads) @ delta
+            quadratic = delta @ (k @ delta) / 2
+            energy = np.sum(diagonal[dofs] * opening**2) / 2
+            fraction = 1.0
+            while fraction > 1e-6:
+                gap = opening + fraction * delta[dofs]
+                bond = tension_k @ np.sum(gap[:, :2]**2, axis=1)
+                normal = np.where(gap[:, 2] < 0, contact_k, tension_k) @ gap[:, 2]**2
+                change = (bond + normal) / 2 - energy
+                if change + fraction * (linear + fraction * quadratic) <= 0:
+                    break
+                fraction /= 2
+            if fraction <= 1e-6:
+                break
+            u += fraction * delta
+            continue
+        u = candidate
+        opening = u[dofs]
+        gap = np.maximum(0, opening[:, 2])
+        separation = np.sqrt(np.sum(opening[:, :2]**2, axis=1) + gap**2)
+        largest = np.maximum(largest, separation)
+        softened = largest > peak * (1 + 1e-5)
+        lift = np.maximum(lift, np.where((softened | (initial_slope == 0)) & (gap > 1e-8), gap, 0.0))
+        above_peak = np.maximum(peak, largest)
+        intact_next = (peak / above_peak) * np.clip((failure - above_peak) / (failure - peak), 0.0, 1.0)
+        if initial_slope == 0 or (stop_at_lift and lift.any()) or np.max(intact - intact_next) < 1e-5:
+            cache["u"] = u
+            return lift, largest, True
+        intact = intact_next
+    return lift, largest, False
+
+
+def _bed_step(k: sp.csr_matrix, loads: np.ndarray, u: np.ndarray, cache: dict,
+              coarse_grid: sp.csr_matrix | None) -> np.ndarray | None:
+    """Reuse a factor while spring stiffness changes, with a smaller factor for large parts."""
+    preconditioner = cache.get("preconditioner")
+    if preconditioner is not None:
+        step, info = spla.cg(k, loads, x0=u, M=preconditioner, rtol=1e-7, maxiter=35)
+        if info == 0:
+            return step
+    try:
+        if coarse_grid is None:
+            factor = spla.splu(k.tocsc(), permc_spec="MMD_AT_PLUS_A")
+            cache["preconditioner"] = spla.LinearOperator(k.shape, matvec=factor.solve)
+            return factor.solve(loads)
+        preconditioner = cache["preconditioner"] = two_level_preconditioner(k, coarse_grid)
+    except RuntimeError:  # A disconnected or degenerate grid can leave a free component.
+        return None
+    step, info = spla.cg(k, loads, x0=u, M=preconditioner, rtol=1e-7, maxiter=500)
+    return step if info == 0 else None
 
 
 def lowest_mode(model: Model, c: np.ndarray, scale: np.ndarray, node_mass: np.ndarray, fixed: np.ndarray,

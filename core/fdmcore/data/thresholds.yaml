@@ -139,7 +139,11 @@ bed_adhesion:
   # ABS-family PEI uses 0.92 × PI, from Kaščak's PEI/PI ratio. Surface texture was unspecified, so both PEI types start alike.
   # Cool plates, BuildTak-style sheets and glass with glue vary by brand and application. They use rounded estimates in the range of glass, PEI and PI.
   # All peel energy values derived from these inputs are low confidence. See research/bed_adhesion.md.
-  min_curl_layers: 2.0  # Free curl needed to open a meaningful gap, in layer heights. Estimate from reference bars.
+  # Effective separation combines bed slip and opening. Both distances are estimates for
+  # the coarse spring model, chosen using the reference bars and awaiting print validation.
+  # Peak traction (N/mm²) = 2 × grip (N/mm) / separation at failure (mm).
+  cohesive_failure_mm: 0.40  # Estimated movement before the first layer loses its grip.
+  cohesive_peak_share: 0.42  # Estimated share of that movement where the bond starts to weaken.
   effective_slip_mm: 0.30  # Estimated distance over which the bond gives way. Sets how strongly the bed holds in the model.
   pla_hot_shear_share: 0.55  # Low confidence. Estimated PLA grip at 80 °C as a share of its peak. Leoben reports 50–60% of peak above 70 °C.
   pla_strand_shear_n_mm:

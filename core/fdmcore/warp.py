@@ -28,13 +28,13 @@ reference, not for exact numbers.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from itertools import product
-from math import exp, log, tanh
+from math import exp, isfinite, log, tanh
 
 import numpy as np
-from scipy.ndimage import binary_dilation
 
-from .fea import Model, b_matrix, build_model, element_stiffness, solve
+from .fea import Model, b_matrix, build_model, cohesive_bed, element_stiffness, prolongation, solve, stiffness
 from .heat import H_FAN, H_STILL, K_PLASTIC
 from .mesh import Mesh
 from .orientation import rotation_to_z
@@ -130,17 +130,13 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
            "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat}
     grip = bed_grip(profile) if adhesion else None
     if grip_trial or grip is not None:
-        # Local energy saturates even for finite cracks on long bars. Screen for
-        # enough overall bending to open a meaningful gap before trying the peel.
-        settings = load_data("thresholds")["bed_adhesion"]
-        curls = curl(out) >= settings["min_curl_layers"] * profile.layer_height
-        peel = _edge_peel(model, c, scale, held_total, bed, springs,
-                          None if grip_trial else grip["grip_n_mm"]) if curls else {}
+        report(len(groups) / (len(groups) + 1), "Checking whether it lifts off the bed")
+        peel = _edge_peel(model, c, scale, held_total, springs, None if grip_trial else grip["grip_n_mm"])
         if grip_trial:
             out["lift_grip_n_mm"] = peel.get("lift_grip_n_mm")
             out["peel_solved"] = not peel.get("solver_failed", False)
         else:
-            out["adhesion"] = {**grip, "may_lift": False, "advance_mm": 0.0, **peel, "curls": curls}
+            out["adhesion"] = {**grip, "may_lift": False, **peel}
     return out
 
 
@@ -219,72 +215,79 @@ def _shear_weight(offset_c: float) -> float:
     return 1.125 + 0.875 * tanh(offset_c / 24)
 
 
-def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray, bed: np.ndarray,
+def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, held: np.ndarray,
                springs: tuple, grip: float | None) -> dict:
-    """Release a finite patch at the most-pulled edge, then follow its front.
-
-    For a calibration trial, record the release rates until the front first advances
-    enough to flag lift. The same trial solves apply to every grip along this path.
-    """
-
+    """Let the bed bond open under the final shrink load, with no pre-cut crack."""
     h = model.grid.h
     bottom = model.elems[:, 2].min()
     footprint = model.grid.solid[:, :, bottom]
+    # Share a voxel's bed face among its four springs, including at edges and corners.
     area = np.zeros(np.array(footprint.shape) + 1)
     for x, y in product((0, 1), repeat=2):
         area[x:x + footprint.shape[0], y:y + footprint.shape[1]] += footprint * h**2 / 4
-    ids = model.node_index[:, :, bottom]
-    edge = (area > 0) & (area < h**2)
-    pull = np.where(edge, -held[ids, 2], 0)
-    if pull.max(initial=0) <= 0:
-        return {}
-    seed = np.unravel_index(pull.argmax(), pull.shape)
-    released = np.zeros_like(edge)
-    released[seed] = True
-    # A finite starter patch spans several voxels. Across a one-voxel front,
-    # the energy is dominated by discretization of the fully clamped edge.
-    starter_mm, advance_mm = 8.0, 2.0
-    energy = 0.0
-    u = None
-    loads = -held
-    released_area = 0.0
-    advance = 0.0
-    starter_extent = 0.0
-    rate = None
-    rates = []
-    for i, distance in enumerate((starter_mm, advance_mm, advance_mm)):
-        grown = binary_dilation(released, mask=area > 0, iterations=max(1, round(distance / h)))
-        grown_area = area[grown].sum()
-        added = grown_area - released_area
-        if not added or np.count_nonzero((area > 0) & ~grown) < 3:
+    xy = np.argwhere(area > 0)
+    nodes = model.node_index[xy[:, 0], xy[:, 1], bottom]
+    area = area[area > 0]
+    settings = load_data("thresholds")["bed_adhesion"]
+    failure = settings["cohesive_failure_mm"]
+    peak = settings["cohesive_peak_share"] * failure
+    if not 0 < peak < failure or not isfinite(failure):
+        return {"solver_failed": True}
+    contact_slope = 30.0  # N/mm³, keeps the bed effectively rigid in compression
+    k = stiffness(model, c, scale, springs)
+    coarse = prolongation(model) if k.shape[0] > 15_000 else None
+    cache = {}
+    loads = -held.ravel()  # Replace the clamped bed reactions with spring forces.
+    dofs = 3 * nodes[:, None] + np.arange(3)
+
+    def trial(work: float) -> dict:
+        # The area of the traction triangle is work per area (N/mm).
+        peak_traction = 2 * (work / failure)
+        initial_slope = peak_traction / peak
+        if initial_slope < 0 or not isfinite(initial_slope):
+            return {"solver_failed": True}
+        lift, largest, solved = cohesive_bed(k, loads, dofs, area, initial_slope, peak,
+                                             failure, contact_slope, cache,
+                                             stop_at_lift=grip is None, coarse_grid=coarse)
+        detached = largest >= failure if work > 0 else lift > 0
+        may_lift = bool(lift.any()) and solved
+        result = {"may_lift": may_lift, "detached_area_mm2": float(area[detached].sum()),
+                  "solver_failed": not solved}
+        if may_lift:
+            result["point"] = model.grid.origin + h * np.array([*xy[lift.argmax()], bottom])
+        return result
+
+    if grip is not None:
+        return trial(grip)
+    return _lift_threshold(trial)
+
+
+def _lift_threshold(trial: Callable[[float], dict]) -> dict:
+    """Find the strongest grip that starts to peel, using the normal run's spring law."""
+    lower, upper = 0.0, 0.05
+    for _ in range(12):
+        result = trial(upper)
+        if result["solver_failed"]:
+            return {"solver_failed": True}
+        if not result["may_lift"]:
             break
-        trial = bed.copy()
-        trial[ids[grown]] = False
-        step, info = solve(model, c, scale, loads, trial, springs=springs, x0=u)
-        if info or not np.isfinite(step).all():
-            if grip is None:
-                return {"solver_failed": True}
-            break
-        # About the held equilibrium, release is equivalent to reversing the
-        # accumulated bed reactions. Minimum potential is -f·u/2 (N mm).
-        work = 0.5 * np.sum(loads * step)
-        rate = float((work - energy) / added)
-        if rate < (0 if grip is None else grip) or step[ids[seed], 2] <= 0:
-            break
-        released, energy, u = grown, work, step
-        released_area = grown_area
-        extent = h * np.abs(np.argwhere(released) - seed).sum(axis=1).max()
-        if i == 0:
-            starter_extent = extent
-        advance = float(extent - starter_extent)
-        if grip is None:
-            rates.append(rate)
-            if advance >= advance_mm:
-                # The path doesn't depend on the grip until a step fails, so the front reaches this
-                # advance (lift) exactly when every step's release rate is at least the grip.
-                return {"lift_grip_n_mm": min(rates)}
-    point = model.grid.origin + h * np.array([*seed, bottom])
-    return {"point": point, "energy_release_n_mm": rate, "advance_mm": advance, "may_lift": advance >= advance_mm}
+        lower, upper = upper, 2 * upper
+    else:
+        return {"solver_failed": True}
+    for _ in range(7):
+        middle = (lower + upper) / 2
+        result = trial(middle)
+        if result["solver_failed"]:
+            return {"solver_failed": True}
+        if result["may_lift"]:
+            lower = middle
+        else:
+            upper = middle
+    if lower == 0:
+        free = trial(0.0)
+        if free["solver_failed"] or not free["may_lift"]:
+            return {"solver_failed": free["solver_failed"]}
+    return {"lift_grip_n_mm": lower}
 
 
 def _calibrated_grip(profile: Profile) -> dict | None:
@@ -308,8 +311,8 @@ def calibrate_bed_grip(profile: Profile, longest_flat_mm: int, shells: Shells = 
                        lengths: tuple[int, ...] = WARPING_TEST_MM) -> dict:
     """Fit an effective grip between the observed flat bar and the first lifted bar.
 
-    Equality at a bar's lift threshold predicts lift. A missing threshold means
-    the bar holds even at zero grip, usually because of the free-curl screen.
+    The lift threshold is a grip at which the bond starts to weaken and the
+    bar opens. A missing threshold means the bar holds even at zero grip.
     """
     if longest_flat_mm not in (0, *lengths):
         raise ValueError(f"Choose 0 or a length from the warping test: {lengths}")
@@ -323,7 +326,9 @@ def calibrate_bed_grip(profile: Profile, longest_flat_mm: int, shells: Shells = 
     bounds = {}
     for key, length in (("lower_n_mm", longest_flat_mm), ("upper_n_mm", next_length)):
         if length:
-            result = simulate(_reference_bar(length), [0, 0, 1], profile, shells, h=1.0, grip_trial=True)
+            # Match the normal warping grid because rounding the bar's thin
+            # cross-section to voxel layers changes the pull on the bond.
+            result = simulate(_reference_bar(length), [0, 0, 1], profile, shells, grip_trial=True)
             if not result["peel_solved"]:
                 return {**record, "status": "unresolved"}
             if result["lift_grip_n_mm"] is not None:
