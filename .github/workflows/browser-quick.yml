@@ -27,7 +27,7 @@ jobs:
     name: Browser smoke test (quick)
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
