@@ -155,9 +155,13 @@ window:
 # healing. The material's layer strength comes from prints like the default-cooling test block (median bond
 # about 0.66 in this model; a 6 mm wall at full fan 0.55, at 30 % fan 0.83). Estimated; T-477 tunes it.
 strength:
-  usual_bond: 0.65         # the healing behind the material's layer strength
-  max_gain: 1.25           # a better-fused joint is at most this much stronger (and never stronger than the plastic)
-  min_share: 0.2           # nor weaker than this share (the model's healing is rough at the cold end)
+  healing_exponent:
+    value: 0.25
+    source: "Wool & O'Connor 1981, A theory of crack healing in polymers, doi:10.1063/1.328526; the early-time interface strength scales as time to the one-quarter power. Applying it to non-isothermal printed joints is an approximation."
+  # Estimated. T-477 will check these against printed parts.
+  usual_bond: 0.65         # modeled healing of the default-cooling test block, used as the reference print
+  max_gain: 1.25           # upper bound relative to usual layer strength (also capped by in-plane strength)
+  min_share: 0.2           # lower bound relative to usual layer strength, where modeled healing is most uncertain
 
 # The cooling plan (thermal_opt.py, T-480). Estimated; T-477 / T-482 check it against real prints.
 optimizer:

@@ -2753,6 +2753,10 @@ def _cooling_summary(r: dict) -> list[str]:
     return lines
 
 
+def _heat_key(p: Profile) -> str:
+    return json.dumps([p.material_id, p.material, p.printer, p.enclosure], sort_keys=True, default=str)
+
+
 def _heat(p: Profile, fine: bool = False):
     """The heat model over the loaded G-code (thermal.Heat, kinematics.Timing), cached per profile and tier:
     heat_model and the strength check's heat option share one run."""
@@ -2760,7 +2764,7 @@ def _heat(p: Profile, fine: bool = False):
     from .thermal import simulate
 
     g = _require().gcode
-    key = json.dumps([p.material, p.printer, p.nozzle, bool(fine)], sort_keys=True, default=str)
+    key = (_heat_key(p), bool(fine))
     if g.get("heat", (None,))[0] != key:
         with progress.stage(0, 0.05):
             tm = timing(g["toolpath"])
@@ -2769,24 +2773,40 @@ def _heat(p: Profile, fine: bool = False):
     return g["heat"][1]
 
 
-def _bond_per_cube(model, up, p: Profile, mat) -> np.ndarray:
-    """thermal.bond_strength for each analysis cube: from the heat nodes in and around it (their median)."""
-    import warnings
-
+def _bond_per_cube(model, g: dict, h, mat) -> tuple[np.ndarray, np.ndarray]:
+    """Find the weakest joint crossing each cube: a crack can start at a single cold interface.
+    Compare each joint's flat footprint with the cube's bounds in the printer frame.
+    A cube without an overlapping joint keeps its usual strength and has source index -1."""
     from scipy.spatial import cKDTree
 
     from .thermal import bond_strength
 
-    h, _ = _heat(p)
-    rot, base = _orientation(up, p)
-    nodes = (_gcode_to_oriented(rot)(np.column_stack([h.xy, h.z])) + base) @ rot  # part frame
-    reach = h.cell_mm / 2 + model.grid.h
-    dist, idx = cKDTree(nodes).query(model.grid.centers(model.elems), k=8, distance_upper_bound=reach)
-    bonds = np.append(h.bond, np.nan)[np.minimum(idx, len(nodes))]  # no node in reach: NaN
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)  # a cube with no joint near it: all NaN (counts as usual)
-        near = np.nanmedian(bonds, axis=1)
-    return bond_strength(near, mat.strength_xy / mat.strength_z)
+    joints = np.flatnonzero(np.isfinite(h.joint_z) & np.isfinite(h.bond))
+    share = np.ones(len(model.elems))
+    source = np.full(len(model.elems), -1, dtype=int)
+    if not len(joints):
+        return share, source
+
+    # Rank by healing so a single indexed minimum keeps both the factor and its source.
+    joints = joints[np.argsort(h.bond[joints], kind="stable")]
+    points = np.column_stack([h.xy[joints], h.joint_z[joints]])
+    rotation = g["q"].T @ g["rot"]
+    centers = (model.grid.centers(model.elems) @ g["rot"].T - g["shift"]) @ g["q"]
+    reach = np.abs(rotation).sum(axis=1) * model.grid.h / 2 + np.array([h.cell_mm / 2, h.cell_mm / 2, 0])
+    # Keep a joint on a cube face despite roundoff in the coordinate transforms.
+    tree = cKDTree((points - points[0]) / reach)
+    scaled = (centers - points[0]) / reach
+    # Bound the temporary pair list when a coarse strength cube spans many fine heat cells.
+    for start in range(0, len(centers), 512):
+        block = scaled[start:start + 512]
+        pairs = cKDTree(block).sparse_distance_matrix(tree, 1 + 1e-8, p=np.inf, output_type="ndarray")
+        best = np.full(len(block), len(joints), dtype=int)
+        np.minimum.at(best, pairs["i"], pairs["j"])
+        found = best < len(joints)
+        source[start + np.flatnonzero(found)] = joints[best[found]]
+    found = source >= 0
+    share[found] = bond_strength(h.bond[source[found]], mat.strength_xy / mat.strength_z)
+    return share, source
 
 
 def _orientation(up, p: Profile) -> tuple[np.ndarray, np.ndarray]:
@@ -2953,7 +2973,7 @@ def _printed(model):
 
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
              top: int | None = None, bottom: int | None = None, fine: bool = False, detailed: bool = False,
-             zones: list[dict] | None = None, heat: bool = False) -> dict:
+             zones: list[dict] | None = None, heat: bool | None = None) -> dict:
     """Will it hold? Safety factor, failure mode and a per-face heat map (uint8, 255 = breaks).
     ``walls`` (lines), ``infill`` (0–1), ``top``/``bottom`` (solid layers) say how it will be printed
     (default: the goal's usual settings). With several load cases (``case`` on forces) the weakest
@@ -2961,10 +2981,10 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     changes, the coarse one can be trusted (the usual mesh-convergence check in FEA). ``detailed``
     uses the G-code from ``load_gcode`` instead of walls/infill/top/bottom: the plastic really in
     each spot and which way its lines run (lines pulled apart sideways become a third way to break).
-    ``zones``: stronger zones from optimise_strength (slicer modifier volumes). ``heat`` (with
-    ``detailed``): the layers' strength in each spot follows how well they fused in the heat model
-    instead of one value for the whole part; ``heat`` in the result compares the safety with that of
-    the same print with every layer bonded as usual."""
+    ``zones``: stronger zones from optimise_strength (slicer modifier volumes). With ``detailed``,
+    use a matching heat result if available. ``heat=True`` runs the heat model if needed and
+    ``heat=False`` uses the usual layer strength. The ``heat`` result compares safety with usual
+    bonding and locates the cold joint that sets the local strength."""
     from dataclasses import replace
 
     from .strength import evaluate_cases, face_values, material_for, refine, sample_nodes, surface_values
@@ -2974,25 +2994,30 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     cases = _load_case(loads, _grid("fine_voxels") if fine else None)
     sh = _shells(p, walls, infill, top, bottom, zones)
     model = cases[0].model
-    printed = None
+    printed = h = None
     if detailed:
         if s.gcode is None:
             raise ValueError("Load the sliced G-code first (detailed check)")
         if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
             raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
         printed, missed = _printed(model)
+        cached = s.gcode.get("heat")
+        if heat is not False and cached is not None and cached[0][0] == _heat_key(p):
+            h = cached[1][0]
+        elif heat:
+            h, _ = _heat(p)
     elif heat:
         raise ValueError("The heat option needs the detailed check (load the sliced G-code)")
-    usual = None
-    if heat:
+    if h is not None:
         usual = evaluate_cases(cases, up, p, sh, printed)["safety_factor"]
-        printed = replace(printed, bond=_bond_per_cube(model, up, p, material_for(p)))
+        bond, source = _bond_per_cube(model, s.gcode, h, material_for(p))
+        printed = replace(printed, bond=bond)
     r = evaluate_cases(cases, up, p, sh, printed) if printed is not None else _evaluate(cases, up, p, sh)
     r["fine"] = bool(fine)
     if printed is not None:
         r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
-    if heat:
-        r["heat"] = _heat_strength(model, printed.bond, r, usual)
+    if h is not None:
+        r["heat"] = _heat_strength(model, h, bond, source, r, usual)
     fi, vm, u = r.pop("fi"), r.pop("vm"), r.pop("u")
     heat = face_values(s.mesh, model.grid, model, fi)
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
@@ -3038,21 +3063,34 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     return r
 
 
-def _heat_strength(model, bond: np.ndarray, r: dict, usual: float) -> dict:
+def _heat_strength(model, h, bond: np.ndarray, source: np.ndarray, r: dict, usual: float) -> dict:
     """What the print's cooling does to the safety, in plain words: this print against the same one with
     every layer bonded as usual, and how well the layers fused at the weakest spot."""
     sf = r["safety_factor"]
     at = int(np.argmin(np.linalg.norm(model.grid.centers(model.elems) - r["critical_point"], axis=1)))
-    share = float(bond[at])
+    params = {"safety": round(sf, 1), "usual": round(usual, 1)}
     if sf < usual * 0.97:
-        text = (f"This print's cooling weakens the layers: safety {sf:.1f} instead of {usual:.1f} if every layer "
-                f"had fused as usual. At the weakest spot they hold about {share:.0%} of their usual strength.")
+        key = "strength.heat.weakened"
     elif sf > usual * 1.03:
-        text = f"The layers of this print fuse better than usual: safety {sf:.1f} instead of {usual:.1f}."
+        key = "strength.heat.stronger"
     else:
-        text = f"This print's cooling hardly changes the strength (safety {sf:.1f}, {usual:.1f} with usual bonding)."
-    return {"safety_factor": sf, "usual_safety_factor": usual, "bond_at_weakest": round(share, 2),
-            "bond_min": round(float(bond.min()), 2), "text": text}
+        key = "strength.heat.similar"
+    message = {"key": key, "params": params}
+    result = {"safety_factor": sf, "usual_safety_factor": usual, "bond_at_weakest": round(float(bond[at]), 2),
+              "bond_min": round(float(bond.min()), 2), "message": message, "text": format_message(message)}
+    weak = at if bond[at] < 1 else int(bond.argmin())
+    if bond[weak] < 1:
+        j = source[weak]
+        p = np.array([*h.xy[j], h.joint_z[j]])
+        point = _gcode_to_oriented(_require().gcode["rot"])(p)
+        params = {"layer": int(h.layer[j]) + 1, "height": round(float(point[2]), 2),
+                  "share": round(float(bond[weak]) * 100, 1), "warm_s": round(float(h.above_tg_s[j]), 2)}
+        joint_message = {"key": "strength.heat.cold_joint", "params": params}
+        detail = format_message(joint_message)
+        result["weak_joint"] = {"point": point.tolist(), "layer": params["layer"], "strength_pct": params["share"],
+                                "message": joint_message, "detail": detail}
+        result["text"] += " " + detail
+    return result
 
 
 def strength_variant(up, loads: list[dict], data: bytes, profile: dict | None = None, walls: int | None = None,

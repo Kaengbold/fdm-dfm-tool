@@ -85,8 +85,10 @@ def test_export_layouts():
     assert "ParameterModifier" in conf and 'key="fill_density" value="50%"' in conf and 'key="perimeters" value="3"' in conf
     plain = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {"wall_loops": "2"})))
     assert {"Metadata/model_settings.config", "Metadata/Slic3r_PE_model.config"} <= set(plain.namelist())
+    cura = zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], {}, {"wall_loops": "2"}, zones=[zone], slicer="cura")))
+    assert 'cura:wall_line_count' in cura.read("3D/3dmodel.model").decode()
     with pytest.raises(ValueError, match="layout"):
-        api.export([0, 0, 1], {}, {}, zones=[zone], slicer="cura")
+        api.export([0, 0, 1], {}, {}, zones=[zone], slicer="unknown")
 
 
 def test_zone_box_stays_above_the_bed():

@@ -875,7 +875,7 @@ def check_new_ui_heat(browser, port: int) -> str:
         assert page.evaluate(colours) != sliced, "the plan's replay is coloured by its own temperatures"
         page.screenshot(path=str(OUT / "new-ui-heat-replay.png"))
         page.locator(".heat-slider").evaluate("(e) => { e.value = e.max; e.dispatchEvent(new Event('input')); }")  # all layers again
-        page.get_by_role("radio", name="Too hot / cold").click()
+        page.get_by_role("radio", name="Too hot / too cold").click()
         hot = """() => { const hv = fdmUI.services.heatView, m = hv.paths.mesh, c = m.instanceColor.array;
           let n = 0;  // red: much more red than green and blue (colours are linear here)
           for (let i = 0; i < m.count; i++) if (c[i * 3] > 0.4 && c[i * 3 + 1] < 0.1 && c[i * 3 + 2] < 0.1) n++; return n; }"""
@@ -896,12 +896,12 @@ def check_new_ui_heat(browser, port: int) -> str:
         cut = page.evaluate("() => fdmUI.services.heatView.paths.mesh.count")
         assert 0 < cut < total, (cut, total)
         page.screenshot(path=str(OUT / "new-ui-heat-heat.png"))
-        page.get_by_role("radio", name="G-code changes").click()
+        page.get_by_role("radio", name="Speed & fan changes").click()
         assert page.evaluate("() => fdmUI.services.heatView.marks?.mesh.visible ?? true")
         page.screenshot(path=str(OUT / "new-ui-heat-gcode.png"))
         charts = page.locator(".heat-chart").count()
         with page.expect_download(timeout=600_000) as dl:
-            page.get_by_role("button", name="Optimize my G-code directly").click()
+            page.get_by_role("button", name="Download cooling-optimized G-code").click()
         name = dl.value.suggested_filename
         assert name == "part_cooled.gcode", name
         page.wait_for_selector(".heat-ok")
@@ -1656,6 +1656,8 @@ def check_journey(browser, port: int, viewport=(1280, 720)) -> str:
         page.locator(".ui-select__pop:not([hidden]) .ui-select__search").fill("P1S")
         page.locator(".ui-select__pop:not([hidden]) .ui-select__option", has_text="Bambu Lab P1S").click()
         nxt()
+        if page.locator("dialog.ui-modal").count():  # T-610 asks to re-run after changing goal on Setup
+            page.locator("dialog.ui-modal").get_by_role("button", name="Not now").click()
         wait_step("Environment")
         nxt()
         wait_step("Holds")
@@ -1766,6 +1768,8 @@ def check_journey(browser, port: int, viewport=(1280, 720)) -> str:
         rail = page.locator(".ui-rail").inner_text()
         assert not any(x in rail for x in ("Holds", "Loads", "Load details")), rail
         nxt()
+        if page.locator("dialog.ui-modal").count():  # T-610 asks to re-run after changing goal on Setup
+            page.locator("dialog.ui-modal").get_by_role("button", name="Not now").click()
         wait_step("Environment")
         nxt()
         wait_step("Analyse")  # straight from Environment: Quality has no holds or loads

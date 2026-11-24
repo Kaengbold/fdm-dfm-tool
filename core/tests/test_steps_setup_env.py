@@ -105,7 +105,7 @@ def test_optimize_args_matches_api_signature_and_maps_all_fields():
     assert ul["goal"] == "quality"
     assert ul["change"] == "design"
     assert ul["constraints"] == {}
-    assert ul["nozzles"] == ["0.2", "0.4", "0.6", "0.8", "1.0"]
+    assert ul["nozzles"] == ["0.4", "0.6"]
     assert ul["loads"] is None  # quality skips strength
     assert "repeated_load" not in ul["profile"]
 
@@ -218,13 +218,14 @@ def test_setup_controls_locks_nozzles_manage_and_step_warning(page):
     assert "Bambu Lab P1S" in page.locator(".stage-note").inner_text()
     assert page.get_by_role("button", name="Next").is_enabled()
 
-    # All printer nozzle ToggleChips ticked by default; unticking 1.0 removes it from profile.nozzles.
+    # Only 0.4 and 0.6 mm nozzle ToggleChips ticked by default (T-609); ticking 0.8 adds it to profile.nozzles.
     nozzle_chips = page.locator(".step-nozzles [aria-pressed]")
     assert nozzle_chips.count() == 5
-    for i in range(5):
-        assert nozzle_chips.nth(i).get_attribute("aria-pressed") == "true"
-    page.locator(".step-nozzles [data-nozzle='1.0']").click()
-    assert page.evaluate("() => fdmUI.store.get().profile.nozzles") == ["0.2", "0.4", "0.6", "0.8"]
+    for size in ("0.2", "0.4", "0.6", "0.8", "1.0"):
+        want = "true" if size in ("0.4", "0.6") else "false"
+        assert page.locator(f".step-nozzles [data-nozzle='{size}']").get_attribute("aria-pressed") == want
+    page.locator(".step-nozzles [data-nozzle='0.8']").click()
+    assert page.evaluate("() => fdmUI.store.get().profile.nozzles") == ["0.4", "0.6", "0.8"]
 
     # Material Select: defaults "Decide later", owned materials listed first with "Owned" badge, pick = clearable hard lock.
     mat_btn = page.get_by_role("button", name="Material")

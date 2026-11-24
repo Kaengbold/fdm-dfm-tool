@@ -131,7 +131,7 @@ class Printed:
     lines: np.ndarray  # (E, 3) main line direction, part frame
     aligned: np.ndarray  # (E,) 1 = all lines one way (walls), 0 = crossing (grid infill, alternating solid layers)
     first_s: np.ndarray  # (E,) when the cube was first printed (s since start)
-    bond: np.ndarray | None = None  # (E,) layer bond against a usual print, from the heat model (T-476); None: usual
+    bond: np.ndarray | None = None  # (E,) strength of the weakest modeled joint crossing each cube; 1 or None: usual
 
 
 def printed_from(dep: dict, model: Model, inside: np.ndarray) -> Printed:
@@ -785,9 +785,8 @@ def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np
     normal = traction @ up
     shear = np.linalg.norm(traction - normal[:, None] * up, axis=1)
     allow = np.maximum(scale, 1e-3)
-    fi_layer = np.hypot(np.maximum(normal, 0) / mat.strength_z, shear / mat.strength_z) / allow
-    if bond is not None:
-        fi_layer = fi_layer / bond
+    layer_strength = mat.strength_z if bond is None else mat.strength_z * bond
+    fi_layer = np.hypot(np.maximum(normal, 0), shear) / (allow * layer_strength)
     sx, sy, sz, syz, sxz, sxy = stress.T
     vm = np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (syz**2 + sxz**2 + sxy**2))
     fi_plane = vm / mat.strength_xy / allow
