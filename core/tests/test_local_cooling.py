@@ -55,8 +55,13 @@ def test_the_local_tool_returns_checked_gcode(tmp_path, slice_with_chamber):
 
 
 @pytest.mark.skipif(find_orca() is None, reason="needs an installed OrcaSlicer")
-def test_the_local_tool_keeps_orcas_slice_when_the_cold_start_fails_the_check(tmp_path, slice_with_chamber):
+def test_the_local_tool_keeps_orcas_slice_when_the_plan_fails_its_check(tmp_path, slice_with_chamber, monkeypatch):
+    """A cold chamber start is planned and checked like a warm one; a plan that fails its check falls back to
+    Orca's untouched slice (forced here: the fixture's plan passes since the bead-neck optimizer fix, T-596)."""
     slices = slice_with_chamber("M141")
+    real = mcp_server.api.optimize_gcode
+    monkeypatch.setattr(mcp_server.api, "optimize_gcode",
+                        lambda *a, **k: {**real(*a, **k), "ok": False, "problems": ["3 newly too cold to bond"]})
     out = tmp_path / "fallback.gcode"
     r = mcp_server.optimize_print_cooling([0, 0, 1], str(out))
     assert r["source"] == "OrcaSlicer's own", r
