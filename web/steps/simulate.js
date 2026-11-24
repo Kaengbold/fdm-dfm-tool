@@ -326,6 +326,7 @@ registerStep("sim", {
         : result.gcodeError ? t("sim.basis.wrongFile", { reason: result.gcodeError }) : t("sim.basis.ours")));
       const grip = result.warp.adhesion;
       if (grip) {
+        if (grip.detail) body.append(h("p", { class: "ui-hint" }, grip.detail));
         const note = grip.shear_source === "calibrated"
           ? (grip.calibration_temp_differs ? "calibratedTempDiffers" : "calibrated")
           : (grip.assumed_surface ? "assumed" : "estimated");

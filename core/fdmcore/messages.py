@@ -238,6 +238,8 @@ def _one_liner_message(finding: dict[str, Any], profile: Any = None) -> dict[str
     rule = finding["rule"]
     sev = finding.get("severity", "info")
     m = finding.get("metrics") or {}
+    if rule == "bed_adhesion" and "start_height_mm" in m:
+        return _msg("finding.bed_adhesion.start_height", height=m["start_height_mm"])
     mat_name = profile.material["name"] if profile is not None else None
     prn_name = profile.printer["name"] if profile is not None else None
     nozzle = m.get("nozzle") if m.get("nozzle") is not None else (float(profile.nozzle) if profile is not None else None)

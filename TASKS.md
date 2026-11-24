@@ -1330,7 +1330,7 @@ Not reachable: Pollák & Goryl 2025.
 - [x] **T-593 P2** Glue-layer peel model at the bed (cohesive zone). · files: `core/fdmcore/warp.py`, `core/fdmcore/fea.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-593-cohesive-peel`)
   - Do: the first layer held by springs that weaken and break as they stretch, so a lift grows by itself; must tell the short and long reference bars apart without T-390's curl gate (then drop the gate). Only in the detailed warping run if it is slow.
   - Outcome: First-layer springs weaken and break under shrinkage. The 40 mm ABS bar holds and the 90 mm bar starts to lift. The default-grid calibration reproduces 80 mm held and 120 mm lifted in Python and Pyodide.
-- [~] **T-594 P2** Check the peel while printing, not only at the end. · files: `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-594-peel-while-printing`)
+- [x] **T-594 P2** Check the peel while printing, not only at the end. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` (adhesion finding), `web/steps/simulate.js` (onset note) · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-594-peel-while-printing`)
   - Do: run the peel check at each warp step (corners usually lift in the first layers, bed hot, part still soft); report the height where it starts.
 - [~] **T-595 P2** Heated chamber: the real set point and its warm-up. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml`, `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-595-chamber-warmup`)
   - Do: read the chamber temperature from the G-code / printer profile instead of a fixed 60 °C; enclosures (passive and heated) warm up over the first ~30 min instead of being warm from layer 1.

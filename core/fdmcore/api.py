@@ -1967,8 +1967,9 @@ def _adhesion_finding(s: Session, w: dict, rotation: np.ndarray) -> dict:
     point[2] = 0  # The voxelised footprint can sit a fraction of a cube below the mesh.
     h = w["model"].grid.h
     bbox = [(point - [h, h, 0]).tolist(), (point + [h, h, h]).tolist()]
-    metrics = {k: v for k, v in w["adhesion"].items() if k not in ("point", "curls")}
-    message = {"key": "finding.bed_adhesion.one_liner", "params": {}}
+    adhesion = w["adhesion"]
+    metrics = {k: v for k, v in adhesion.items() if k not in ("point", "curls", "message", "detail")}
+    message = adhesion.get("message", {"key": "finding.bed_adhesion.one_liner", "params": {}})
     return {"rule": "bed_adhesion", "severity": "warn", "impact": "fails", "bbox": bbox,
             "metrics": metrics, "detail": format_message(message), "message": message}
 
