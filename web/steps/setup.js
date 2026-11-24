@@ -9,7 +9,7 @@ import { Button } from "../ui/button.js";
 import { Select } from "../ui/select.js";
 import { ToggleChip } from "../ui/chip.js";
 import { ChoiceCards, SegmentedControl } from "../ui/choice.js";
-import { activeNozzles, optimizeArgs, orderedMaterials, printerNozzles } from "./args.js";
+import { activeNozzles, defaultNozzles, optimizeArgs, orderedMaterials, printerNozzles } from "./args.js";
 
 export { optimizeArgs };
 
@@ -55,7 +55,9 @@ function render({ body, stage, store, go, openRoute }) {
     onChange: (id) => {
       const avail = printerNozzles(catalog, id);
       const nextNozzle = profile.nozzle && avail.includes(String(profile.nozzle)) ? String(profile.nozzle) : "";
-      patchProfile({ printer: id, nozzles: avail, nozzle: nextNozzle });
+      const def = defaultNozzles(catalog, id);
+      const nextNozzles = nextNozzle && !def.includes(nextNozzle) ? avail.filter((n) => def.includes(n) || n === nextNozzle) : def;
+      patchProfile({ printer: id, nozzles: nextNozzles, nozzle: nextNozzle });
     },
   });
   printerSelect.querySelector(".ui-select__button")?.setAttribute("data-focus-key", "setup-printer");

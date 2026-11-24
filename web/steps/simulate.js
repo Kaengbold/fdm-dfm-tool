@@ -236,8 +236,8 @@ function showOverlay(store, services, legend) {
     }
     legend.append(h("b", {}, stress ? t("sim.legend.stress", { max: warp.stress_max.toFixed(1) }) : t("sim.legend.warp", { max: warp.max_mm.toFixed(2) })),
       h("span", {}, stress ? t("sim.legend.stressNote") : warpSize === "big" ? t("sim.legend.big") : t("sim.legend.true")));
-  } else if (overlay === "heat" && result && extra.some((sim) => sim.showHeat?.({ services, value: extraValue(result, sim) }))) {
-    stage.hideField(); // a later simulation draws its own heat view (and its key in the panel)
+  } else if (overlay === "heat" && result && extra.some((sim) => sim.showHeat?.({ services, value: extraValue(result, sim), legend }))) {
+    stage.hideField(); // a later simulation draws its own heat view and fills the on-stage color legend (T-612)
     shown = null;
     return;
   } else if (shown !== key) {
