@@ -315,7 +315,12 @@ registerStep("sim", {
     if (overlay !== "heat") for (const sim of extra) sim.clearHeat?.(services);
     const legend = h("div", { class: "sim-legend" });
     const bar = h("div", { class: "sim-views" },
-      SegmentedControl({ label: t("sim.view.label"), size: "small", options: choices, value: overlay, onChange: (v) => { overlay = v; services.rerender(); } }));
+      SegmentedControl({ label: t("sim.view.label"), size: "small", options: choices, value: overlay, onChange: (v) => {
+        const toHeat = v === "heat" && overlay !== "heat";
+        overlay = v;
+        services.rerender();
+        if (toHeat) requestAnimationFrame(() => document.querySelector(".heat-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      } }));
     if (overlay === "warp") {
       bar.append(SegmentedControl({ label: t("sim.view.size"), size: "small", value: warpSize,
         options: [{ value: "true", label: t("sim.view.true") }, { value: "big", label: t("sim.view.big") }], onChange: (v) => { warpSize = v; services.rerender(); } }));

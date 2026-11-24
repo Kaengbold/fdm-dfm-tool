@@ -38,8 +38,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: tools/node_modules
-          key: pyodide-0.27.2
-      - run: npm install --no-save --prefix tools pyodide@0.27.2
+          key: pyodide-0.27.8
+      - run: npm install --no-save --prefix tools pyodide@0.27.8
       - run: node tools/pyodide_check.mjs
 
   deploy:

@@ -53,7 +53,7 @@ cd core && python -m pytest -q                 # engine tests (~8 min; while wor
 python tools/e2e_smoke.py                      # browser test in headless Edge: every step, then the whole journey at two sizes (pip install playwright)
 python tools/e2e_smoke.py --quick              # the step checks only (what CI runs)
 python tools/e2e_smoke.py --gemini-review      # + Gemini screenshot review
-node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.2)
+node tools/pyodide_check.mjs                   # engine in Pyodide under Node (once: npm install --no-save --prefix tools pyodide@0.27.8)
 node tools/make_step_fixture.mjs               # regenerate the STEP test part (once: npm install --no-save --prefix tools replicad-opencascadejs@1.1.0)
 node tools/check_step_faces.mjs                # STEP face ids: importer vs OpenCascade (once: npm install --no-save --no-package-lock --prefix tools replicad-opencascadejs@1.1.0 occt-import-js@0.0.23)
 python tools/slicer_check.py                   # do installed OrcaSlicer / Bambu Studio / PrusaSlicer apply our 3MF settings?

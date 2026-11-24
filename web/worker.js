@@ -2,7 +2,7 @@
 // Protocol: {id, method, args, data?} -> {id, result} | {id, error}; plus {type: "ready"} once booted
 // and {type: "progress", id, fraction, text} while a call runs, and {type: "partial", id, result} when the call has a
 // usable result before it ends (the optimizer's best options so far, T-552). To cancel, the page kills the worker.
-import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.mjs";
+import { loadPyodide } from "https://cdn.jsdelivr.net/pyodide/v0.27.8/full/pyodide.mjs";
 
 const ENGINE = new URL("../core/fdmcore/", import.meta.url);
 

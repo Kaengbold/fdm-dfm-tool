@@ -65,7 +65,7 @@ function openDraft(services, store, hit, existing = null) {
   const regions = services.picker.data?.regions;
   const normal = existing?.normal ?? hitNormal(hit, regions);
   const point = existing?.point ?? hit.point;
-  const onFace = (existing?.edge ?? (hit.kind === "face" ? null : hit.edge)) == null;
+  const onFace = (existing ? existing.edge : (hit.kind === "face" ? null : hit.edge)) == null;
   const area = existing?.area ?? (onFace ? regions?.[hit.region]?.area_mm2 ?? 0 : 0);
   let direction = existing?.direction ?? normal.map((x) => -x);
   const gizmo = services.openGizmo(point, normal, { direction: existing?.direction ?? null, onChange: (d) => { direction = d; },
@@ -92,8 +92,9 @@ function openDraft(services, store, hit, existing = null) {
     const newtons = field.unit === "MPa" ? v * area : v;
     const dir = gizmo.direction();
     const { name } = existing ?? describeHit(hit);
-    const load = { id: existing?.id ?? uid("load"), region: existing?.region ?? hit.region, edge: existing?.edge ?? (hit.kind === "face" ? null : hit.edge),
-      edgeKind: existing?.edgeKind ?? (hit.kind === "corner" ? "concave" : hit.kind === "edge" ? "feature" : null),
+    const load = { id: existing?.id ?? uid("load"), region: existing ? existing.region : hit.region,
+      edge: existing ? existing.edge : (hit.kind === "face" ? null : hit.edge),
+      edgeKind: existing ? existing.edgeKind : (hit.kind === "corner" ? "concave" : hit.kind === "edge" ? "feature" : null),
       point, normal, area, name, direction: dir.map((x) => Math.round(x * 1e4) / 1e4), newtons, unit: field.unit,
       case: existing?.case ?? store.get().nextCase ?? 1 };
     const loads = existing ? store.get().loads.map((l) => (l.id === existing.id ? load : l)) : [...store.get().loads, load];
@@ -117,7 +118,8 @@ function drawArrows(services, loads) {
   const stage = services.stage;
   if (!stage.part) return;
   if (!arrows) { arrows = new THREE.Group(); arrows.renderOrder = 8; }
-  if (arrows.parent !== stage.scene) stage.scene.add(arrows);
+  // Attach to part.group so force arrows rotate and shift with the part whenever print orientation changes (T-607).
+  if (arrows.parent !== stage.part.group) stage.part.group.add(arrows);
   arrows.clear();
   const size = stage.part.geo.boundingSphere.radius * 2;
   const violet = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--ov-load").trim() || "#9333EA");
@@ -138,8 +140,11 @@ function drawArrows(services, loads) {
 }
 
 function placeLabels(services) {
+  if (arrows) arrows.updateWorldMatrix(true, false);
   for (const { el, arrow } of labels) {
-    const p = arrow.userData.tail.clone().project(services.stage.camera);
+    const p = arrow.userData.tail.clone();
+    if (arrows) arrows.localToWorld(p);
+    p.project(services.stage.camera);
     const r = services.stage.canvas.getBoundingClientRect(), host = el.parentElement?.getBoundingClientRect();
     if (!host) continue;
     el.style.left = `${(p.x + 1) / 2 * r.width + r.left - host.left}px`;
@@ -185,4 +190,5 @@ registerStep("loads", {
     body.append(h("button", { type: "button", class: "ui-link", onclick: () => store.set({ nextCase: maxCase + 1 }, { undoable: false }) },
       nextCase > maxCase ? t("loads.nextIsNewCase", { n: nextCase }) : t("loads.separateCase")));
   },
+  leave() { closeDraft(); },
 });

@@ -72,6 +72,8 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const focusKey = !moved && screen.contains(active) ? active?.dataset?.focusKey : null;
     const sel = focusKey && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
     const hadFocus = screen.contains(active) || active === document.body;
+    // Keep the right panel's scroll position across same-step re-renders (T-611).
+    const prevScroll = !moved ? (screen.querySelector(".panel-body")?.scrollTop ?? 0) : 0;
     header.update(s, route);
     // The step being left tidies what it put on the shared 3D view (Simulation's colours and result surface).
     const showing = route === "flow" ? s.step : null;
@@ -123,11 +125,12 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     if (s.part && def.layout !== "part" && services.cameraBar) stageUi.append(services.cameraBar());
     const keep = focusKey && screen.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
     if (keep) {
-      keep.focus();
+      keep.focus({ preventScroll: !moved });
       if (sel && "setSelectionRange" in keep) try { keep.setSelectionRange(sel[0], sel[1]); } catch { /* non-selectable */ }
     } else if (moved || hadFocus) {
-      title.focus();  // focus moves to each new step title (§1.8)
+      title.focus({ preventScroll: !moved });  // focus moves to each new step title (§1.8)
     }
+    if (!moved && prevScroll > 0) body.scrollTop = prevScroll;
   }
 
   function startPlaceholder() {
