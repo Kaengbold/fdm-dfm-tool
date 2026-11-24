@@ -56,7 +56,10 @@ export function setupLine(option, catalog) {
 
 /** What the status lines and the footer say about a result. */
 export function summarize(result) {
-  const findings = result?.check?.findings ?? [];
+  const heatRes = result?.extra?.find((x) => x.name === "heat")?.value?.result;
+  // When the 3D thermal model ran cleanly and found 0 hot spots, don't contradict it with the old 1-D cooling finding (T-618).
+  const thermalClear = heatRes && (heatRes.before?.too_hot ?? 0) === 0;
+  const findings = (result?.check?.findings ?? []).filter((f) => !(thermalClear && f.rule === "small_layers_cooling"));
   const cooling = findings.filter((f) => COOLING.test(f.rule) && f.severity !== "info");
   const issues = findings.filter((f) => !COOLING.test(f.rule) && f.severity !== "info");
   const verdict = result?.warp?.verdict ?? null;

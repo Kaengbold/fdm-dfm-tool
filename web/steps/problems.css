@@ -33,6 +33,7 @@
 .pa-sag-line, .pa-droop-line { fill: none; stroke: var(--bad); stroke-width: 2.5; stroke-linecap: round; }
 .pa-squish { fill: var(--warn); stroke: var(--text-2); stroke-width: 1.2; transform-origin: 110px 56px; animation: pa-squish 2.4s ease-in-out infinite; }
 .pa-warp-body { transform-origin: 110px 60px; animation: pa-warp 2.6s ease-in-out infinite; }
+.pa-tip-body { transform-origin: 110px 64px; animation: pa-tip 2.4s ease-in-out infinite; }
 .pa-sag-line { transform-origin: 110px 22px; animation: pa-sag 2.4s ease-in-out infinite; }
 .pa-droop-line { transform-origin: 76px 34px; animation: pa-droop 2.4s ease-in-out infinite; }
 .pa-pulse { animation: pa-pulse 1.8s ease-in-out infinite; }
@@ -40,6 +41,7 @@
 .pa-fix-cut { fill: var(--surface-sunken); stroke: var(--good); stroke-width: 2; animation: pa-fix-in 2.2s ease-in-out infinite; }
 
 @keyframes pa-warp { 0%, 100% { transform: scaleY(1); } 50% { transform: perspective(120px) rotateX(18deg) translateY(-3px); } }
+@keyframes pa-tip { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(12deg); } }
 @keyframes pa-sag { 0%, 100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(4px) scaleY(1.6); } }
 @keyframes pa-droop { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(7deg); } }
 @keyframes pa-squish { 0%, 100% { transform: scaleX(0.86); } 50% { transform: scaleX(1.06); } }

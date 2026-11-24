@@ -21,12 +21,14 @@ function s(tag, attrs = {}) {
 /** Map a finding rule to its 2D problem animation kind (or null if none fits). */
 export function problemAnimKind(finding) {
   const r = String(finding?.rule ?? "").toLowerCase();
-  if (/warp|corner|bed_contact|peel|lift|shrink/.test(r)) return "warp";
+  if (/tipping_risk|tall_thin/.test(r)) return "tipping";
+  if (/small_bed_contact|print_may_fail/.test(r)) return "small_bed";
+  if (/warp|sharp_corner|peel|lift|shrink/.test(r)) return "warp";
   if (/sideways_hole|hole_oval|hole_closes|hole_undersized|bridge_sag/.test(r)) return "hole_sag";
   if (/overhang|unsupported|midair|trapped_support|droop|ledge|ceiling/.test(r)) return "overhang";
   if (/thin_wall|wall_thin|gap_fuses|shallow_relief|side_detail|narrow/.test(r)) return "thin_wall";
   if (/elephant|first_layer/.test(r)) return "elephant";
-  if (/weak|pin|neck|stress|fillet|layer_bond/.test(r)) return "weak_corner";
+  if (/weak|upright_pin|thin_neck|stress|fillet|layer_bond/.test(r)) return "weak_corner";
   if (/heat|cool|small_layers/.test(r)) return "overheat";
   return null;
 }
@@ -48,6 +50,16 @@ function drawScene(kind) {
   const W = 220, H = 76;
   const base = { viewBox: `0 0 ${W} ${H}`, class: `prob-anim__svg is-${kind}`, role: "img", "aria-hidden": "true" };
   switch (kind) {
+    case "tipping":
+      return svg(base,
+        s("line", { x1: 16, y1: 64, x2: 204, y2: 64, class: "pa-bed" }),
+        s("rect", { x: 102, y: 12, width: 16, height: 52, rx: 2, class: "pa-part pa-tip-body" }),
+        s("path", { d: "M126 24 L144 24 M138 19 L144 24 L138 29", class: "pa-arrow pa-pulse" }));
+    case "small_bed":
+      return svg(base,
+        s("line", { x1: 16, y1: 62, x2: 204, y2: 62, class: "pa-bed" }),
+        s("path", { d: "M72 16 L148 16 L120 62 L100 62 Z", class: "pa-part pa-tip-body" }),
+        s("line", { x1: 98, y1: 62, x2: 122, y2: 62, class: "pa-crack pa-pulse" }));
     case "warp":
       return svg(base,
         s("line", { x1: 16, y1: 60, x2: 204, y2: 60, class: "pa-bed" }),

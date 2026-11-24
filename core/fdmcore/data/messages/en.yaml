@@ -60,9 +60,9 @@ finding.tall_thin_feature.title: "Tall thin part wobbles"
 finding.tall_thin_feature.one_liner: "Slender upright section bends under the nozzle and prints messy."
 finding.tall_thin_feature.one_liner_size: "{width} mm wide, {height} mm tall; wobbles and prints messy."
 
-finding.small_layers_cooling.title: "Small layers stay soft"
-finding.small_layers_cooling.one_liner: "Tiny layers stay hot when the next one lands; tips droop or blob."
-finding.small_layers_cooling.one_liner_temp: "Still ~{temp} °C when the next layer lands; tips droop or blob."
+finding.small_layers_cooling.title: "Layers print too fast to cool"
+finding.small_layers_cooling.one_liner: "Short layers stay soft when the next one lands; thin sections can sag or blob."
+finding.small_layers_cooling.one_liner_temp: "Still ~{temp} °C when the next layer lands; thin sections can sag or blob."
 
 finding.heat_too_hot.title: "Spot stays too hot"
 finding.heat_too_hot.one_liner: "Plastic is still soft when the next layer lands; it may sag or blob."
