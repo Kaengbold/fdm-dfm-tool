@@ -153,7 +153,18 @@ def test_open_abs_short_bar_holds_and_long_bar_peels(h):
     assert not short["solver_failed"] and not long["solver_failed"]
     assert not short["may_lift"] and long["may_lift"]
     assert short["grip_n_mm"] == long["grip_n_mm"] > 0
+    assert "start_height_mm" not in short
+    assert 0 < long["start_height_mm"] <= 3
     assert min(abs(long["point"][0] - x) for x in (0, 90)) < 2
+
+
+def test_peel_starts_low_on_a_tall_bar():
+    p = Profile.from_dict(ABS_OPEN)
+    adhesion = warp.simulate(bar(90, height=12), [0, 0, 1], p, h=1, adhesion=True)["adhesion"]
+    assert adhesion["may_lift"] and not adhesion["solver_failed"]
+    assert 1 <= adhesion["start_step"] <= 4
+    assert adhesion["start_height_mm"] == adhesion["start_step"]
+    assert min(abs(adhesion["point"][0] - x) for x in (0, 90)) < 2
 
 
 def test_cohesive_peel_transfers_load_and_breaks_the_next_spring():
@@ -182,9 +193,13 @@ def test_peel_finding_is_local_and_contributes_to_print_risk():
         r = api.warping(up, ABS_OPEN)
         assert r["adhesion"]["assumed_surface"] and r["adhesion"]["surface"] == "textured_pei"
         assert r["adhesion"]["bed_temp_c"] == 100
+        assert r["adhesion"]["point_print"] == r["lift_points_print"][0]
+        assert "mm tall" in r["adhesion"]["detail"]
         check = api.check(up, ABS_OPEN)
         finding = next(f for f in check["findings"] if f["rule"] == "bed_adhesion")
         assert finding["title"] == "May come loose here"
+        assert finding["metrics"]["start_height_mm"] == r["adhesion"]["start_height_mm"]
+        assert finding["one_liner"] == r["adhesion"]["detail"]
         assert finding["bbox"][0][2] == 0 and abs(finding["bbox"][0][0]) > 35
         assert any("build plate" in reason for reason in check["print_risk"]["reasons"])
         changed_plate = api.check(up, {**ABS_OPEN, "printer": "my_glass"})
