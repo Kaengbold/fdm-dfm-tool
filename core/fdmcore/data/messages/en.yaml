@@ -286,3 +286,8 @@ finding.load_bearing_wall_thin.one_liner_size: "{wall} mm wall is thin under loa
 finding.uneven_wall_thickness.title: "Thick next to thin wall"
 finding.uneven_wall_thickness.one_liner: "Thick block cools slower and pulls sink marks or warps thin wall."
 finding.uneven_wall_thickness.one_liner_size: "{thin} mm wall next to {thick} mm block shrinks unevenly."
+
+strength.heat.weakened: "This print's cooling weakens the layers. Safety factor is {safety}, compared with {usual} with usual bonding."
+strength.heat.stronger: "The layers of this print fuse better than usual. Safety factor is {safety}, compared with {usual} with usual bonding."
+strength.heat.similar: "This print's cooling makes little difference to safety. Safety factor is {safety}, compared with {usual} with usual bonding."
+strength.heat.cold_joint: "At layer {layer} ({height} mm), the joint stayed warm enough to fuse for about {warm_s} s and holds about {share}% of its usual strength. Fan speed and the time between layers affect how long the joint stays warm."
