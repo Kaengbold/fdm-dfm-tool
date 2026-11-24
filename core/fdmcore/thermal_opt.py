@@ -39,7 +39,7 @@ from .gcode import (BRIDGE, LAYER_TIME, NOT_SLOWED, OVERHANG, PART_KINDS, SMALL_
                     Toolpath, fan_levels, fan_mask, flow_cap)
 from .kinematics import timing
 from .profile import Profile, load_data
-from .thermal import Heat, _interp, aux_cooling, constants, simulate, window
+from .thermal import Heat, _interp, aux_cooling, chamber_air, constants, simulate, window
 
 PROTECTED = (OVERHANG, BRIDGE, SMALL_PERIMETER, VOLUMETRIC_CAP, UNKNOWN)  # slowdowns that protect the print
 FIRST_LAYER = 2  # layers 0 and 1 keep the slicer's settings (bed adhesion)
@@ -219,7 +219,7 @@ def _parks(tp: Toolpath, plan: Plan) -> tuple[dict, dict]:
 class _Law:
     """The fitted cooling law (see the module docstring)."""
 
-    air: float
+    air: np.ndarray
     a: np.ndarray  # (M,) 1/s
     b: np.ndarray  # (M,) 1/s per W/m²K of fan
     h_base: np.ndarray  # (M,) fan h while the node cooled as sliced
@@ -242,17 +242,18 @@ def _below(h: Heat) -> np.ndarray:
 
 def _fit(tp: Toolpath, base: Heat, ref: Heat, c: dict, ref_fan: float) -> _Law:
     """``ref``: the run with the part fan at ``ref_fan`` from layer 2 on."""
-    air = float(c["chamber_c"])
+    air = chamber_air(c, base.born_s + np.nan_to_num(base.cover_s) / 2)
     h_ref = float(_interp(c["h_fan"], 100.0 * ref_fan))
     layer_fan = np.zeros(int(base.layer.max()) + 2)
     np.maximum.at(layer_fan, tp.layer, tp.part_fan)  # the slicer's fan in each layer
     h_base = np.array([float(_interp(c["h_fan"], 100.0 * f)) for f in layer_fan])[np.minimum(base.layer + 1, len(layer_fan) - 1)]
 
-    def rate(h: Heat) -> np.ndarray:
+    def rate(h: Heat, air: np.ndarray) -> np.ndarray:
         with np.errstate(all="ignore"):
             return np.log((h.birth_c - air) / np.maximum(h.cover_c - air, 0.5)) / np.maximum(h.cover_s, 1e-3)
 
-    k0, k1 = rate(base), rate(ref)
+    k0 = rate(base, air)
+    k1 = rate(ref, chamber_air(c, ref.born_s + np.nan_to_num(ref.cover_s) / 2))
     dh = h_ref - h_base
     with np.errstate(all="ignore"):
         b = np.where(np.isfinite(k0 + k1) & (np.abs(dh) > 1e-6), np.maximum((k1 - k0) / dh, 0.0), 0.0)
@@ -326,7 +327,8 @@ def _search(tp: Toolpath, h: Heat, law: _Law, win: dict, weight: np.ndarray, all
                 t = np.maximum(t0 + extra, 0.05)
                 k0 = law.a[under] + law.b[under] * law.h_base[under]
                 k1 = law.a[under] + law.b[under] * hf
-                temp = law.air + (h.cover_c[under] - law.air) * np.exp(-(k1 * t - k0 * t0))
+                air = law.air[under]
+                temp = air + (h.cover_c[under] - air) * np.exp(-(k1 * t - k0 * t0))
                 over = np.nan_to_num(temp - win["limit_c"][under], nan=0.0)
                 cost += hot_worth * _by_column(over, weight[under], hot_groups)
                 cover = temp
@@ -406,7 +408,7 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
     ``intents_at(heat)`` -> design-intent masks (thermal.window); both optional. Returns the plans, the print
     time and the window before and after, and the heat results (``heat``: before, gcode, slicer)."""
     cfg = settings()
-    c = constants(profile, tp.settings)
+    c = constants(profile, toolpath=tp)
     stages = iter(np.linspace(0, 1, 7))
 
     def run(path: Toolpath, snapshots: bool = False) -> tuple[Heat, float]:

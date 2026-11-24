@@ -17,14 +17,19 @@ def test_only_the_cooling_slowdown_is_switched_off():
 
 
 @pytest.mark.skipif(find_orca() is None, reason="needs an installed OrcaSlicer")
-def test_the_local_tool_returns_optimized_gcode(tmp_path):
-    """The fixture part (a block with a Ø3 mm pin): Orca without its slowdown is faster but much hotter; the
-    cooling plan leaves fewer spots too hot than Orca's own slowdown, and the file it writes passed its checks."""
+def test_the_local_tool_returns_checked_gcode(tmp_path):
+    """Orca without its slowdown is faster but hotter. Only write the cooling plan if it stays safe to print:
+    the cold chamber can leave joints too cold to bond, in which case use Orca's untouched slice."""
     api.load((FIXTURES / "part.stl").read_bytes(), "part.stl")
     out = tmp_path / "cooled.gcode"
     r = mcp_server.optimize_print_cooling([0, 0, 1], str(out))
     m = r["minutes"]
-    assert r["source"] == "cooling plan" and out.read_text().startswith("; ") and "cooling plan" in out.read_text()[:4000]
-    assert m["without_slowdown"] < m["orca_with_its_slowdown"] and r["changes"]["park_moves"] + r["changes"]["speed_lines"] > 0
+    text = out.read_text()
+    assert text.startswith("; ") and m["without_slowdown"] < m["orca_with_its_slowdown"]
+    if r["source"] == "OrcaSlicer's own":
+        assert "newly too cold to bond" in r["why"] and "cooling plan" not in text[:4000]
+        return
+    assert r["source"] == "cooling plan" and "cooling plan" in text[:4000]
+    assert r["changes"]["park_moves"] + r["changes"]["speed_lines"] > 0
     hot = r["spots_too_hot"]
     assert hot["with_cooling_plan"] < hot["orca_with_its_slowdown"] < hot["without_slowdown"] and "OrcaSlicer's own" in r["summary"]

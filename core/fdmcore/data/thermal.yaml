@@ -116,11 +116,12 @@ process:
   z_conductivity_ratio:     {value: 0.7, range: [0.5, 0.9], unit: "-", source: "estimate: voids and the narrow bead contact lower k across layers", confidence: estimated}
   bed_contact_conductance:  {smooth_pei: 300, textured_pei: 150, range: [50, 1000], unit: W/m2K, source: "estimate (textured: less contact area)", confidence: estimated}
   nozzle_reheat:  {h_equiv: 70, range: [30, 120], unit: W/m2K, reach_mm: 1.5, reach_range_mm: [0.5, 3.0], source: "estimate: radiation and hot air from the nozzle and heater block onto the top layer", confidence: estimated}
-  chamber_air_c:  # steady state after about 30 min
+  chamber_air_c:  # steady-state defaults when no setpoint is available
     open:           {value: 25, range: [18, 30], source: "room", confidence: estimated}
     closed_bed_60:  {value: 35, range: [28, 40], source: "estimate, closed desktop printer printing PLA / PETG", confidence: estimated}
     closed_bed_100: {value: 48, range: [40, 55], source: "estimate, closed desktop printer printing ABS / ASA", confidence: estimated}
-    heated_chamber: {value: 60, range: [45, 90], source: "the chamber heater's set point", confidence: estimated}
+    heated_chamber: {value: 60, range: [45, 90], source: "estimate, typical chamber heater set point", confidence: estimated}
+  chamber_warmup_s: {value: 600, unit: s, source: "estimate: about 95% of the way to steady temperature after 30 minutes", confidence: estimated}
   melt_temp_drop_c:  # below the set point, by volumetric flow (mm3/s), standard hotend within its rated flow
     points: {0: 0, 10: 5, 20: 15, 30: 30}
     range_at_20: [5, 30]

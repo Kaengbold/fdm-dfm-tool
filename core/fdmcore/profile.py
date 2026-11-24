@@ -85,6 +85,7 @@ PRINTER_FIELDS = {
     "name": (str, None, None),
     "bed": (list, 20, 2000),
     "enclosure": (("none", "passive", "heated"), None, None),
+    "chamber_temp_c": (float, 0, 150),
     "hardened_nozzle": (bool, None, None),
     "speed": (("fast", "medium"), None, None),
     "multi_material": (("none", "optional", "builtin"), None, None),

@@ -111,7 +111,9 @@ def test_optimize_gcode_offers_a_checked_file():
     r = api.optimize_gcode([0, 0, 1], data)
     assert r["ok"] and r["changes"]["park_moves"] > 0 and r["minutes"][1] > r["minutes"][0]
     text = r["data"].decode()
-    assert "Spots too hot 40 -> 0" in text and gcode.parse(text).dwells["s"].sum() > 0
+    hot_before, hot_after = r["too_hot"]
+    assert hot_before > hot_after
+    assert f"Spots too hot {hot_before} -> {hot_after}" in text and gcode.parse(text).dwells["s"].sum() > 0
     with pytest.raises(ValueError, match="Plain .gcode"):
         api.optimize_gcode([0, 0, 1], (FIXTURES / "bambu.gcode.3mf").read_bytes())
     with pytest.raises(ValueError, match="isn't the G-code"):

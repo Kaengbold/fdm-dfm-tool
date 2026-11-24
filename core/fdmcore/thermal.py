@@ -26,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import importance, progress
-from .gcode import LAYER_TIME, PART_KINDS, SOLID, SUPPORT, WALL, Toolpath, _role, fan_mask
+from .gcode import LAYER_TIME, PART_KINDS, SOLID, SUPPORT, WALL, Toolpath, _number, _role, _text, fan_mask
 from .kinematics import Timing, nozzle_at
 from .profile import Profile, load_data
 
@@ -111,30 +111,50 @@ def _interp(points: dict, x):
     return np.interp(x, keys, [float(points[k if k in points else int(k)]) for k in keys])
 
 
-def constants(profile: Profile, settings: dict | None = None) -> dict:
+def _temperature(settings: dict, *keys, default: float | None) -> float | None:
+    for key in keys:
+        value = _number(_text(settings.get(key)), 0.0)
+        if 0 < value < np.inf:
+            return value
+    return default
+
+
+def chamber_conditions(profile: Profile, settings: dict | None = None, *, toolpath: Toolpath | None = None) -> dict:
+    """Use startup heater commands before slicer settings or the printer's default, so a print's
+    requested temperature wins. A startup wait counts as preheating, not as print time."""
+    settings = toolpath.settings if settings is None and toolpath is not None else settings or {}
+    process = load_data("thermal")["process"]
+    air = process["chamber_air_c"]
+    bed = _temperature(settings, "hot_plate_temp", "bed_temperature", "textured_plate_temp",
+                       default=float(profile.material["bed_temp_c"]))
+    room = _value(air["open"])
+    passive = _value(air["closed_bed_100"] if bed >= 90 else air["closed_bed_60"])
+    target = toolpath.chamber_target_c if toolpath is not None else None
+    if target is None:
+        target = _temperature(settings, "chamber_temperature", "chamber_temp_c",
+                              default=_temperature(profile.printer, "chamber_temp_c", default=None))
+    if target is None:
+        target = _value(air["heated_chamber"]) if profile.enclosure == "heated" else 0.0
+    steady = max(room, target) if target else passive if profile.enclosure != "none" else room
+    preheated = bool(target and toolpath is not None and toolpath.chamber_waited)
+    return {"bed_c": bed, "chamber_c": steady,
+            "chamber_start_c": steady if preheated else room, "chamber_warmup_s": _value(process["chamber_warmup_s"])}
+
+
+def chamber_air(c: dict, seconds: float | np.ndarray) -> float | np.ndarray:
+    """Bulk air temperature as a cold enclosure approaches its target; an open or preheated one stays put."""
+    return c["chamber_c"] + (c["chamber_start_c"] - c["chamber_c"]) * np.exp(
+        -np.maximum(seconds, 0) / c["chamber_warmup_s"])
+
+
+def constants(profile: Profile, settings: dict | None = None, *, toolpath: Toolpath | None = None) -> dict:
     """SI constants for this material and printer from data/thermal.yaml (and the slicer's
     temperatures when the G-code has them)."""
     data = load_data("thermal")
     mid = profile.material_id.split("_")[0]
     m = data["materials"].get(mid, data["materials"]["pla"])
     pr = data["process"]
-    s = settings or {}
-
-    def setting(*keys, default):
-        for k in keys:
-            try:
-                v = float(str(s.get(k, "")).split(",")[0])
-                if v > 0:
-                    return v
-            except ValueError:
-                pass
-        return default
-
-    bed = setting("hot_plate_temp", "bed_temperature", "textured_plate_temp", default=float(profile.material["bed_temp_c"]))
-    enclosure = profile.enclosure
-    air = pr["chamber_air_c"]
-    chamber = {"none": air["open"], "passive": air["closed_bed_100"] if bed >= 90 else air["closed_bed_60"],
-               "heated": air["heated_chamber"]}[enclosure]
+    s = toolpath.settings if settings is None and toolpath is not None else settings or {}
     tc = m.get("tc_c", {}).get("value")
     aux_h = 0.0
     if profile.printer.get("aux_fan"):
@@ -146,8 +166,8 @@ def constants(profile: Profile, settings: dict | None = None) -> dict:
         "material": mid, "rho": _value(m["density"]), "cp_glassy": _value(m["cp_glassy"]), "cp_melt": _value(m["cp_melt"]),
         "k": _value(m["k"]), "emissivity": _value(m["emissivity"]), "tg": _value(m["tg_c"]),
         "latent": _value(m["latent_heat"]), "tc": float(tc) if tc is not None else None,
-        "nozzle_c": setting("nozzle_temperature", "temperature", default=float(profile.material["nozzle_temp_c"])),
-        "bed_c": bed, "chamber_c": _value(chamber), "air_bed_mm": _value(pr["air_bed_layer_mm"]),
+        "nozzle_c": _temperature(s, "nozzle_temperature", "temperature", default=float(profile.material["nozzle_temp_c"])),
+        **chamber_conditions(profile, s, toolpath=toolpath), "air_bed_mm": _value(pr["air_bed_layer_mm"]),
         "h_still": _value(pr["h_still_air"]), "h_fan": pr["h_fan"]["points"], "fan_falloff_mm": _value(pr["h_fan"]["falloff_mm"]),
         "aux_fan_h": aux_h,
         "fan_spin_up_s": _value(pr["fan_spin_up_s"]), "contact": _value(pr["bead_contact_conductance"]),
@@ -286,7 +306,7 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
 
     started = time.time()
     cfg = TIERS[tier]
-    c = {**constants(profile, tp.settings), **(overrides or {})}
+    c = {**constants(profile, toolpath=tp), **(overrides or {})}
     cell = cfg["cell_mm"]
     d = _deposits(tp, tm, cell, c, region)
     n = len(d["keys"])
@@ -383,12 +403,12 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     window = None
     nb = 0
     t, steps, fan_eff, aux_eff, cur = t_begin, 0, 0.0, 0.0, 0
-    air_of = lambda zz: c["chamber_c"] + (c["bed_c"] - c["chamber_c"]) * np.exp(-zz / c["air_bed_mm"])
+    bed_fade = np.exp(-z / c["air_bed_mm"])
     eps_sigma = c["emissivity"] * SIGMA
     report_at = 0.0
     born_last = float(d["born"].max())
     snap_layers = sorted(set(range(n_layers - 1, -1, -max(1, -(-n_layers // SNAP_MAX))))) if snapshots else []
-    snap_lo, snap_hi = min(float(c["chamber_c"]), 20.0), float(c["nozzle_c"])
+    snap_lo, snap_hi = min(float(c["chamber_start_c"]), float(c["chamber_c"]), 20.0), float(c["nozzle_c"])
     snaps = {"layer": [], "t_s": [], "fan": [], "blocks": []}
 
     while t < t_stop:
@@ -459,9 +479,10 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
         area_air = top_area[nodes] * ~covered + side_area[nodes]
         h_fan = (_interp(c["h_fan"], fan_eff * 100) + aux_h * aux_eff) * np.exp(
             -np.maximum(z_print - z[nodes], 0) / c["fan_falloff_mm"])
-        air = air_of(z[nodes])
+        chamber = chamber_air(c, (t + t_next) / 2)
+        air = chamber + (c["bed_c"] - chamber) * bed_fade[nodes]
         h_rad = eps_sigma * ((Tn + 273.15) ** 2 + (air + 273.15) ** 2) * (Tn + air + 546.3)
-        air_l = air_of(0.0)
+        air_l = c["bed_c"]
         h_rad_l = eps_sigma * ((Tl + 273.15) ** 2 + (air_l + 273.15) ** 2) * (Tl + air_l + 546.3)
         g_amb = np.concatenate([area_air * (c["h_still"] + h_fan + h_rad), exposed_lump[lumps - n] * (c["h_still"] + h_rad_l)])
         t_amb = np.concatenate([air, np.full(len(lumps), air_l)])

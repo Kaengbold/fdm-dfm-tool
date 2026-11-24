@@ -33,7 +33,7 @@ MIN_SPEED = 10.0  # mm/s: slicers slow small layers down to the minimum layer ti
 
 
 def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profile: Profile, sliced: dict | None = None,
-               min_speed: float = MIN_SPEED, min_layer_time: float | None = None) -> np.ndarray:
+               min_speed: float = MIN_SPEED, min_layer_time: float | None = None, *, climate: dict | None = None) -> np.ndarray:
     """Temperature (°C) of each sampled layer once ``DEPTH_MM`` more plastic has been printed on top:
     above the softening point, the top of the part is still soft and can't hold its shape.
 
@@ -41,7 +41,8 @@ def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profil
     ``sliced`` (detailed level, gcode.layer_times): the real time between layers and the plastic in
     each, instead of estimates from the goal's settings. ``min_speed``: the filament's minimum print speed
     (OrcaSlicer ``slow_down_min_speed``), the floor of the slicer's slow-down for small layers;
-    ``min_layer_time`` (s) overrides the material's (``slow_down_layer_time``)."""
+    ``min_layer_time`` (s) overrides the material's (``slow_down_layer_time``). ``climate`` lets
+    detailed warp use the same changing chamber air and bed temperature as its shrink model."""
     mat = profile.material
     plan = goal_plan(profile)
     lh = plan["layer_height"] if sliced is None else float(np.median(sliced["layer_height"]))
@@ -69,11 +70,17 @@ def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profil
     exposed = np.append(np.maximum(a[:-1] - a[1:], 0.0), a[-1])  # top faces not covered by the next layer
     side = h * p * dzm
     g_bed = K_PLASTIC * fill[0] * a[0] / (dzm / 2)
-    t_amb, t_bed, t_noz = AMBIENT_C[profile.enclosure], float(mat["bed_temp_c"]), float(mat["nozzle_temp_c"])
+    t_bed, t_noz = float(mat["bed_temp_c"]), float(mat["nozzle_temp_c"])
+    air = np.full(n, AMBIENT_C[profile.enclosure])
+    if climate is not None:
+        from .thermal import chamber_air
 
-    temp = np.full(n, t_amb)
+        air = chamber_air(climate, np.cumsum(t) - t / 2)
+        t_bed = climate["bed_c"]
+
+    temp = np.full(n, air[0])
     k = max(1, int(round(DEPTH_MM / dz)))
-    soft = np.full(n, t_amb)
+    soft = np.full(n, air[0])
     for j in range(n):
         temp[j] = t_noz
         lo = max(0, j - WINDOW)
@@ -81,11 +88,11 @@ def layer_heat(zs: np.ndarray, areas: np.ndarray, perimeters: np.ndarray, profil
         g_noz = H_NOZZLE * min(a[j], NOZZLE_REACH_MM2 * 1e-6)
         for _ in range(SUBSTEPS):
             temp[lo:j + 1] = _step(temp[lo:j + 1], cap[lo:j + 1], cond[lo:j], side[lo:j + 1], h * exposed[lo:j], h * a[j],
-                                   g_noz, g_bed if lo == 0 else 0.0, dt, t_amb, t_bed, t_noz)
+                                   g_noz, g_bed if lo == 0 else 0.0, dt, air[j], t_bed, t_noz)
         soft[max(j - k, 0)] = temp[max(j - k, 0)]
     if n > k:
         soft[n - k:] = soft[n - k - 1]  # nothing is printed on the last layers: they cool down instead
-    out = np.full(len(zs), t_amb)
+    out = np.full(len(zs), air[0])
     np.maximum.at(out, src, soft)  # hottest cell within each sampled layer
     return out
 
