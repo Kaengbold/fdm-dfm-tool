@@ -35,15 +35,51 @@ def test_an_overcooled_wall_is_weaker_than_one_printed_in_its_window(wall):
     """Bent across its layers: printed with long waits under full fan, the layers fuse poorly and the safety
     drops well below that of the same wall printed straight through at 30 % fan."""
     api.load_gcode(wall_gcode(fan=77), [0, 0, 1])
+    fallback = api.strength([0, 0, 1], wall, detailed=True)
+    assert "heat" not in fallback
     good = api.strength([0, 0, 1], wall, detailed=True, heat=True)
+    assert fallback["safety_factor"] == pytest.approx(good["heat"]["usual_safety_factor"])
     api.load_gcode(wall_gcode(fan=255, wait_s=30), [0, 0, 1])
     cold = api.strength([0, 0, 1], wall, detailed=True, heat=True)
     assert cold["safety_factor"] < 0.7 * good["safety_factor"]
     assert cold["mode"] == "layers" and cold["heat"]["bond_at_weakest"] < 0.7
     assert cold["heat"]["usual_safety_factor"] == pytest.approx(good["heat"]["usual_safety_factor"], rel=0.02)
-    assert "weakens the layers" in cold["heat"]["text"] and "instead of" in cold["heat"]["text"]
-    plain = api.strength([0, 0, 1], wall, detailed=True)  # without the heat option: one value for the whole part
+    assert cold["heat"]["message"]["key"] == "strength.heat.weakened"
+    joint = cold["heat"]["weak_joint"]
+    assert joint["layer"] > 1 and 0 < joint["point"][2] < H
+    assert joint["message"]["key"] == "strength.heat.cold_joint" and "Fan speed" in cold["heat"]["text"]
+    assert api.strength([0, 0, 1], wall, detailed=True)["heat"] == cold["heat"]
+    plain = api.strength([0, 0, 1], wall, detailed=True, heat=False)
     assert "heat" not in plain and plain["safety_factor"] == pytest.approx(cold["heat"]["usual_safety_factor"])
+
+
+def test_only_cubes_crossing_the_cold_joint_lose_strength(wall):
+    # Make one interface cold while holding all other joints at their usual strength.
+    from fdmcore.profile import Profile, load_data
+
+    up = [0, 0, 1]
+    api.load_gcode(wall_gcode(fan=77), up)
+    h, _ = api._heat(Profile.from_dict(None))
+    usual = load_data("thermal")["strength"]["usual_bond"]
+    h.bond[np.isfinite(h.joint_z)] = usual
+    cold_layer = 20
+    cold = (h.layer == cold_layer) & np.isfinite(h.joint_z)
+    assert cold.any()
+    h.bond[cold] = usual / 4
+    plain = api.strength(up, wall, detailed=True, heat=False)
+    local = api.strength(up, wall, detailed=True)
+    elems = local["elements"]
+    z = np.frombuffer(elems["centers"], np.float32).reshape(-1, 3)[:, 2]
+    delta = np.frombuffer(elems["fi"], np.float32) - np.frombuffer(plain["elements"]["fi"], np.float32)
+    crossing = np.abs(z - cold_layer * LH) <= elems["size_mm"] / 2 + 1e-6
+    assert delta[crossing].max() > 1
+    np.testing.assert_allclose(delta[~crossing], 0, atol=1e-4)
+    assert local["safety_factor"] < plain["safety_factor"]
+    assert local["heat"]["weak_joint"]["layer"] == cold_layer + 1
+
+    # An incompatible thermal result must not change strength or trigger a fresh run.
+    different = api.strength(up, wall, profile={"material": "abs"}, detailed=True)
+    assert "heat" not in different
 
 
 def test_heat_needs_the_detailed_check(wall):

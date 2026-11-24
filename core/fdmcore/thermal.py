@@ -59,6 +59,7 @@ class Heat:
     joint_c: np.ndarray  # (M, len(DELAYS_S)) joint to the node below, T_int at each delay (NaN: no node below)
     above_tg_s: np.ndarray  # (M,) seconds the joint stayed above the glass transition
     bond: np.ndarray  # (M,) how far the joint healed, 0..1 (welding integral, Wool: (∫dt / reptation time)^¼)
+    joint_z: np.ndarray  # (M,) height of the joint below, NaN unless both sides contain part plastic
     overhang: np.ndarray  # (M,) share of its plastic printed as bridge or overhang
     cooled: np.ndarray  # (M,) share of its plastic the slicer slowed down for layer cooling
     shell: np.ndarray  # (M,) share of walls and solid layers (what holds layers together; sparse infill barely does)
@@ -203,7 +204,7 @@ def _reptation_s(T: np.ndarray, c: dict) -> np.ndarray:
         dt = t - c["wlf_ref"]
         return -c["wlf_c1"] * dt / (c["wlf_c2"] + dt)
 
-    above = T > c["wlf_ref"]
+    above = T > c["tg"]
     shifted = log_shift(np.where(above, T, c["wlf_ref"] + 1)) - log_shift(c["reptation_ref"])
     return np.where(above, c["reptation_s"] * 10.0 ** np.minimum(shifted, 30), np.inf)
 
@@ -264,9 +265,10 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, region=None) -> di
     overhang = np.bincount(node, vol * spans, minlength=len(keys)) / volume
     cooled = np.bincount(node, vol * (tp.cause[line] == LAYER_TIME), minlength=len(keys)) / volume
     shell = np.bincount(node, vol * np.isin(tp.kind[line], (WALL, SOLID)), minlength=len(keys)) / volume
+    part = np.bincount(node, np.isin(tp.kind[line], PART_KINDS), minlength=len(keys)) > 0
     return {"keys": keys, "nx": nx, "ny": ny, "layer": lay, "ix": cx, "iy": cy, "lo": lo, "volume": volume,
             "born": born, "birth": birth, "z": tp.layer_z[lay] - lh / 2, "lh": lh, "skin_mm": skin,
-            "overhang": overhang, "cooled": cooled, "shell": shell}
+            "overhang": overhang, "cooled": cooled, "shell": shell, "part": part}
 
 
 def _neighbours(keys: np.ndarray, offsets) -> np.ndarray:
@@ -538,9 +540,12 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     has_below = down >= 0
     joint[~has_below] = np.nan
     above_tg[~has_below] = np.nan
-    bond = np.where(has_below, np.minimum(weld, 1.0) ** 0.25, np.nan)
+    exponent = _value(load_data("thermal")["strength"]["healing_exponent"])
+    bond = np.where(has_below, np.minimum(weld, 1.0) ** exponent, np.nan)
+    part_joint = has_below & d["part"] & d["part"][np.maximum(down, 0)]
+    joint_z = np.where(part_joint, z - lh / 2, np.nan)
     return Heat(layer=layer, xy=xy, z=z, volume=d["volume"], born_s=d["born"], birth_c=d["birth"], cover_c=cover_c,
-                cover_s=cover_s, joint_c=joint, above_tg_s=above_tg, bond=bond,
+                cover_s=cover_s, joint_c=joint, above_tg_s=above_tg, bond=bond, joint_z=joint_z,
                 overhang=d["overhang"], cooled=d["cooled"], shell=d["shell"], island=island, column=column, cell_mm=cell, tier=tier,
                 material=c["material"], tg_c=c["tg"], seconds=time.time() - started, steps=steps,
                 snaps=None if not snapshots else {

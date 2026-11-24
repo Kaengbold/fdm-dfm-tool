@@ -1330,17 +1330,19 @@ Not reachable: Pollák & Goryl 2025.
 - [x] **T-593 P2** Glue-layer peel model at the bed (cohesive zone). · files: `core/fdmcore/warp.py`, `core/fdmcore/fea.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-593-cohesive-peel`)
   - Do: the first layer held by springs that weaken and break as they stretch, so a lift grows by itself; must tell the short and long reference bars apart without T-390's curl gate (then drop the gate). Only in the detailed warping run if it is slow.
   - Outcome: First-layer springs weaken and break under shrinkage. The 40 mm ABS bar holds and the 90 mm bar starts to lift. The default-grid calibration reproduces 80 mm held and 120 mm lifted in Python and Pyodide.
-- [~] **T-594 P2** Check the peel while printing, not only at the end. · files: `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-594-peel-while-printing`)
+- [x] **T-594 P2** Check the peel while printing, not only at the end. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` (adhesion finding), `web/steps/simulate.js` (onset note) · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-594-peel-while-printing`)
   - Do: run the peel check at each warp step (corners usually lift in the first layers, bed hot, part still soft); report the height where it starts.
 - [x] **T-595 P2** Heated chamber: the real set point and its warm-up. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml`, `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-595-chamber-warmup`)
   - Do: read the chamber temperature from the G-code / printer profile instead of a fixed 60 °C; enclosures (passive and heated) warm up over the first ~30 min instead of being warm from layer 1.
   - Outcome: Heat and warping use the startup chamber setting or the printer preset, with an estimated 30-minute warm-up when the chamber starts cold. A startup M191 wait starts the print warm.
-- [ ] **T-622 P2** Cooling plan: the rewritten G-code must match the plan. · files: `core/fdmcore/thermal_opt.py`, `core/fdmcore/gcode.py` · owner: —  - Do: with T-595's cold chamber start, the in-memory plan on the cooling fixture shows no cold joints, but the rewritten file re-simulates about 0.7 s longer with 60 newly too-cold spots, so the export check falls back to OrcaSlicer's slice. Find where plan and rewrite differ (dwell or park timing) and close the gap.
-- [ ] **T-596 P2** Layer joints as a bead neck. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml` · owner: —
+- [ ] **T-622 P2** Cooling plan: the rewritten G-code must match the plan. · files: `core/fdmcore/thermal_opt.py`, `core/fdmcore/gcode.py` · owner: —
+  - Do: with T-595's cold chamber start, the in-memory plan on the cooling fixture shows no cold joints, but the rewritten file re-simulates about 0.7 s longer with 60 newly too-cold spots, so the export check falls back to OrcaSlicer's slice. Find where plan and rewrite differ (dwell or park timing) and close the gap.
+- [~] **T-596 P2** Layer joints as a bead neck. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-596-bead-neck`)
   - Do: heat between layers flows through the neck where two round beads touch: contact width from line width and layer height (0.3 × 0.8 vs 0.05 × 0.45 differ), not the whole cell; contact conductance from T-590 (today 500 W/m²K, range 100–5000, the most uncertain number).
-- [~] **T-597 P1** Cooling feeds layer strength. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-597-cooling-strength`)
+- [x] **T-597 P1** Cooling feeds layer strength. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-597-cooling-strength`)
   - Do: where the heat simulation says a joint bonded cold (time above the softening point), the strength check uses a weaker layer strength there instead of one factor for the whole part.
-- [ ] **T-598 P2** Results as ranges. · files: `core/fdmcore/api.py`, `web/` · owner: —
+  - Outcome: Detailed strength uses the weakest modeled joint crossing each cube, reports its layer and cooling history, and uses the usual layer strength when heat data is unavailable.
+- [~] **T-598 P2** Results as ranges. · files: `core/fdmcore/api.py`, `web/` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-598-result-ranges`)
   - Do: run with the low and high ends of the uncertain constants (thermal.yaml / thresholds ranges) and show e.g. "×2.1 to ×3.4" or "40–55 °C" beside today's single number; keep it fast (only the few constants that matter most).
 - [ ] **T-599 P2** Strength grid check on thin features. · files: `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: —
   - Do: warn when the weak spot, a thin wall or a fillet is only a few voxels thick, and re-check it on a finer grid automatically; say when the answer moved.
@@ -1380,6 +1382,23 @@ Issues and improvements found during hands-on testing of the new UI.
   - Outcome: added `"cura"` to `SLICERS` in `web/steps/done.js` (Done step + header Export modal) with a note listing the global Cura print settings to set by hand (`CURA_GLOBAL`), and allowed `layout="cura"` in `export_3mf()` to fall back cleanly to plain 3MF with `cura:*` metadata when modifiers are present.
 - [x] **T-615 P2** [Export] Unified G-code download on Done (with or without heat/cooling optimization). · serves: 1, 3 · files: `web/steps/done.js`, `web/steps/heat.js`, `web/steps/simulate.js`, `web/messages/en.js` · owner: Antigravity (`task/T-609-ux-and-export`)
   - Outcome: added a `Standard` / `With heat optimization` toggle in the Done step's G-code card (`downloadGcode` runs `load_gcode` + `optimize_gcode` when heat optimization is chosen) alongside a clear safety notice about stock OrcaSlicer profiles.
+
+### Phase 11: follow-up testing & Flash user audit (2026-11-24)
+
+Found from owner screenshot review (`l_bracket.stl`) and Flash subagent normal-user walkthrough (`hook.stl`).
+
+- [x] **T-616 P1** [Bug] Force arrows render on top of the 3D part instead of being occluded by it. · serves: 2 · files: `web/steps/loads.js` · owner: Antigravity (`task/T-616-ux-and-model-fixes`)
+  - Outcome: set `depthTest = true` on load arrows in `drawArrows` (`web/steps/loads.js`) so the 3D part properly covers force arrows behind it.
+- [x] **T-617 P1** [Bug] Wrong 2D animations in Problems (`tipping_risk` matched `pin`, `small_bed_contact` matched `warp`) and disorienting zoom on tiny bboxes. · serves: 1, 2 · files: `web/steps/problemanim.js`, `web/steps/problems.css`, `web/messages/en.js`, `web/viewport/stage.js` · owner: Antigravity (`task/T-616-ux-and-model-fixes`)
+  - Outcome: added dedicated `tipping` and `small_bed` 2D animations, tightened `problemAnimKind` regexes so `tipping_risk` / `small_bed_contact` never mis-match `pin` / `warp`, and clamped `Stage.frameBox` minimum radius to 35 % of the part's bounding sphere.
+- [x] **T-618 P1** [Bug] Cooling contradiction between Simulation (`thermal.py`) and Problems (`small_layers_cooling`), plus unclear wording. · serves: 1, 2, 3 · files: `core/fdmcore/data/messages/en.yaml`, `core/fdmcore/data/rules.yaml`, `web/steps/problems.js`, `web/steps/simulate.js` · owner: Antigravity (`task/T-616-ux-and-model-fixes`)
+  - Outcome: when Simulation's 3D thermal model (`optimize_cooling`) ran cleanly with 0 hot spots, `simulate.js` and `problems.js` suppress stale 1-D `small_layers_cooling` findings; rewrote `small_layers_cooling` title/one-liner/fix in `en.yaml` and `rules.yaml` to speak about thin sections instead of tips and removed the dangling "the finding says how low" reference.
+- [x] **T-619 P1** [Bug] Optimizer recommends unprintable knife-edge `Tilted` orientation (`0.29 mm²` bed contact) over flat `+X side down` on `hook.stl`, and labels `0.1 g` support as `No support`. · serves: 1, 2 · files: `core/fdmcore/optimizer.py` · owner: Antigravity (`task/T-616-ux-and-model-fixes`)
+  - Outcome: included `o["ease"]` in `goal_cost` across `balanced`, `fast`, `light`, and `strong`, and tightened `"No support"` to `support_g < 0.05`. Verified on `hook.stl` (`40 N` load, `balanced`): flat `−X side down` (`0.0 g` support, `ease = 0.15`, Safety `×3.82`) now wins.
+- [ ] **T-620 P2** [UI] Surface unattached design suggestions (corner rounding on `l_bracket.stl`) and suppress false-positive `first_layer_detail` on tiny bed contacts. · serves: 1, 2 · files: `core/fdmcore/checks.py`, `web/steps/fixes.js`, `web/steps/problems.js` · owner: —
+  - Do: show `source: "other"` design edits (such as rounding sharp bed corners when no warping finding fired) in an optional improvements section on Problems instead of dropping them, and skip `first_layer_detail` when `small_bed_contact` is already flagged.
+- [ ] **T-621 P2** [UI] Polish from normal-user walkthrough: consistent print time across Options/Simulation/Done, Overhangs underside view hint, Heat fallback notice on stage, `PC (polycarbonate)` wrapping, Done G-code card when browser slicer unavailable. · serves: 1, 2, 3 · files: `web/steps/done.js`, `web/steps/simulate.js`, `web/steps/options.css`, `web/messages/en.js` · owner: —
+  - Do: show Simulation's real print time on Done when available, add an on-stage notice when Heat has no G-code, tilt or hint to look underneath in Overhangs view, prevent orphan `)` wrapping in Options, and disable/explain the browser G-code download when OrcaSlicer WASM isn't available.
 
 ## Done
 

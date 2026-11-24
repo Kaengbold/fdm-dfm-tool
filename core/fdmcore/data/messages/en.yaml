@@ -60,9 +60,9 @@ finding.tall_thin_feature.title: "Tall thin part wobbles"
 finding.tall_thin_feature.one_liner: "Slender upright section bends under the nozzle and prints messy."
 finding.tall_thin_feature.one_liner_size: "{width} mm wide, {height} mm tall; wobbles and prints messy."
 
-finding.small_layers_cooling.title: "Small layers stay soft"
-finding.small_layers_cooling.one_liner: "Tiny layers stay hot when the next one lands; tips droop or blob."
-finding.small_layers_cooling.one_liner_temp: "Still ~{temp} °C when the next layer lands; tips droop or blob."
+finding.small_layers_cooling.title: "Layers print too fast to cool"
+finding.small_layers_cooling.one_liner: "Short layers stay soft when the next one lands; thin sections can sag or blob."
+finding.small_layers_cooling.one_liner_temp: "Still ~{temp} °C when the next layer lands; thin sections can sag or blob."
 
 finding.heat_too_hot.title: "Spot stays too hot"
 finding.heat_too_hot.one_liner: "Plastic is still soft when the next layer lands; it may sag or blob."
@@ -203,6 +203,7 @@ finding.warping.one_liner: "Long flat base shrinks as it cools and pulls corners
 finding.warping.one_liner_len: "{length} mm {material} base cools and lifts corners off the bed."
 finding.bed_adhesion.title: "May come loose here"
 finding.bed_adhesion.one_liner: "This corner may lift as the print shrinks. Bed grip is estimated."
+finding.bed_adhesion.start_height: "The corner may start lifting when the print is about {height} mm tall."
 
 finding.weak_upright_pin.title: "Upright pin snaps easily"
 finding.weak_upright_pin.one_liner: "Layers run across the stem; a sideways bump snaps it off."
@@ -286,3 +287,8 @@ finding.load_bearing_wall_thin.one_liner_size: "{wall} mm wall is thin under loa
 finding.uneven_wall_thickness.title: "Thick next to thin wall"
 finding.uneven_wall_thickness.one_liner: "Thick block cools slower and pulls sink marks or warps thin wall."
 finding.uneven_wall_thickness.one_liner_size: "{thin} mm wall next to {thick} mm block shrinks unevenly."
+
+strength.heat.weakened: "This print's cooling weakens the layers. Safety factor is {safety}, compared with {usual} with usual bonding."
+strength.heat.stronger: "The layers of this print fuse better than usual. Safety factor is {safety}, compared with {usual} with usual bonding."
+strength.heat.similar: "This print's cooling makes little difference to safety. Safety factor is {safety}, compared with {usual} with usual bonding."
+strength.heat.cold_joint: "At layer {layer} ({height} mm), the joint stayed warm enough to fuse for about {warm_s} s and holds about {share}% of its usual strength. Fan speed and the time between layers affect how long the joint stays warm."

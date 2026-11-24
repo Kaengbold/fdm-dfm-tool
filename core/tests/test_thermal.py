@@ -140,6 +140,11 @@ def test_old_layers_merge_without_changing_much(orca, quick, monkeypatch):
 def test_the_fan_cools(orca, quick):
     still = thermal.simulate(*orca, PLA, "quick", overrides={"h_fan": {0: 0, 100: 0}})
     assert np.nanmedian(still.cover_c) > np.nanmedian(quick.cover_c) + 10
+    part_joints = np.isfinite(quick.joint_z)
+    np.testing.assert_array_equal(still.joint_z, quick.joint_z)
+    fanned = thermal.bond_strength(quick.bond[part_joints])
+    warm = thermal.bond_strength(still.bond[part_joints])
+    assert np.median(fanned) < np.median(warm)
 
 
 def test_bambu_side_fan_cools_only_on_equipped_printers():

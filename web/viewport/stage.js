@@ -342,7 +342,9 @@ export class Stage {
     const box = new THREE.Box3();
     for (const c of corners) box.expandByPoint(new THREE.Vector3(c[0] + x, c[1] + y, c[2] + z).applyMatrix4(this.part.group.matrixWorld));
     const centre = box.getCenter(new THREE.Vector3());
-    const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 4);
+    // Keep at least 35 % of the part radius in view so tiny features (e.g. a 0.3 mm² corner) don't zoom into a featureless grey wall (T-617).
+    const minR = Math.max(4, (this.part.geo.boundingSphere?.radius ?? 0) * 0.35);
+    const r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, minR);
     const d = this.camera.position.clone().sub(this.controls.target).normalize();
     const dist = (r / Math.sin(THREE.MathUtils.degToRad(15))) * 1.3;
     this.controls.target.copy(centre);

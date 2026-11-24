@@ -163,17 +163,18 @@ def goal_cost(o: dict, goal: str, ref: dict) -> float:
     """Lower is better, among options that meet the target (§10.2 "then optimise for")."""
     t, g = o["minutes"] / max(ref["minutes"], 1e-6), o["total_g"] / max(ref["total_g"], 1e-6)
     ease = WARP_COST.get(o.get("warp_risk"), 0.0) - (OWNED_BONUS if o.get("owned") else 0.0)
+    pose_ease = float(o.get("ease") or 0.0)
     sup = (o["support_g"] or 0.0) / max(ref["total_g"], 1e-6)
     sf = o["safety"] if o["safety"] is not None else 0.0
     if goal == "strong":
-        return -min(sf, 50.0) + 0.05 * t + 0.2 * ease
+        return -min(sf, 50.0) + 0.05 * t + 0.2 * ease + 0.15 * pose_ease
     if goal == "fast":
-        return t + 0.05 * g + ease
+        return t + 0.05 * g + ease + 0.2 * pose_ease
     if goal == "light":
-        return g + 0.05 * t + ease  # total grams include the support, which matters most here
+        return g + 0.05 * t + ease + 0.2 * pose_ease  # total grams include the support, which matters most here
     if goal == "quality":
-        return o["ease"] + 0.5 * sup + 0.1 * t + ease
-    return t + g + 0.3 * sup - 0.1 * min(sf / max(o["target"] or 1, 1e-6), 2.0) + ease  # balanced
+        return pose_ease + 0.5 * sup + 0.1 * t + ease
+    return t + g + 0.3 * sup + 0.25 * pose_ease - 0.1 * min(sf / max(o["target"] or 1, 1e-6), 2.0) + ease  # balanced
 
 
 def pick_options(cands: list[dict], goal: str, owned: list[str]) -> list[dict]:
@@ -225,7 +226,7 @@ def pros_cons(opt: dict, best: dict, cons_by_material: dict[str, list[str]]) -> 
                 and opt["safety"] >= best["safety"] * 1.1 and opt.get("reinforced")):
             pros.append(f"Safety ×{opt['safety']:.1f}")
     else:
-        if opt["support_g"] is not None and opt["support_g"] < 0.5:
+        if opt["support_g"] is not None and opt["support_g"] < 0.05:
             pros.append("No support")
         if opt["safety"] is not None and opt["target"]:
             pros.append(f"Safety ×{opt['safety']:.1f}")

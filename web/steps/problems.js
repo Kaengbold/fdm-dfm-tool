@@ -65,7 +65,12 @@ async function runCheck(store, services) {
   services.rerender();
   try {
     const sim = store.isStale("simulate") ? null : store.result("simulate");
-    const out = await checkAndDesign(services.engine, s, sim?.check ?? null);
+    const heatRes = sim?.extra?.find((x) => x.name === "heat")?.value?.result;
+    const thermalClear = heatRes && (heatRes.before?.too_hot ?? 0) === 0;
+    const simCheck = sim?.check
+      ? (thermalClear ? { ...sim.check, findings: (sim.check.findings ?? []).filter((f) => f.rule !== "small_layers_cooling") } : sim.check)
+      : null;
+    const out = await checkAndDesign(services.engine, s, simCheck);
     store.setResult("check", { ...out, detailed: Boolean(sim?.detailed) }, deps);
     skipped = null;
   } catch (e) {

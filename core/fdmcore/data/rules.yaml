@@ -153,9 +153,7 @@ rules:
       drooping blob before it can solidify.
     fixes:
     - domain: slicer
-      text: "Let the printer slow tiny layers down further so they can cool. The slow-down stops at the filament's
-      minimum print speed (OrcaSlicer: Cooling → Min print speed, often 10 mm/s), so lower that too; the finding
-      says how low."
+      text: "Increase minimum layer time and lower the filament's minimum print speed (OrcaSlicer: Cooling → Min print speed) so short layers have time to cool before the next layer lands."
       settings:
         slow_down_for_layer_cooling: '1'
         slow_down_layer_time: '8'
