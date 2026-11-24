@@ -1334,7 +1334,7 @@ Not reachable: Pollák & Goryl 2025.
   - Do: run the peel check at each warp step (corners usually lift in the first layers, bed hot, part still soft); report the height where it starts.
 - [~] **T-595 P2** Heated chamber: the real set point and its warm-up. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml`, `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-595-chamber-warmup`)
   - Do: read the chamber temperature from the G-code / printer profile instead of a fixed 60 °C; enclosures (passive and heated) warm up over the first ~30 min instead of being warm from layer 1.
-- [ ] **T-596 P2** Layer joints as a bead neck. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml` · owner: —
+- [~] **T-596 P2** Layer joints as a bead neck. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-596-bead-neck`)
   - Do: heat between layers flows through the neck where two round beads touch: contact width from line width and layer height (0.3 × 0.8 vs 0.05 × 0.45 differ), not the whole cell; contact conductance from T-590 (today 500 W/m²K, range 100–5000, the most uncertain number).
 - [x] **T-597 P1** Cooling feeds layer strength. · files: `core/fdmcore/thermal.py`, `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-597-cooling-strength`)
   - Do: where the heat simulation says a joint bonded cold (time above the softening point), the strength check uses a weaker layer strength there instead of one factor for the whole part.
