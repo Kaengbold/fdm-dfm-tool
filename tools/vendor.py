@@ -28,7 +28,7 @@ import urllib.request
 from pathlib import Path
 
 CDN = "https://cdn.jsdelivr.net"
-PYODIDE = "pyodide/v0.27.2/full/"
+PYODIDE = "pyodide/v0.27.8/full/"
 PYODIDE_RUNTIME = ["pyodide.mjs", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json"]
 PACKAGES = ["numpy", "shapely", "pyyaml", "scipy"]  # web/worker.js, plus scipy loaded on demand (NEEDS_SCIPY)
 FILES = [
@@ -73,11 +73,11 @@ HASHES = {
     "npm/occt-import-js@0.0.23/dist/occt-import-js.wasm": "33391fc9d94ea5c869a6718488bf0a9a464222bac9bdc764dfe1690cef281952",
     "npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js": "018e57538fcb773f0124eae60aee4de693d3aae01c55b2b883a874911ab121c3",
     "npm/replicad-opencascadejs@1.1.0/dist/replicad_single.wasm": "4c9f22e9f3828dca6f3c95405934cdbe624e593c35266f47f392ab337478dbde",
-    "pyodide/v0.27.2/full/pyodide.mjs": "0a7aa1048a1349f9f9a8966f15ce224048de93b5292b9d66975b807c54d416b4",
-    "pyodide/v0.27.2/full/pyodide.asm.js": "c5bc43242dbdd922b03fd9f9ca22480d37451238686e84cb38499143f81ec75b",
-    "pyodide/v0.27.2/full/pyodide.asm.wasm": "7936ef6019d80723adce4bd86666b84534d071362839f1cf9b2b80bed917c812",
-    "pyodide/v0.27.2/full/python_stdlib.zip": "7a4edf94cc3d937ba29078adb857d1646d9ce064ad93e795645d124e212eb5a1",
-    "pyodide/v0.27.2/full/pyodide-lock.json": "3a3cfb1c0bc02917a1792c1ecdf2b9b484ca406f5d03cb8af4083e97ec7d706a",
+    "pyodide/v0.27.8/full/pyodide.mjs": "0119dc60b71b676b53d61ef63f8847973f845d2c8cf2eee32a61773ed8b5b01e",
+    "pyodide/v0.27.8/full/pyodide.asm.js": "8bd8175d6b97ee4ffff85c5aaf44130fad3e9322939826f2a52d27d786ef8908",
+    "pyodide/v0.27.8/full/pyodide.asm.wasm": "92160102d09feeb8c738a07c870bde47fd4c141fd70b5376188bdd951df9ea23",
+    "pyodide/v0.27.8/full/python_stdlib.zip": "cb5f8d7eae384fcf27c574d8b13901de1753a50f93038130c326f85b88c9012b",
+    "pyodide/v0.27.8/full/pyodide-lock.json": "cb18729b18db7ce2482d196209c8051d8122441b817fc2f644d643b44e5e1b0f",
     f"{MUON3D_DIR}/manifest.json": "8e6bb1925975d89e994a57f667efef5607a094c7e3befdcdf6bfb6a697ce8efb",
     f"{MUON3D_DIR}/host.446c6d131da98dbf.js": "446c6d131da98dbf2bbb5e102472ad6e3e192b0d7e8af19103070528d4a1a6f2",
     f"{MUON3D_DIR}/host-chunk.bd6a59f31a9394b2.js": "bd6a59f31a9394b26f524f5dfcf1e2757db814e437cb019f925acd89b0720b74",

@@ -11,6 +11,7 @@ import { h } from "../ui/dom.js";
 import { Button } from "../ui/button.js";
 import { SegmentedControl } from "../ui/choice.js";
 import { Disclosure } from "../ui/disclosure.js";
+import { ProgressCard } from "../ui/progress.js";
 import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { fieldColor } from "../viewport/stage.js";
@@ -119,13 +120,37 @@ async function useFile(file, store, services) {
   services.rerender();
 }
 
-async function runSimulations(store, services) {
+const simCardState = (r) => ({
+  done: r.done,
+  share: Math.min(1, (r.done + (r.sub ?? 0)) / Math.max(r.stages.length, 1)),
+  elapsed: (performance.now() - r.started) / 1000,
+});
+
+export async function runSimulations(store, services) {
   const s = store.get();
   const o = s.option;
+  if (!o) return false;
   const profile = simProfile(s, o);
   const engine = services.engine;
+  const stages = ["slice", "gcode", "warp", "check", ...extra.map((x) => x.stage).filter(Boolean)];
+  const setStage = (name) => {
+    if (!run) return;
+    run.stage = name;
+    const idx = run.stages.indexOf(name);
+    if (idx >= 0) run.done = idx;
+    run.sub = 0;
+    run.card?.set(simCardState(run));
+  };
   lastError = null;
-  run = { stage: "slice" };
+  const me = { stage: "slice", stages, done: 0, sub: 0, started: performance.now(), card: null, timer: null };
+  run = me;
+  me.timer = setInterval(() => run?.card?.set(simCardState(run)), 500);
+  const prevProgress = services.onProgress;
+  services.onProgress = (fraction) => {
+    if (run !== me) return;
+    me.sub = Math.max(0, Math.min(0.99, fraction ?? 0));
+    me.card?.set(simCardState(me));
+  };
   services.rerender();
   try {
     if (slice?.state === "slicing") await slice.promise;
@@ -133,8 +158,7 @@ async function runSimulations(store, services) {
     let gcodeError = null;
     let data = null;
     if (slice?.state === "ready") {
-      run.stage = "gcode";
-      services.rerender();
+      setStage("gcode");
       data = typeof slice.gcode === "string" ? new TextEncoder().encode(slice.gcode) : slice.gcode;
       try {
         gcode = await engine.call("load_gcode", { up: o.up, profile }, data);
@@ -144,25 +168,26 @@ async function runSimulations(store, services) {
       }
     }
     const detailed = Boolean(gcode);
-    run.stage = "warp";
-    services.rerender();
+    setStage("warp");
     const warp = await engine.call("warping", { up: o.up, profile, detailed });
-    run.stage = "check";
-    services.rerender();
+    setStage("check");
     const check = await engine.call("check", { up: o.up, profile, detailed, faces: markedFaces(s) });
     const more = [];
     for (const sim of extra) {
-      run.stage = sim.stage ?? run.stage;
-      services.rerender();
+      setStage(sim.stage ?? run.stage);
       const value = await sim.run({ engine, up: o.up, profile, detailed, check, warp, state: s, gcode: detailed ? data : null });
       if (value) more.push({ name: sim.name, value, status: value.status });
     }
     store.setResult("simulate", { check, warp, gcode, gcodeError, detailed, source: detailed ? slice.source : "ours", extra: more },
       store.deps(...DEPENDS));
+    return true;
   } catch (e) {
     if (!(e instanceof Cancelled)) lastError = e.message;
+    return false;
   } finally {
-    run = null;
+    if (me.timer) clearInterval(me.timer);
+    if (services.onProgress && run === me) services.onProgress = prevProgress;
+    if (run === me) run = null;
     services.rerender();
   }
 }
@@ -276,8 +301,12 @@ registerStep("sim", {
       h("button", { type: "button", class: "ui-link", onclick: () => file.click() }, t("sim.haveFile")), file));
 
     if (run) {
-      body.append(h("div", { class: "sim-running" }, h("span", {}, t(`sim.stage.${run.stage}`)),
-        Button({ label: t("ui.cancel"), variant: "ghost", onClick: () => services.engine.cancel() })));
+      const card = ProgressCard({ title: t("sim.runningTitle"), stages: run.stages.map((k) => t(`sim.stage.${k}`)),
+        onCancel: () => services.engine.cancel() });
+      run.card = card;
+      card.set(simCardState(run));
+      stage.append(h("div", { class: "analyse-progress" }, card));
+      body.append(Button({ label: t("sim.runningShort"), variant: "primary", disabled: true }));
     } else {
       body.append(Button({ label: fresh ? t("sim.again") : t("sim.run"), variant: fresh ? "secondary" : "primary", onClick: () => runSimulations(store, services) }));
     }
@@ -315,7 +344,12 @@ registerStep("sim", {
     if (overlay !== "heat") for (const sim of extra) sim.clearHeat?.(services);
     const legend = h("div", { class: "sim-legend" });
     const bar = h("div", { class: "sim-views" },
-      SegmentedControl({ label: t("sim.view.label"), size: "small", options: choices, value: overlay, onChange: (v) => { overlay = v; services.rerender(); } }));
+      SegmentedControl({ label: t("sim.view.label"), size: "small", options: choices, value: overlay, onChange: (v) => {
+        const toHeat = v === "heat" && overlay !== "heat";
+        overlay = v;
+        services.rerender();
+        if (toHeat) requestAnimationFrame(() => document.querySelector(".heat-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      } }));
     if (overlay === "warp") {
       bar.append(SegmentedControl({ label: t("sim.view.size"), size: "small", value: warpSize,
         options: [{ value: "true", label: t("sim.view.true") }, { value: "big", label: t("sim.view.big") }], onChange: (v) => { warpSize = v; services.rerender(); } }));

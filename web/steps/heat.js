@@ -332,7 +332,7 @@ function panel({ body, services, value, overlay }) {
     body.append(h("p", { class: "ui-hint" }, t("heat.seeHeat")), fixBlock(value, services));
     return;
   }
-  body.append(h("section", { class: "heat-block" }, h("div", { class: "ui-label" }, t("heat.show")),
+  body.append(h("section", { class: "heat-block heat-controls" }, h("div", { class: "ui-label" }, t("heat.show")),
     SegmentedControl({ label: t("heat.show"), value: view.mode,
       options: [...(shown.replay ? ["replay"] : []), "window", "importance", "lines"].map((v) => ({ value: v, label: t(`heat.mode.${v}`) })),
       onChange: (v) => { view.mode = v; services.rerender(); } }),

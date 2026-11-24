@@ -51,12 +51,46 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
   stageEl.append(stageUi);
   root.replaceChildren(header.el, screen);
 
+  let returnTo = null; // downstream step the user jumped back from (T-610)
+  const ANALYSE_IDX = STEPS.indexOf(step("analyse"));
+
   function go(id) {
     const s = store.get();
+    const fromIdx = STEPS.indexOf(step(s.step));
+    const toIdx = STEPS.indexOf(step(id));
+    if (fromIdx >= ANALYSE_IDX && toIdx < ANALYSE_IDX) returnTo = s.step;
+    else if (toIdx >= ANALYSE_IDX) returnTo = null;
     const visited = s.visited.includes(id) ? s.visited : [...s.visited, id];
     store.set({ step: id, visited }, { undoable: false });
     route = "flow";
     render(true);
+  }
+
+  /** User clicked Next or a step in the sidebar: if leaving an upstream step with stale results, offer to re-run
+   * and return to where they came from (T-610). */
+  function navigate(target) {
+    const s = store.get();
+    const fromIdx = STEPS.indexOf(step(s.step));
+    const toIdx = STEPS.indexOf(step(target));
+    const stale = store.isStale("optimize") || store.isStale("simulate");
+    const leavingUpstream = fromIdx < ANALYSE_IDX && (toIdx > fromIdx);
+    const jumpingDownstream = toIdx >= ANALYSE_IDX;
+    if (leavingUpstream && stale && services.rerunAll && (returnTo || jumpingDownstream)) {
+      const dest = jumpingDownstream ? target : returnTo;
+      openModal({
+        title: t("nav.rerunTitle"),
+        body: t("nav.rerunBody", { step: t(`step.${dest}.label`) }),
+        actions: [
+          { label: t("nav.rerunLater"), variant: "ghost", onClick: () => go(target) },
+          { label: t("nav.rerunNow"), variant: "primary", onClick: () => {
+            returnTo = null;
+            services.rerunAll({ store, go, services, returnStep: dest });
+          } },
+        ],
+      });
+      return;
+    }
+    go(target);
   }
   function openRoute(name) {
     route = name;
@@ -72,6 +106,8 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const focusKey = !moved && screen.contains(active) ? active?.dataset?.focusKey : null;
     const sel = focusKey && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
     const hadFocus = screen.contains(active) || active === document.body;
+    // Keep the right panel's scroll position across same-step re-renders (T-611).
+    const prevScroll = !moved ? (screen.querySelector(".panel-body")?.scrollTop ?? 0) : 0;
     header.update(s, route);
     // The step being left tidies what it put on the shared 3D view (Simulation's colours and result surface).
     const showing = route === "flow" ? s.step : null;
@@ -92,7 +128,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const rail = StepRail({
       label: t("shell.steps"), collapsed: def.layout === "options",
       steps: railSteps(s, s.step, (r) => store.isStale(r), (id) => t(`step.${id}.label`)),
-      onGo: go,
+      onGo: navigate,
     });
     rail.classList.add("rail");
     const title = h("h2", { tabindex: "-1", id: "step-title" }, t(`step.${s.step}.label`));
@@ -106,7 +142,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const next = own?.to ?? nextStep(s.step, s);
     const foot = h("div", { class: "panel-foot" },
       back ? Button({ label: t("shell.back"), variant: "ghost", onClick: () => go(back) }) : h("span"),
-      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => (own?.confirm ? own.confirm(() => go(next)) : go(next)) }) : h("span"));
+      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => (own?.confirm ? own.confirm(() => navigate(next)) : navigate(next)) }) : h("span"));
     const head = h("div", { class: "panel-head" }, title, h("p", { class: "hint" }, t(`step.${s.step}.purpose`)));
     (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, openRoute, services });
     if (def.layout === "part") {
@@ -123,11 +159,12 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     if (s.part && def.layout !== "part" && services.cameraBar) stageUi.append(services.cameraBar());
     const keep = focusKey && screen.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
     if (keep) {
-      keep.focus();
+      keep.focus({ preventScroll: !moved });
       if (sel && "setSelectionRange" in keep) try { keep.setSelectionRange(sel[0], sel[1]); } catch { /* non-selectable */ }
     } else if (moved || hadFocus) {
-      title.focus();  // focus moves to each new step title (§1.8)
+      title.focus({ preventScroll: !moved });  // focus moves to each new step title (§1.8)
     }
+    if (!moved && prevScroll > 0) body.scrollTop = prevScroll;
   }
 
   function startPlaceholder() {

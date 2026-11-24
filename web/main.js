@@ -12,11 +12,12 @@ import { attachKeyboard } from "./viewport/featurelist.js";
 import { loadPart, trianglesOf } from "./steps/part.js";
 import "./steps/start.js";
 import "./steps/options.js";
-import "./steps/analyse.js";
+import { start as startAnalysis } from "./steps/analyse.js";
+import { optimizeArgs } from "./steps/args.js";
 import "./steps/loads.js";
 import "./steps/details.js";
 import "./steps/holds.js";
-import "./steps/simulate.js";
+import { runSimulations } from "./steps/simulate.js";
 import "./steps/heat.js";
 import { openExport } from "./steps/done.js";
 import "./steps/tolerances.js";
@@ -79,6 +80,25 @@ const services = {
   openSettings: (tab) => {
     openSettingsTab(tab);
     app.openRoute("settings");
+  },
+  // Re-run stale optimization / simulations and return to where the user came from (T-610).
+  async rerunAll({ store: st, go, services: svc, returnStep }) {
+    const needsSim = ["sim", "problems", "done"].includes(returnStep);
+    if (st.isStale("optimize")) {
+      go("analyse");
+      const ok = await startAnalysis(svc, st, go, optimizeArgs(st.get()), { goAfter: false });
+      if (!ok) return;
+      if (needsSim) {
+        const best = st.result("optimize")?.options?.[0];
+        if (best) st.set({ option: best }, { undoable: false });
+      }
+    }
+    if (needsSim && st.get().option && (st.isStale("simulate") || !st.result("simulate"))) {
+      go("sim");
+      const ok = await runSimulations(st, svc);
+      if (!ok) return;
+    }
+    go(returnStep);
   },
 };
 // What the picker's badge says for a hovered face, edge or inside corner (§7).

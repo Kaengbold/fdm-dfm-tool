@@ -13,6 +13,14 @@ export function createEngine({ url = new URL("./worker.js", import.meta.url), on
   function start() {
     worker = new Worker(url, { type: "module" });
     ready = new Promise((resolve, reject) => {
+      const failAll = (msg) => {
+        const err = new Error(msg);
+        reject(err);
+        for (const { reject: fail } of pending.values()) fail(err);
+        pending.clear();
+      };
+      worker.addEventListener("error", (e) => failAll(e?.message || "Engine worker failed to start"));
+      worker.addEventListener("messageerror", () => failAll("Engine worker message error"));
       worker.addEventListener("message", ({ data }) => {
         if (data.type === "ready") resolve();
         else if (data.type === "boot-error") reject(new Error(data.error));

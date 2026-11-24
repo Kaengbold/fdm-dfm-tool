@@ -58,14 +58,15 @@ export function canLeave(id, state) {
 }
 
 /**
- * Rail entries for StepRail (web/ui/steprail.js): done (visited before the current one), current, upcoming,
- * skipped; a done step whose result is stale gets ``stale`` ("Needs a re-run"). ``isStale(resultName)`` from the store.
+ * Rail entries for StepRail (web/ui/steprail.js): done (any visited step other than current, so users can jump freely
+ * between completed sections without pressing Next repeatedly, T-610), current, upcoming, skipped; a done step whose
+ * result is stale gets ``stale`` ("Needs a re-run"). ``isStale(resultName)`` from the store.
  */
 export function railSteps(state, current, isStale = () => false, label = (id) => id) {
   const cur = STEPS.indexOf(step(current));
   return STEPS.map((s, i) => {
     const skipped = Boolean(s.skipWhen?.(state));
-    const status = skipped ? "skipped" : i < cur && state.visited.includes(s.id) ? "done" : i === cur ? "current" : "upcoming";
+    const status = skipped ? "skipped" : i === cur ? "current" : state.visited.includes(s.id) ? "done" : "upcoming";
     return { id: s.id, label: label(s.id), state: status, stale: status === "done" && Boolean(s.result) && isStale(s.result) };
   });
 }

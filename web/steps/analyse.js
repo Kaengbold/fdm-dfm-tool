@@ -18,8 +18,8 @@ import { showFacesPanel, clearShowFaces } from "./showfaces.js";
 
 export const DEPENDS = ["model", "profile", "goal", "environment", "loads", "depth"];
 // The optimizer's own stage names (core/fdmcore/optimizer.py progress.report) → the plan's list (§10.1).
-const STAGES = ["orient", "strength", "settings", "nozzles", "reinforce", "pick"];
-const STAGE_OF = [["Finding orientations", "orient"], ["Checking strength", "strength"], ["Measuring support", "strength"],
+export const STAGES = ["orient", "strength", "settings", "nozzles", "reinforce", "pick"];
+export const STAGE_OF = [["Finding orientations", "orient"], ["Checking strength", "strength"], ["Measuring support", "strength"],
   ["Trying walls", "settings"], ["Trying nozzles", "nozzles"], ["Testing local reinforcements", "reinforce"], ["Picking options", "pick"]];
 
 const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
@@ -49,8 +49,9 @@ async function loadEstimates(services, store, args) {
   if (estimates.key === key && !run) services.rerender();
 }
 
-/** Run the optimizer. ``budget``: false for no time budget (Continue the search), else the depth's own. */
-export async function start(services, store, go, args, { budget = true } = {}) {
+/** Run the optimizer. ``budget``: false for no time budget (Continue the search), else the depth's own.
+ * ``goAfter``: false lets a caller (e.g. T-610 smart re-run) decide where to navigate next. Returns true on success. */
+export async function start(services, store, go, args, { budget = true, goAfter = true } = {}) {
   const depth = store.get().depth;
   const deps = store.deps(...DEPENDS);
   lastError = null;
@@ -71,17 +72,19 @@ export async function start(services, store, go, args, { budget = true } = {}) {
   try {
     const budget_s = budget ? budgetFor(depth, estimate) : null;
     const result = await services.engine.call("optimize", { ...args, depth, budget_s });
-    if (run !== me) return; // stopped: the partial result is in already
+    if (run !== me) return false; // stopped: the partial result is in already
     store.setResult("optimize", result, deps);
     finish();
     store.set({ optimized: Date.now() }, { undoable: false });
-    go("options");
+    if (goAfter) go("options");
+    return true;
   } catch (err) {
-    if (run !== me) return; // stopped with the best so far
+    if (run !== me) return false; // stopped with the best so far
     const cancelled = err?.name === "Cancelled" || err?.constructor?.name === "Cancelled";
     finish();
     if (!cancelled) lastError = err?.message ?? String(err);
     services.rerender();
+    return false;
   }
 }
 
