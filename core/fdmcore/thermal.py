@@ -189,13 +189,38 @@ def _reptation_s(T: np.ndarray, c: dict) -> np.ndarray:
     return np.where(above, c["reptation_s"] * 10.0 ** np.minimum(shifted, 30), np.inf)
 
 
-def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, region=None) -> dict:
+def _bead_dimensions(tp: Toolpath, lines: np.ndarray, length: np.ndarray,
+                    profile: Profile) -> tuple[np.ndarray, np.ndarray]:
+    """Recover bead width from the extruded area: a stadium has area h(w - h) + pi*h²/4."""
+    height = tp.layer_height[lines].astype(float)
+    known_height = np.isfinite(height) & (height > 0)
+    height = np.where(known_height, height, profile.layer_height)
+    volume = tp.volume[lines]
+    known_width = known_height & (length > 0) & np.isfinite(volume) & (volume > 0)
+    width = np.divide(volume, length * height, out=np.zeros_like(height), where=known_width)
+    width += (1 - np.pi / 4) * height
+    return np.where(known_width, width, profile.line_width), height
+
+
+def _joint_conductance(area: np.ndarray, neck_area: np.ndarray, distance: np.ndarray, c: dict) -> np.ndarray:
+    """Add the resistance inside the beads and the resistance at their smaller contact in series."""
+    bulk = c["k"] * c["z_ratio"] * area / distance
+    contact = c["contact"] * np.minimum(area, neck_area)
+    return bulk * contact / (bulk + contact)
+
+
+def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, profile: Profile, region=None) -> dict:
     """Plastic of the part and its supports drawn onto the cells of each layer: one node per filled
-    cell, with its plastic, when it was printed and how hot it went down. ``region`` (x0, y0, x1, y1,
-    printer frame): only the plastic inside it (a detail run, see ``simulate``)."""
+    cell, with its plastic, when it was printed and how hot it went down. Sum the beads' flat strips
+    in each cell to estimate the area available to touch the next layer, without tracking exactly
+    where individual lines overlap. Almost round beads get a small flat to allow for squashing.
+    ``region`` (x0, y0, x1, y1, printer frame): only the plastic inside it (see ``simulate``)."""
     which = np.flatnonzero(np.isin(tp.kind, (*PART_KINDS, SUPPORT)))
     a, b = tp.p0[which].astype(float), tp.p1[which].astype(float)
     length = np.linalg.norm(b - a, axis=1)
+    run = np.linalg.norm(b[:, :2] - a[:, :2], axis=1)
+    width, height = _bead_dimensions(tp, which, run, profile)
+    flat = np.maximum(width - height, 0.05 * width)
     n = np.maximum(np.ceil(length / (cell / 2)).astype(int), 1)
     seg = np.repeat(np.arange(len(which)), n)
     k = np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
@@ -223,7 +248,7 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, region=None) -> di
     # Slivers (a wall clipping a cell's corner) would cool on their own far too fast: join each to its
     # fullest neighbour in the layer, so a node is always a real lump of plastic.
     volume = np.bincount(node, vol)
-    lh_node = np.bincount(node, vol * tp.layer_height[line]) / volume
+    lh_node = np.bincount(node, vol * height[seg]) / volume
     sliver = volume / (cell * cell * lh_node) < SLIVER_FILL
     near = _neighbours(keys, (ny, -ny, 1, -1))
     near_vol = np.where(near >= 0, volume[np.maximum(near, 0)], -1.0)
@@ -237,7 +262,8 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, region=None) -> di
     lay = keys // (nx * ny)
     rest = keys % (nx * ny)
     cx, cy = rest // ny, rest % ny
-    lh = np.bincount(node, vol * tp.layer_height[line]) / volume
+    lh = np.bincount(node, vol * height[seg]) / volume
+    neck = np.bincount(node, (flat * run / n)[seg])
     # The part's skin: outer walls face the air, whatever the cell size (inner lines touch other plastic).
     outer = np.array([_role(f) in ("outer", "overhang") for f in tp.features])[tp.feature[line]]
     skin = np.bincount(node, outer * length[seg] / n[seg], minlength=len(keys))
@@ -247,7 +273,7 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, region=None) -> di
     shell = np.bincount(node, vol * np.isin(tp.kind[line], (WALL, SOLID)), minlength=len(keys)) / volume
     part = np.bincount(node, np.isin(tp.kind[line], PART_KINDS), minlength=len(keys)) > 0
     return {"keys": keys, "nx": nx, "ny": ny, "layer": lay, "ix": cx, "iy": cy, "lo": lo, "volume": volume,
-            "born": born, "birth": birth, "z": tp.layer_z[lay] - lh / 2, "lh": lh, "skin_mm": skin,
+            "born": born, "birth": birth, "z": tp.layer_z[lay] - lh / 2, "lh": lh, "skin_mm": skin, "neck_mm2": neck,
             "overhang": overhang, "cooled": cooled, "shell": shell, "part": part}
 
 
@@ -290,7 +316,7 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     cfg = TIERS[tier]
     c = {**constants(profile, tp.settings), **(overrides or {})}
     cell = cfg["cell_mm"]
-    d = _deposits(tp, tm, cell, c, region)
+    d = _deposits(tp, tm, cell, c, profile, region)
     n = len(d["keys"])
     nx, ny = d["nx"], d["ny"]
     layer, z, lh = d["layer"], d["z"], d["lh"]
@@ -324,8 +350,8 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     has = up >= 0
     i, o = np.flatnonzero(has), up[has]
     area = h * h * np.minimum(fill[i], fill[o])
-    bulk = c["k"] * c["z_ratio"] * area / ((lh_m[i] + lh_m[o]) / 2)
-    ea.append(i), eb.append(o), eg.append(1 / (1 / bulk + 1 / (c["contact"] * area)))
+    neck = np.minimum(d["neck_mm2"][i], d["neck_mm2"][o]) * 1e-6
+    ea.append(i), eb.append(o), eg.append(_joint_conductance(area, neck, (lh_m[i] + lh_m[o]) / 2, c))
     ea, eb, eg = np.concatenate(ea), np.concatenate(eb), np.concatenate(eg)
     g_bed = np.where(layer == 0, c["bed_contact"] * h * h * fill, 0.0)
     top_area = d["volume"] * 1e-9 / lh_m  # the plastic's own top (fill may pass 1 where lines sit on a cell edge)

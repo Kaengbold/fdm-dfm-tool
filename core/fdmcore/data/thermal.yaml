@@ -112,8 +112,11 @@ process:
     falloff_mm: {value: 30, range: [10, 60], source: "estimate: the fan's effect fades with distance below the nozzle", confidence: estimated}
   fan_spin_up_s:  {value: 0.4, range: [0.2, 1.0], unit: s, source: "estimate for small DC blowers (time constant)", confidence: estimated}
   h_aux_fan:      {value: 20, range: [10, 40], unit: W/m2K, source: "estimated increment from the upper end of Costa et al. 2014's convection bracket (150), allowing for Bambu's separate side blower", confidence: estimated}
+  # The most uncertain input, per area of actual bead contact, not the whole cell face.
+  # Estimated neck: the flat of a stadium (line width minus layer height), with a 5% width floor
+  # for nearly round beads that flatten a little. Neither the floor nor the conductance is measured.
   bead_contact_conductance: {value: 500, range: [100, 5000], unit: W/m2K, source: "estimate; Costa et al. 2014 only bracket 0 / 100 / 1e6 (no measured value)", confidence: estimated}
-  z_conductivity_ratio:     {value: 0.7, range: [0.5, 0.9], unit: "-", source: "estimate: voids and the narrow bead contact lower k across layers", confidence: estimated}
+  z_conductivity_ratio:     {value: 0.7, range: [0.5, 0.9], unit: "-", source: "estimate: small voids reduce heat flow within the layers; the bead contact is counted separately", confidence: estimated}
   bed_contact_conductance:  {smooth_pei: 300, textured_pei: 150, range: [50, 1000], unit: W/m2K, source: "estimate (textured: less contact area)", confidence: estimated}
   nozzle_reheat:  {h_equiv: 70, range: [30, 120], unit: W/m2K, reach_mm: 1.5, reach_range_mm: [0.5, 3.0], source: "estimate: radiation and hot air from the nozzle and heater block onto the top layer", confidence: estimated}
   chamber_air_c:  # steady state after about 30 min
