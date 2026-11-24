@@ -16,8 +16,9 @@ chosen with a simple cooling law fitted to two runs of it, then checked with a f
    slicer's own layer-time slowdown undone: the layer below is warmer when it is covered). Cost: print time
    plus, per spot outside its window, its importance weight × how far out it is (``thermal.yaml``
    ``optimizer``: what a degree or a share of bond is worth in seconds), plus a little per fan change.
-4. Apply it to a copy of the toolpath, run the heat model, and correct once: layers still too hot get the
-   next stronger choice, undone slowdowns that made a spot too hot are put back. Run again for the result.
+4. Apply it to a copy of the toolpath, run the heat model, and correct once: undo any speed-up that made
+   a spot too hot, raise the fan only where it has room, and use the trial's temperatures to trim an
+   existing G-code slowdown before resorting to a park. Run again for the result.
 
 Never touched: overhang, bridge, small-perimeter, flow-cap and unexplained slowdowns, layers 0–1, travel,
 ironing and wipes, anything that isn't the part (supports, prime towers), and no line goes faster than its
@@ -108,9 +109,20 @@ def aux_schedule(tp: Toolpath, plan: Plan) -> tuple[np.ndarray, dict]:
     return override, events
 
 
+def _part_fan_spans(tp: Toolpath, layers: int) -> tuple[np.ndarray, np.ndarray]:
+    """Printed-line spans each layer's part-fan override would affect, including its spin-up lead."""
+    first = np.searchsorted(tp.layer, np.arange(layers + 1))
+    spin = float(load_data("thermal")["process"]["fan_spin_up_s"]["value"])
+    lead = float(settings()["fan_lead_spin_ups"]) * spin
+    ends = first[1:]
+    starts = ends.copy()
+    active = np.flatnonzero(first[:-1] < len(tp.t0))
+    starts[active] = np.searchsorted(tp.t0, tp.t0[first[np.maximum(active - 1, 0)]].astype(float) - lead)
+    return starts, ends
+
+
 def apply(tp: Toolpath, plan: Plan) -> Toolpath:
     """A copy of ``tp`` with the plan's speeds, fans and cooling parks."""
-    cfg = settings()
     speed, cause = tp.speed.astype(float), tp.cause.copy()
     ok = adjustable(tp)
     length = np.linalg.norm(tp.p1 - tp.p0, axis=1)
@@ -130,13 +142,9 @@ def apply(tp: Toolpath, plan: Plan) -> Toolpath:
     # covers them; a few spin-ups early) to the end of k; elsewhere the slicer's. Commands where it changes.
     fan = tp.part_fan.astype(float).copy()
     want = np.full(len(fan), np.nan)
-    c_spin = float(load_data("thermal")["process"]["fan_spin_up_s"]["value"])
-    first = np.searchsorted(tp.layer, np.arange(len(plan.fan) + 1))  # lines are in layer order
+    starts, ends = _part_fan_spans(tp, len(plan.fan))
     for k in np.flatnonzero(np.isfinite(plan.fan)):
-        if first[k] >= len(fan):
-            continue
-        lo = int(np.searchsorted(tp.t0, tp.t0[first[max(k - 1, 0)]] - float(cfg["fan_lead_spin_ups"]) * c_spin))
-        hi = first[min(k + 1, len(plan.fan))]
+        lo, hi = starts[k], ends[k]
         want[lo:hi] = np.fmax(want[lo:hi], plan.fan[k])
     fan = np.where(np.isfinite(want), want, fan)
     part = [i for i, name in enumerate(tp.fan_names) if name == "part"] or [0]
@@ -401,6 +409,16 @@ def _score(h: Heat, win: dict, weight: np.ndarray) -> dict:
             "bond_median": round(float(np.nanmedian(h.bond)), 3) if np.isfinite(h.bond).any() else None}
 
 
+def _extra_cooling_s(h: Heat, win: dict, air: float, layers: int) -> np.ndarray:
+    """Extra cooling time to reach the sag limit, using the trial's birth-to-cover cooling rate."""
+    hot = win["too_hot"] & (h.cover_c > win["limit_c"]) & (win["limit_c"] > air) & (h.birth_c > h.cover_c)
+    above_air = h.cover_c[hot] - air
+    extra = h.cover_s[hot] * np.log(above_air / (win["limit_c"][hot] - air)) / np.log((h.birth_c[hot] - air) / above_air)
+    needed = np.zeros(layers + 1)
+    np.maximum.at(needed, h.layer[hot] + 1, extra)
+    return needed[:layers]
+
+
 def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, tier: str = "quick") -> dict:
     """The cooling plan for ``tp`` (module docstring). ``weight_at(heat)`` -> importance weight per node and
     ``intents_at(heat)`` -> design-intent masks (thermal.window); both optional. Returns the plans, the print
@@ -436,22 +454,34 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
         # A side blower can warp materials that need to stay warm. Offer a boost only for PLA.
         plan = _search(tp, base, law, win0, weight, allow_fan, allow_undo, budget,
                        aux_h if allow_fan and try_aux else 0.0)
-        h, t = run(apply(tp, plan), snapshots=allow_fan)
+        trial = apply(tp, plan)
+        h, t = run(trial, snapshots=allow_fan)
         win, w = judge(h)
         # One correction, layer k by its spots: the layer below it still too hot -> the next stronger choice on
         # k; k's own joints made too cold by the plan -> one step back; both -> whichever weighs more.
         layer_w = lambda mask: np.bincount(h.layer[mask].astype(np.intp), w[mask], minlength=layers + 1)
         hot_below = np.concatenate([[0.0], layer_w(win["too_hot"])[:layers]])  # index k: hot spots in layer k - 1
         new_cold = layer_w(win["too_cold"] & ~_same(win0["too_cold"], h, base))[:layers]
+        if allow_fan:
+            starts, ends = _part_fan_spans(tp, layers)
+            needed = float(cfg["slowdown_correction_share"]) * _extra_cooling_s(h, win, law.air, layers)
+            slowest = min(cfg["slow_steps"])
+            can_slow = adjustable(tp)
+            line_s = np.linalg.norm(trial.p1[can_slow] - trial.p0[can_slow], axis=1) / np.maximum(trial.speed[can_slow], 1e-3)
+            slowable_s = np.bincount(tp.layer[can_slow], line_s, minlength=layers)
         changed = False
         for k in range(FIRST_LAYER, layers):
             if hot_below[k] > new_cold[k] and hot_below[k] > 0:
                 if plan.fast[k] > 1:
                     plan.fast[k] = 1.0
-                elif allow_fan and not plan.fan[k] >= 1.0:
+                elif allow_fan and np.any(trial.part_fan[starts[k]:ends[k]] < 1.0):
                     plan.fan[k] = 1.0
+                elif allow_fan and plan.park[k] == 0 and slowable_s[k] > 0 and slowest < plan.slow[k] < 1:
+                    if needed[k] <= 0:
+                        continue
+                    plan.slow[k] = max(slowest, plan.slow[k] / (1 + needed[k] / slowable_s[k]))
                 elif plan.park[k] < max(cfg["park_steps"]):
-                    # Slowing more keeps the hot nozzle over a small spot longer: wait away from it instead.
+                    # If slowing isn't already part of the plan, wait away from the hot nozzle instead.
                     plan.park[k] = min([p for p in cfg["park_steps"] if p > plan.park[k]])
                 else:
                     continue

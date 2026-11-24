@@ -87,9 +87,10 @@ def test_the_plan_leaves_protected_lines_alone(pin):
 def test_optimize_cooling_in_plain_words():
     api.load((FIXTURES / "part.stl").read_bytes(), "fixture")
     api.load_gcode((FIXTURES / "bambu.gcode.3mf").read_bytes(), [0, 0, 1])
-    r = api.optimize_cooling([0, 0, 1])
+    r = api.optimize_cooling([0, 0, 1], {"material": "pla", "printer": "bambu_p1s"})
     assert r["confidence"] == "rough" and r["guessed"]
-    assert r["gcode"]["too_hot"] < r["before"]["too_hot"] and r["gcode"]["too_cold"] <= r["before"]["too_cold"]
+    assert [r[plan]["too_hot"] for plan in ("before", "gcode", "slicer")] == [40, 20, 10]
+    assert [r[plan]["too_cold"] for plan in ("before", "gcode", "slicer")] == [0, 0, 0]
     assert r["summary"][0].startswith("As sliced") and any("cooling plan in the G-code" in line for line in r["summary"])
     assert "Rough" in r["summary"][-1]
     cooling = r["slicer"]["cooling"]

@@ -3,13 +3,14 @@ on top) against the simpler line-by-line check."""
 
 import gzip
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from fdmcore import api, gcode, kinematics, thermal
-from fdmcore.profile import Profile
+from fdmcore.profile import Profile, load_data
 
 FIXTURES = Path(__file__).parent / "gcode"
 PLA = Profile.from_dict({"material": "pla", "printer": "bambu_p1s"})
@@ -38,6 +39,58 @@ def plate_then_dot(pause_s: float, size: float = 12.0) -> str:
     m = size / 2
     out += [f"G4 S{pause_s}", ";LAYER_CHANGE", "G1 Z0.4 F600", f"G1 X{m - 0.5} Y{m} F6000", f"G1 X{m + 0.5} Y{m} E{e:.5f} F600"]
     return "\n".join(out)
+
+
+def stacked_beads(width: float, height: float) -> gcode.Toolpath:
+    """Two one-mm lines directly above one another, each inside the same cell."""
+    volume = height * (width - height) + np.pi * height**2 / 4
+    filament = volume / (np.pi * 1.75**2 / 4)
+    text = f"""M83
+;LAYER_CHANGE
+G1 X0.5 Y0.5 Z{height} F600
+; FEATURE: Internal solid infill
+G1 X1.5 E{filament:.8f} F600
+G4 S20
+;LAYER_CHANGE
+G1 X0.5 Z{2 * height} F600
+G1 X1.5 E{filament:.8f} F600
+"""
+    return gcode.parse(text)
+
+
+def test_thick_wide_bead_has_a_more_conductive_neck():
+    constants = thermal.constants(PLA)
+    necks = []
+    for width, height in [(0.8, 0.3), (0.45, 0.05)]:
+        tp = stacked_beads(width, height)
+        nodes = thermal._deposits(tp, kinematics.timing(tp), 2.0, constants, PLA)
+        np.testing.assert_allclose(nodes["lh"], [height, height])
+        np.testing.assert_allclose(nodes["neck_mm2"], [width - height] * 2, atol=1e-6)
+        necks.append(min(nodes["neck_mm2"]) * 1e-6)
+
+    entry = load_data("thermal")["process"]["bead_contact_conductance"]
+    face = np.full(2, 1e-6)
+    fixed_distance = np.full(2, 0.2e-3)
+    bulk = constants["k"] * constants["z_ratio"] * face / fixed_distance
+    for coefficient in (entry["range"][0], constants["contact"], entry["range"][1]):
+        joint = thermal._joint_conductance(face, np.array(necks), fixed_distance, {**constants, "contact": coefficient})
+        np.testing.assert_allclose(joint, 1 / (1 / bulk + 1 / (coefficient * np.array(necks))))
+        assert joint[0] > joint[1]
+
+
+def test_wider_neck_cools_the_upper_bead_faster_into_the_bed():
+    tp = stacked_beads(0.45, 0.2)
+    tm = kinematics.timing(tp)
+    tp = replace(tp, layer_height=np.full_like(tp.layer_height, np.nan))
+    narrow = Profile.from_dict({"nozzle": 0.4, "layer_height": 0.2})
+    wide = Profile.from_dict({"nozzle": 0.8, "layer_height": 0.2})
+    settings = {"nozzle_c": 220.0, "h_still": 0.0, "h_fan": {0: 0, 100: 0}, "emissivity": 0.0,
+                "bed_contact": 5000.0, "nozzle_h": 0.0, "chamber_c": 25.0, "bed_c": 25.0}
+    slow = thermal.simulate(tp, tm, narrow, overrides=settings)
+    fast = thermal.simulate(tp, tm, wide, overrides=settings)
+    np.testing.assert_array_equal(fast.volume, slow.volume)
+    np.testing.assert_array_equal(fast.z, slow.z)
+    assert fast.joint_c[1, 2] < slow.joint_c[1, 2]
 
 
 def test_a_plate_cools_through_its_top(monkeypatch):
