@@ -51,12 +51,46 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
   stageEl.append(stageUi);
   root.replaceChildren(header.el, screen);
 
+  let returnTo = null; // downstream step the user jumped back from (T-610)
+  const ANALYSE_IDX = STEPS.indexOf(step("analyse"));
+
   function go(id) {
     const s = store.get();
+    const fromIdx = STEPS.indexOf(step(s.step));
+    const toIdx = STEPS.indexOf(step(id));
+    if (fromIdx >= ANALYSE_IDX && toIdx < ANALYSE_IDX) returnTo = s.step;
+    else if (toIdx >= ANALYSE_IDX) returnTo = null;
     const visited = s.visited.includes(id) ? s.visited : [...s.visited, id];
     store.set({ step: id, visited }, { undoable: false });
     route = "flow";
     render(true);
+  }
+
+  /** User clicked Next or a step in the sidebar: if leaving an upstream step with stale results, offer to re-run
+   * and return to where they came from (T-610). */
+  function navigate(target) {
+    const s = store.get();
+    const fromIdx = STEPS.indexOf(step(s.step));
+    const toIdx = STEPS.indexOf(step(target));
+    const stale = store.isStale("optimize") || store.isStale("simulate");
+    const leavingUpstream = fromIdx < ANALYSE_IDX && (toIdx > fromIdx);
+    const jumpingDownstream = toIdx >= ANALYSE_IDX;
+    if (leavingUpstream && stale && services.rerunAll && (returnTo || jumpingDownstream)) {
+      const dest = jumpingDownstream ? target : returnTo;
+      openModal({
+        title: t("nav.rerunTitle"),
+        body: t("nav.rerunBody", { step: t(`step.${dest}.label`) }),
+        actions: [
+          { label: t("nav.rerunLater"), variant: "ghost", onClick: () => go(target) },
+          { label: t("nav.rerunNow"), variant: "primary", onClick: () => {
+            returnTo = null;
+            services.rerunAll({ store, go, services, returnStep: dest });
+          } },
+        ],
+      });
+      return;
+    }
+    go(target);
   }
   function openRoute(name) {
     route = name;
@@ -94,7 +128,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const rail = StepRail({
       label: t("shell.steps"), collapsed: def.layout === "options",
       steps: railSteps(s, s.step, (r) => store.isStale(r), (id) => t(`step.${id}.label`)),
-      onGo: go,
+      onGo: navigate,
     });
     rail.classList.add("rail");
     const title = h("h2", { tabindex: "-1", id: "step-title" }, t(`step.${s.step}.label`));
@@ -108,7 +142,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const next = own?.to ?? nextStep(s.step, s);
     const foot = h("div", { class: "panel-foot" },
       back ? Button({ label: t("shell.back"), variant: "ghost", onClick: () => go(back) }) : h("span"),
-      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => (own?.confirm ? own.confirm(() => go(next)) : go(next)) }) : h("span"));
+      next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => (own?.confirm ? own.confirm(() => navigate(next)) : navigate(next)) }) : h("span"));
     const head = h("div", { class: "panel-head" }, title, h("p", { class: "hint" }, t(`step.${s.step}.purpose`)));
     (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, openRoute, services });
     if (def.layout === "part") {

@@ -11,11 +11,12 @@ import { Button } from "../ui/button.js";
 import { OptionColumn, ConstraintsBar } from "../ui/options.js";
 import { NumberField } from "../ui/numberfield.js";
 import { Select } from "../ui/select.js";
+import { ProgressCard } from "../ui/progress.js";
 import { openModal } from "../ui/overlay.js";
 import { registerStep } from "../shell.js";
 import { t } from "../i18n.js";
 import { activeNozzles, optimizeArgs, orderedMaterials } from "./args.js";
-import { start as startAnalysis } from "./analyse.js";
+import { STAGES, STAGE_OF, start as startAnalysis } from "./analyse.js";
 
 // Comparison order: [row key, label key].
 export const ROWS = [
@@ -79,6 +80,7 @@ function chipLabel(key, value, options) {
 }
 
 let busy = false;
+let rerun = null; // {started, done, share, partial, card, timer, deps} while re-optimizing with constraints (T-608)
 let focused = 0;
 let editing = null; // {col, key} while a value is being edited
 let edits = { result: null, cols: {} }; // per column: constraint key → edited value, for the result they were made on
@@ -109,19 +111,52 @@ function sharedRows(keys, columns) {
   });
 }
 
+const rerunCardState = (r) => ({ done: r.done, share: r.share, elapsed: (performance.now() - r.started) / 1000, canStop: Boolean(r.partial) });
+
+function finishRerun() {
+  if (rerun?.timer) clearInterval(rerun.timer);
+  rerun = null;
+  busy = false;
+}
+
+function stopRerun(services, store) {
+  const r = rerun;
+  if (!r?.partial) return;
+  finishRerun();
+  store.setResult("optimize", { ...r.partial, stopped: true }, r.deps);
+  services.engine.cancel();
+  focused = 0;
+  services.rerender();
+}
+
 async function reoptimize(services, store) {
   busy = true;
+  const s = store.get();
+  const deps = store.deps("model", "profile", "goal", "environment", "loads", "depth");
+  const me = { started: performance.now(), done: 0, share: 0, partial: null, card: null, timer: null, deps };
+  rerun = me;
+  const update = () => rerun?.card?.set(rerunCardState(rerun));
+  me.timer = setInterval(update, 500);
+  services.onPartial = (result) => { if (rerun === me && result?.options?.length) { me.partial = result; update(); } };
+  services.onProgress = (fraction, text) => {
+    if (rerun !== me) return;
+    const hit = STAGE_OF.find(([prefix]) => text?.startsWith(prefix));
+    if (hit) me.done = Math.max(me.done, STAGES.indexOf(hit[1]));
+    me.share = Math.max(me.share, fraction ?? 0);
+    update();
+  };
   services.rerender();
   try {
-    const s = store.get();
-    const deps = store.deps("model", "profile", "goal", "environment", "loads", "depth");
     const result = await services.engine.call("optimize", optimizeArgs(s));
+    if (rerun !== me) return;
     store.setResult("optimize", result, deps);
     focused = 0;
   } catch (err) {
-    showError = err?.message ?? String(err);
+    if (rerun !== me) return;
+    const cancelled = err?.name === "Cancelled" || err?.constructor?.name === "Cancelled";
+    if (!cancelled) showError = err?.message ?? String(err);
   } finally {
-    busy = false;
+    if (rerun === me) finishRerun();
     services.rerender();
   }
 }
@@ -189,12 +224,19 @@ function use(store, go, o) {
 
 registerStep("options", {
   leave() { framedPart = null; },
-  render({ body, store, go, services }) {
+  render({ body, stage, store, go, services }) {
     const s = store.get();
     const result = store.result("optimize");
     if (!result) {
       body.append(h("p", { class: "ui-hint" }, t("options.none")), Button({ label: t("options.toAnalyse"), variant: "primary", onClick: () => go("analyse") }));
       return;
+    }
+    if (rerun) {
+      const card = ProgressCard({ title: t("options.reoptimizing"), stages: STAGES.map((k) => t(`analyse.stage.${k}`)),
+        onCancel: () => services.engine.cancel(), onStop: () => stopRerun(services, store) });
+      rerun.card = card;
+      card.set(rerunCardState(rerun));
+      stage.append(h("div", { class: "analyse-progress" }, card));
     }
     const options = result.options ?? [];
     if (edits.result !== result) {
