@@ -132,7 +132,7 @@ function drawArrows(services, loads) {
     const pushing = d.dot(n) < 0;
     const tail = pushing ? at.clone().addScaledVector(d, -len) : at;
     const arrow = new THREE.ArrowHelper(d, tail, len, violet, len * 0.22, len * 0.12);
-    arrow.traverse((o) => { if (o.material) { o.material.depthTest = false; o.material.transparent = true; } });
+    arrow.traverse((o) => { if (o.material) { o.material.depthTest = true; } });
     arrow.userData = { id: l.id, tail: pushing ? tail : at.clone().addScaledVector(d, len) };
     arrows.add(arrow);
   }
