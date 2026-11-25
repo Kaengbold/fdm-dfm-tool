@@ -538,7 +538,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
     # ---------- 3–6. Recipe search per pose, verified; materials by arithmetic on the verified solve. ----------
     cands: list[dict] = []
 
-    def option(i: int, p: Profile, sh, sf: float | None, model_gm, *, reinforced: bool = False,
+    def option(i: int, p: Profile, sh, sf: float | None, model_gm, *, strength_basis=None, reinforced: bool = False,
                reinforcement_kind: str | None = None, reinforcements: list[dict] | None = None,
                zones: list[dict] | None = None, edits: list[dict] | None = None) -> dict:
         g_part, minutes = model_gm(sh, p)
@@ -559,6 +559,15 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
             "reinforced": reinforced, "reinforcement_kind": reinforcement_kind,
             "reinforcements": list(reinforcements or []), "zones": list(zones or []), "edits": list(edits or []),
         }
+        if strength_basis is not None:
+            case_fi, reference = strength_basis
+            from .strength import material_for, safety_range
+
+            nominal, material = material_for(reference), material_for(p)
+            bounds = safety_range(case_fi, p, sf, layer_scale=nominal.strength_z / material.strength_z,
+                                  material_scale=nominal.strength_xy / material.strength_xy)
+            if bounds is not None:
+                row["safety_range"] = [round(value, 2) for value in bounds]
         cands.append(row)
         return row
 
@@ -585,7 +594,8 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
                 case_fi = r["case_fi"]
             for mid in mats:
                 q = prof(mid, nozzle, lh)
-                option(i, q, sh, _material_safety(case_fi, p_ref_s, q) if case_fi else None, gm_for(i))
+                option(i, q, sh, _material_safety(case_fi, p_ref_s, q) if case_fi else None, gm_for(i),
+                       strength_basis=(case_fi, p_ref_s) if case_fi else None)
 
     own_search = ([m for m in mats[1:] if m in owned] + [m for m in ("pla", "petg") if m in mats[1:] and m not in owned])[:OWN_SEARCH_MATERIALS]
 
@@ -610,14 +620,14 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
                 q = prof(mid, nozzle, lh)
                 sf = _material_safety(case_fi, p_ref_s, q)
                 if sf >= targets[mid] or depth == "fast" or mid == mats[0] or not own_climbs or mid not in own_search:
-                    option(i, q, sh, sf, gm_for(i))
+                    option(i, q, sh, sf, gm_for(i), strength_basis=(case_fi, p_ref_s))
                     continue
                 known_ok_q = any(c["up"] == pose_up and c["nozzle"] == nozzle and c["layer_height"] == round(lh, 2)
                                  and c["material"] == mid and c["meets_target"] for c in cands)
                 own = _run_climb(i, q, solid_known_ok=known_ok_q)
                 sh2 = _locked_shells(Shells(walls=own["walls"], infill=own["infill"], top=own["top"], bottom=own["bottom"]), lock)
                 r2, p_ref2 = cached_solve(i, q, sh2, rtol=1e-4)
-                option(i, q, sh2, _material_safety(r2["case_fi"], p_ref2, q), gm_for(i))
+                option(i, q, sh2, _material_safety(r2["case_fi"], p_ref2, q), gm_for(i), strength_basis=(r2["case_fi"], p_ref2))
 
     def trial(i: int, nozzle: str, rows: list[dict]) -> None:
         """A bigger nozzle on the best pose: the goal's usual recipe, plus each 0.4 option's recipe at the same
@@ -639,7 +649,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
                 r, p_ref_s = cached_solve(i, p0, sh, rtol=1e-4)
                 for mid in mats:
                     q = prof(mid, nozzle, lh)
-                    option(i, q, sh, _material_safety(r["case_fi"], p_ref_s, q), gm_for(i))
+                    option(i, q, sh, _material_safety(r["case_fi"], p_ref_s, q), gm_for(i), strength_basis=(r["case_fi"], p_ref_s))
 
     nozzle_notes: list[dict] = []
 
@@ -1380,7 +1390,7 @@ def _emit_if_better(i: int, mats: list[str], nozzle: str, lh: float, prof, sh, c
         sf = _material_safety(case_fi, p_ref, q)
         g_part, _ = gm_fn(sh, q)
         if _material_improves(mid, sf, g_part, base_snapshot, pose_up, goal):
-            option(i, q, sh, sf, gm_fn, reinforced=True, reinforcement_kind=kind,
+            option(i, q, sh, sf, gm_fn, strength_basis=(case_fi, p_ref), reinforced=True, reinforcement_kind=kind,
                    reinforcements=[{"kind": kind, "label": label, "detail": detail}],
                    zones=zones, edits=edits)
             emitted += 1

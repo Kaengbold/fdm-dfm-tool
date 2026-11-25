@@ -33,8 +33,10 @@ const grams = (g) => (g == null ? t("options.unknown") : `${Math.round(g)} g`);
 export function optionRows(o, constraints = {}) {
   const pinned = (key, value) => key != null && JSON.stringify(constraints[key]) === JSON.stringify(value);
   const cell = (key, value, pinKey, pinValue, tone) => ({ key, value, pinnable: pinKey != null, pinKey, pinValue, pinned: pinned(pinKey, pinValue), tone });
-  const safety = o.safety == null ? t("options.noStrength")
+  const nominal = o.safety == null ? t("options.noStrength")
     : t(o.meets_target ? "options.safetyOk" : "options.safetyLow", { sf: o.safety.toFixed(1), target: o.target });
+  const [low, high] = o.safety_range?.map((value) => Number(value.toFixed(1))) ?? [];
+  const safety = low == null ? nominal : t("ranges.safety", { nominal, low, high });
   return [
     cell("orientation", o.orientation, "up", o.up),
     cell("material", `${o.material_name ?? o.material}${o.owned ? ` · ${t("options.owned")}` : ""}`, "material", o.material),
@@ -57,6 +59,7 @@ export const EDITABLE = { material: "material", nozzle: "nozzle", layer: "layer_
 /** The option as edited in its column: the edited values (``edits``: constraint key → value) in place, for display. */
 export function editedOption(o, edits = {}, catalog = null) {
   const out = { ...o };
+  if (Object.keys(edits).length) delete out.safety_range;
   for (const [key, value] of Object.entries(edits)) {
     if (key === "material") Object.assign(out, { material: value, material_name: catalog?.materials?.[value]?.name ?? value, owned: catalog?.owned?.includes(value) });
     else out[key] = value;
@@ -269,6 +272,7 @@ registerStep("options", {
         h("div", { class: "row" }, Button({ label: t("options.continue"), variant: "secondary", size: "small", onClick: goOn }))));
     }
     if (stale) body.append(h("p", { class: "analyse-stale" }, t("options.stale")));
+    if (s.goal !== "quality" && options.some((o) => o.safety_range)) body.append(h("p", { class: "ui-hint" }, t("ranges.hint")));
 
     const shown = ROWS.filter(([key]) => (key !== "safety" || s.goal !== "quality")
       && (key !== "changes" || options.some((o) => o.reinforcements?.length)));

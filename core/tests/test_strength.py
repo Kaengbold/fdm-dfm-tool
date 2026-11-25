@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,84 @@ def test_thin_strip_strength_follows_its_thickness():
     assert out[1]["safety_factor"] / out[0]["safety_factor"] == pytest.approx(1.43, rel=0.1)
 
 
+@pytest.fixture
+def loaded_grid_part(monkeypatch):
+    from test_hold import box as solid_box, region_facing
+
+    monkeypatch.setattr(api, "_analysis", {"strength_voxels": 2000, "fine_voxels": 5000})
+
+    def load(thickness):
+        api.load(solid_box(60, 20, thickness), "grid check")
+        return [{"region": region_facing([-1, 0, 0]), "kind": "fixed"},
+                {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 1, "direction": "down"}]
+
+    return load
+
+
+def test_strength_rechecks_a_thin_wall(loaded_grid_part):
+    loads = loaded_grid_part(1.2)
+    r = api.strength([0, 0, 1], loads)
+    check = r["grid_check"]
+    assert check["reason"]["key"] == "strength.grid.weak_spot"
+    assert check["status"] == "changed"
+    assert check["message"]["key"] == "strength.grid.changed_safety"
+    assert check["coarse_voxel_mm"] == pytest.approx(0.896281)
+    assert r["mesh"]["voxel_mm"] == r["elements"]["size_mm"] == check["fine_voxel_mm"]
+    assert check["fine_voxel_mm"] == pytest.approx(0.711379)
+    assert "changed the safety factor" in r["explanation"]
+    manual = api.strength([0, 0, 1], loads, fine=True)
+    assert manual["fine"] and "grid_check" not in manual
+    assert manual["mesh"]["voxel_mm"] < check["fine_voxel_mm"]
+
+
+def test_strength_skips_refinement_for_a_thick_block(loaded_grid_part):
+    loads = loaded_grid_part(20)
+    r = api.strength([0, 0, 1], loads)
+    assert "grid_check" not in r
+    assert r["mesh"]["voxel_mm"] == pytest.approx(12 ** (1 / 3))
+
+
+def test_strength_rechecks_a_small_fillet_in_thick_stock(loaded_grid_part):
+    from shapely.geometry import Point
+
+    from fdmcore.mesh import to_binary_stl
+    from test_hold import region_facing
+
+    corner = box(9, 9, 11.3, 11.3).difference(Point(11.3, 11.3).buffer(2.3, 32))
+    outline = box(0, 0, 30, 9).union(box(0, 0, 9, 30)).union(corner)
+    api.load(to_binary_stl(Mesh(extrude(outline, 0, 20))), "filleted bracket")
+    loads = [{"region": region_facing([-1, 0, 0]), "kind": "fixed"},
+             {"region": region_facing([1, 0, 0]), "kind": "force", "kg": 3, "direction": "pull"}]
+    check = api.strength([0, 0, 1], loads)["grid_check"]
+    assert check["reason"]["key"] == "strength.grid.fillet"
+    assert check["fine_voxel_mm"] < check["coarse_voxel_mm"]
+
+
+@pytest.mark.parametrize("failure", ["exception", "nonconvergence"])
+def test_strength_keeps_the_original_result_if_refinement_fails(loaded_grid_part, monkeypatch, failure):
+    loads = loaded_grid_part(1.2)
+    original_solve = api._strength_on_grid
+    calls = []
+
+    def solve_grid(cases, *args, trial=False):
+        calls.append(trial)
+        if trial and failure == "exception":
+            raise ValueError("The load is too small for this grid")
+        r = original_solve(cases, *args, trial=trial)
+        if trial:
+            r["_cases_converged"] = False
+        return r
+
+    monkeypatch.setattr(api, "_strength_on_grid", solve_grid)
+    r = api.strength([0, 0, 1], loads)
+    check = r["grid_check"]
+    assert calls == [False, True]
+    assert check["status"] == "failed" and "fine_voxel_mm" not in check
+    assert r["safety_factor"] == check["coarse_safety_factor"]
+    assert r["mesh"]["voxel_mm"] == r["elements"]["size_mm"] == check["coarse_voxel_mm"]
+    assert "uses the original grid" in r["explanation"]
+
+
 def test_cantilever_matches_beam_theory():
     # L=100, 10x10 section, E=1000 MPa, 10 N tip load: deflection = FL³/3EI = 4 mm.
     grid = VoxelGrid(np.ones((50, 5, 5), bool), np.zeros(3), 2.0)
@@ -87,9 +166,17 @@ def test_hook_strongest_on_its_side():
     loads = hook_loads()
     prof = {"material": "abs", "printer": "prusa_mk4s"}
     side = api.strength([1, 0, 0], loads, prof)["safety_factor"]
-    back = api.strength([0, 1, 0], loads, prof)
+    back = api.dispatch("strength", json.dumps({"up": [0, 1, 0], "loads": loads, "profile": prof}))
     assert side > 1.5 * back["safety_factor"]
     assert back["mode"] == "layers"
+    low, high = back["range"]
+    assert low < back["safety_factor"] <= high
+    json.dumps(back, allow_nan=False, default=bytes.hex)
+
+
+def test_safety_range_rechecks_every_load_and_keeps_material_failure_limit():
+    profile = Profile.from_dict({"material": "pla"})
+    assert strength.safety_range([(0.4, 0.1), (0.2, 0.375)], profile, 2.5) == pytest.approx([2.0, 1 / 0.375])
 
 
 def test_enclosure_makes_abs_stronger_across_layers():
