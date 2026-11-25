@@ -174,6 +174,9 @@ def set_expert(values: dict[str, float]) -> dict:
     if _session is not None:
         _session.solved = None  # results depend on these
         _session.warp = None
+        if _session.gcode is not None:
+            _session.gcode.pop("heat", None)
+            _session.gcode.pop("heat_ranges", None)
     return expert_settings()
 
 
@@ -1859,14 +1862,15 @@ WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, l
 _warp_reference: dict = {}
 
 
-def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
+def warping(up, profile: dict | None = None, detailed: bool = False, ranges: bool = True) -> dict:
     """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
     longest bar that stays flat (1 = like that bar), where it lifts first, and the curled shape
     (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm);
     the stress left inside after it cools: ``stress_value`` (MPa per vertex), ``stress_max`` (MPa, 99th percentile
     of the elements: single voxel corners spike) and ``stress_share`` (of what the layers hold).
     ``detailed``: with the loaded G-code's real layer times (layers that come quickly are still warm
-    when the next go on and shrink less); ``from_gcode`` says whether it was used."""
+    when the next go on and shrink less); ``from_gcode`` says whether it was used. ``ranges`` includes
+    a curl range in mm and, for quick runs where both peel trials settle, possible bed lift verdicts."""
     from . import warp
     from .gcode import layer_times
     from .strength import refine, sample_nodes, surface_values
@@ -1881,7 +1885,8 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
     climate = chamber_conditions(p, toolpath=tp)
     sliced = layer_times(tp) if tp is not None else None
     warm = _warm_layers(up, p, sliced, climate) if detailed and sliced is not None else None
-    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, climate=climate, sliced=sliced, adhesion=True)
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, climate=climate, sliced=sliced, adhesion=True,
+                      peel_range=ranges and not detailed)
     model, turn = r["model"], r["rotation"]  # model in the print frame; turn: part -> print
     s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"] @ turn, "turn": turn}  # set_fit / set_gap use it
     setup = _warp_setup(p)
@@ -1915,6 +1920,9 @@ def warping(up, profile: dict | None = None, detailed: bool = False) -> dict:
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
            "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
            "from_gcode": warm is not None}
+    if ranges:
+        values = [out["curl_mm"], *(round(curl * factor, 3) for factor in warp.shrink_factors(p))]
+        out["range"] = {"curl_mm": [min(values), max(values)]}
     if adhesion is not None:
         out["adhesion"] = {k: v for k, v in adhesion.items() if k != "point"}
         if peel_point is not None:
@@ -2305,7 +2313,7 @@ HOT_SPOTS = 20  # heat_model lists this many of the hottest spots
 
 
 def heat_model(up, profile: dict | None = None, fine: bool = False, intents: list[dict] | None = None,
-               loads: list[dict] | None = None, focus: bool = False) -> dict:
+               loads: list[dict] | None = None, focus: bool = False, ranges: bool = True) -> dict:
     """Heat network over the loaded G-code (thermal.py): how hot every spot is when the next layer
     covers it, how well each joint between layers bonds, and where that leaves the temperature window
     (``findings``: too hot, too cold to bond, or slowed down for cooling it doesn't need). The profile's
@@ -2319,13 +2327,17 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     cold, 3 needless slowdown) and ``importance_reason`` (index into ``reasons``). ``focus`` (with the quick
     tier): the spots that leave their window or matter most are run again in fine detail, each in a box with a
     margin (``focus``: where, and the hottest covering temperature both ways); the findings there come from the
-    fine runs. Cheaper than a fine run of a big part; the per-spot arrays stay the quick tier's."""
+    fine runs. Cheaper than a fine run of a big part; the per-spot arrays stay the quick tier's.
+    ``ranges`` adds two quick heat runs to estimate ranges for the whole-print temperature and bonding summaries;
+    skipped for fine or focused detail."""
     from .importance import REASONS
     from .thermal import DELAYS_S, confidence, window
 
     p = Profile.from_dict(profile)
     tp = _toolpath_for(up, "heat model")
-    h, tm = _heat(p, fine)
+    with_ranges = ranges and not (fine or focus)
+    with stage(0, 1 / 3 if with_ranges else 1):
+        h, tm = _heat(p, fine)
     pts, masks, weight, reason, imp = _spot_marks(h, up, p, intents, loads)
     w = window(h, p, masks, weight)
     state = np.select([w["too_hot"], w["needless"], w["too_cold"]], [1, 3, 2], 0)
@@ -2336,11 +2348,16 @@ def heat_model(up, profile: dict | None = None, fine: bool = False, intents: lis
     covered = np.isfinite(h.cover_c)
     hottest = np.flatnonzero(covered)[np.argsort(-h.cover_c[covered])][:HOT_SPOTS]
     f32 = lambda a: np.asarray(a, np.float32).tobytes()
+    summary = _heat_summary(h)
+    extra = {}
+    if with_ranges:
+        with stage(1 / 3, 1):
+            extra["range"] = _heat_ranges(tp, p, summary, tm)
     return {
         "tier": h.tier, "spots": int(len(h.layer)), "layers": int(h.layer.max()) + 1, "cell_mm": h.cell_mm, "confidence": confidence(p),
         "material": h.material, "tg_c": h.tg_c, "print_min": round(tm.total_s / 60, 1), "seconds": round(h.seconds, 1),
-        "cover_c": {"median": round(float(np.median(h.cover_c[covered])), 1) if covered.any() else None,
-                    "p95": round(float(np.percentile(h.cover_c[covered], 95)), 1) if covered.any() else None},
+        **summary,
+        **extra,
         "hottest": [{"point": np.round(pts[i], 2), "layer": int(h.layer[i]), "cover_c": round(float(h.cover_c[i]), 1),
                      "cover_s": round(float(h.cover_s[i]), 1)} for i in hottest],
         "delays_s": list(DELAYS_S),
@@ -2445,7 +2462,7 @@ def _spot_marks(h, up, p: Profile, intents: list[dict] | None, loads: list[dict]
 
 
 def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None = None, intents: list[dict] | None = None,
-                     fine: bool = False, detail: bool = False) -> dict:
+                     fine: bool = False, detail: bool = False, ranges: bool = False) -> dict:
     """A cooling plan for the loaded G-code (thermal_opt.py): fan ahead of time, slower layers or short park
     moves where spots stay too hot, and the slicer's layer-time slowdown undone where it only made the layers
     too cold to bond (at most ``max_speedup`` of the print time), each spot weighed by how much it matters
@@ -2455,7 +2472,8 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
     ``slicer``: print minutes, spots too hot / too cold (weighted too), median bond. ``summary``: plain words.
     All limits are estimates (``confidence`` "rough") until real prints tune them. ``detail``: also what the
     screen shows before and after the G-code plan (``_cooling_detail``: every spot, a timeline per layer, the
-    lines whose speed changes)."""
+    lines whose speed changes). ``ranges`` adds the quick heat bounds for the print as sliced, not
+    a second optimization; ignored in the fine tier."""
     from .thermal_opt import optimize
 
     p = Profile.from_dict(profile)
@@ -2468,8 +2486,14 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
             marks[id(h)] = _spot_marks(h, up, p, intents, loads)
         return marks[id(h)]
 
-    r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
+    with_ranges = ranges and not fine
+    with stage(0, 0.75 if with_ranges else 1):
+        r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
     out = _cooling_view(r, _importance_map(up, p, loads), p)
+    if with_ranges:
+        summary = _heat_summary(r["heat"]["before"])
+        with stage(0.75, 1):
+            out["before"].update(summary, range=_heat_ranges(tp, p, summary))
     return {**out, **_cooling_detail(tp, r, up, p, mark)} if detail else out
 
 
@@ -2764,6 +2788,50 @@ def _heat_key(p: Profile) -> str:
     return json.dumps([p.material_id, p.material, p.printer, p.enclosure], sort_keys=True, default=str)
 
 
+def _heat_summary(heat) -> dict:
+    """Report temperatures only where the next layer covers a spot, and bonding only at actual joints."""
+    cover = heat.cover_c[np.isfinite(heat.cover_c)]
+    bond = heat.bond[np.isfinite(heat.bond)]
+    return {"cover_c": {name: round(float(np.percentile(cover, q)), 1) if len(cover) else None
+                        for name, q in (("median", 50), ("p95", 95))},
+            "bond_median": round(float(np.median(bond)), 3) if len(bond) else None}
+
+
+def _heat_ranges(toolpath, profile: Profile, nominal: dict, timing_result=None) -> dict:
+    """Contact conductance controls how much heat crosses a joint, and the fan controls how fast it
+    leaves the part. Sample weaker contact/stronger fan and the reverse as contrasting conditions,
+    not a guarantee of the extrema. The G-code and its timing do not change between the reruns."""
+    from .kinematics import timing
+    from .thermal import simulate
+
+    gcode = _require().gcode
+    key = _heat_key(profile)
+    if gcode.get("heat_ranges", (None,))[0] != key:
+        if timing_result is None:
+            timing_result = timing(toolpath)
+        process = load_data("thermal")["process"]
+        fan = process["h_fan"]
+        contacts = process["bead_contact_conductance"]["range"]
+        points = fan["points"]
+        off = points[0]
+        samples = []
+        for index, (contact, full_fan) in enumerate(zip(contacts, reversed(fan["range_at_100"]))):
+            factor = (full_fan - off) / (points[100] - off)
+            curve = {speed: off + (value - off) * factor for speed, value in points.items()}
+            with progress.stage(index / 2, (index + 1) / 2):
+                heat = simulate(toolpath, timing_result, profile, overrides={"contact": contact, "h_fan": curve})
+                samples.append(_heat_summary(heat))
+        gcode["heat_ranges"] = (key, samples)
+
+    samples = [nominal, *gcode["heat_ranges"][1]]
+
+    def bounds(values):
+        return None if any(value is None for value in values) else [min(values), max(values)]
+
+    return {"cover_c": {name: bounds([sample["cover_c"][name] for sample in samples]) for name in nominal["cover_c"]},
+            "bond_median": bounds([sample["bond_median"] for sample in samples])}
+
+
 def _heat(p: Profile, fine: bool = False):
     """The heat model over the loaded G-code (thermal.Heat, kinematics.Timing), cached per profile and tier:
     heat_model and the strength check's heat option share one run."""
@@ -2958,7 +3026,7 @@ def _heat_findings(tp, h, w: dict, pts: np.ndarray, p: Profile, load_bearing, re
     return [summarize_finding(f, p) for f in out]
 
 
-def _printed(model):
+def _printed(model, *, cache: bool = True):
     """What the loaded G-code puts in each cube of ``model`` (cached per analysis grid)."""
     from .gcode import deposit
     from .strength import printed_from
@@ -2974,8 +3042,84 @@ def _printed(model):
 
         dep = deposit(g["toolpath"], model.grid, model.elems, to_part)
         pr = printed_from(dep, model, inside_fraction(s.mesh, model.grid))
-        g["printed"] = {id(model): (pr, dep["missed"])}  # one grid at a time: old ones are not used again
+        result = pr, dep["missed"]
+        if cache:
+            g["printed"] = {id(model): result}
+        return result
     return g["printed"][id(model)]
+
+
+def _strength_on_grid(cases, up, p, sh, detailed, h, *, trial: bool = False) -> dict:
+    """Recompute print deposition and bonding for the grid used in this solve."""
+    from dataclasses import replace
+
+    from .strength import evaluate_cases, material_for
+
+    if not detailed:
+        return _evaluate(cases, up, p, sh)
+    model = cases[0].model
+    printed, missed = _printed(model, cache=not trial)
+    if h is not None:
+        usual = evaluate_cases(cases, up, p, sh, printed)["safety_factor"]
+        bond, source = _bond_per_cube(model, _require().gcode, h, material_for(p))
+        printed = replace(printed, bond=bond)
+    r = evaluate_cases(cases, up, p, sh, printed)
+    r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
+    if h is not None:
+        r["heat"] = _heat_strength(model, h, bond, source, r, usual)
+    return r
+
+
+def _thin_feature(model, critical_point) -> str | None:
+    from .strength import THIN_GRID_CELLS, thin_grid_cells
+
+    thin = thin_grid_cells(model)
+    at = np.floor((critical_point - model.grid.origin) / model.grid.h).astype(int)
+    if (thin & (model.elems == at).all(axis=1)).any():
+        return "weak_spot"
+    if any(f["type"] == "rounded_edge" and f["tag"] != "none" and f["radius"] <= THIN_GRID_CELLS * model.grid.h
+           for f in _features()):
+        return "fillet"
+    return "wall" if thin.any() else None
+
+
+def _strength_grid_check(cases, r, loads, up, p, sh, detailed, h):
+    """Try one bounded refinement. The original result and cache survive a failed trial."""
+    from .strength import finer_grid, prepare_cases
+
+    model = cases[0].model
+    reason = _thin_feature(model, r["critical_point"])
+    if reason is None:
+        return cases, r, None
+    s = _require()
+    before = r["safety_factor"]
+    check = {"status": "limited", "coarse_voxel_mm": model.grid.h, "coarse_safety_factor": before,
+             "reason": {"key": f"strength.grid.{reason}", "params": {}}}
+    try:
+        grid = finer_grid(s.mesh, model, _grid("strength_voxels"))
+        if grid is not None:
+            check["status"] = "failed"
+            refined = prepare_cases(s.mesh, s.regions, _resolve_loads(loads), grid=grid)
+            trial = _strength_on_grid(refined, up, p, sh, detailed, h, trial=True)
+            if trial["_cases_converged"] and np.isfinite(trial["fi"]).all() and np.isfinite(trial["u"]).all():
+                after = trial["safety_factor"]
+                moved = not np.isclose(after, before, rtol=0.05, atol=0) or trial["verdict"] != r["verdict"]
+                check.update(status="changed" if moved else "similar", fine_voxel_mm=grid.h)
+                cases, r = refined, trial
+    except (ValueError, RuntimeError, ArithmeticError, MemoryError, np.linalg.LinAlgError):
+        check["status"] = "failed"
+    status, params = check["status"], {}
+    if status == "changed":
+        after = r["safety_factor"]
+        if np.isfinite([before, after]).all():
+            old, new = _format_safety(before), _format_safety(after)
+            if old == new:
+                old, new = f"about ×{before:.2f}", f"about ×{after:.2f}"
+            if old != new:
+                status = "changed_safety"
+                params = {"before": old, "after": new}
+    check["message"] = {"key": f"strength.grid.{status}", "params": params}
+    return cases, r, check
 
 
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
@@ -2991,23 +3135,21 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     ``zones``: stronger zones from optimise_strength (slicer modifier volumes). With ``detailed``,
     use a matching heat result if available. ``heat=True`` runs the heat model if needed and
     ``heat=False`` uses the usual layer strength. The ``heat`` result compares safety with usual
-    bonding and locates the cold joint that sets the local strength."""
-    from dataclasses import replace
-
-    from .strength import evaluate_cases, face_values, material_for, refine, sample_nodes, surface_values
+    bonding and locates the cold joint that sets the local strength. A thin feature on the normal grid
+    can trigger one bounded finer solve, described in ``grid_check``. Quick runs include a safety
+    ``range`` from rechecking the same stresses with weaker and stronger layer bonds."""
+    from .strength import face_values, refine, safety_range, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
     cases = _load_case(loads, _grid("fine_voxels") if fine else None)
     sh = _shells(p, walls, infill, top, bottom, zones)
-    model = cases[0].model
-    printed = h = None
+    h = None
     if detailed:
         if s.gcode is None:
             raise ValueError("Load the sliced G-code first (detailed check)")
         if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
             raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
-        printed, missed = _printed(model)
         cached = s.gcode.get("heat")
         if heat is not False and cached is not None and cached[0][0] == _heat_key(p):
             h = cached[1][0]
@@ -3015,16 +3157,21 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
             h, _ = _heat(p)
     elif heat:
         raise ValueError("The heat option needs the detailed check (load the sliced G-code)")
-    if h is not None:
-        usual = evaluate_cases(cases, up, p, sh, printed)["safety_factor"]
-        bond, source = _bond_per_cube(model, s.gcode, h, material_for(p))
-        printed = replace(printed, bond=bond)
-    r = evaluate_cases(cases, up, p, sh, printed) if printed is not None else _evaluate(cases, up, p, sh)
+    r = _strength_on_grid(cases, up, p, sh, detailed, h)
+    # The optimiser can reuse these stresses on its usual grid even if the display uses a finer one.
+    base_case = next(c for c in cases if c.number == r["case"])
+    base_fi = r["fi"]
+    if not fine:
+        cases, r, grid_check = _strength_grid_check(cases, r, loads, up, p, sh, detailed, h)
+        if grid_check is not None:
+            r["grid_check"] = grid_check
     r["fine"] = bool(fine)
-    if printed is not None:
-        r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
-    if h is not None:
-        r["heat"] = _heat_strength(model, h, bond, source, r, usual)
+    r.pop("_cases_converged")
+    model = cases[0].model
+    if not (fine or detailed):
+        bounds = safety_range(r["case_fi"], p, r["safety_factor"])
+        if bounds is not None:
+            r["range"] = bounds
     fi, vm, u = r.pop("fi"), r.pop("vm"), r.pop("u")
     heat = face_values(s.mesh, model.grid, model, fi)
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
@@ -3063,10 +3210,13 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
     s.strength_verdict = r["verdict"]
-    s.stressed = None if printed is not None else {"model": model, "up": np.asarray(up, float) / np.linalg.norm(up),
-                                                   "material": json.dumps(p.material, sort_keys=True), "fi": fi, "ignore": worst.ignore}
+    s.stressed = None if detailed else {"model": base_case.model, "up": np.asarray(up, float) / np.linalg.norm(up),
+                                       "material": json.dumps(p.material, sort_keys=True), "fi": base_fi, "ignore": base_case.ignore}
     r["story_parts"] = _strength_story_parts(r)
     r["explanation"] = _strength_story(s.mesh, up, r, p)
+    if "grid_check" in r:
+        check = r["grid_check"]
+        r["explanation"] += f" {format_message(check['reason'])} {format_message(check['message'])}"
     return r
 
 

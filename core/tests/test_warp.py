@@ -151,13 +151,18 @@ def test_enclosure_and_pla_warp_less():
 
 def test_warping_result_for_the_view():
     api.load(to_binary_stl(bar(90)), "bar")
-    r = api.warping([0, 0, 1], ABS_OPEN)
+    r = api.dispatch("warping", json.dumps({"up": [0, 0, 1], "profile": ABS_OPEN}))
     tris = np.frombuffer(r["field_triangles"], np.float32).reshape(-1, 3, 3)
     assert len(np.frombuffer(r["vertex_disp"], np.float32)) == 3 * len(np.frombuffer(r["vertex_value"], np.float32)) == 9 * len(tris)
     assert r["verdict"] == "likely to lift" and r["lift_points_print"]
     ends = [abs(p[0]) for p in r["lift_points_print"]]
     assert max(ends) > 35  # the bar's ends (it is centred on the bed origin), not its middle
     assert "brim" in r["explanation"]
+    low, high = r["range"]["curl_mm"]
+    assert low < r["curl_mm"] < high
+    low, high = r["adhesion"]["range"]
+    assert low <= r["adhesion"]["may_lift"] <= high
+    json.dumps(r, allow_nan=False, default=bytes.hex)
 
 
 @pytest.mark.parametrize("h", [1.0, None])

@@ -57,9 +57,19 @@ def warp_limit(profile: Profile) -> float | None:
     return profile.warping_length(load_data("thresholds")["warping"]["risk_length_mm"])
 
 
+def shrink_factors(profile: Profile) -> list[float]:
+    """Shrink drives both curl and bed pull. The held and released elastic solves are linear in it."""
+    settings = load_data("thresholds")["warping"]
+    shrink = profile.material.get("shrinkage_pct", 0.3)
+    bounds = settings["shrinkage_pct_ranges"].get(profile.material_id)
+    if bounds and bounds[0] <= shrink <= bounds[1]:
+        return [bound / shrink for bound in bounds]
+    return settings["shrinkage_factor_range"]
+
+
 def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None,
              warm: tuple | None = None, *, climate: dict | None = None, sliced: dict | None = None,
-             adhesion: bool = False, grip_trial: bool = False) -> dict:
+             adhesion: bool = False, grip_trial: bool = False, peel_range: bool = False) -> dict:
     """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model (voxelised in the
     print frame: ``rotation`` turns part coordinates into it, so a tilted part sits flat on the grid's
     bottom layer instead of touching the bed with one stair-step corner), displacement after coming off
@@ -69,7 +79,9 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     times); plastic still warm then shrinks less while printing. ``climate`` and ``sliced`` use the
     loaded print's chamber and timing instead of estimating both from the profile and shape.
     With ``adhesion``, find the first build step where the bed bond peels. With ``grip_trial``,
-    find the strongest grip at which any step lifts."""
+    find the strongest grip at which any step lifts.
+    ``peel_range`` changes shrink and grip: shrink controls the pull, and grip is how much the bed can take.
+    Reuse the clamped solve and peel stiffness, but run the nonlinear peel law separately at each endpoint."""
     rotation = rotation_to_z(up)
     # Rounded: float noise from the turn (3.0000000001 mm) would add a whole voxel layer.
     print_mesh = Mesh(np.round(mesh.triangles @ rotation.T, 9))
@@ -108,6 +120,14 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     grip = bed_grip(profile) if adhesion and not grip_trial else None
     peel = {"may_lift": False, "detached_area_mm2": 0.0}
     peel_failed = False
+    scenarios = {}
+    endpoints = {}
+    if grip is not None and peel_range:
+        weak, strong = (1.0, 1.0) if grip["shear_source"] == "calibrated" else load_data("thresholds")["bed_adhesion"]["grip_factor_range"]
+        low, high = shrink_factors(profile)
+        nominal = grip["grip_n_mm"]
+        scenarios = {"less_lift": (low, nominal * strong), "more_lift": (high, nominal * weak)}
+        endpoints = dict.fromkeys(scenarios, False)
     peel_steps: list[tuple[Model, np.ndarray, np.ndarray]] = []
     spring_scale = mat.e_xy * grid.h
     for k, g in enumerate(groups):
@@ -134,7 +154,8 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
         u_total[full_n] += u
         strain[full_e] += ue @ b_mid.T
         done = active
-        if not grip_trial and (grip is None or peel["may_lift"]):
+        active_scenarios = {name: values for name, values in scenarios.items() if endpoints[name] is False}
+        if not grip_trial and (grip is None or (peel["may_lift"] and not active_scenarios)):
             continue
         # Replace the partial build's accumulated bed reactions with the bed bond.
         bed_load = held_total[full_n[fixed]]
@@ -144,7 +165,13 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
             peel_steps.append((sub, sub_scale, bed_load))
             continue
         report((k + 0.5) / (len(groups) + 1), "Checking whether it lifts off the bed")
-        peel = _edge_peel(sub, c, sub_scale, bed_load, spring_scale, grip["grip_n_mm"])
+        nominal_grip = None if peel["may_lift"] else grip["grip_n_mm"]
+        trial = _edge_peel(sub, c, sub_scale, bed_load, spring_scale, nominal_grip, scenarios=active_scenarios)
+        for name, result in trial.pop("scenarios").items():
+            endpoints[name] = None if result["solver_failed"] else result["may_lift"]
+        if nominal_grip is None:
+            continue
+        peel = trial
         peel_failed |= peel["solver_failed"]
         if peel["may_lift"]:
             z = grid.origin[2] + (bed_level + g[-1] + 1) * grid.h
@@ -177,6 +204,9 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
         out.update(lift_grip_n_mm=lift_grip, peel_solved=not peel_failed)
     elif grip is not None:
         out["adhesion"] = {**grip, **peel, "solver_failed": peel_failed}
+        if endpoints and not peel_failed and None not in endpoints.values():
+            values = [peel["may_lift"], *endpoints.values()]
+            out["adhesion"]["range"] = [min(values), max(values)]
     return out
 
 
@@ -262,8 +292,10 @@ def _shear_weight(offset_c: float) -> float:
 
 
 def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndarray,
-               spring_scale: float, grip: float | None, lift_grip: float | None = None) -> dict:
-    """Let the bed bond open under the shrink already built up, with no pre-cut crack."""
+               spring_scale: float, grip: float | None, lift_grip: float | None = None,
+               *, scenarios: dict | None = None) -> dict:
+    """Let the bed bond open under the shrink already built up, with no pre-cut crack.
+    Endpoint trials can share a preconditioner, but start fresh so one trial's slip cannot affect another."""
     h = model.grid.h
     bottom = model.elems[:, 2].min()
     footprint = model.grid.solid[:, :, bottom]
@@ -278,25 +310,32 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndar
     failure = settings["cohesive_failure_mm"]
     peak = settings["cohesive_peak_share"] * failure
     if not 0 < peak < failure or not isfinite(failure):
-        return {"may_lift": False, "detached_area_mm2": 0.0, "solver_failed": True}
+        failed = {"may_lift": False, "detached_area_mm2": 0.0, "solver_failed": True}
+        return failed if scenarios is None else {**failed, "scenarios": dict.fromkeys(scenarios, failed)}
     contact_slope = 30.0  # N/mm³, keeps the bed effectively rigid in compression
     k = stiffness(model, c, scale, _release_springs(nodes, spring_scale))
     coarse = prolongation(model) if k.shape[0] > 15_000 else None
     cache = {}
+    endpoint_cache = {}
     dofs = 3 * nodes[:, None] + np.arange(3)
     loads = np.zeros(k.shape[0])
     # Both the footprint and the clamped bed nodes are ordered by (x, y).
     loads[dofs] = -bed_load
 
-    def trial(work: float) -> dict:
+    def trial(work: float, load_scale: float = 1.0, *, endpoint: bool = False) -> dict:
         # The area of the traction triangle is work per area (N/mm).
         peak_traction = 2 * (work / failure)
         initial_slope = peak_traction / peak
         if initial_slope < 0 or not isfinite(initial_slope):
             return {"may_lift": False, "detached_area_mm2": 0.0, "solver_failed": True}
-        lift, largest, solved = cohesive_bed(k, loads, dofs, area, initial_slope, peak,
-                                             failure, contact_slope, cache,
-                                             stop_at_lift=grip is None, coarse_grid=coarse)
+        if endpoint:
+            endpoint_cache.pop("u", None)
+            if "preconditioner" in cache:
+                endpoint_cache.setdefault("preconditioner", cache["preconditioner"])
+        lift, largest, solved = cohesive_bed(k, loads if load_scale == 1.0 else loads * load_scale,
+                                             dofs, area, initial_slope, peak, failure, contact_slope,
+                                             endpoint_cache if endpoint else cache, stop_at_lift=endpoint or grip is None,
+                                             coarse_grid=coarse)
         detached = largest >= failure if work > 0 else lift > 0
         may_lift = bool(lift.any()) and solved
         result = {"may_lift": may_lift, "detached_area_mm2": float(area[detached].sum()),
@@ -305,6 +344,9 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndar
             result["point"] = model.grid.origin + h * np.array([*xy[lift.argmax()], bottom])
         return result
 
+    if scenarios is not None:
+        out = trial(grip) if grip is not None else {}
+        return {**out, "scenarios": {name: trial(work, factor, endpoint=True) for name, (factor, work) in scenarios.items()}}
     if grip is not None:
         return trial(grip)
     return _lift_threshold(trial, lift_grip)
