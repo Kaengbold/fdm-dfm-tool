@@ -155,6 +155,7 @@ async function confirmBatch(store, services, recheck) {
       if (loads) {
         const st = await engine.call("strength", { up: o.up, loads, profile: profileOf(next), walls: option.walls, infill: option.infill, top: option.top, bottom: option.bottom });
         summary.safety = Math.round(st.safety_factor * 10) / 10;
+        summary.gridCheck = st.grid_check;
         option = { ...option, safety: summary.safety, meets_target: summary.target == null || summary.safety >= summary.target };
       }
       const before = res?.check?.findings ?? [];
@@ -308,6 +309,7 @@ function batchCard(store, services) {
         ? t("problems.safetyWas", { sf: sum.safety, was: sum.before, target: sum.target })
         : t("problems.safety", { sf: sum.safety, target: sum.target })));
     }
+    if (sum.gridCheck) card.append(h("span", {}, t(sum.gridCheck.reason), " ", t(sum.gridCheck.message)));
   } else {
     card.append(h("b", {}, t("problems.appliedNoCheck")));
   }
