@@ -970,6 +970,28 @@ rules:
       — https://www.core77.com/posts/65318/how-to-design-snap-fit-components
     - Loftsmith — Snap Fit Design for 3D Printing (PLA ~2 %, PETG 3–4 %, halve across layers)
       — https://loftsmith.com/guides/snap-fit-3d-printing
+  large_deflection:
+    title: This part bends a lot
+    why: As a flexible part bends, the load acts on a different shape and can bend it a different amount.
+    fixes:
+    - domain: geometry
+      text: If the bend is unwanted, shorten the unsupported span or add a brace.
+    - domain: process
+      text: Test a printed copy at the intended load and check that it still has room to move.
+    tags: [strength, snap-fit]
+    sources:
+    - Bisshopp and Drucker, Large Deflection of Cantilever Beams (1945) — https://doi.org/10.1090/qam/13360
+  compression_buckling:
+    title: Thin walls can bow under load
+    why: A long, thin wall can suddenly bow sideways under compression before the plastic itself breaks.
+    fixes:
+    - domain: geometry
+      text: Add a rib or shorten the unsupported length so the wall has less room to bow.
+    - domain: process
+      text: Support the wall from the side or reduce the force pushing along it.
+    tags: [strength, buckling]
+    sources:
+    - MIT OpenCourseWare, Structural Mechanics, Lecture 7, Buckling of Beams — https://ocw.mit.edu/courses/2-080j-structural-mechanics-fall-2013/resources/mit2_080jf13_lecture7/
   thick_solid_block:
     title: Thick solid block
     why: This section is a thick solid block. The slicer fills the inside with hollow infill, so adding more infill

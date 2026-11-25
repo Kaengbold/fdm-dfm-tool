@@ -1,9 +1,10 @@
-"""Rough linear-elastic FEA on a voxel grid, with FDM-style anisotropy.
+"""Rough elastic FEA on a voxel grid, with FDM-style anisotropy.
 
 Every solid voxel is an 8-node hexahedron. All elements share one stiffness
 matrix (scaled per element for shell vs. infill), assembled into a sparse
 system and solved with preconditioned conjugate gradients. The bed bond adds
-nonlinear springs to this coarse, linear-elastic model.
+nonlinear springs. The strength check can also account for a changing shape
+under load or estimate when compression makes the unloaded shape unstable.
 """
 
 from __future__ import annotations
@@ -168,26 +169,10 @@ def _stiffness_free(model: Model, c: np.ndarray, scale: np.ndarray, free: np.nda
         # id() can be reused once a model is freed: the entry keeps its model and must be the same object.
         pat = held[1] if held is not None and held[0] is model else None
         if pat is None:
-            dof_map = np.full(n, -1, dtype=np.int32)
-            dof_map[free] = np.arange(nf, dtype=np.int32)
-            fe = dof_map[model.edof]
-            rows = np.repeat(fe, 24, axis=1).ravel()
-            cols = np.tile(fe, (1, 24)).ravel()
-            keep = (rows >= 0) & (cols >= 0) if nf < n else None
-            r, col = (rows[keep], cols[keep]) if keep is not None else (rows, cols)
-            csr = sp.csr_matrix((np.ones(len(r), dtype=np.int8), (r, col)), shape=(nf, nf))
-            csr.sort_indices()
-            csr_row = np.repeat(np.arange(nf, dtype=np.int64), np.diff(csr.indptr))
-            csr_key = csr_row * nf + csr.indices
-            slot = np.searchsorted(csr_key, r.astype(np.int64) * nf + col).astype(np.int32)
-            pat = (dof_map, keep, slot, csr.indices, csr.indptr, len(csr.data))
+            pat = _assembly_pattern(model, free)
             precond_cache[pat_key] = (model, pat)
-        dof_map, keep, slot, indices, indptr, nnz = pat
-        vals = (scale[:, None] * ke.ravel()[None, :]).ravel()
-        if keep is not None:
-            vals = vals[keep]
-        data = np.bincount(slot, weights=vals, minlength=nnz)
-        kf = sp.csr_matrix((data, indices, indptr), shape=(nf, nf), copy=False)
+        dof_map = pat[0]
+        kf = _assemble((scale[:, None] * ke.ravel()[None, :]).ravel(), pat)
     else:
         dof_map = np.full(n, -1, dtype=np.int32)
         dof_map[free] = np.arange(nf, dtype=np.int32)
@@ -210,6 +195,33 @@ def _stiffness_free(model: Model, c: np.ndarray, scale: np.ndarray, free: np.nda
         if skeep.any():
             kf = kf + sp.csr_matrix((sv[skeep], (sr[skeep], sc[skeep])), shape=(nf, nf))
     return kf
+
+
+def _assembly_pattern(model: Model, free: np.ndarray) -> tuple:
+    """Map each free element matrix entry to its slot in the assembled CSR."""
+    nf = int(free.sum())
+    dof_map = np.full(len(free), -1, dtype=np.int32)
+    dof_map[free] = np.arange(nf, dtype=np.int32)
+    fe = dof_map[model.edof]
+    rows = np.repeat(fe, 24, axis=1).ravel()
+    cols = np.tile(fe, (1, 24)).ravel()
+    keep = (rows >= 0) & (cols >= 0) if nf < len(free) else None
+    r, col = (rows[keep], cols[keep]) if keep is not None else (rows, cols)
+    csr = sp.csr_matrix((np.ones(len(r), dtype=np.int8), (r, col)), shape=(nf, nf))
+    csr.sort_indices()
+    csr_row = np.repeat(np.arange(nf, dtype=np.int64), np.diff(csr.indptr))
+    csr_key = csr_row * nf + csr.indices
+    slot = np.searchsorted(csr_key, r.astype(np.int64) * nf + col).astype(np.int32)
+    return dof_map, keep, slot, csr.indices, csr.indptr, len(csr.data)
+
+
+def _assemble(vals: np.ndarray, pattern: tuple) -> sp.csr_matrix:
+    _, keep, slot, indices, indptr, nnz = pattern
+    if keep is not None:
+        vals = vals[keep]
+    data = np.bincount(slot, weights=vals, minlength=nnz)
+    nf = len(indptr) - 1
+    return sp.csr_matrix((data, indices, indptr), shape=(nf, nf), copy=False)
 
 
 def stiffness(model: Model, c: np.ndarray, scale: np.ndarray, springs: tuple | None = None) -> sp.csr_matrix:
@@ -429,3 +441,169 @@ def element_stress(model: Model, c: np.ndarray, scale: np.ndarray, u: np.ndarray
     ue = u.ravel()[model.edof]  # (E, 24)
     strain = ue @ b.T
     return scale[:, None] * (strain @ c.T)
+
+
+def _gradients(b: np.ndarray) -> np.ndarray:
+    """Shape function gradients (8 nodes, 3 reference directions) from the linear B matrix."""
+    return np.array([b[i, i::3] for i in range(3)]).T
+
+
+def voigt_tensor(values: np.ndarray) -> np.ndarray:
+    """Unpack symmetric tensors in (xx, yy, zz, yz, xz, xy) order."""
+    return values[:, [[0, 5, 4], [5, 1, 3], [4, 3, 2]]]
+
+
+def _finite_strain(ue: np.ndarray, grad: np.ndarray, c: np.ndarray, scale: np.ndarray):
+    # Green-Lagrange strain is zero under a rigid rotation. Double the shear strains in Voigt
+    # notation to match the existing material tensor. Keep stress in the reference material frame.
+    du = ue.transpose(0, 2, 1) @ grad
+    strain = (du + du.transpose(0, 2, 1) + du.transpose(0, 2, 1) @ du) / 2
+    strain = np.stack([strain[:, i, j] * (1 if i == j else 2) for i, j in VOIGT], axis=1)
+    return np.eye(3) + du, strain, scale[:, None] * (strain @ c.T)
+
+
+def large_deflection(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.ndarray,
+                     fixed: np.ndarray, linear: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Equilibrium with large rotations, small elastic strains and dead loads.
+
+    Use a total Lagrangian Hex8 with a consistent tangent. Continue from zero load and backtrack
+    on total potential energy. The iteration budget is shared across load increments. Return None
+    if the solve cannot reach the full load, or passes outside the elastic model's useful range.
+    """
+    free = np.repeat(~fixed, 3)
+    nodes = model.edof[:, ::3] // 3
+    edof = model.edof.astype(np.int32, copy=False)
+    pattern = _assembly_pattern(model, free)
+    f = forces.ravel()[free]
+    h = model.grid.h
+    volume = h**3
+    b0 = b_matrix(0, 0, 0, h)
+    grad = _gradients(b0)
+    # Integrate the finite-strain terms at the centre. The missing linear stiffness controls
+    # hourglass modes and recovers the existing small-displacement solution as the load tends to
+    # zero. It vanishes for every affine displacement, including finite rigid rotations.
+    stabilization = element_stiffness(c, h) - (b0.T @ c @ b0) * volume
+    u = np.zeros_like(linear)
+    coarse = prolongation(model)[free] if len(f) > 4000 else None
+
+    def response(u, load):
+        ue = u[nodes]
+        deformation, strain, stress = _finite_strain(ue, grad, c, scale)
+        if np.any(np.linalg.det(deformation) <= 0) or np.max(np.abs(strain)) > 0.2:
+            return np.inf, None, None, None
+        flat = ue.reshape(-1, 24)
+        stabilized = (flat @ stabilization) * scale[:, None]
+        energy = (np.einsum("ei,ei->", strain, stress) * volume +
+                  np.einsum("ei,ei->", flat, stabilized)) / 2 - load @ u.ravel()[free]
+        s = voigt_tensor(stress)
+        residual = ((deformation @ s) @ grad.T).transpose(0, 2, 1).reshape(-1, 24) * volume + stabilized
+        internal = np.bincount(edof.ravel(), weights=residual.ravel(), minlength=len(free))[free]
+        return energy, internal - load, deformation, s
+
+    def tangent(deformation, stress):
+        b = np.stack([deformation[:, None, :, i] * grad[None, :, j, None] +
+                      (deformation[:, None, :, j] * grad[None, :, i, None] if i != j else 0)
+                      for i, j in VOIGT], axis=1).reshape(-1, 6, 24)
+        kg = (grad @ stress) @ grad.T
+        ke = ((b.transpose(0, 2, 1) @ (c @ b)) * volume + stabilization) * scale[:, None, None]
+        for axis in range(3):
+            ke[:, axis::3, axis::3] += kg * volume
+        return _assemble(ke.ravel(), pattern)
+
+    steps = max(4, min(12, int(np.ceil(np.linalg.norm(linear, axis=1).max() / (3 * model.grid.h)))))
+    budget = 75
+    last = older = u
+    for i in range(1, steps + 1):
+        report((i - 1) / steps, "Simulating")
+        load = f * (i / steps)
+        # A quadratic predictor follows the shortening of the arm as its tip rotates.
+        guess = linear / steps if i == 1 else 2 * u - last
+        if i >= 3:
+            guess += u - 2 * last + older
+        older, last, u = last, u, guess
+        result = response(u, load)
+        tolerance = 2e-4 * np.linalg.norm(load)
+        for _ in range(20):
+            budget -= 1
+            if budget < 0:
+                return None
+            energy, residual, deformation, stress = result
+            if residual is None:
+                return None
+            if np.linalg.norm(residual) <= tolerance:
+                break
+            k = tangent(deformation, stress)
+            try:
+                if coarse is None:
+                    step = spla.splu(k.tocsc(), permc_spec="MMD_AT_PLUS_A").solve(-residual)
+                else:
+                    precond = two_level_preconditioner(k, coarse)
+                    step, info = spla.cg(k, -residual, M=precond, rtol=1e-3, maxiter=160)
+                    if info != 0:
+                        return None
+            except RuntimeError:
+                return None
+            slope = residual @ step
+            if not np.isfinite(slope) or slope >= 0:
+                return None
+            delta = np.zeros(len(free))
+            delta[free] = step
+            delta = delta.reshape(-1, 3)
+            for j in range(8):
+                fraction = 0.5**j
+                candidate = u + fraction * delta
+                result = response(candidate, load)
+                if result[0] <= energy + 1e-4 * fraction * slope:
+                    u = candidate
+                    break
+            else:
+                return None
+        else:
+            return None
+    return u, _finite_strain(u[nodes], grad, c, scale)[2]
+
+
+def buckling_load_factor(model: Model, c: np.ndarray, scale: np.ndarray, fixed: np.ndarray,
+                         stress: np.ndarray) -> tuple[float, np.ndarray] | None:
+    """First linearized buckling load multiplier and its unitless shape.
+
+    The pre-stress adds a geometric stiffness K_G, assembled from center stresses held constant
+    in each voxel. Solve -K_G x = lambda K x for the largest positive lambda (smallest positive
+    load multiplier). Tensile stress stabilizes the part in this calculation.
+    """
+    free = np.repeat(~fixed, 3)
+    if free.sum() < 2:
+        return None
+    k = _stiffness_free(model, c, scale, free)
+    tensor = voigt_tensor(stress)
+    kg = np.zeros((len(model.elems), 8, 8))
+    g = 1 / np.sqrt(3)
+    for p in product((-g, g), repeat=3):
+        grad = _gradients(b_matrix(*p, model.grid.h))
+        kg -= (grad @ tensor @ grad.T) * (model.grid.h / 2) ** 3
+    nodes = (model.edof[:, ::3] // 3).astype(np.int32)
+    kg = sp.csr_matrix((kg.ravel(), (np.repeat(nodes, 8, axis=1).ravel(), np.tile(nodes, (1, 8)).ravel())),
+                       shape=(model.n_nodes, model.n_nodes))
+    kg = sp.kron(kg, sp.eye(3), format="csr")[free][:, free]
+    try:
+        if k.shape[0] <= 4000:
+            solve_k = spla.splu(k.tocsc(), permc_spec="MMD_AT_PLUS_A").solve
+        else:
+            precond = two_level_preconditioner(k, prolongation(model)[free])
+
+            def solve_k(rhs):
+                x, info = spla.cg(k, rhs, M=precond, rtol=1e-5, maxiter=300)
+                if info:
+                    raise RuntimeError("Buckling stiffness solve did not converge")
+                return x
+
+        inv = spla.LinearOperator(k.shape, matvec=solve_k)
+        start = np.random.default_rng(0).standard_normal(k.shape[0])
+        vals, vecs = spla.eigsh(kg, k=1, M=k, Minv=inv, which="LA", tol=1e-3, maxiter=25, ncv=12, v0=start)
+    except RuntimeError:
+        return None
+    if not np.isfinite(vals[0]) or vals[0] <= 0:
+        return None
+    shape = np.zeros(len(free))
+    shape[free] = vecs[:, 0]
+    return float(1 / vals[0]), shape.reshape(-1, 3)

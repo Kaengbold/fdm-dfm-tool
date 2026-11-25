@@ -508,7 +508,8 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
 
     # ---------- Shared material-independent FEA cache & preconditioner cache ----------
     # Because E_z/E_xy and Poisson ratios are shared across materials (strength.material_for), the stress field
-    # for a given (pose, nozzle, layer_height, shells) is identical across all materials; only strengths scale.
+    # for a given (pose, nozzle, layer_height, shells) is identical across materials in the linear
+    # recipe search. The final options get separate geometry checks in their own materials.
     precond_cache: dict = {}
     solve_cache: dict = {}  # (pose_idx, nozzle, round(lh, 3), sh) -> (result_dict, p_solved, exact_bool)
     pose_u: dict[int, list] = {}  # latest displacement per pose for warm-starting nearby solves
@@ -522,7 +523,8 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
         start = hit[0].get("_u_all") if hit is not None else (x0 if x0 is not None else pose_u.get(i))
         # Use evaluate_cases directly with warm start and preconditioner reuse; keep material p0 as reference.
         p0 = prof(mats[0], p.nozzle, p.layer_height)
-        r = evaluate_cases(cases, poses[i].up, p0, sh, x0=start, rtol=rtol, precond_cache=precond_cache)
+        r = evaluate_cases(cases, poses[i].up, p0, sh, x0=start, rtol=rtol, precond_cache=precond_cache,
+                           geometry_checks=False)
         solve_cache[key] = (r, p0, exact)
         if r.get("_u_all") is not None:
             pose_u[i] = r["_u_all"]
@@ -540,7 +542,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
 
     def option(i: int, p: Profile, sh, sf: float | None, model_gm, *, strength_basis=None, reinforced: bool = False,
                reinforcement_kind: str | None = None, reinforcements: list[dict] | None = None,
-               zones: list[dict] | None = None, edits: list[dict] | None = None) -> dict:
+               zones: list[dict] | None = None, edits: list[dict] | None = None, edited_cases=None) -> dict:
         g_part, minutes = model_gm(sh, p)
         sup = support_g(i, p)
         from .api import _grams_minutes
@@ -560,6 +562,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
             "reinforcements": list(reinforcements or []), "zones": list(zones or []), "edits": list(edits or []),
         }
         if strength_basis is not None:
+            row["_strength_trial"] = (cases if edited_cases is None else edited_cases, i, p, sh, edited_cases is None)
             case_fi, reference = strength_basis
             from .strength import material_for, safety_range
 
@@ -653,10 +656,41 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
 
     nozzle_notes: list[dict] = []
 
+    def check_shortlist(picks: list[dict]) -> None:
+        from .strength import safety_range
+
+        for o in picks:
+            trial = o.get("_strength_trial")
+            # The geometry checks can only push an option below its target; one already below it is flagged
+            # anyway (the strength step still runs them in full for the option picked).
+            if trial is None or not o["meets_target"]:
+                continue
+            trial_cases, i, profile, shells, same_shape = trial
+            # Start from the search's solution for this pose and reuse its preconditioner: the solve itself is
+            # then cheap, and the geometry checks only run where they can matter.
+            hit = solve_cache.get((i, profile.nozzle, round(profile.layer_height, 3), shells)) if same_shape else None
+            start = hit[0].get("_u_all") if hit is not None else (pose_u.get(i) if same_shape else None)
+            checked = evaluate_cases(trial_cases, poses[i].up, profile, shells, x0=start, precond_cache=precond_cache)
+            if not any("geometry_checks" in case for case in checked["cases"]):
+                continue
+            sf = checked["safety_factor"]
+            o.update(safety=round(float(sf), 2), meets_target=sf >= o["target"])
+            o.pop("safety_range", None)
+            bounds = safety_range(checked["case_fi"], profile, sf)
+            if bounds is not None:
+                o["safety_range"] = [round(value, 2) for value in bounds]
+
     def result(partial: bool = False) -> dict:
         """The options from the candidates checked so far (pick_options copies them, so this can run again)."""
         picks = pick_options(cands, goal, owned)
-        feasible = bool(picks)
+        if not picks and cands:
+            strongest = max(cands, key=lambda c: (c["safety"] or 0.0) / (c["target"] or 1.0))
+            picks = [dict(strongest, badge="Recommended", recommended=True)]
+        if not partial:
+            check_shortlist(picks)
+        eligible = [o for o in picks if o["meets_target"]]
+        shortlist_failed = bool(picks and not eligible and any(c["meets_target"] for c in cands))
+        feasible = bool(eligible)
         out = {"goal": goal, "depth": depth, "target": target, "feasible": feasible, "skipped": list(skipped),
                "materials_skipped": mat_skipped, "nozzles_skipped": list(nozzle_notes), "candidates_checked": len(cands)}
         if partial:
@@ -665,7 +699,7 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
             out["ended_early"] = True
             out["ended_at"] = ended_at[0]
         if not feasible:
-            best = max(cands, key=lambda c: (c["safety"] or 0.0) / (c["target"] or 1.0)) if cands else None
+            best = max(picks, key=lambda c: (c["safety"] or 0.0) / (c["target"] or 1.0), default=None)
             checked_target = target
             uniform_target = len(set(targets.values())) == 1
             if best is not None:
@@ -678,6 +712,8 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
                 out["explanation"] = (f"Search ended early: {missing}"
                                       + (f" (best ×{best['safety']:.1f})" if best and best["safety"] else "")
                                       + ". Continue the search to try the rest.")
+            elif shortlist_failed:
+                out["explanation"] = "The final strength checks put the shortlisted options below their targets."
             else:
                 out["explanation"] = "Nothing could be checked."
                 if best and best["safety"]:
@@ -685,11 +721,16 @@ def optimize(mesh, *, goal: str = "balanced", loads: list[dict] | None = None, d
                         out["explanation"] = f"None of the options we checked reached ×{target:g}. Best: ×{best['safety']:.1f}"
                     else:
                         out["explanation"] = f"No option met its target. Closest: ×{best['safety']:.1f} of ×{checked_target:.2f}"
-        elif ended_at:
-            out["explanation"] = "Search ended early: these are the best options it found in the time. Continue the search to try the rest."
+        else:
+            picks = eligible
+            if not picks[0]["recommended"]:
+                picks[0].update(badge="Recommended", recommended=True)
+            if ended_at:
+                out["explanation"] = "Search ended early: these are the best options it found in the time. Continue the search to try the rest."
         if picks:
             out["target"] = picks[0]["target"]
         for o in picks:
+            o.pop("_strength_trial", None)
             o.pop("reinforcement_kind", None)
             pros_cons(o, picks[0], mat_cons)
             o["settings"] = _slicer_settings(o)
@@ -1203,7 +1244,8 @@ def _try_fillets(mesh, cases, edges: list[dict], i: int, up, pose_up: list[float
         pc_local: dict = {}
         x0_aug = [map_displacement(aug_cases[0].model.n_nodes, node_map, u) for u in u_base] if u_base else None
         for sh_try in test_shells:
-            r_scr = evaluate_cases(aug_cases, up, p0, sh_try, x0=x0_aug, rtol=1e-3, precond_cache=pc_local)
+            r_scr = evaluate_cases(aug_cases, up, p0, sh_try, x0=x0_aug, rtol=1e-3, precond_cache=pc_local,
+                                   geometry_checks=False)
             if _any_material_improves(mats, nozzle, lh, prof, sh_try, r_scr["case_fi"], p0,
                                       gm_for(i, aug_cases[0].model, orig_vol + added_mm3),
                                       base_snapshot, pose_up, goal, min_gain=0.05):
@@ -1232,12 +1274,12 @@ def _try_fillets(mesh, cases, edges: list[dict], i: int, up, pose_up: list[float
             continue
         edit, chk_cases, chk_map, real_add_mm3 = entry
         x0_chk = [map_displacement(chk_cases[0].model.n_nodes, chk_map, u) for u in u_base] if u_base else None
-        r_chk = evaluate_cases(chk_cases, up, p0, sh_try, x0=x0_chk, rtol=1e-4)
+        r_chk = evaluate_cases(chk_cases, up, p0, sh_try, x0=x0_chk, rtol=1e-4, geometry_checks=False)
         gm_chk = gm_for(i, chk_cases[0].model, orig_vol + real_add_mm3)
         added += _emit_if_better(
             i, mats, nozzle, lh, prof, sh_try, r_chk["case_fi"], p0, gm_chk, option,
             base_snapshot, pose_up, goal,
-            kind="fillet", label=edit["title"], detail=edit["description"], zones=[], edits=[edit],
+            kind="fillet", label=edit["title"], detail=edit["description"], zones=[], edits=[edit], edited_cases=chk_cases,
         )
     return added
 
@@ -1265,7 +1307,8 @@ def _try_thickening(mesh, cases, i: int, up, pose_up: list[float], bed_z: float,
         pc_local: dict = {}
         x0_aug = [map_displacement(aug_cases[0].model.n_nodes, node_map, u) for u in u_base] if u_base else None
         for sh_try in test_shells:
-            r_scr = evaluate_cases(aug_cases, up, p0, sh_try, x0=x0_aug, rtol=1e-3, precond_cache=pc_local)
+            r_scr = evaluate_cases(aug_cases, up, p0, sh_try, x0=x0_aug, rtol=1e-3, precond_cache=pc_local,
+                                   geometry_checks=False)
             if _any_material_improves(mats, nozzle, lh, prof, sh_try, r_scr["case_fi"], p0,
                                       gm_for(i, aug_cases[0].model, orig_vol + added_mm3),
                                       base_snapshot, pose_up, goal, min_gain=0.05):
@@ -1291,12 +1334,12 @@ def _try_thickening(mesh, cases, i: int, up, pose_up: list[float], bed_z: float,
             continue
         edit, chk_cases, chk_map, real_add_mm3 = entry
         x0_chk = [map_displacement(chk_cases[0].model.n_nodes, chk_map, u) for u in u_base] if u_base else None
-        r_chk = evaluate_cases(chk_cases, up, p0, sh_try, x0=x0_chk, rtol=1e-4)
+        r_chk = evaluate_cases(chk_cases, up, p0, sh_try, x0=x0_chk, rtol=1e-4, geometry_checks=False)
         gm_chk = gm_for(i, chk_cases[0].model, orig_vol + real_add_mm3)
         added += _emit_if_better(
             i, mats, nozzle, lh, prof, sh_try, r_chk["case_fi"], p0, gm_chk, option,
             base_snapshot, pose_up, goal,
-            kind="thicken", label=edit["title"], detail=edit["description"], zones=[], edits=[edit],
+            kind="thicken", label=edit["title"], detail=edit["description"], zones=[], edits=[edit], edited_cases=chk_cases,
         )
     return added
 
@@ -1383,7 +1426,7 @@ def _any_material_improves(mats: list[str], nozzle: str, lh: float, prof, sh, ca
 
 def _emit_if_better(i: int, mats: list[str], nozzle: str, lh: float, prof, sh, case_fi, p_ref: Profile,
                     gm_fn, option, base_snapshot: list[dict], pose_up: list[float], goal: str,
-                    *, kind: str, label: str, detail: str, zones: list[dict], edits: list[dict]) -> int:
+                    *, kind: str, label: str, detail: str, zones: list[dict], edits: list[dict], edited_cases=None) -> int:
     emitted = 0
     for mid in mats:
         q = prof(mid, nozzle, lh)
@@ -1392,7 +1435,7 @@ def _emit_if_better(i: int, mats: list[str], nozzle: str, lh: float, prof, sh, c
         if _material_improves(mid, sf, g_part, base_snapshot, pose_up, goal):
             option(i, q, sh, sf, gm_fn, strength_basis=(case_fi, p_ref), reinforced=True, reinforcement_kind=kind,
                    reinforcements=[{"kind": kind, "label": label, "detail": detail}],
-                   zones=zones, edits=edits)
+                   zones=zones, edits=edits, edited_cases=edited_cases)
             emitted += 1
     return emitted
 

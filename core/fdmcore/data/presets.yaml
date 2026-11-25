@@ -344,7 +344,7 @@ materials:
     max_flow_mm3s: 3         # flexible filament jams when pushed fast
     z_strength_factor: {none: 0.85, passive: 0.85, heated: 0.85}  # layers bond very well
     tensile_xy_mpa: 30       # Polymaker PolyFlex TPU95 29 MPa, Bambu TPU 95A HF 22 MPa (TDS)
-    modulus_xy_mpa: 30       # Polymaker PolyFlex TPU95 TDS: Young's modulus 29 ± 2.8 MPa (ISO 527), 33.6 MPa in V5.5 (ISO 37); not the 9.4 MPa at 100 % stretch. The strength check is not meant for TPU
+    modulus_xy_mpa: 30       # Polymaker PolyFlex TPU95 TDS: Young's modulus 29 ± 2.8 MPa (ISO 527), 33.6 MPa in V5.5 (ISO 37). The strength model uses this near the start of the stretch curve.
     density_g_cm3: 1.21
     shrinkage_pct: 0.5
     nozzle_temp_c: 240

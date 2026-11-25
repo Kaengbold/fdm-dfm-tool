@@ -36,6 +36,11 @@ finding.place.settings: "settings"
 
 # --- Printability & knowledge-base rules (every rule in rules.yaml) ---
 
+finding.large_deflection.title: "This part bends a lot"
+finding.large_deflection.one_liner: "As the part bends, the load acts on a different shape."
+finding.compression_buckling.title: "Thin walls can bow under load"
+finding.compression_buckling.one_liner: "A long, thin wall can suddenly bow sideways under compression."
+
 finding.long_bridge.title: "Long bridge will sag"
 finding.long_bridge.one_liner: "Unsupported span is too long; strands droop and leave a rough underside."
 finding.long_bridge.one_liner_span: "{span} mm span is over {material}'s {max_bridge} mm limit; underside sags."
@@ -300,3 +305,10 @@ strength.grid.failed: "The finer check could not finish reliably, so this estima
 strength.grid.similar: "A check with smaller cells gave a similar strength estimate."
 strength.grid.changed: "A check with smaller cells changed the strength estimate."
 strength.grid.changed_safety: "A check with smaller cells changed the safety factor from {before} to {after}."
+strength.geometry.large_deflection: "Accounting for the bend changes the estimated movement from {linear} mm to {curved} mm."
+strength.geometry.bending_unavailable: "The part may bend a lot. The estimate uses its starting shape, so check the bend on a printed copy."
+strength.geometry.buckling: "The thin wall may bow sideways at about {factor} times the load you set."
+strength.geometry.buckling_unavailable: "A thin section is being pushed along its length. The estimate could not check whether it bows sideways."
+strength.geometry.buckling_fix: "Support the wall from the side or reduce the force pushing along it."
+strength.geometry.buckling_holds: "It should hold the push you set."
+strength.geometry.buckling_risk: "The wall may suddenly bow sideways under a push."
