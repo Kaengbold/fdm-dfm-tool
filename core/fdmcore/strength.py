@@ -182,18 +182,61 @@ class LoadCase:
         return out
 
 
-def prepare_cases(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000) -> list[LoadCase]:
+def prepare_cases(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000,
+                  *, grid: VoxelGrid | None = None) -> list[LoadCase]:
     """One LoadCase per case number, all on the same voxel model."""
     fixed = [l for l in loads if l["kind"] == "fixed"]
     forces = [l for l in loads if l["kind"] != "fixed"]
     numbers = sorted({int(l.get("case", 1)) for l in forces}) or [1]
-    model = build_model(voxelize(mesh, target_voxels, partial=True))
+    model = build_model(grid if grid is not None else voxelize(mesh, target_voxels, partial=True))
     out = []
     for n in numbers:
         case = prepare(mesh, region, fixed + [l for l in forces if int(l.get("case", 1)) == n], model=model)
         case.number = n
         out.append(case)
     return out
+
+
+THIN_GRID_CELLS = 3
+AUTO_GRID_TARGET = 18_000
+AUTO_GRID_MAX_SOLID = 20_000
+AUTO_GRID_MAX_BOX = 200_000  # partial voxelization allocates arrays over the entire box
+
+
+def thin_grid_cells(model: Model) -> np.ndarray:
+    """Cubes with at most three contiguous cells between opposite faces along a grid axis.
+
+    Looking in both directions keeps a single free face, edge or corner of a thick block
+    from looking like a thin wall. There is no need to look farther than three cells.
+    """
+    solid, elems = model.grid.solid, model.elems
+    padded = np.pad(solid, THIN_GRID_CELLS)
+    xyz = elems.T + THIN_GRID_CELLS
+    thin = np.zeros(len(elems), dtype=bool)
+    for axis in range(3):
+        span = np.ones(len(elems), dtype=np.int8)
+        for direction in (-1, 1):
+            indices = list(xyz)
+            inside = np.ones(len(elems), dtype=bool)
+            for step in range(1, THIN_GRID_CELLS + 1):
+                indices[axis] = xyz[axis] + direction * step
+                inside &= padded[tuple(indices)]
+                span += inside
+        thin |= span <= THIN_GRID_CELLS
+    return thin
+
+
+def finer_grid(mesh: Mesh, coarse: Model, target_voxels: int) -> VoxelGrid | None:
+    """At most one finer grid, with limits on both voxelization and the solve."""
+    lo, hi = mesh.bounds()
+    size = hi - lo
+    target = min(2 * target_voxels, AUTO_GRID_TARGET)
+    h = max((abs(mesh.volume()) / target) ** (1 / 3), float(size.max()) / 300)
+    if h >= 0.95 * coarse.grid.h or np.prod(np.maximum(np.ceil(size / h), 1)) > AUTO_GRID_MAX_BOX:
+        return None
+    grid = voxelize(mesh, h=h, partial=True)
+    count = np.count_nonzero(grid.solid)
+    return grid if 0 < count <= min(AUTO_GRID_MAX_SOLID, 2 * len(coarse.elems)) else None
 
 
 def prepare(mesh: Mesh, region: np.ndarray, loads: list[dict], target_voxels: int = 12_000, model: Model | None = None) -> LoadCase:
@@ -657,6 +700,7 @@ def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells =
     worst["case"] = cases[k].number
     worst["cases"] = [{"case": c.number, "safety_factor": r["safety_factor"], "verdict": r["verdict"]} for c, r in zip(cases, results)]
     worst["case_fi"] = [(r["fi_layers_max"], r["fi_material_max"]) for r in results]
+    worst["_cases_converged"] = all(r["solver_converged"] for r in results)
     worst["_u_all"] = [r["u"] for r in results]
     return worst
 

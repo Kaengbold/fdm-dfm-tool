@@ -155,6 +155,7 @@ async function confirmBatch(store, services, recheck) {
       if (loads) {
         const st = await engine.call("strength", { up: o.up, loads, profile: profileOf(next), walls: option.walls, infill: option.infill, top: option.top, bottom: option.bottom });
         summary.safety = Math.round(st.safety_factor * 10) / 10;
+        summary.gridCheck = st.grid_check;
         summary.safetyRange = st.range;
         option = { ...option, safety: summary.safety, safety_range: st.range, meets_target: summary.target == null || summary.safety >= summary.target };
       }
@@ -312,6 +313,7 @@ function batchCard(store, services) {
       card.append(h("span", {}, low == null ? nominal : t("ranges.safety", { nominal, low, high })));
       if (sum.safetyRange) card.append(h("span", { class: "ui-hint" }, t("ranges.hint")));
     }
+    if (sum.gridCheck) card.append(h("span", {}, t(sum.gridCheck.reason), " ", t(sum.gridCheck.message)));
   } else {
     card.append(h("b", {}, t("problems.appliedNoCheck")));
   }

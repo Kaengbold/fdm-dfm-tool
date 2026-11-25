@@ -3019,7 +3019,7 @@ def _heat_findings(tp, h, w: dict, pts: np.ndarray, p: Profile, load_bearing, re
     return [summarize_finding(f, p) for f in out]
 
 
-def _printed(model):
+def _printed(model, *, cache: bool = True):
     """What the loaded G-code puts in each cube of ``model`` (cached per analysis grid)."""
     from .gcode import deposit
     from .strength import printed_from
@@ -3035,8 +3035,84 @@ def _printed(model):
 
         dep = deposit(g["toolpath"], model.grid, model.elems, to_part)
         pr = printed_from(dep, model, inside_fraction(s.mesh, model.grid))
-        g["printed"] = {id(model): (pr, dep["missed"])}  # one grid at a time: old ones are not used again
+        result = pr, dep["missed"]
+        if cache:
+            g["printed"] = {id(model): result}
+        return result
     return g["printed"][id(model)]
+
+
+def _strength_on_grid(cases, up, p, sh, detailed, h, *, trial: bool = False) -> dict:
+    """Recompute print deposition and bonding for the grid used in this solve."""
+    from dataclasses import replace
+
+    from .strength import evaluate_cases, material_for
+
+    if not detailed:
+        return _evaluate(cases, up, p, sh)
+    model = cases[0].model
+    printed, missed = _printed(model, cache=not trial)
+    if h is not None:
+        usual = evaluate_cases(cases, up, p, sh, printed)["safety_factor"]
+        bond, source = _bond_per_cube(model, _require().gcode, h, material_for(p))
+        printed = replace(printed, bond=bond)
+    r = evaluate_cases(cases, up, p, sh, printed)
+    r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
+    if h is not None:
+        r["heat"] = _heat_strength(model, h, bond, source, r, usual)
+    return r
+
+
+def _thin_feature(model, critical_point) -> str | None:
+    from .strength import THIN_GRID_CELLS, thin_grid_cells
+
+    thin = thin_grid_cells(model)
+    at = np.floor((critical_point - model.grid.origin) / model.grid.h).astype(int)
+    if (thin & (model.elems == at).all(axis=1)).any():
+        return "weak_spot"
+    if any(f["type"] == "rounded_edge" and f["tag"] != "none" and f["radius"] <= THIN_GRID_CELLS * model.grid.h
+           for f in _features()):
+        return "fillet"
+    return "wall" if thin.any() else None
+
+
+def _strength_grid_check(cases, r, loads, up, p, sh, detailed, h):
+    """Try one bounded refinement. The original result and cache survive a failed trial."""
+    from .strength import finer_grid, prepare_cases
+
+    model = cases[0].model
+    reason = _thin_feature(model, r["critical_point"])
+    if reason is None:
+        return cases, r, None
+    s = _require()
+    before = r["safety_factor"]
+    check = {"status": "limited", "coarse_voxel_mm": model.grid.h, "coarse_safety_factor": before,
+             "reason": {"key": f"strength.grid.{reason}", "params": {}}}
+    try:
+        grid = finer_grid(s.mesh, model, _grid("strength_voxels"))
+        if grid is not None:
+            check["status"] = "failed"
+            refined = prepare_cases(s.mesh, s.regions, _resolve_loads(loads), grid=grid)
+            trial = _strength_on_grid(refined, up, p, sh, detailed, h, trial=True)
+            if trial["_cases_converged"] and np.isfinite(trial["fi"]).all() and np.isfinite(trial["u"]).all():
+                after = trial["safety_factor"]
+                moved = not np.isclose(after, before, rtol=0.05, atol=0) or trial["verdict"] != r["verdict"]
+                check.update(status="changed" if moved else "similar", fine_voxel_mm=grid.h)
+                cases, r = refined, trial
+    except (ValueError, RuntimeError, ArithmeticError, MemoryError, np.linalg.LinAlgError):
+        check["status"] = "failed"
+    status, params = check["status"], {}
+    if status == "changed":
+        after = r["safety_factor"]
+        if np.isfinite([before, after]).all():
+            old, new = _format_safety(before), _format_safety(after)
+            if old == new:
+                old, new = f"about ×{before:.2f}", f"about ×{after:.2f}"
+            if old != new:
+                status = "changed_safety"
+                params = {"before": old, "after": new}
+    check["message"] = {"key": f"strength.grid.{status}", "params": params}
+    return cases, r, check
 
 
 def strength(up, loads: list[dict], profile: dict | None = None, walls: int | None = None, infill: float | None = None,
@@ -3052,24 +3128,21 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     ``zones``: stronger zones from optimise_strength (slicer modifier volumes). With ``detailed``,
     use a matching heat result if available. ``heat=True`` runs the heat model if needed and
     ``heat=False`` uses the usual layer strength. The ``heat`` result compares safety with usual
-    bonding and locates the cold joint that sets the local strength. Quick runs include a safety
+    bonding and locates the cold joint that sets the local strength. A thin feature on the normal grid
+    can trigger one bounded finer solve, described in ``grid_check``. Quick runs include a safety
     ``range`` from rechecking the same stresses with weaker and stronger layer bonds."""
-    from dataclasses import replace
-
-    from .strength import evaluate_cases, face_values, material_for, refine, safety_range, sample_nodes, surface_values
+    from .strength import face_values, refine, safety_range, sample_nodes, surface_values
 
     s = _require()
     p = Profile.from_dict(profile)
     cases = _load_case(loads, _grid("fine_voxels") if fine else None)
     sh = _shells(p, walls, infill, top, bottom, zones)
-    model = cases[0].model
-    printed = h = None
+    h = None
     if detailed:
         if s.gcode is None:
             raise ValueError("Load the sliced G-code first (detailed check)")
         if np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
             raise ValueError("The G-code was sliced for another orientation: slice this one, or switch back")
-        printed, missed = _printed(model)
         cached = s.gcode.get("heat")
         if heat is not False and cached is not None and cached[0][0] == _heat_key(p):
             h = cached[1][0]
@@ -3077,20 +3150,21 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
             h, _ = _heat(p)
     elif heat:
         raise ValueError("The heat option needs the detailed check (load the sliced G-code)")
-    if h is not None:
-        usual = evaluate_cases(cases, up, p, sh, printed)["safety_factor"]
-        bond, source = _bond_per_cube(model, s.gcode, h, material_for(p))
-        printed = replace(printed, bond=bond)
-    r = evaluate_cases(cases, up, p, sh, printed) if printed is not None else _evaluate(cases, up, p, sh)
+    r = _strength_on_grid(cases, up, p, sh, detailed, h)
+    # The optimiser can reuse these stresses on its usual grid even if the display uses a finer one.
+    base_case = next(c for c in cases if c.number == r["case"])
+    base_fi = r["fi"]
+    if not fine:
+        cases, r, grid_check = _strength_grid_check(cases, r, loads, up, p, sh, detailed, h)
+        if grid_check is not None:
+            r["grid_check"] = grid_check
     r["fine"] = bool(fine)
+    r.pop("_cases_converged")
+    model = cases[0].model
     if not (fine or detailed):
         bounds = safety_range(r["case_fi"], p, r["safety_factor"])
         if bounds is not None:
             r["range"] = bounds
-    if printed is not None:
-        r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
-    if h is not None:
-        r["heat"] = _heat_strength(model, h, bond, source, r, usual)
     fi, vm, u = r.pop("fi"), r.pop("vm"), r.pop("u")
     heat = face_values(s.mesh, model.grid, model, fi)
     r["face_heat"] = (np.clip(heat / 1.25, 0, 1) * 255).astype(np.uint8).tobytes()
@@ -3129,10 +3203,13 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     s.weak_spot = (r["critical_point"], float(model.grid.h))  # design() suggests a chamfer there
     s.hot_spots = _hot_spots(model, fi, ok)  # ... and at the other inside corners that are nearly as weak
     s.strength_verdict = r["verdict"]
-    s.stressed = None if printed is not None else {"model": model, "up": np.asarray(up, float) / np.linalg.norm(up),
-                                                   "material": json.dumps(p.material, sort_keys=True), "fi": fi, "ignore": worst.ignore}
+    s.stressed = None if detailed else {"model": base_case.model, "up": np.asarray(up, float) / np.linalg.norm(up),
+                                       "material": json.dumps(p.material, sort_keys=True), "fi": base_fi, "ignore": base_case.ignore}
     r["story_parts"] = _strength_story_parts(r)
     r["explanation"] = _strength_story(s.mesh, up, r, p)
+    if "grid_check" in r:
+        check = r["grid_check"]
+        r["explanation"] += f" {format_message(check['reason'])} {format_message(check['message'])}"
     return r
 
 
