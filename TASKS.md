@@ -1342,7 +1342,7 @@ Not reachable: Pollák & Goryl 2025.
   - Outcome: Detailed strength uses the weakest modeled joint crossing each cube, reports its layer and cooling history, and uses the usual layer strength when heat data is unavailable.
 - [~] **T-598 P2** Results as ranges. · files: `core/fdmcore/api.py`, `web/` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-598-result-ranges`)
   - Do: run with the low and high ends of the uncertain constants (thermal.yaml / thresholds ranges) and show e.g. "×2.1 to ×3.4" or "40–55 °C" beside today's single number; keep it fast (only the few constants that matter most).
-- [ ] **T-599 P2** Strength grid check on thin features. · files: `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: —
+- [~] **T-599 P2** Strength grid check on thin features. · files: `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-599-thin-feature-grid`)
   - Do: warn when the weak spot, a thin wall or a fillet is only a few voxels thick, and re-check it on a finer grid automatically; say when the answer moved.
 - [ ] **T-600 P3** Strength: big bending and buckling. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` · owner: —
   - Do: large-deflection solve for snap fits and TPU; a buckling check for thin, tall walls under pressure.
