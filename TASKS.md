@@ -1351,7 +1351,7 @@ Not reachable: Pollák & Goryl 2025.
   - Outcome: Thin features trigger one bounded finer solve, with a notice when the safety estimate moves and a fallback to the original result if the finer solve fails.
 - [~] **T-600 P3** Strength: big bending and buckling. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-600-large-deflection-buckling`)
   - Do: large-deflection solve for snap fits and TPU; a buckling check for thin, tall walls under pressure.
-- [ ] **T-601 P3** Warping: plastic relaxes while warm. · files: `core/fdmcore/warp.py` · owner: —
+- [~] **T-601 P3** Warping: plastic relaxes while warm. · files: `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-601-warm-relaxation`)
   - Do: stress relaxation near the softening point (bed-warm layers), from published data; check whether PLA warping is over-predicted today.
 - [ ] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: —
 - [ ] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: —
