@@ -44,6 +44,7 @@ def test_goal_options_meet_the_target_and_differ(hook, goal):
     for a in opts:  # never padded with near copies
         assert all(optimizer._distinct(a, b) for b in opts if b is not a)
     o = opts[0]
+    assert all(opt["safety_range"][0] <= opt["safety"] <= opt["safety_range"][1] for opt in opts)
     assert o["settings"]["wall_loops"] == str(o["walls"]) and o["total_g"] >= o["part_g"]
     assert len(o["pros"]) <= 3 and len(o["cons"]) <= 3
 

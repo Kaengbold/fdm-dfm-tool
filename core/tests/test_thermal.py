@@ -2,6 +2,7 @@
 on top) against the simpler line-by-line check."""
 
 import gzip
+import json
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -172,12 +173,19 @@ def test_islands_and_columns(quick):
 def test_heat_model_from_the_api():
     api.load((FIXTURES / "part.stl").read_bytes(), "fixture")
     api.load_gcode((FIXTURES / "bambu.gcode.3mf").read_bytes(), [0, 0, 1])
-    r = api.heat_model([0, 0, 1])
+    r = api.dispatch("heat_model", '{"up": [0, 0, 1]}')
     assert r["tier"] == "quick" and r["spots"] > 100 and r["material"] == "pla"
     pts = np.frombuffer(r["points"], np.float32).reshape(-1, 3)
     assert len(pts) == r["spots"]
     assert pts[:, 2].min() >= 0 and pts[:, 2].max() <= 10.2  # in the oriented part's frame
     top = r["hottest"][0]
     assert top["point"][2] > PIN_Z and top["cover_c"] >= r["cover_c"]["p95"]  # the hottest spots are on the pin
+    for name, value in r["cover_c"].items():
+        low, high = r["range"]["cover_c"][name]
+        assert low <= value <= high and low < high
+    low, high = r["range"]["bond_median"]
+    assert low <= r["bond_median"] <= high
+    json.dumps(r, allow_nan=False, default=bytes.hex)
+    assert "range" not in api.heat_model([0, 0, 1], ranges=False)
     with pytest.raises(ValueError, match="another orientation"):
         api.heat_model([1, 0, 0])

@@ -115,6 +115,13 @@ first_layer:
   thin_lines: 3                   # first-layer strips narrower than this many lines stick badly (estimate)
 
 warping:
+  shrinkage_pct_ranges:
+    pla: [0.2, 0.4]
+    petg: [0.3, 0.5]
+    abs: [0.6, 0.9]
+    pa_cf: [0.3, 0.5]
+  # Sensitivity trial for other or custom materials, not measured limits.
+  shrinkage_factor_range: [0.75, 1.25]
   # Footprint length (mm, longest side of an island on the bed) where corner lifting becomes likely.
   # From shrinkage rates (PLA 0.2–0.4 %, PETG 0.3–0.5 %, ABS 0.6–0.9 %, PA-CF 0.3–0.5 %) calibrated to
   # "ABS on an open printer: risky from ~40–50 mm" [problem_warping_and_corner_lifting, mistake_23_printing_abs_asa_pc_on_open_printer].
@@ -133,6 +140,8 @@ warping:
   brim_width_mm: 8                # [corner_mouse_ears_vs_brim]
 
 bed_adhesion:
+  # Sensitivity trial for uncalibrated grip, not measured limits.
+  grip_factor_range: [0.5, 1.5]
   # Grip estimates for a bare model on a hot bed. Leoben PLA strand shear: https://doi.org/10.1080/14658011.2017.1399531
   # PETG surface comparison: https://doi.org/10.3390/app14020945 (PEI/glass 0.98, PI/glass 1.06, aluminium/glass 0.60).
   # PEI and aluminium follow those ratios from the nearest glass estimate, extended to other plastics with low confidence.
@@ -406,6 +415,10 @@ grip_fins:
   min_length_mm: 1.2              # less room than this in the wall: no fins
   min_wall_mm: 1.2                # plastic left around the pocket
   count_by_diameter: [[6, 3], [12, 4], [1000, 6]]   # partner up to Ø mm: fins
+
+strength_uncertainty:
+  # Rough sensitivity trial; see process effects in research/sourced_B_strength.yaml.
+  z_strength_factor_range: [0.8, 1.2]
 
 shrinkage:
   # Parts shrink as they cool (linear %, per material in presets.yaml). Report when the longest
