@@ -41,6 +41,9 @@ NOZZLE_SAMPLE_S = 0.05  # where the nozzle is, sampled this often for reheating
 COOL_DOWN_S = DELAYS_S[-1]  # keep going after the last line, so the last joints get their T_int
 MIN_FILL = 0.05  # a cell's plastic share never counts below this (sparse infill still conducts a little)
 SLIVER_FILL = 0.25  # a cell with less plastic than this joins its fullest neighbour (a wall clipping a corner)
+_REFINED = {**TIERS["fine"], "cell_mm": 0.5}
+_BOUNDARY_BYTES = 16 * 1024 * 1024
+_PROTOTYPE_SAMPLES = 1_000_000
 
 
 @dataclass
@@ -209,7 +212,8 @@ def _joint_conductance(area: np.ndarray, neck_area: np.ndarray, distance: np.nda
     return bulk * contact / (bulk + contact)
 
 
-def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, profile: Profile, region=None) -> dict:
+def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, profile: Profile, region=None,
+              bounded: bool = False) -> dict:
     """Plastic of the part and its supports drawn onto the cells of each layer: one node per filled
     cell, with its plastic, when it was printed and how hot it went down. Sum the beads' flat strips
     in each cell to estimate the area available to touch the next layer, without tracking exactly
@@ -217,11 +221,18 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, profile: Profile, 
     ``region`` (x0, y0, x1, y1, printer frame): only the plastic inside it (see ``simulate``)."""
     which = np.flatnonzero(np.isin(tp.kind, (*PART_KINDS, SUPPORT)))
     a, b = tp.p0[which].astype(float), tp.p1[which].astype(float)
+    if bounded and region is not None:
+        lo, hi = np.array(region).reshape(2, 2)
+        crosses = ((np.maximum(a[:, :2], b[:, :2]) >= lo) &
+                   (np.minimum(a[:, :2], b[:, :2]) < hi)).all(axis=1)
+        which, a, b = which[crosses], a[crosses], b[crosses]
     length = np.linalg.norm(b - a, axis=1)
     run = np.linalg.norm(b[:, :2] - a[:, :2], axis=1)
     width, height = _bead_dimensions(tp, which, run, profile)
     flat = np.maximum(width - height, 0.05 * width)
     n = np.maximum(np.ceil(length / (cell / 2)).astype(int), 1)
+    if bounded and n.sum() > _PROTOTYPE_SAMPLES:
+        raise ValueError("Too many toolpath samples for the refined heat prototype")
     seg = np.repeat(np.arange(len(which)), n)
     k = np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)
     f = (k + 0.5) / n[seg]
@@ -234,7 +245,8 @@ def _deposits(tp: Toolpath, tm: Timing, cell: float, c: dict, profile: Profile, 
     melt = (c["nozzle_c"] - _interp(c["melt_drop"], flow))[seg]
     if region is not None:
         x0, y0, x1, y1 = region
-        inside = (pts[:, 0] >= x0) & (pts[:, 0] <= x1) & (pts[:, 1] >= y0) & (pts[:, 1] <= y1)
+        hi = pts[:, :2] < [x1, y1] if bounded else pts[:, :2] <= [x1, y1]
+        inside = ((pts[:, :2] >= [x0, y0]) & hi).all(axis=1)
         if not inside.any():
             raise ValueError("No printed plastic in that region")
         seg, line, pts, vol, t, melt = seg[inside], line[inside], pts[inside], vol[inside], t[inside], melt[inside]
@@ -303,8 +315,106 @@ def _islands(n: int, layer: np.ndarray, side: np.ndarray, up: np.ndarray) -> tup
     return island, column_of[island]
 
 
+@dataclass
+class RefinedHeat:
+    quick: Heat
+    fine: Heat
+    region: tuple[float, float, float, float]  # padded crop in the printer frame
+    boundary_nodes: int
+    boundary_links: int
+
+
+class _CutBoundary:
+    """One-way coupling to adjacent quick cells across the four lateral faces of the crop."""
+
+    def __init__(self, region: tuple[float, float, float, float], cell: float):
+        self.region = region
+        self.cell = cell
+        self.lo, self.hi = np.rint(np.array(region).reshape(2, 2) / cell).astype(int)
+        self.times: list[float] = []
+        self.rows: list[np.ndarray] = []
+
+    def select(self, d: dict, fill: np.ndarray) -> None:
+        x, y = d["ix"] + int(d["lo"][0]), d["iy"] + int(d["lo"][1])
+        x0, y0 = self.lo
+        x1, y1 = self.hi
+        side_x = ((x == x0 - 1) | (x == x1)) & (y >= y0) & (y < y1)
+        side_y = ((y == y0 - 1) | (y == y1)) & (x >= x0) & (x < x1)
+        self.nodes = np.flatnonzero(side_x | side_y)
+        self.by_cell = {(d["layer"][i], x[i], y[i]): j for j, i in enumerate(self.nodes)}
+        self.birth_s = d["born"][self.nodes]
+        self.birth_c = d["birth"][self.nodes]
+        self.fill, self.lh = fill[self.nodes], d["lh"][self.nodes]
+
+    def record(self, t: float, temperatures: np.ndarray, representatives: np.ndarray) -> None:
+        if not len(self.nodes):
+            return
+        # Include overhead for the timestamp and each NumPy row as well as its data.
+        if (len(self.rows) + 1) * (4 * len(self.nodes) + 192) > _BOUNDARY_BYTES:
+            raise ValueError("Too much temperature history for the refined heat prototype")
+        self.times.append(t)
+        self.rows.append(temperatures[representatives[self.nodes]].astype(np.float32))
+
+    def at(self, t: float) -> tuple[np.ndarray, np.ndarray]:
+        """Sample before/after the quick step, using melt temperature at birth."""
+        live = t >= self.birth_s
+        i = int(np.searchsorted(self.time_array, t))
+        if i == len(self.rows):
+            return self.rows[-1], live
+        if self.times[i] == t:
+            return self.rows[i], live
+        left = self.times[i - 1] if i else -np.inf
+        born_between = self.birth_s > left
+        start = np.maximum(left, self.birth_s)
+        start_c = np.where(born_between, self.birth_c, self.rows[i - 1])
+        elapsed = np.maximum(t - start, 0)
+        fraction = elapsed / np.maximum(self.times[i] - start, 1e-12)
+        return start_c + fraction * (self.rows[i] - start_c), live
+
+    def links(self, d: dict, fill: np.ndarray, cell: float, conductivity: float) -> tuple[np.ndarray, ...]:
+        self.time_array = np.asarray(self.times)
+        ratio = round(self.cell / cell)
+        xy = np.column_stack([d["ix"], d["iy"]]) + d["lo"].astype(int)
+        edge, source = [], []
+        for axis in (0, 1):
+            for step, cut in ((-1, self.lo[axis] * ratio), (1, self.hi[axis] * ratio - 1)):
+                for i in np.flatnonzero(xy[:, axis] == cut):
+                    outside = xy[i].copy()
+                    outside[axis] += step
+                    j = self.by_cell.get((d["layer"][i], *(outside // ratio)))
+                    if j is not None:
+                        edge.append(i)
+                        source.append(j)
+        edge, source = np.asarray(edge, int), np.asarray(source, int)
+        # Each link spans one fine face. Its two half-cell conduction resistances add in series.
+        area = cell * np.minimum(d["lh"][edge], self.lh[source]) * 1e-6
+        distance = (cell / fill[edge] + self.cell / self.fill[source]) * 0.5e-3
+        return edge, source, conductivity * area / distance
+
+
+def refine_hot_region(tp: Toolpath, tm: Timing, profile: Profile,
+                      region: tuple[float, float, float, float], *, padding_mm: float = 2.0,
+                      overrides: dict | None = None) -> RefinedHeat:
+    """Prototype: refine a caller-selected hot spot in XY, over the original printed layers.
+
+    Pad and align the box to the quick grid so cut faces can take temperatures from the
+    adjacent quick cells. Interpret results inside the requested box, away from its cut faces.
+    """
+    box = np.asarray(region, dtype=float)
+    if (box.shape != (4,) or not np.isfinite(box).all() or np.any(box[:2] >= box[2:]) or
+            not np.isfinite(padding_mm) or padding_mm < 0):
+        raise ValueError("Expected a finite XY box and non-negative padding")
+    cell = TIERS["quick"]["cell_mm"]
+    padded = tuple(np.r_[np.floor((box[:2] - padding_mm) / cell),
+                         np.ceil((box[2:] + padding_mm) / cell)] * cell)
+    boundary = _CutBoundary(padded, cell)
+    quick = simulate(tp, tm, profile, overrides=overrides, _boundary=boundary)
+    fine = simulate(tp, tm, profile, "refined", overrides=overrides, region=padded, _boundary=boundary)
+    return RefinedHeat(quick, fine, padded, len(boundary.nodes), boundary.link_count)
+
+
 def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", overrides: dict | None = None,
-             region=None, snapshots: bool = False) -> Heat:
+             region=None, snapshots: bool = False, *, _boundary: _CutBoundary | None = None) -> Heat:
     """Run the heat network over the whole print. ``overrides`` replaces constants (tests, tuning).
     ``region`` (x0, y0, x1, y1, printer frame): only the plastic inside it gets cells, with the timing and the
     nozzle of the whole print: a cheap detail run around a spot (its cut sides lose no heat sideways, so keep a
@@ -313,16 +423,27 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
     from scipy.sparse import coo_matrix
 
     started = time.time()
-    cfg = TIERS[tier]
+    cfg = _REFINED if tier == "refined" and _boundary is not None else TIERS[tier]
     c = {**constants(profile, tp.settings), **(overrides or {})}
+    if _boundary is not None and tm.total_s - tm.moves["t0"][0] > _PROTOTYPE_SAMPLES * NOZZLE_SAMPLE_S:
+        raise ValueError("Too many nozzle positions for the refined heat prototype")
     cell = cfg["cell_mm"]
-    d = _deposits(tp, tm, cell, c, profile, region)
+    d = _deposits(tp, tm, cell, c, profile, region, bounded=_boundary is not None)
     n = len(d["keys"])
     nx, ny = d["nx"], d["ny"]
     layer, z, lh = d["layer"], d["z"], d["lh"]
     h, lh_m = cell * 1e-3, lh * 1e-3
     fill = np.clip(d["volume"] / (cell * cell * lh), MIN_FILL, 1.0)
     mass = c["rho"] * d["volume"] * 1e-9  # kg
+    cut_edges = None
+    capture = _boundary if tier == "quick" else None
+    if capture is not None:
+        _boundary.select(d, fill)
+    elif _boundary is not None:
+        edge, source, g_cut = _boundary.links(d, fill, cell, c["k"])
+        _boundary.link_count = len(edge)
+        if len(edge):
+            cut_edges = edge, source, g_cut
 
     side = _neighbours(d["keys"], (ny, -ny, 1, -1))  # same layer: x+, x-, y+, y-
     up = _neighbours(d["keys"], (nx * ny,))[:, 0]
@@ -506,11 +627,19 @@ def simulate(tp: Toolpath, tm: Timing, profile: Profile, tier: str = "quick", ov
         g = wg * (born[wa] & born[wb])
         diag = np.where(live, cap + g_amb + g_b + g_noz, 1.0)
         rhs = np.where(live, cap * T[idx] + g_amb * t_amb + g_b * c["bed_c"] + g_noz * c["nozzle_c"], T[idx])
+        if cut_edges is not None:
+            cut_c, cut_live = _boundary.at(t_next)
+            dst = local[rep[edge]]
+            active = (dst >= 0) & born[edge] & cut_live[source]
+            diag += np.bincount(dst[active], g_cut[active], minlength=m)
+            rhs += np.bincount(dst[active], g_cut[active] * cut_c[source[active]], minlength=m)
         diag += np.bincount(la, g, minlength=m) + np.bincount(lb, g, minlength=m)
         A = coo_matrix((np.concatenate([diag, -g, -g]), (np.concatenate([np.arange(m), la, lb]), np.concatenate([np.arange(m), lb, la]))),
                        shape=(m, m)).tocsr()
         T_old = T[idx]
         T[idx] = _solve(A, rhs, T_old)
+        if capture is not None:
+            capture.record(t_next, T, rep)
 
         # Joints: T_int = mean of the two nodes (same plastic on both sides of the contact).
         j = j_all[born[j_all]]

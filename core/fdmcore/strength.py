@@ -32,7 +32,7 @@ import numpy as np
 from .fea import Material, Model, build_model, element_stress, lowest_mode, rotate_stiffness, solve
 from .mesh import Mesh
 from .orientation import rotation_to_z
-from .profile import Profile
+from .profile import Profile, load_data
 from .service import heat_factor, required_safety
 from .voxel import VoxelGrid, depth, voxelize
 
@@ -475,6 +475,22 @@ def material_for(profile: Profile) -> Material:
         strength_z=m["tensile_xy_mpa"] * profile.z_strength_factor * bond * k,
     )
 
+
+def safety_range(case_fi, profile: Profile, safety: float, *, layer_scale: float = 1.0,
+                 material_scale: float = 1.0) -> list[float] | None:
+    """Recheck every load's failure limits, not its stresses: Z strength changes layer failure but
+    not stiffness. Layer bonds vary with cooling and printing, even for the same plastic."""
+    if not np.isfinite(safety):
+        return None
+    z_strength = profile.z_strength_factor
+    factors = load_data("thresholds")["strength_uncertainty"]["z_strength_factor_range"]
+    values = [safety]
+    for factor in factors:
+        layer = layer_scale / min(factor, 1 / z_strength)
+        worst = max(max(fl * layer, fm * material_scale) for fl, fm in case_fi)
+        if worst > 0:
+            values.append(float(1 / worst))
+    return [min(values), max(values)]
 
 
 def solid_fraction(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:

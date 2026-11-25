@@ -28,7 +28,7 @@ NODE = shutil.which("node")
 def detail():
     api.load((FIXTURES / "part.stl").read_bytes(), "fixture")
     api.load_gcode(gzip.decompress((FIXTURES / "orca.gcode.gz").read_bytes()), [0, 0, 1])
-    return api.optimize_cooling([0, 0, 1], detail=True)
+    return api.optimize_cooling([0, 0, 1], detail=True, ranges=True)
 
 
 def test_detail_has_every_spot_before_and_after(detail):
@@ -39,6 +39,11 @@ def test_detail_has_every_spot_before_and_after(detail):
     assert n > 100 and all(len(sp[k][i]) == n * 4 for k in ("cover_c", "cover_s", "bond") for i in (0, 1))
     before, after = (np.frombuffer(w, np.uint8) for w in sp["window"])
     assert (before == 1).sum() == detail["before"]["too_hot"] == 40 and (after == 1).sum() == detail["gcode"]["too_hot"] == 0
+    baseline = detail["before"]
+    low, high = baseline["range"]["cover_c"]["median"]
+    assert low < baseline["cover_c"]["median"] < high
+    low, high = baseline["range"]["bond_median"]
+    assert low < baseline["bond_median"] < high
     tl = detail["timeline"]
     layers = len(tl["z"]) // 4
     assert layers == 50 and all(len(tl[k][i]) == layers * 4 for k in ("seconds", "fan", "cover_c") for i in (0, 1))

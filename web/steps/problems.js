@@ -156,7 +156,8 @@ async function confirmBatch(store, services, recheck) {
         const st = await engine.call("strength", { up: o.up, loads, profile: profileOf(next), walls: option.walls, infill: option.infill, top: option.top, bottom: option.bottom });
         summary.safety = Math.round(st.safety_factor * 10) / 10;
         summary.gridCheck = st.grid_check;
-        option = { ...option, safety: summary.safety, meets_target: summary.target == null || summary.safety >= summary.target };
+        summary.safetyRange = st.range;
+        option = { ...option, safety: summary.safety, safety_range: st.range, meets_target: summary.target == null || summary.safety >= summary.target };
       }
       const before = res?.check?.findings ?? [];
       summary.newIds = F.newProblems(before, out.check.findings);
@@ -305,9 +306,12 @@ function batchCard(store, services) {
   if (sum.recheck) {
     card.append(h("b", {}, t("problems.rechecked", { fixed: sum.fixed, count: sum.newIds.length })));
     if (sum.safety != null) {
-      card.append(h("span", {}, sum.before != null
+      const nominal = sum.before != null
         ? t("problems.safetyWas", { sf: sum.safety, was: sum.before, target: sum.target })
-        : t("problems.safety", { sf: sum.safety, target: sum.target })));
+        : t("problems.safety", { sf: sum.safety, target: sum.target });
+      const [low, high] = sum.safetyRange?.map((value) => Math.round(value * 10) / 10) ?? [];
+      card.append(h("span", {}, low == null ? nominal : t("ranges.safety", { nominal, low, high })));
+      if (sum.safetyRange) card.append(h("span", { class: "ui-hint" }, t("ranges.hint")));
     }
     if (sum.gridCheck) card.append(h("span", {}, t(sum.gridCheck.reason), " ", t(sum.gridCheck.message)));
   } else {

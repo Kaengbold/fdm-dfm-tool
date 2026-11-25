@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -165,9 +166,17 @@ def test_hook_strongest_on_its_side():
     loads = hook_loads()
     prof = {"material": "abs", "printer": "prusa_mk4s"}
     side = api.strength([1, 0, 0], loads, prof)["safety_factor"]
-    back = api.strength([0, 1, 0], loads, prof)
+    back = api.dispatch("strength", json.dumps({"up": [0, 1, 0], "loads": loads, "profile": prof}))
     assert side > 1.5 * back["safety_factor"]
     assert back["mode"] == "layers"
+    low, high = back["range"]
+    assert low < back["safety_factor"] <= high
+    json.dumps(back, allow_nan=False, default=bytes.hex)
+
+
+def test_safety_range_rechecks_every_load_and_keeps_material_failure_limit():
+    profile = Profile.from_dict({"material": "pla"})
+    assert strength.safety_range([(0.4, 0.1), (0.2, 0.375)], profile, 2.5) == pytest.approx([2.0, 1 / 0.375])
 
 
 def test_enclosure_makes_abs_stronger_across_layers():

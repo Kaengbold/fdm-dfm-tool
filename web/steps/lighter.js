@@ -77,7 +77,7 @@ function use(store, way) {
     { label: t("ui.cancel"), variant: "ghost" },
     { label: t("light.use"), variant: "primary", onClick: () => {
       store.set({ option: { ...o, walls: way.walls, top: way.top, bottom: way.bottom, infill: way.infill,
-        settings: { ...(o.settings ?? {}), ...way.settings }, zones: way.zones ?? [], safety: Math.round(way.safety_factor * 10) / 10,
+        settings: { ...(o.settings ?? {}), ...way.settings }, zones: way.zones ?? [], safety: Math.round(way.safety_factor * 10) / 10, safety_range: undefined,
         part_g: way.grams, total_g: way.grams + (o.support_g ?? 0), minutes: way.minutes, meets_target: true, lighter: way.id } });
       result = null;
     } }] });
