@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from fdmcore import api, gcode, gcode_rewrite, thermal_opt
+from fdmcore import api, gcode, gcode_rewrite, kinematics, thermal_opt
 from test_heat_window import slab
 
 FIXTURES = Path(__file__).parent / "gcode"
@@ -51,6 +51,23 @@ def test_speeds_fan_and_parks_change_nothing_else(absolute):
     assert back.dwells["s"].sum() == pytest.approx(tp.dwells["s"].sum() + 6.0)
     assert new.parks == 1 and new.minutes[1] > new.minutes[0]
     assert new.text.startswith("; FDM DFM Tool cooling plan")
+
+
+def test_park_timing_matches_the_written_moves():
+    text = slab(fan=128, speed=40, set_speed=40)
+    tp = gcode.parse(text)
+    lines = text.splitlines()
+    at = tp.src[np.searchsorted(tp.layer, 16)]
+    lines[at:at] = ["M204 P500 T500", "G4 P250"]
+    text = "\n".join(lines)
+    tp = gcode.parse(text)
+    plan = thermal_opt.Plan.none(len(tp.layer_z))
+    plan.park[16] = 6.0
+    new = gcode_rewrite.rewrite(text, tp, plan)
+    back = gcode.parse(new.text)
+    planned, written = kinematics.timing(new.toolpath), kinematics.timing(back)
+    np.testing.assert_allclose(planned.t0, written.t0, rtol=0, atol=1e-8)
+    assert planned.total_s == pytest.approx(written.total_s, rel=0, abs=1e-8)
 
 
 def test_progress_lines_follow_the_new_timing():
@@ -105,14 +122,26 @@ def test_a_broken_rewrite_is_refused():
 
 
 def test_optimize_gcode_offers_a_checked_file():
-    data = gzip.decompress((FIXTURES / "orca.gcode.gz").read_bytes())
+    data = b"M191 S35\n" + gzip.decompress((FIXTURES / "orca.gcode.gz").read_bytes())
     api.load((FIXTURES / "part.stl").read_bytes(), "fixture")
     api.load_gcode(data, [0, 0, 1])
     r = api.optimize_gcode([0, 0, 1], data)
     assert r["ok"] and r["changes"]["park_moves"] > 0 and r["minutes"][1] > r["minutes"][0]
     text = r["data"].decode()
+    assert r["too_hot"] == [40, 0]
     assert "Spots too hot 40 -> 0" in text and gcode.parse(text).dwells["s"].sum() > 0
     with pytest.raises(ValueError, match="Plain .gcode"):
         api.optimize_gcode([0, 0, 1], (FIXTURES / "bambu.gcode.3mf").read_bytes())
     with pytest.raises(ValueError, match="isn't the G-code"):
         api.optimize_gcode([0, 0, 1], slab().encode())
+
+
+def test_optimize_gcode_offers_a_checked_file_from_a_cold_chamber():
+    data = gzip.decompress((FIXTURES / "orca.gcode.gz").read_bytes())
+    api.load((FIXTURES / "part.stl").read_bytes(), "fixture")
+    api.load_gcode(data, [0, 0, 1])
+    r = api.optimize_gcode([0, 0, 1], data)
+    assert r["ok"], r.get("problems")
+    assert r["changes"]["park_moves"] > 0
+    assert r["too_hot"] == [40, 10]
+    assert r["too_cold"] == [0, 0]
