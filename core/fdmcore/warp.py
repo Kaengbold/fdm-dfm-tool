@@ -21,9 +21,9 @@ So a thin wall cools a millimetre or two above the bed and a thick block stays w
 What stays behind after cooling is residual stress: each element's shrink minus what the part
 let it do. ``residual_stress`` gives it per element (MPa, von Mises), the "stress left inside" view.
 
-Linear and rough: real plastic creeps while warm (so real residual stress is lower), the fin
-ignores the nozzle's heat, and the millimetres of the shape are exaggerated. Use it for where and how much relative to the
-reference, not for exact numbers.
+Warm plastic sheds some of the stress that shrinkage would otherwise build up. A measured
+stress-retention curve gives an effective shrink strain for each layer before the elastic solve.
+The fin ignores the nozzle's heat and the millimetres of the shape are screening estimates.
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ from itertools import product
 from math import exp, isfinite, log, tanh
 
 import numpy as np
+from scipy.interpolate import interpn
 
 from .fea import Model, b_matrix, build_model, cohesive_bed, element_stiffness, prolongation, solve, stiffness
 from .heat import H_FAN, H_STILL, K_PLASTIC, layer_seconds
@@ -102,11 +103,18 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     elem_level = np.round((zc - zc.min()) / grid.h).astype(int)
     heights = zc - zc.min() + grid.h / 2
     climate = chamber_conditions(profile) if climate is None else climate
-    seconds = (_chamber_seconds(grid, heights, elem_level, profile, sliced)
-               if climate["chamber_c"] != climate["chamber_start_c"] else 0.0)
-    shrink = shrink_while_printing(heights, profile, fade_depth(model, elem_level, profile), climate=climate, seconds=seconds)
+    family = profile.material.get("based_on", profile.material_id)
+    relaxation = load_data("thermal")["warp_relaxation"].get(family)
+    changing_air = climate["chamber_c"] != climate["chamber_start_c"]
+    seconds, dwell = (_layer_timing(grid, heights, elem_level, profile, sliced)
+                      if changing_air or relaxation is not None else (0.0, 0.0))
+    temp = _fin_temperature(fade_depth(model, elem_level, profile), climate, seconds)
     if warm is not None:
-        shrink = np.minimum(shrink, shrink_below(np.interp(heights, *warm), profile))
+        temp = np.maximum(temp, np.interp(heights, *warm))
+    shrink = shrink_below(temp, profile)
+    if relaxation is not None:
+        # Approximate shrink loading over a physical layer by its midpoint age.
+        shrink *= _retained_stress(temp, dwell / 2, relaxation)
     levels = np.unique(elem_level)
     groups = np.array_split(levels, min(MAX_STEPS, len(levels)))
     b_mid = b_matrix(0.0, 0.0, 0.0, grid.h)
@@ -473,18 +481,36 @@ def fade_depth(model, elem_level: np.ndarray, profile: Profile) -> np.ndarray:
     return below[elem_level] + per_layer[elem_level] / 2
 
 
-def _chamber_seconds(grid: VoxelGrid, heights: np.ndarray, elem_level: np.ndarray, profile: Profile,
-                     sliced: dict | None) -> np.ndarray:
-    """Put the chamber curve on each print height, using voxel-layer footprints when no slice is loaded."""
+def _layer_timing(grid: VoxelGrid, heights: np.ndarray, elem_level: np.ndarray, profile: Profile,
+                  sliced: dict | None) -> tuple[np.ndarray, np.ndarray]:
+    """Build age and time per physical print layer, independent of the mechanical step size."""
     if sliced is not None:
         start = np.r_[0.0, np.cumsum(sliced["seconds"][:-1])]
-        return np.interp(heights, sliced["z"] - sliced["layer_height"] / 2, start)
+        centers = sliced["z"] - sliced["layer_height"] / 2
+        layer = np.searchsorted(sliced["z"], heights).clip(max=len(centers) - 1)
+        return np.interp(heights, centers, start), sliced["seconds"][layer]
     solid = np.pad(grid.solid, ((1, 1), (1, 1), (0, 0)))
     area = solid.sum(axis=(0, 1)) * grid.h ** 2
     perimeter = sum(np.count_nonzero(np.diff(solid, axis=axis), axis=(0, 1)) for axis in (0, 1)) * grid.h
-    duration = layer_seconds(area, perimeter, profile) * (grid.h / profile.layer_height)
+    dwell = layer_seconds(area, perimeter, profile)
+    duration = dwell * (grid.h / profile.layer_height)
     start = np.cumsum(duration) - duration
-    return start[np.flatnonzero(area)[0] + elem_level]
+    layer = np.flatnonzero(area)[0] + elem_level
+    return start[layer], dwell[layer]
+
+
+def _retained_stress(temp: np.ndarray, seconds: np.ndarray, data: dict) -> np.ndarray:
+    """Interpolate the fraction of stress left at fixed strain, holding the data at its limits."""
+    temperatures = np.array(list(data["retained"]))
+    times = np.log1p(data["seconds"])
+    points = np.stack((np.clip(temp, temperatures[0], temperatures[-1]),
+                       np.clip(np.log1p(seconds), times[0], times[-1])), axis=-1)
+    return interpn((temperatures, times), np.array(list(data["retained"].values())), points)
+
+
+def _fin_temperature(depth: np.ndarray, climate: dict, seconds: float | np.ndarray) -> np.ndarray:
+    air = chamber_air(climate, seconds)
+    return air + (climate["bed_c"] - air) * np.exp(-depth)
 
 
 def shrink_while_printing(height: np.ndarray, profile: Profile, depth: np.ndarray | None = None, *,
@@ -492,13 +518,10 @@ def shrink_while_printing(height: np.ndarray, profile: Profile, depth: np.ndarra
     """Linear shrinkage of plastic at ``height`` mm above the bed while the print goes on: from where
     it sets (``softening_c``) down to the temperature there (the bed's warmth fading into the air).
     ``depth``: fade lengths above the bed (``fade_depth``); default a thin wall's."""
-    mat = profile.material
     climate = chamber_conditions(profile) if climate is None else climate
-    t_set, t_air = float(mat["softening_c"]), chamber_air(climate, seconds)
     if depth is None:
         depth = np.asarray(height) / fade_length(profile, THIN_WALL_MM)
-    t_here = t_air + (climate["bed_c"] - t_air) * np.exp(-depth)
-    return mat.get("shrinkage_pct", 0.3) / 100 * np.clip(t_set - t_here, 0, None) / max(t_set - ROOM_C, 1.0)
+    return shrink_below(_fin_temperature(depth, climate, seconds), profile)
 
 
 def shrink_below(temp: np.ndarray, profile: Profile) -> np.ndarray:

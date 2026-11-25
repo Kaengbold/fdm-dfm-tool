@@ -9,7 +9,7 @@ from fdmcore import api, gcode, thermal, warp
 from fdmcore.additions import extrude
 from fdmcore.fea import cohesive_bed
 from fdmcore.mesh import Mesh, to_binary_stl
-from fdmcore.profile import Profile
+from fdmcore.profile import Profile, load_data
 
 ABS_OPEN = {"material": "abs", "printer": "prusa_mk4s"}
 
@@ -124,6 +124,44 @@ def test_bottom_layers_on_the_warm_bed_shrink_less():
     assert np.all(np.diff(s) >= 0) and s[0] < 0.3 * s[-1]
 
 
+def test_pla_relaxes_more_when_bed_warm():
+    data = load_data("thermal")["warp_relaxation"]["pla"]
+    # After 10 seconds, the 40 °C layer has shed 19.4% of its stress vs. 0.6% at 25 °C.
+    temps = np.array([25, 40])
+    assert warp._retained_stress(temps, np.full(2, 10), data) == pytest.approx([0.994, 0.806])
+    assert warp._retained_stress(temps, np.zeros(2), data) == pytest.approx([1, 1])
+
+
+def test_petg_relaxation_holds_the_measured_temperature_limits():
+    data = load_data("thermal")["warp_relaxation"]["petg"]
+    temps = np.array([25, 37, 53, 70])
+    assert warp._retained_stress(temps, np.full(4, 10), data) == pytest.approx([1, 1, 0.640, 0.640])
+
+
+def test_warp_uses_sliced_layer_time_for_relaxation():
+    profile = Profile.from_dict({"material": "pla", "printer": "prusa_mk4s"})
+    warm = ([0.5, 1.5, 2.5], [25, 40, 25])
+
+    def shrink(seconds):
+        sliced = {"z": np.arange(1.0, 4.0), "layer_height": np.ones(3), "seconds": np.full(3, seconds)}
+        result = warp.simulate(bar(10), [0, 0, 1], profile, h=1, warm=warm, sliced=sliced)
+        return result["shrink"][result["model"].elems[:, 2] == 1].mean()
+
+    # The layer at 40 °C would shrink 0.075% elastically. Use 1 s and 10 s of relaxation.
+    assert shrink(2) == pytest.approx(0.00067875)
+    assert shrink(20) == pytest.approx(0.0006045)
+
+
+def test_abs_bar_curls_less_in_preheated_chamber():
+    profile = Profile.from_dict(ABS_OPEN)
+    climate = thermal.chamber_conditions(profile)
+    mesh = bar(45)
+    cold = warp.simulate(mesh, [0, 0, 1], profile, h=1, climate=climate)
+    preheated = {**climate, "chamber_c": 60, "chamber_start_c": 60}
+    warm = warp.simulate(mesh, [0, 0, 1], profile, h=1, climate=preheated)
+    assert [warp.curl(r) for r in (cold, warm)] == pytest.approx([0.358970, 0.203229], abs=1e-5)
+
+
 def test_warp_shrink_follows_the_chamber_during_the_sliced_print():
     profile = Profile.from_dict({"material": "abs", "printer": "bambu_h2d"})
     layers = "M83\nG1 Z0.2\nG1 X10 E1\nG4 S1800\nG1 Z2.2\nG1 X0 E1\n"
@@ -181,8 +219,9 @@ def test_peel_starts_low_on_a_tall_bar():
     p = Profile.from_dict(ABS_OPEN)
     adhesion = warp.simulate(bar(90, height=12), [0, 0, 1], p, h=1, adhesion=True)["adhesion"]
     assert adhesion["may_lift"] and not adhesion["solver_failed"]
-    assert 1 <= adhesion["start_step"] <= 4
-    assert adhesion["start_height_mm"] == adhesion["start_step"]
+    # Warm lower layers shed enough stress for the fourth build step to hold.
+    assert adhesion["start_step"] == 5
+    assert adhesion["start_height_mm"] == 5.0
     assert min(abs(adhesion["point"][0] - x) for x in (0, 90)) < 2
 
 
