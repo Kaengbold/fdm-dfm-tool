@@ -1351,13 +1351,14 @@ Not reachable: Pollák & Goryl 2025.
 - [ ] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: —
 - [ ] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: —
   - Do: add the brim / ears the 3MF will get to the warp model's first layer (more bed contact, different peel front) instead of a rule of thumb.
-- [~] **T-604 P3** Finer heat tier prototype. · files: `core/fdmcore/thermal.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-604-fine-heat-tier`)
+- [x] **T-604 P3** Finer heat tier prototype. · files: `core/fdmcore/thermal.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-604-fine-heat-tier`)
   - Do: the plan in `research/thermal_optimizer_later.md`: quick-run temperatures as the edges of a finer local model around hot spots; compare on a pin, a bridge and a thick-to-thin part; time and memory in Pyodide; then decide on GPU.
 
 ### Phase 10: owner testing feedback (2026-11-24)
 
 Issues and improvements found during hands-on testing of the new UI.
 
+  - Outcome: opt-in `thermal.refine_hot_region` (0.5 mm grid, quick-run temperatures as the cut boundary); pin +10 °C peak, 2–7.6 s and ≤12 MiB in Pyodide; WebGPU deferred (numbers in `research/thermal_optimizer_later.md`).
 - [x] **T-605 P1** [Bug] Safari fails to load Python (Pyodide). · serves: 1, 2 · files: `web/worker.js`, `web/engine.js`, `web/index.html`, `tools/vendor.py`, `core/tests/test_web_csp.py` · owner: Antigravity (`task/T-605-p1-bugs`)
   - Outcome: upgraded Pyodide `0.27.2` → `0.27.8` (includes Pyodide #5445 Safari/WebKit WasmGC fix) with updated SHA-256 hashes in `tools/vendor.py` and CI workflows; added `worker.onerror` and `messageerror` handlers in `web/engine.js` so worker boot failures surface instead of hanging; added `worker-src 'self' blob: https://cdn.jsdelivr.net` to `web/index.html` CSP.
 - [x] **T-606 P1** [Bug] Editing an existing load does not open the edit menu. · serves: 2 · files: `web/steps/loads.js`, `tools/e2e_smoke.py` · owner: Antigravity (`task/T-605-p1-bugs`)

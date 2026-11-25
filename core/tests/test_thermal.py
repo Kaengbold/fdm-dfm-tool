@@ -132,6 +132,61 @@ def test_quick_and_fine_agree(orca, quick):
     assert quick.seconds < 10  # the quick tier's time budget on a small part (~60 s in the browser)
 
 
+def test_hot_pin_has_a_higher_peak_on_the_refined_grid(orca, quick):
+    result = thermal.refine_hot_region(*orca, PLA, (122, 124, 128, 128))
+    assert result.region == (120, 122, 130, 130)
+    assert (result.boundary_nodes, result.boundary_links) == (402, 799)
+    np.testing.assert_array_equal(result.quick.cover_c, quick.cover_c)
+    fine = result.fine
+    assert fine.cell_mm == 0.5
+    quick_peak = np.nanmax(quick.cover_c[quick.z > PIN_Z])
+    fine_peak = np.nanmax(fine.cover_c[fine.z > PIN_Z])
+    assert fine_peak - quick_peak == pytest.approx(9.97, abs=0.05)
+
+
+def test_refined_boundary_follows_quick_temperatures_and_transfers_heat(monkeypatch):
+    tp = gcode.parse(plate_then_dot(2.0))
+    tm = kinematics.timing(tp)
+    cut = thermal._CutBoundary((4, 4, 8, 8), 2.0)
+    record = cut.record
+    measured = []
+
+    def capture(t, temperatures, representatives):
+        measured.append(temperatures[representatives[cut.nodes]].copy())
+        record(t, temperatures, representatives)
+
+    monkeypatch.setattr(cut, "record", capture)
+    thermal.simulate(tp, tm, PLA, _boundary=cut)
+    refined = thermal.simulate(tp, tm, PLA, "refined", region=cut.region, _boundary=cut)
+    assert (len(cut.nodes), cut.link_count) == (8, 32)
+    for i in (0, len(cut.times) // 2, len(cut.times) - 1):
+        t = cut.times[i]
+        at_t, live = cut.at(t)
+        np.testing.assert_array_equal(at_t, measured[i].astype(np.float32))
+        np.testing.assert_array_equal(live, cut.birth_s <= t)
+    first = int(cut.birth_s.argmin())
+    birth = cut.birth_s[first]
+    assert not cut.at(birth - 0.01)[1][first]
+    at_birth, live = cut.at(birth)
+    assert live[first]
+    assert at_birth[first] == pytest.approx(cut.birth_c[first])
+    i = int(np.searchsorted(cut.times, cut.birth_s.max())) + 1
+    at_mid, live = cut.at((cut.times[i - 1] + cut.times[i]) / 2)
+    assert live.all()
+    np.testing.assert_allclose(at_mid, (measured[i - 1] + measured[i]) / 2, atol=1e-5)
+
+    # Zero the cross-cut conductance on the exact same grid to isolate the boundary's effect.
+    links = cut.links
+
+    def insulated(*args):
+        edge, source, conductance = links(*args)
+        return edge, source, np.zeros_like(conductance)
+
+    monkeypatch.setattr(cut, "links", insulated)
+    isolated = thermal.simulate(tp, tm, PLA, "refined", region=cut.region, _boundary=cut)
+    assert np.nanmax(np.abs(refined.cover_c - isolated.cover_c)) == pytest.approx(0.0274, abs=0.002)
+
+
 def test_old_layers_merge_without_changing_much(orca, quick, monkeypatch):
     monkeypatch.setitem(thermal.TIERS, "short", {**thermal.TIERS["quick"], "layers": 6})
     short = thermal.simulate(*orca, PLA, "short")

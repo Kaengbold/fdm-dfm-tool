@@ -20,6 +20,28 @@ An adaptive octree can provide high resolution around a moving heat source. Publ
 
 Follow-up prototype in NumPy/SciPy. Run the quick model over the whole print, use its temperatures on the boundaries of a padded hot region, and refine occupied cells around the flagged bead contacts. Compare against the current local fine result and measured cover temperatures on a pin, a bridge and a thick-to-thin transition. Check whether the hot and weak spot classifications improve, and record wall time and peak memory under native Python and Pyodide. Use those measurements to decide whether a GPU implementation would help.
 
+### T-604 prototype results
+
+`thermal.refine_hot_region(tp, timing, profile, box)` takes a caller-selected hot area in printer XY. It pads the box by 2 mm and snaps it outward to the 2 mm quick grid. The whole-print run records the temperatures of occupied coarse cells just outside the four cut faces at every solver step. The local 0.5 mm grid interpolates those temperatures in time, starts each exterior cell at its deposition temperature, and conducts heat across shared faces after both sides are deposited. The local grid keeps the original layer heights and bead-neck contact model. The coupling is one-way, with no fine-to-coarse feedback or diagonal links across cuts. The prototype caps saved history at about 16 MiB and caps each deposition and nozzle sample array at one million positions.
+
+The cases are the repository's Orca-sliced pin, a controlled PLA toolpath with a 10 mm free bridge between piers, and a controlled PLA toolpath with a 4 mm wide cap on a thick base. Each temperature is the peak immediately before the next bead covers a cell in the same target zone. Hot and weak shares are weighted by plastic volume and use the existing temperature-window rules. Hot shares use covered cells and weak shares use part-to-part joints. Local fine uses the same padded box at 1 mm with insulated cut faces. Refined timing includes both the whole-print quick pass and the 0.5 mm local pass with coupling.
+
+| Part | Peak cover °C, quick / local fine / refined | Hot share %, quick / local fine / refined | Weak share %, quick / local fine / refined |
+| --- | ---: | ---: | ---: |
+| Pin | 171.55 / 172.59 / 181.52 | 100 / 100 / 100 | 0 / 0 / 0 |
+| Bridge | 108.78 / 100.45 / 101.58 | 100 / 100 / 100 | 0 / 0 / 0 |
+| Thick-to-thin | 176.24 / 180.86 / 184.81 | 16 / 20 / 21.05 | 0 / 0 / 0 |
+
+| Part | Native seconds, quick / local fine / refined | Pyodide seconds, quick / local fine / refined | Native peak RSS rise MiB | Node peak RSS rise MiB | Wasm heap growth MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Pin | 1.06 / 2.03 / 4.35 | 2.17 / 3.90 / 7.58 | 2.7 / 4.1 / 11.5 | 6.4 / 11.4 / 11.5 | 0 / 0 / 0 |
+| Bridge | 0.34 / 0.67 / 0.97 | 0.64 / 1.06 / 1.99 | 2.0 / 2.3 / 4.6 | 2.6 / 0.0 / 6.9 | 0 / 0 / 0 |
+| Thick-to-thin | 0.34 / 0.64 / 1.11 | 0.71 / 1.11 / 2.17 | 2.2 / 3.3 / 7.2 | 11.8 / 3.0 / 12.9 | 0 / 0 / 12 |
+
+Single runs in fresh processes on Windows with a Ryzen 7 1700, Python 3.10.9 and Node 18.18.0 with Pyodide 0.27.8. The native runs set `OPENBLAS_NUM_THREADS` and `OMP_NUM_THREADS` to 1. Timings exclude imports, G-code parsing and classification. Peak RSS rise is the process high-water mark after the run minus the high-water mark before the run. The Wasm numbers measure growth in allocated linear memory, including spare capacity. The refined runs ended at 71.875, 59.875 and 71.875 MiB of Wasm memory for pin, bridge and thick-to-thin, respectively. Reproduce each row with `python tools/thermal_refine_bench.py <pin|bridge|transition> <quick|fine|refined>` and `node tools/thermal_refine_bench.mjs <pin|bridge|transition> <quick|fine|refined>`. Install the Node dependency with `npm install --no-save --no-package-lock --prefix tools pyodide@0.27.8`.
+
+**Defer WebGPU and keep the CPU prototype opt-in.** The three Pyodide runs took 2.0–7.6 s end to end and grew the Wasm heap by at most 12 MiB. The coarse pass itself took 0.62–1.99 s in the coupled runs. The change in hot share was confined to the transition, and no case triggered a weak-joint finding. The different peak predictions need measured cover temperatures and weak-joint data from real prints before they can establish an accuracy gain. Revisit GPU work if those measurements support refinement and larger, representative crops exceed the CPU time or memory budget.
+
 ## Island order as a slicer hint
 
 A slicer can give a hot island more time to cool by choosing another island in the same object as the next stop. Candidate islands must already be printable on the same layer with the same material. Preserve the seam start and loop direction of each island, and let the slicer replan travels, retractions, wipes and lifts against the plastic deposited so far. Keep bridge and support dependencies and object labels intact. Disable the hint for material changes, purge sequences and sequential-object printing. PrusaSlicer's seam and travel controls illustrate why the slicer needs to own those decisions. [Prusa seam position](https://help.prusa3d.com/article/seam-position_151069) · [Prusa layers and perimeters](https://help.prusa3d.com/article/layers-and-perimeters_1748)
