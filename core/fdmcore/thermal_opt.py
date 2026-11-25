@@ -37,7 +37,7 @@ import numpy as np
 
 from . import progress
 from .gcode import (BRIDGE, LAYER_TIME, NOT_SLOWED, OVERHANG, PART_KINDS, SMALL_PERIMETER, UNKNOWN, VOLUMETRIC_CAP,
-                    Toolpath, fan_levels, fan_mask, flow_cap)
+                    Toolpath, _number, fan_levels, fan_mask, flow_cap)
 from .kinematics import timing
 from .profile import Profile, load_data
 from .thermal import Heat, _interp, aux_cooling, chamber_air, constants, simulate, window
@@ -167,12 +167,19 @@ def apply(tp: Toolpath, plan: Plan) -> Toolpath:
         fans = {key: np.r_[added[key], v[keep]] for key, v in fans.items()}
     order = np.argsort(fans["line"], kind="stable")
     fans = {key: v[order].astype(tp.fans[key].dtype) for key, v in fans.items()}
-    travel, dwells = _parks(tp, plan)
     return replace(tp, speed=speed.astype(np.float32), cause=cause, part_fan=fan.astype(np.float32), fans=fans, fan_names=names,
-                   travel=travel, dwells=dwells)
+                   **_park_events(tp, plan))
 
 
 PARK_MM = 20.0  # a park move goes this far past the part (in x), so the nozzle's heat doesn't reach it
+
+
+def park_feeds(tp: Toolpath) -> tuple[float, float, float]:
+    """Retraction length (mm), retraction and travel feeds (mm/min), at the writer's precision."""
+    retract = _number(tp.settings.get("retraction_length"), 0.8) or 0.8
+    retract_speed = _number(tp.settings.get("retraction_speed"), 35.0) or 35.0
+    travel_speed = float(np.median(tp.travel["speed"])) if len(tp.travel["speed"]) else 150.0
+    return round(retract, 3), max(1, round(retract_speed * 60)), max(1, round(travel_speed * 60))
 
 
 def park_moves(tp: Toolpath, plan: Plan) -> list[dict]:
@@ -201,26 +208,38 @@ def park_moves(tp: Toolpath, plan: Plan) -> list[dict]:
     return out
 
 
-def _parks(tp: Toolpath, plan: Plan) -> tuple[dict, dict]:
-    """Travel and pause events with the plan's park moves (kinematics.timing puts a pause at the move after it)."""
+def _park_events(tp: Toolpath, plan: Plan) -> dict:
+    """Put the park after the original commands before the line, just as in the exported file."""
     moves = park_moves(tp, plan)
     if not moves:
-        return tp.travel, tp.dwells
-    tr = tp.travel
-    speed = float(np.median(tr["speed"])) if len(tr["speed"]) else 150.0
-    add = {key: [] for key in ("p0", "p1", "t0", "t1", "speed", "line")}
-    pauses = {"line": [], "t": [], "s": []}
+        return {}
+    retract, retract_feed, travel_feed = park_feeds(tp)
+    t0 = tp.t0.copy()
+    travel, dwells, retracts = [], [], []
     for m in moves:
-        tf = float(tp.t0[m["line"]])
-        for a, b, t in ((m["here"], m["away"], tf - 2e-6), (m["away"], m["here"], tf - 1e-6)):
-            add["p0"].append(a), add["p1"].append(b), add["t0"].append(t), add["t1"].append(t)
-            add["speed"].append(speed), add["line"].append(m["line"])
-        pauses["line"].append(m["line"]), pauses["t"].append(tf - 1.5e-6), pauses["s"].append(m["seconds"])
-    travel = {key: np.concatenate([np.asarray(tr[key]), np.asarray(add[key], dtype=np.asarray(tr[key]).dtype if len(tr[key]) else None)])
-              for key in add}
-    travel.update({key: tr[key] for key in tr if key not in add})
-    dwells = {key: np.concatenate([np.asarray(tp.dwells[key], float), np.asarray(pauses[key], float)]) for key in pauses}
-    return travel, dwells
+        line = m["line"]
+        # These timestamps only order events. The motion planner calculates their durations.
+        out = t0[line]
+        back = np.nextafter(out, np.inf)
+        t0[line] = np.nextafter(back, np.inf)
+        here, away = m["here"], m["away"]
+        rounded_here, rounded_away = here.copy(), away.copy()
+        rounded_here[:2], rounded_away[:2] = np.round(here[:2], 3), np.round(away[:2], 3)
+        for a, b, t in ((here, rounded_away, out), (rounded_away, rounded_here, back)):
+            if np.linalg.norm(b - a) > 1e-6:
+                travel.append((a, b, t, t, travel_feed / 60, line))
+        dwells.append((line, back, float(f'{m["seconds"]:g}')))
+        if retract:
+            retracts.extend(((line, out, -retract, retract_feed / 60, False),
+                             (line, t0[line], retract, retract_feed / 60, False)))
+
+    def append(original: dict, rows: list, keys: tuple) -> dict:
+        return {key: np.concatenate([original[key], np.asarray(values, dtype=original[key].dtype)])
+                for key, values in zip(keys, zip(*rows))} if rows else original
+
+    return {"t0": t0, "travel": append(tp.travel, travel, ("p0", "p1", "t0", "t1", "speed", "line")),
+            "dwells": append(tp.dwells, dwells, ("line", "t", "s")),
+            "retracts": append(tp.retracts, retracts, ("line", "t", "mm", "speed", "moving"))}
 
 
 @dataclass

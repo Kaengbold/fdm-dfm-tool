@@ -21,12 +21,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .gcode import Toolpath, _line_blocks, _number, _words, fan_levels, flow_cap, parse
+from .gcode import Toolpath, _line_blocks, _words, fan_levels, flow_cap, parse
 from .kinematics import _defaults, timing
-from .thermal_opt import Plan, apply, aux_schedule, park_moves
+from .thermal_opt import Plan, apply, aux_schedule, park_feeds, park_moves
 
 PA_TOLERANCE = 0.25  # with adaptive pressure advance (no table to redo it), speeds change at most this much
-RETRACT_MM, RETRACT_MM_S = 0.8, 35.0  # for a park move when the file's settings don't say
 _WORD = re.compile(r"\b([A-Z])([-+]?\d*\.?\d+)")
 
 
@@ -93,9 +92,7 @@ def rewrite(data, tp: Toolpath, plan: Plan, note: list[str] | None = None) -> Re
         first_of[int(tp.src[i])] = int(i)
     lo_src, hi_src = int(tp.src[0]), int(tp.src[-1])
     parks = {m["line"]: m for m in park_moves(tp, plan)}
-    retract = _number(tp.settings.get("retraction_length"), RETRACT_MM) or RETRACT_MM
-    retract_f = (_number(tp.settings.get("retraction_speed"), RETRACT_MM_S) or RETRACT_MM_S) * 60
-    travel_f = float(np.median(tp.travel["speed"])) * 60 if len(tp.travel["speed"]) else 9000.0
+    retract, retract_f, travel_f = park_feeds(tp)
     progress = _progress(t_old, t_new, first_of)
 
     out: list[str] = []
