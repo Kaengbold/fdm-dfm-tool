@@ -1342,8 +1342,7 @@ Not reachable: Pollák & Goryl 2025.
   - Outcome: Detailed strength uses the weakest modeled joint crossing each cube, reports its layer and cooling history, and uses the usual layer strength when heat data is unavailable.
 - [x] **T-598 P2** Results as ranges. · files: `core/fdmcore/api.py`, `web/` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-598-result-ranges`)
   - Do: run with the low and high ends of the uncertain constants (thermal.yaml / thresholds ranges) and show e.g. "×2.1 to ×3.4" or "40–55 °C" beside today's single number; keep it fast (only the few constants that matter most).
-  - Outcome: Show ranges for strength, base curl, next-layer temperature and bonding beside the usual estimates, and show when the quick bed-grip trials disagree on lifting.
-- [ ] **T-599 P2** Strength grid check on thin features. · files: `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: —
+- [~] **T-599 P2** Strength grid check on thin features. · files: `core/fdmcore/strength.py`, `core/fdmcore/api.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-599-thin-feature-grid`)
   - Do: warn when the weak spot, a thin wall or a fillet is only a few voxels thick, and re-check it on a finer grid automatically; say when the answer moved.
 - [ ] **T-600 P3** Strength: big bending and buckling. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` · owner: —
   - Do: large-deflection solve for snap fits and TPU; a buckling check for thin, tall walls under pressure.
@@ -1352,7 +1351,7 @@ Not reachable: Pollák & Goryl 2025.
 - [ ] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: —
 - [ ] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: —
   - Do: add the brim / ears the 3MF will get to the warp model's first layer (more bed contact, different peel front) instead of a rule of thumb.
-- [ ] **T-604 P3** Finer heat tier prototype. · files: `core/fdmcore/thermal.py` · owner: —
+- [~] **T-604 P3** Finer heat tier prototype. · files: `core/fdmcore/thermal.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-604-fine-heat-tier`)
   - Do: the plan in `research/thermal_optimizer_later.md`: quick-run temperatures as the edges of a finer local model around hot spots; compare on a pin, a bridge and a thick-to-thin part; time and memory in Pyodide; then decide on GPU.
 
 ### Phase 10: owner testing feedback (2026-11-24)
