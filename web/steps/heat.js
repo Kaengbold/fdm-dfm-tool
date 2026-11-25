@@ -33,7 +33,7 @@ async function runHeat({ engine, up, profile, detailed, state, gcode }) {
   fixing = null;
   Object.assign(view, { mode: "replay", which: "after", run: "before", layer: Infinity, picked: null });
   try {
-    const result = await engine.call("optimize_cooling", { ...args, detail: true });
+    const result = await engine.call("optimize_cooling", { ...args, detail: true, ranges: true });
     const hot = result.before.too_hot + result.before.too_cold, left = result.gcode.too_hot + result.gcode.too_cold;
     const name = (state.part?.name ?? "part").replace(/\.[^.]+$/, "");
     return { result, gcode, args, name, status: { label: t("heat.status"), value: hot ? t("heat.statusFixed", { count: hot, left }) : t("heat.statusFine"), tone: left ? "warn" : "ok" } };
@@ -324,11 +324,17 @@ function panel({ body, services, value, overlay }) {
     return;
   }
   const r = value.result;
+  const before = r.before;
+  const cover = before.range?.cover_c?.median;
+  const bond = before.range?.bond_median;
   const d = shown?.result === r ? shown.decoded : decode(r);
   const conf = { rough: "rough", "partly tuned": "partly", tuned: "tuned" }[r.confidence] ?? "rough";
   body.append(h("section", { class: "heat-summary" },
     h("div", { class: "heat-summary__head" }, h("b", {}, t("heat.sum.title")), h("span", { class: `heat-conf heat-conf--${conf}` }, t(`heat.confidence.${conf}`))),
-    h("ul", {}, summary(r, d).map((m) => h("li", {}, t(m)))),
+    h("ul", {}, summary(r, d).map((m) => h("li", {}, t(m))),
+      cover ? h("li", {}, t("ranges.cover", { value: before.cover_c.median, low: cover[0], high: cover[1] })) : null,
+      bond ? h("li", {}, t("ranges.bond", { value: Math.round(before.bond_median * 100), low: Math.round(bond[0] * 100), high: Math.round(bond[1] * 100) })) : null),
+    cover || bond ? h("p", { class: "ui-hint" }, t("ranges.hint")) : null,
     r.guessed ? h("p", { class: "ui-hint" }, t("heat.guessed")) : null));
   if (overlay === "heat") showHeat({ services, value }); // the stage is drawn after the panel: draw it now
   if (overlay !== "heat" || shown?.result !== r) {

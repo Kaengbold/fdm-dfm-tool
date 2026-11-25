@@ -856,8 +856,11 @@ def check_new_ui_heat(browser, port: int) -> str:
         page.wait_for_selector(".heat-summary", timeout=600_000)
         status = page.locator(".sim-status").inner_text()
         assert "Cooling plan" in status and "40 spots outside their window, 0 with the plan" in status, status
+        assert re.search(r"Base curl: [\d.]+ mm \([\d.]+–[\d.]+ mm\)", page.locator("aside.panel").inner_text())
         summary = page.locator(".heat-summary").inner_text()
         assert "Too hot: 40 spots before, 0 after" in summary and "Rough" in summary, summary
+        assert "typical temperature at the next layer:" in summary and "typical layer bonding:" in summary, summary
+        assert "uncertain material and printing data" in summary, summary
         page.locator(".sim-views").get_by_role("radio", name="Heat").click()
         page.wait_for_selector(".heat-slider")
         # The sliced paths stand in for the part (T-587); red beads as sliced, none with the plan (instance colours).

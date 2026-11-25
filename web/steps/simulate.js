@@ -328,7 +328,14 @@ registerStep("sim", {
         ? t(result.source === "file" ? "sim.basis.file" : "sim.basis.orca", { minutes: Math.round(result.gcode.print_time_min) })
         : result.gcodeError ? t("sim.basis.wrongFile", { reason: result.gcodeError }) : t("sim.basis.ours")));
       const grip = result.warp.adhesion;
+      const curl = result.warp.range?.curl_mm;
+      if (curl) body.append(h("p", {}, t("ranges.curl", { value: result.warp.curl_mm, low: curl[0], high: curl[1] })));
+      if (curl || grip?.range) body.append(h("p", { class: "ui-hint" }, t("ranges.hint")));
       if (grip) {
+        if (grip.range) {
+          const verdict = { key: grip.may_lift ? "ranges.peel.lift" : "ranges.peel.hold" };
+          body.append(h("p", {}, t(grip.range[0] !== grip.range[1] ? "ranges.peel.both" : "ranges.peel.same", { verdict })));
+        }
         if (grip.detail) body.append(h("p", { class: "ui-hint" }, grip.detail));
         const note = grip.shear_source === "calibrated"
           ? (grip.calibration_temp_differs ? "calibratedTempDiffers" : "calibrated")
