@@ -549,11 +549,17 @@ def large_deflection(model: Model, c: np.ndarray, scale: np.ndarray, forces: np.
             delta = np.zeros(len(free))
             delta[free] = step
             delta = delta.reshape(-1, 3)
+            # Near convergence the energy drop falls below the rounding of a sum over every
+            # element, whose sign then depends on the numpy build. There, accept a step that
+            # reduces the residual instead.
+            noise = 1e-10 * (abs(energy) + abs(load @ u.ravel()[free]))
+            unbalanced = np.linalg.norm(residual)
             for j in range(8):
                 fraction = 0.5**j
                 candidate = u + fraction * delta
                 result = response(candidate, load)
-                if result[0] <= energy + 1e-4 * fraction * slope:
+                if result[0] <= energy + 1e-4 * fraction * slope or (
+                        result[0] <= energy + noise and np.linalg.norm(result[1]) < unbalanced):
                     u = candidate
                     break
             else:
