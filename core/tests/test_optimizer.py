@@ -33,6 +33,38 @@ def test_targets_are_floors():
     assert [optimizer.target_for(g, True) for g in ("strong", "balanced", "fast", "light")] == [5, 3, 3, 3]
 
 
+def test_geometry_only_checked_for_shortlisted_options(hook, monkeypatch):
+    from fdmcore import strength
+
+    evaluate = strength.evaluate_cases
+    search_calls = 0
+    final_calls = 0
+
+    def check(*args, **kwargs):
+        nonlocal search_calls, final_calls
+        result = evaluate(*args, **kwargs)
+        if not kwargs.get("geometry_checks", True):
+            assert final_calls == 0
+            search_calls += 1
+            return result
+        final_calls += 1
+        # Model a buckling limit below the target for each shortlisted option.
+        result["safety_factor"] = 0.8
+        for case in result["cases"]:
+            case["geometry_checks"] = {"buckling": {"status": "solved", "load_factor": 0.8}}
+        result["case_fi"] = [(*pair[:2], 1 / 0.8) for pair in result["case_fi"]]
+        return result
+
+    monkeypatch.setattr(strength, "evaluate_cases", check)
+    result = api.optimize("balanced", hook, "fast", {"printer": "bambu_p1s"})
+    assert search_calls > final_calls
+    assert 1 < final_calls <= optimizer.MAX_OPTIONS
+    assert not result["feasible"]
+    best, = result["options"]
+    assert best["below_target"] and best["safety"] == 0.8
+    assert best["safety_range"][1] == 0.8
+
+
 @pytest.mark.parametrize("goal", ["balanced", "fast", "light", "strong"])
 def test_goal_options_meet_the_target_and_differ(hook, goal):
     r = api.optimize(goal, hook, "fast", {"printer": "bambu_p1s"})

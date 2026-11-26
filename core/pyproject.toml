@@ -24,7 +24,7 @@ fdmdfm = "fdmcore.cli:main"
 include = ["fdmcore*"]
 
 [tool.setuptools.package-data]
-fdmcore = ["data/*.yaml", "data/*.json", "data/*.json.gz", "manifest.json"]
+fdmcore = ["data/*.yaml", "data/messages/*.yaml", "data/*.json", "data/*.json.gz", "manifest.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
