@@ -1130,6 +1130,7 @@ def _strength_story_parts(r: dict) -> dict:
         "material": "There the plastic itself is overloaded, not the bond between layers. More walls, more infill or a thicker design help most.",
         "lines": ("There the printed lines lying side by side get pulled apart, like a screw tearing out through the walls."
                   " More walls around that spot, more material there, or turning the part so the lines run along the pull help most."),
+        "buckling": format_message("strength.geometry.buckling_fix"),
     }[r["mode"]]
     # Strong enough: don't nudge people to change a part that already holds (the why stays in the full story).
     helps = "Nothing needs to change for this load." if r.get("verdict") == "fine" else why
@@ -1147,6 +1148,8 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
         "likely to break": (format_message("strength.residual.likely_to_break") if r.get("residual_stress", {}).get("included")
                             else f"It will most likely break: it holds only about {sf:.0%} of the load you set."),
     }[r["verdict"]]
+    if r["mode"] == "buckling":
+        head = format_message(f"strength.geometry.buckling_{'holds' if r['verdict'] == 'fine' else 'risk'}")
     why = _strength_story_parts(r)["why"]
     near = (" It's right next to where the part is held: a real screw, clamp or glue spreads the load a bit,"
             " so it is probably somewhat stronger there than shown.") if r.get("near_support") else ""
@@ -1231,7 +1234,8 @@ def optimise_strength(up, loads: list[dict], profile: dict | None = None, target
         from .strength import Shells
 
         sh = Shells(walls=best["walls"], infill=best["infill"], top=best["top"], bottom=best["bottom"])
-        best["beyond"] = _preferred(_beyond_settings(evaluate_cases(cases, best["up"], p, sh), p, profile, loads, target), target)
+        result = _evaluate(cases, best["up"], p, sh)
+        best["beyond"] = _preferred(_beyond_settings(result, p, profile, loads, cases, best["up"], sh, target), target)
     if zones:
         with stage(0.9, 1.0):
             # Where the zones go: where the user's own strength check found the stress, when it is for this
@@ -1766,7 +1770,7 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
         if eval_fn is not None:
             val, u_all = eval_fn(sh, rtol, start)
         else:
-            r = evaluate_cases(cases, up, p, sh, x0=start, rtol=rtol, precond_cache=pc)
+            r = evaluate_cases(cases, up, p, sh, x0=start, rtol=rtol, precond_cache=pc, geometry_checks=False)
             val, u_all = float(r["safety_factor"]), r.get("_u_all")
         memo[sh] = (val, u_all, exact)
         return val, u_all
@@ -1838,6 +1842,8 @@ def _climb(cases, up, p: Profile, target: float, mesh: Mesh, zones: list | None 
         cur_sf, cur_u = solve_sh(sh, rtol=1e-3, x0=cur_u)
         steps.append({"change": label, "safety_factor": float(cur_sf)})
     final_sf, _ = solve_sh(sh, rtol=1e-4, x0=cur_u)
+    if eval_fn is None:
+        final_sf = _evaluate(cases, up, p, sh)["safety_factor"]
     settings = {"wall_loops": str(sh.walls), "top_shell_layers": str(sh.top), "bottom_shell_layers": str(sh.bottom),
                 "sparse_infill_density": f"{sh.infill:.0%}"}
     if p.goal == "material":  # lightning infill only holds up the top surface, not a load
@@ -3114,7 +3120,14 @@ def _strength_grid_check(cases, r, loads, up, p, sh, detailed, h):
             check["status"] = "failed"
             refined = prepare_cases(s.mesh, s.regions, _resolve_loads(loads), grid=grid)
             trial = _strength_on_grid(refined, up, p, sh, detailed, h, trial=True)
-            if trial["_cases_converged"] and np.isfinite(trial["fi"]).all() and np.isfinite(trial["u"]).all():
+            # A finer grid can push an optional solve over its budget. Keep a successful
+            # geometry check when the finer grid still calls for that check but can't finish it.
+            geometry_lost = any(
+                check.get("status") == "solved" and new.get("geometry_checks", {}).get(kind, {}).get("status") == "unavailable"
+                for old, new in zip(r["cases"], trial["cases"])
+                for kind, check in old.get("geometry_checks", {}).items()
+            )
+            if not geometry_lost and trial["_cases_converged"] and np.isfinite(trial["fi"]).all() and np.isfinite(trial["u"]).all():
                 after = trial["safety_factor"]
                 moved = not np.isclose(after, before, rtol=0.05, atol=0) or trial["verdict"] != r["verdict"]
                 check.update(status="changed" if moved else "similar", fine_voxel_mm=grid.h)
@@ -3149,7 +3162,8 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     use a matching heat result if available. ``heat=True`` runs the heat model if needed and
     ``heat=False`` uses the usual layer strength. The ``heat`` result compares safety with usual
     bonding and locates the cold joint that sets the local strength. A thin feature on the normal grid
-    can trigger one bounded finer solve, described in ``grid_check``. Quick runs include a safety
+    can trigger one bounded finer solve, described in ``grid_check``. Large movement or compression
+    in a thin wall can trigger further analysis, reported in ``geometry_checks``. Quick runs include a safety
     ``range`` from rechecking the same stresses with weaker and stronger layer bonds. A matching
     ``warping`` run supplies the stress locked in while printing (see ``residual_stress``)."""
     from .strength import face_values, refine, safety_range, sample_nodes, surface_values
@@ -3242,6 +3256,9 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
         residual["message"] = {"key": f"strength.residual.{status}", "params": params}
         residual["detail"] = format_message(residual["message"])
         r["explanation"] += f" {residual['detail']}"
+    for check in r.get("geometry_checks", {}).values():
+        if "detail" in check:
+            r["explanation"] += f" {check['detail']}"
     if "grid_check" in r:
         check = r["grid_check"]
         r["explanation"] += f" {format_message(check['reason'])} {format_message(check['message'])}"
@@ -3478,7 +3495,7 @@ def strength_options(up, loads: list[dict], profile: dict | None = None, walls: 
             "Turns the part so the load runs along the layers instead of pulling them apart.",
             "may need more support or take longer", up=axes[best].tolist())
 
-    out += _beyond_settings(base, p, profile, loads)
+    out += _beyond_settings(base, p, profile, loads, case, up, sh)
     for o in out:
         o["base_safety"] = float(base["safety_factor"])
     return _preferred(out, required_safety(p))
@@ -3501,7 +3518,8 @@ def _preferred(options: list[dict], need: float) -> list[dict]:
     return sorted(options, key=key)
 
 
-def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], need: float | None = None) -> list[dict]:
+def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[dict], cases, up, shells,
+                     need: float | None = None) -> list[dict]:
     """What helps besides slicer settings and orientation: a design change at the weak spot, another
     material, or a lighter load (that still reaches ``need``, default the usual safety). Also the way
     out when even the strongest settings aren't enough."""
@@ -3566,11 +3584,11 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             "piece lies so its layers run along its own load, and the glued face sits where little load crosses it. Rough "
             "(from one solve); check the strength of the pieces after printing.", "two pieces to glue, with pins", purpose="strength")
 
-    # Less load: stresses grow in step with the load, so the safety does the opposite.
+    # Less load: the linear estimates scale directly. Recheck the load if the part still bends far.
     sf = base["safety_factor"]
     forces = [float(l.get("kg", 1)) for l in loads if l.get("kind") == "force"]
     if forces and np.isfinite(sf) and sf < need:
-        share = sf / need
+        share = _lighter_load_share(base, cases, up, p, shells, need)
         kg = f"about {forces[0] * share:.1f} kg instead of {forces[0]:g} kg" if len(forces) == 1 else f"about {share:.0%} of every load you set"
         add(f"Carry less: {kg}", "load", need,
             "The part holds a smaller load with the same margin. Spread the weight over two parts, add a support, or hang less on it.",
@@ -3578,16 +3596,42 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
     return out
 
 
+def _lighter_load_share(base: dict, cases, up, profile: Profile, shells, need: float) -> float:
+    """Refine the suggested load near the target when the shape changes appreciably."""
+    from dataclasses import replace
+
+    from .strength import evaluate_cases, large_motion
+
+    share = base["safety_factor"] / need
+    bends = any(c.get("geometry_checks", {}).get("bending", {}).get("status") == "solved" for c in base["cases"])
+    if not bends and not any(large_motion(c, share * u) for c, u in zip(cases, base["_u_all"])):
+        return share
+    for _ in range(3):
+        trial = [replace(c, forces=c.forces * share) for c in cases]
+        observed = evaluate_cases(trial, up, profile, shells)["safety_factor"]
+        if not (np.isfinite(observed) and observed > 0):
+            break
+        correction = observed / need
+        if abs(correction - 1) < 5e-4:
+            break
+        share = min(1.0, share * correction)
+    return share
+
+
 def _scaled_safety(base: dict, p: Profile, other: Profile) -> float:
     """Safety factor of ``base`` (a strength result in ``p``'s material) printed in ``other``'s
     material instead: stresses barely depend on stiffness here, only the strengths change — at room
     temperature and at the temperature it's used at (service.heat_factor)."""
     from .service import heat_factor
+    from .strength import failure_index, material_for
 
     cur, m = p.material, other.material
     k = heat_factor(other) / max(heat_factor(p), 1e-9)
-    worst = max(base["fi_layers_max"] * cur["tensile_xy_mpa"] * p.z_strength_factor / (m["tensile_xy_mpa"] * other.z_strength_factor),
-                base["fi_material_max"] * cur["tensile_xy_mpa"] / m["tensile_xy_mpa"]) / k
+    layer = cur["tensile_xy_mpa"] * p.z_strength_factor / (m["tensile_xy_mpa"] * other.z_strength_factor * k)
+    material = cur["tensile_xy_mpa"] / (m["tensile_xy_mpa"] * k)
+    buckling = material_for(p).e_xy / material_for(other).e_xy
+    cases = base.get("case_fi", [(base["fi_layers_max"], base["fi_material_max"])])
+    worst = max(failure_index(fi, layer, material, buckling) for fi in cases)
     return 1 / worst if worst > 0 else float("inf")
 
 

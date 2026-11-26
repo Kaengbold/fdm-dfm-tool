@@ -99,6 +99,42 @@ materials:
     wlf:          {c1: 17.44, c2_k: 51.6, t_ref_c: 147, range_c1: [11, 19], range_c2_k: [40, 80], source: "universal WLF constants at Tg", confidence: estimated}
     reptation_s:  {value: 0.03, range: [0.003, 0.3], unit: s, t_ref_c: 280, source: "order-of-magnitude estimate", confidence: estimated}
 
+# Fraction of initial stress left under a fixed strain. Rows are degrees C, columns are seconds.
+warp_relaxation:
+  pla:
+    # Kontou et al. 2024, Fig. 2b and WLF fit, doi:10.3390/nano14131116 (molded Ingeo 2003D).
+    seconds: [0, 1, 10, 100, 1000]
+    retained:
+      25: [1, 1.000, 0.994, 0.962, 0.902]
+      30: [1, 0.991, 0.958, 0.895, 0.789]
+      35: [1, 0.959, 0.896, 0.791, 0.608]
+      40: [1, 0.905, 0.806, 0.629, 0.381]
+      45: [1, 0.821, 0.658, 0.421, 0.245]
+      50: [1, 0.697, 0.476, 0.280, 0.172]
+      55: [1, 0.544, 0.324, 0.192, 0.127]
+      60: [1, 0.375, 0.216, 0.142, 0.094]
+  petg:
+    # Liu et al. 2025, Figs. 7-8, doi:10.4041/kjod25.094 (PETG aligner sheet, 37-53 C).
+    # Approximate readings from the 37 C master curve, shifted for each temperature.
+    seconds: [0, 1, 10, 100, 1000]
+    retained:
+      37: [1, 1.000, 1.000, 1.000, 0.955]
+      41: [1, 1.000, 1.000, 0.980, 0.882]
+      45: [1, 1.000, 0.967, 0.836, 0.599]
+      49: [1, 0.977, 0.871, 0.653, 0.468]
+      53: [1, 0.863, 0.640, 0.461, 0.355]
+  abs:
+    # Witek 2023, Eq. 3 and Table 1, doi:10.7494/cmms.2023.2.0813 (printed Prusa ABS).
+    # Fixed 1.5% strain, integrating the fitted viscous branch from elastic loading.
+    seconds: [0, 1, 10, 100, 1000]
+    retained:
+      25:  [1, 0.999, 0.989, 0.945, 0.880]
+      40:  [1, 0.999, 0.990, 0.940, 0.852]
+      60:  [1, 0.997, 0.970, 0.853, 0.692]
+      80:  [1, 0.994, 0.949, 0.729, 0.427]
+      90:  [1, 0.980, 0.841, 0.443, 0.162]
+      100: [1, 0.916, 0.508, 0.085, 0.025]
+
 process:
   # Convection. Costa et al. 2014 bracket 5-150 W/m2K and say values of about 60 and above "should correspond to
   # most practical conditions"; they quote 67 W/m2K (Rodriguez) for a hot ABS bead in natural convection.

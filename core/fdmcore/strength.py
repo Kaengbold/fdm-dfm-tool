@@ -29,7 +29,9 @@ import math
 
 import numpy as np
 
-from .fea import VOIGT, Material, Model, build_model, element_stress, lowest_mode, rotate_stiffness, solve
+from .fea import (VOIGT, Material, Model, buckling_load_factor, build_model, element_stress,
+                  large_deflection, lowest_mode, rotate_stiffness, solve, voigt_tensor)
+from .messages import format_message
 from .mesh import Mesh
 from .orientation import rotation_to_z
 from .profile import Profile, load_data
@@ -77,6 +79,9 @@ CONTACT_ROUNDS = 8
 HOLDS = ("clamped", "resting", "screw")
 MIN_SCALE = 0.01
  # empty cubes inside a hollow print: soft, but not zero (the solver needs some stiffness)
+GEOMETRY_MAX_CELLS = 20_000
+LARGE_MOTION_SHARE = 0.12
+BUCKLING_SLENDERNESS = 8
 
 
 @dataclass(frozen=True)
@@ -146,7 +151,7 @@ def printed_from(dep: dict, model: Model, inside: np.ndarray) -> Printed:
     sparse = _smooth(model.elems, model.grid.solid.shape, dep["volume"][:, 2] / room, inside)
     rest = np.maximum(1 - dense, 1e-9)
     scale = (dense + rest * np.clip(sparse / rest, 0.0, 1.0) ** INFILL_EXPONENT) * _fill(model)  # of the room, then of the cube
-    t = _tensor(dep["tensor"])
+    t = voigt_tensor(dep["tensor"])
     w, v = np.linalg.eigh(t)  # ascending; lines are horizontal, so the smallest is ~0 (the build direction)
     lines = v[:, :, 2]
     aligned = np.where(w[:, 2] > 0, (w[:, 2] - w[:, 1]) / np.maximum(w[:, 2] + w[:, 1], 1e-12), 0.0)
@@ -487,10 +492,16 @@ def safety_range(case_fi, profile: Profile, safety: float, *, layer_scale: float
     values = [safety]
     for factor in factors:
         layer = layer_scale / min(factor, 1 / z_strength)
-        worst = max(max(fl * layer, fm * material_scale) for fl, fm in case_fi)
+        worst = max(failure_index(fi, layer, material_scale, 1.0) for fi in case_fi)
         if worst > 0:
             values.append(float(1 / worst))
     return [min(values), max(values)]
+
+
+def failure_index(fi, layer_scale: float, material_scale: float, buckling_scale: float) -> float:
+    """Combine failure limits from one load case, with a buckling index when it was checked."""
+    layers, material, *buckling = fi
+    return max(layers * layer_scale, material * material_scale, max(buckling, default=0) * buckling_scale)
 
 
 def solid_fraction(model: Model, up, shells: Shells, profile: Profile) -> np.ndarray:
@@ -663,7 +674,7 @@ class ReleasedStrain:
             return None
         elastic = self.elastic[idx[found]]
         elastic[:, 3:] *= 0.5  # engineering shear -> tensor shear
-        tensor = self.turn.T @ _tensor(elastic) @ self.turn
+        tensor = self.turn.T @ voigt_tensor(elastic) @ self.turn
         i, j = np.asarray(VOIGT).T
         mapped = np.zeros((len(centers), 6))
         mapped[found] = tensor[:, i, j] * np.array([1, 1, 1, 2, 2, 2])
@@ -672,6 +683,7 @@ class ReleasedStrain:
 
 def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None,
              x0: np.ndarray | None = None, rtol: float = 1e-4, precond_cache: dict | None = None, *,
+             large_rotations: bool = True, geometry_checks: bool = True,
              residual_strain: np.ndarray | None = None) -> dict:
     """Solve with the anisotropic material for build direction ``up``. With ``printed`` (from the
     G-code) the plastic in each cube and the line directions replace the shells model.
@@ -682,33 +694,163 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
     scale = element_scale(case.model, up, shells, profile) if printed is None else printed.scale
     u, info = _solve(case, c, scale, mat.e_xy, x0=x0, rtol=rtol, precond_cache=precond_cache)
     stress = element_stress(case.model, c, scale, u)
-    up = np.asarray(up, float)
+    model = case.model
+    need = required_safety(profile)
+    do_bending = geometry_checks and large_rotations and info == 0 and large_motion(case, u)
+    can_solve = (len(model.elems) <= GEOMETRY_MAX_CELLS and
+                 (case.contact is None or len(case.contact[0]) == 0))
+    # The warp solve already let the part deform freely. Use the mapped stress as an estimate of
+    # that equilibrium state; supports, buckling and bending act on the load alone.
+    locked = None if residual_strain is None else scale[:, None] * (residual_strain @ c.T)
 
     def indices(s: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-        layer, plane = failure_indices(s, up, mat, scale, None if printed is None else printed.bond)
-        return layer, plane, None if printed is None else lines_index(s, up, mat, printed)
+        fi_layer, fi_plane = failure_indices(s, np.asarray(up, float), mat, scale, None if printed is None else printed.bond)
+        return fi_layer, fi_plane, None if printed is None else lines_index(s, np.asarray(up, float), mat, printed)
 
-    before = indices(stress)
-    if residual_strain is not None:
-        # The warp solve already let the part deform freely. Use the mapped stress
-        # as an estimate of that equilibrium state, and apply the supports to the load alone.
-        locked = scale[:, None] * (residual_strain @ c.T)
-        stress += locked
-        after = indices(stress)
-    else:
-        after = before
-    out = _summary(case, after[0], after[1], u, info, after[2])
-    if residual_strain is not None:
-        worst = max(fi[~case.ignore].max(initial=0) for fi in before if fi is not None)
-        grid = case.model.grid
-        near = np.max(np.abs(grid.centers(case.model.elems) - out["critical_point"]), axis=1) <= grid.h * (1 + 1e-6)
+    def summarize():
+        fi_layer, fi_plane, fi_lines = indices(stress if locked is None else stress + locked)
+        return _summary(case, fi_layer, fi_plane, u, info, fi_lines)
+
+    out = summarize()
+    buckling = None
+    checks = {}
+    relevant = min(need, out["safety_factor"])
+    if geometry_checks and info == 0 and _compression_needs_check(case, stress, scale, min(mat.e_xy, mat.e_z), relevant):
+        if can_solve:
+            try:
+                buckling = buckling_load_factor(model, c, scale, case.fixed, stress)
+            except (ArithmeticError, MemoryError, np.linalg.LinAlgError):
+                pass  # An optional solve must leave the linear strength result available.
+        checks["buckling"] = {"status": "solved", "load_factor": buckling[0]} if buckling else {
+            "status": "unavailable", **_geometry_message("buckling_unavailable")}
+    if do_bending:
+        checks["bending"] = {"status": "unavailable", **_geometry_message("bending_unavailable")}
+        if buckling is not None and buckling[0] <= 1:
+            checks["bending"] = {"status": "unstable"}
+        elif can_solve and out["safety_factor"] >= 0.25:
+            try:
+                solution = large_deflection(model, c, scale, case.forces, case.fixed, u)
+            except (ArithmeticError, MemoryError, np.linalg.LinAlgError):
+                solution = None
+            if solution is not None:
+                linear_mm = out["max_displacement_mm"]
+                u, stress = solution
+                out = summarize()
+                checks["bending"] = {
+                    "status": "solved", "linear_displacement_mm": linear_mm,
+                    "displacement_mm": out["max_displacement_mm"],
+                    **_geometry_message("large_deflection", rule="large_deflection",
+                                        linear=round(linear_mm, 2), curved=round(out["max_displacement_mm"], 2)),
+                }
+    without = None
+    if locked is not None:
+        worst = max(fi[~case.ignore].max(initial=0) for fi in indices(stress) if fi is not None)
+        without = float(1 / worst) if worst > 0 else None
+    if buckling is not None:
+        factor, shape = buckling
+        if factor <= need or factor < out["safety_factor"]:
+            checks["buckling"].update(_geometry_message("buckling", rule="compression_buckling", factor=round(factor, 2)))
+        if factor < out["safety_factor"]:
+            movement = np.linalg.norm(shape[model.edof[:, ::3] // 3], axis=2).mean(axis=1)
+            usable = ~case.ignore
+            crit = np.argmax(np.where(usable, movement, -1) if usable.any() else movement)
+            out.update(safety_factor=factor, mode="buckling", near_support=False,
+                       critical_point=model.grid.centers(model.elems[crit]).tolist())
+        if without is not None:
+            without = min(without, factor)
+    if locked is not None:
+        grid = model.grid
+        near = np.max(np.abs(grid.centers(model.elems) - out["critical_point"]), axis=1) <= grid.h * (1 + 1e-6)
         out["residual_stress"] = {"included": True,
                                   "peak_near_weak_spot_mpa": float(von_mises(locked[near]).max(initial=0)),
-                                  "safety_factor_without": float(1 / worst) if worst > 0 else None}
-    out["verdict"] = verdict(out["safety_factor"], required_safety(profile))
+                                  "safety_factor_without": without}
+        stress = stress + locked
+    if checks:
+        out["geometry_checks"] = checks
+    out["verdict"] = verdict(out["safety_factor"], need)
     out["vm"] = von_mises(stress)
     out["u"] = u
     return out
+
+
+def _geometry_message(key: str, *, rule: str | None = None, **params) -> dict:
+    message = {"key": f"strength.geometry.{key}", "params": params}
+    out = {"message": message, "detail": format_message(message)}
+    if rule is not None:
+        spec = load_data("rules")["rules"][rule]
+        out.update(rule=rule, fixes=spec["fixes"])
+    return out
+
+
+def large_motion(case: LoadCase, u: np.ndarray) -> bool:
+    """Compare peak movement with the span from its nearest support, even on a small tab."""
+    distance = np.linalg.norm(u, axis=1)
+    h = case.model.grid.h
+    if distance.max() < 2 * h * LARGE_MOTION_SHARE:
+        return False
+    nodes = np.argwhere(case.model.node_index >= 0)
+    held = case.held()
+    moving = ~held & (distance >= 2 * h * LARGE_MOTION_SHARE)
+    if not moving.any():
+        return False
+    from scipy.spatial import cKDTree
+
+    span = cKDTree(nodes[held]).query(nodes[moving])[0] * h
+    return bool(np.any(distance[moving] > LARGE_MOTION_SHARE * np.maximum(span, 2 * h)))
+
+
+def _wall_runs(model: Model) -> tuple[np.ndarray, list]:
+    """Contiguous occupied runs along each grid axis, and their lengths per cell."""
+    cached = model.__dict__.get("_wall_runs")
+    if cached is not None:
+        return cached
+    elems = model.elems
+    spans = np.empty_like(elems)
+    runs = []
+    for axis in range(3):
+        sides = [i for i in range(3) if i != axis]
+        order = np.lexsort((elems[:, axis], elems[:, sides[0]], elems[:, sides[1]]))
+        step = np.diff(elems[order], axis=0)
+        ends = np.r_[0, np.flatnonzero((step[:, axis] != 1) | (step[:, sides] != 0).any(axis=1)) + 1, len(elems)]
+        lengths = np.diff(ends)
+        spans[order, axis] = np.repeat(lengths, lengths)
+        runs.append((order, ends[:-1], lengths))
+    model.__dict__["_wall_runs"] = (spans, runs)
+    return spans, runs
+
+
+def _compression_needs_check(case: LoadCase, stress: np.ndarray, scale: np.ndarray, e: float, relevant: float) -> bool:
+    """Screen for a slender compressed load path with an Euler-order load.
+
+    Use a permissive fraction of the cantilever value pi²/48 for a rectangular strip. Skip
+    stress singularities and look through the wall, across the compressed axis. This is only a
+    screen. Only buckling near the required margin or earlier than material failure matters.
+    The eigenproblem uses the actual supports, full stress tensor and voxel geometry.
+    """
+    span = np.ptp(case.model.elems, axis=0) + 1
+    if span.max() < BUCKLING_SLENDERNESS:
+        return False
+    strain = -stress[:, :3] / (e * scale[:, None])
+    strain[case.ignore] = 0
+    threshold = 0.03 / max(relevant, 1e-12)
+    if np.max(strain * span**2) < threshold:
+        return False
+    sizes, runs = _wall_runs(case.model)
+    for thin, (order, starts, lengths) in enumerate(runs):
+        other = [axis for axis in range(3) if axis != thin]
+        slenderness = sizes[:, other] / sizes[:, thin, None]
+        possible = (slenderness >= BUCKLING_SLENDERNESS) & (strain[:, other] * slenderness**2 >= threshold)
+        if not possible.any():
+            continue
+        # Compression through the wall thickness matters for buckling. A bent wall often has
+        # matching tension on its other face, so one compressed face is insufficient evidence.
+        force = np.add.reduceat(stress[order][:, other], starts, axis=0)
+        stiffness = np.add.reduceat(scale[order], starts)
+        average = np.empty((len(sizes), 2))
+        average[order] = np.repeat(-force / (e * stiffness[:, None]), lengths, axis=0)
+        if np.any(possible & (average * slenderness**2 >= threshold)):
+            return True
+    return False
 
 
 def vibration(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), extra_kg: float = 0.0) -> tuple[float, np.ndarray]:
@@ -742,17 +884,26 @@ def impact_factor(drop_mm: float, deflection_mm: float) -> float:
 
 def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None,
                    x0: list[np.ndarray | None] | None = None, rtol: float = 1e-4,
-                   precond_cache: dict | None = None, *, released: ReleasedStrain | None = None) -> dict:
+                   precond_cache: dict | None = None, *, large_rotations: bool = True, geometry_checks: bool = True,
+                   released: ReleasedStrain | None = None) -> dict:
     """``evaluate`` for every case; the weakest one is returned, with all safety factors in ``cases``."""
     starts = x0 if x0 is not None else [None] * len(cases)
     residual = None if released is None else released.on_grid(cases[0].model)
-    results = [evaluate(c, up, profile, shells, printed, x0=s, rtol=rtol, precond_cache=precond_cache, residual_strain=residual)
+    results = [evaluate(c, up, profile, shells, printed, x0=s, rtol=rtol, precond_cache=precond_cache,
+                        large_rotations=large_rotations, geometry_checks=geometry_checks, residual_strain=residual)
                for c, s in zip(cases, starts)]
     k = int(np.argmin([r["safety_factor"] for r in results]))
     worst = results[k]
     worst["case"] = cases[k].number
     worst["cases"] = [{"case": c.number, "safety_factor": r["safety_factor"], "verdict": r["verdict"]} for c, r in zip(cases, results)]
-    worst["case_fi"] = [(r["fi_layers_max"], r["fi_material_max"]) for r in results]
+    for brief, result in zip(worst["cases"], results):
+        if "geometry_checks" in result:
+            brief["geometry_checks"] = result["geometry_checks"]
+    worst["case_fi"] = []
+    for result in results:
+        limits = (result["fi_layers_max"], result["fi_material_max"])
+        buckling = result.get("geometry_checks", {}).get("buckling", {}).get("load_factor")
+        worst["case_fi"].append(limits if buckling is None else (*limits, 1 / buckling))
     worst["_cases_converged"] = all(r["solver_converged"] for r in results)
     worst["_u_all"] = [r["u"] for r in results]
     if residual is not None:
@@ -900,7 +1051,7 @@ def failure_indices(stress: np.ndarray, up: np.ndarray, mat: Material, scale: np
     In-plane: von Mises vs. in-plane strength. Sparse infill is weaker by ``scale``.
     """
     up = up / np.linalg.norm(up)
-    s = _tensor(stress)  # (E, 3, 3)
+    s = voigt_tensor(stress)
     traction = s @ up
     normal = traction @ up
     shear = np.linalg.norm(traction - normal[:, None] * up, axis=1)
@@ -937,7 +1088,7 @@ def lines_index(stress: np.ndarray, up: np.ndarray, mat: Material, printed: Prin
     up = up / np.linalg.norm(up)
     across = np.cross(up, printed.lines)
     across /= np.maximum(np.linalg.norm(across, axis=1, keepdims=True), 1e-12)
-    traction = np.einsum("eij,ej->ei", _tensor(stress), across)
+    traction = np.einsum("eij,ej->ei", voigt_tensor(stress), across)
     normal = np.einsum("ei,ei->e", traction, across)
     shear = np.linalg.norm(traction - normal[:, None] * across, axis=1)
     return printed.aligned * np.hypot(np.maximum(normal, 0), shear) / mat.strength_z / np.maximum(printed.scale, 1e-3)
@@ -1089,8 +1240,3 @@ def _grow(mask: np.ndarray, model: Model, elem_id) -> np.ndarray:
         ids = elem_id[tuple(n[ok].T)]
         out[ids[ids >= 0]] = True
     return out
-
-
-def _tensor(v: np.ndarray) -> np.ndarray:
-    sx, sy, sz, syz, sxz, sxy = v.T
-    return np.stack([np.stack([sx, sxy, sxz], -1), np.stack([sxy, sy, syz], -1), np.stack([sxz, syz, sz], -1)], -2)
