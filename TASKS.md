@@ -1353,7 +1353,7 @@ Not reachable: Pollák & Goryl 2025.
   - Do: large-deflection solve for snap fits and TPU; a buckling check for thin, tall walls under pressure.
 - [~] **T-601 P3** Warping: plastic relaxes while warm. · files: `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-601-warm-relaxation`)
   - Do: stress relaxation near the softening point (bed-warm layers), from published data; check whether PLA warping is over-predicted today.
-- [ ] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: —
+- [~] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-602-warp-stress`)
 - [ ] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: —
   - Do: add the brim / ears the 3MF will get to the warp model's first layer (more bed contact, different peel front) instead of a rule of thumb.
 - [x] **T-604 P3** Finer heat tier prototype. · files: `core/fdmcore/thermal.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-604-fine-heat-tier`)
