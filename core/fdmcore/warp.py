@@ -35,13 +35,14 @@ from math import exp, isfinite, log, tanh
 import numpy as np
 
 from .fea import Model, b_matrix, build_model, cohesive_bed, element_stiffness, prolongation, solve, stiffness
-from .heat import H_FAN, H_STILL, K_PLASTIC
+from .heat import H_FAN, H_STILL, K_PLASTIC, layer_seconds
 from .mesh import Mesh
 from .messages import format_message
 from .orientation import rotation_to_z
 from .profile import WARPING_TEST_MM, Profile, load_data
 from .progress import report
 from .strength import Shells, element_scale, material_for, von_mises
+from .thermal import chamber_air, chamber_conditions
 from .voxel import VoxelGrid, voxelize
 
 MAX_STEPS = 16  # solves while printing: voxel layers are grouped to at most this many
@@ -67,16 +68,18 @@ def shrink_factors(profile: Profile) -> list[float]:
 
 
 def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None,
-             warm: tuple | None = None, *, adhesion: bool = False, grip_trial: bool = False,
-             peel_range: bool = False) -> dict:
+             warm: tuple | None = None, *, climate: dict | None = None, sliced: dict | None = None,
+             adhesion: bool = False, grip_trial: bool = False, peel_range: bool = False) -> dict:
     """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model (voxelised in the
     print frame: ``rotation`` turns part coordinates into it, so a tilted part sits flat on the grid's
     bottom layer instead of touching the bed with one stair-step corner), displacement after coming off
     the bed (n_nodes, 3, print frame), the bed's pull at each bed node while printing
     (N, positive = the part pulls away from the bed) and the bed nodes. ``warm`` (heights, °C): how warm
     each height still is when more goes on top (the layer heat model with the G-code's real layer
-    times); plastic still warm then shrinks less while printing. With ``adhesion``, find the first
-    build step where the bed bond peels. With ``grip_trial``, find the strongest grip at which any step lifts.
+    times); plastic still warm then shrinks less while printing. ``climate`` and ``sliced`` use the
+    loaded print's chamber and timing instead of estimating both from the profile and shape.
+    With ``adhesion``, find the first build step where the bed bond peels. With ``grip_trial``,
+    find the strongest grip at which any step lifts.
     ``peel_range`` changes shrink and grip: shrink controls the pull, and grip is how much the bed can take.
     Reuse the clamped solve and peel stiffness, but run the nonlinear peel law separately at each endpoint."""
     rotation = rotation_to_z(up)
@@ -97,9 +100,13 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     bed = node_levels == bed_level
     zc = grid.centers(model.elems) @ up
     elem_level = np.round((zc - zc.min()) / grid.h).astype(int)
-    shrink = shrink_while_printing(zc - zc.min() + grid.h / 2, profile, fade_depth(model, elem_level, profile))
+    heights = zc - zc.min() + grid.h / 2
+    climate = chamber_conditions(profile) if climate is None else climate
+    seconds = (_chamber_seconds(grid, heights, elem_level, profile, sliced)
+               if climate["chamber_c"] != climate["chamber_start_c"] else 0.0)
+    shrink = shrink_while_printing(heights, profile, fade_depth(model, elem_level, profile), climate=climate, seconds=seconds)
     if warm is not None:
-        shrink = np.minimum(shrink, shrink_below(np.interp(zc - zc.min() + grid.h / 2, *warm), profile))
+        shrink = np.minimum(shrink, shrink_below(np.interp(heights, *warm), profile))
     levels = np.unique(elem_level)
     groups = np.array_split(levels, min(MAX_STEPS, len(levels)))
     b_mid = b_matrix(0.0, 0.0, 0.0, grid.h)
@@ -466,17 +473,31 @@ def fade_depth(model, elem_level: np.ndarray, profile: Profile) -> np.ndarray:
     return below[elem_level] + per_layer[elem_level] / 2
 
 
-def shrink_while_printing(height: np.ndarray, profile: Profile, depth: np.ndarray | None = None) -> np.ndarray:
+def _chamber_seconds(grid: VoxelGrid, heights: np.ndarray, elem_level: np.ndarray, profile: Profile,
+                     sliced: dict | None) -> np.ndarray:
+    """Put the chamber curve on each print height, using voxel-layer footprints when no slice is loaded."""
+    if sliced is not None:
+        start = np.r_[0.0, np.cumsum(sliced["seconds"][:-1])]
+        return np.interp(heights, sliced["z"] - sliced["layer_height"] / 2, start)
+    solid = np.pad(grid.solid, ((1, 1), (1, 1), (0, 0)))
+    area = solid.sum(axis=(0, 1)) * grid.h ** 2
+    perimeter = sum(np.count_nonzero(np.diff(solid, axis=axis), axis=(0, 1)) for axis in (0, 1)) * grid.h
+    duration = layer_seconds(area, perimeter, profile) * (grid.h / profile.layer_height)
+    start = np.cumsum(duration) - duration
+    return start[np.flatnonzero(area)[0] + elem_level]
+
+
+def shrink_while_printing(height: np.ndarray, profile: Profile, depth: np.ndarray | None = None, *,
+                           climate: dict | None = None, seconds: float | np.ndarray = 0.0) -> np.ndarray:
     """Linear shrinkage of plastic at ``height`` mm above the bed while the print goes on: from where
     it sets (``softening_c``) down to the temperature there (the bed's warmth fading into the air).
     ``depth``: fade lengths above the bed (``fade_depth``); default a thin wall's."""
-    from .heat import AMBIENT_C
-
     mat = profile.material
-    t_set, t_air = float(mat["softening_c"]), AMBIENT_C[profile.enclosure]
+    climate = chamber_conditions(profile) if climate is None else climate
+    t_set, t_air = float(mat["softening_c"]), chamber_air(climate, seconds)
     if depth is None:
         depth = np.asarray(height) / fade_length(profile, THIN_WALL_MM)
-    t_here = t_air + (float(mat["bed_temp_c"]) - t_air) * np.exp(-depth)
+    t_here = t_air + (climate["bed_c"] - t_air) * np.exp(-depth)
     return mat.get("shrinkage_pct", 0.3) / 100 * np.clip(t_set - t_here, 0, None) / max(t_set - ROOM_C, 1.0)
 
 

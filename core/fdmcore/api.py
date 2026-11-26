@@ -1878,17 +1878,25 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
     when the next go on and shrink less); ``from_gcode`` says whether it was used. ``ranges`` includes
     a curl range in mm and, for quick runs where both peel trials settle, possible bed lift verdicts."""
     from . import warp
+    from .gcode import layer_times
     from .strength import refine, sample_nodes, surface_values
+    from .thermal import chamber_conditions
 
     s = _require()
     p = Profile.from_dict(profile)
     sh = _shells(p)
-    warm = _warm_layers(up, p) if detailed else None
-    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, adhesion=True,
+    tp = None
+    if s.gcode is not None and np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999:
+        tp = s.gcode["toolpath"]
+    climate = chamber_conditions(p, toolpath=tp)
+    sliced = layer_times(tp) if tp is not None else None
+    warm = _warm_layers(up, p, sliced, climate) if detailed and sliced is not None else None
+    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, climate=climate, sliced=sliced, adhesion=True,
                       peel_range=ranges and not detailed)
     model, turn = r["model"], r["rotation"]  # model in the print frame; turn: part -> print
     s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"] @ turn, "turn": turn}  # set_fit / set_gap use it
-    key = (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure, round(model.grid.h, 3), sh)
+    setup = _warp_setup(p)
+    key = (*setup, round(model.grid.h, 3))
     if key not in _warp_reference:
         _warp_reference[key] = warp.reference(p, model.grid.h, sh)
     ref = _warp_reference[key]
@@ -1897,7 +1905,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
     verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
     adhesion = r.get("adhesion")
     peel_point = adhesion["point"] @ turn if adhesion and adhesion.get("may_lift") else None
-    s.warp.update(verdict=verdict, setup=_warp_setup(p), adhesion=adhesion, peel_point=peel_point)
+    s.warp.update(verdict=verdict, setup=setup, adhesion=adhesion, peel_point=peel_point)
     # Shape for the view: the part's own movement without the rigid shift and tilt it gets off the bed.
     pos = (model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h) @ turn  # part frame
     u = _without_rigid_motion(pos, r["u"] @ turn)
@@ -1934,18 +1942,15 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
     return out
 
 
-def _warm_layers(up, p: Profile) -> tuple | None:
-    """(heights, °C) from the layer heat model with the loaded G-code's layer times, if it is for ``up``."""
+def _warm_layers(up, p: Profile, sliced: dict, climate: dict) -> tuple:
+    """(heights, °C) from the layer heat model with the loaded G-code's layer times and chamber air."""
     from .checks import _layer_heat
-    from .gcode import layer_times
     from .slicer import slice_mesh
 
     s = _require()
-    if s.gcode is None or np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) < 0.999:
-        return None
     rotation = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
     layers = slice_mesh(orient(s.mesh, rotation), p.layer_height)
-    return np.array([l.z for l in layers]), _layer_heat(layers, p, layer_times(s.gcode["toolpath"]))
+    return np.array([l.z for l in layers]), _layer_heat(layers, p, sliced, climate=climate)
 
 
 def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
@@ -1965,6 +1970,7 @@ def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
 
 def _warp_setup(p: Profile) -> tuple:
     return (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure,
+            p.printer.get("chamber_temp_c"), p.printer["speed"], p.goal,
             p.printer.get("bed_surface", "unknown"), p.nozzle, p.layer_height, _shells(p))
 
 
@@ -2298,6 +2304,7 @@ def load_gcode(data: bytes | str, up, profile: dict | None = None) -> dict:
 
     q, shift = placement(tp, lo - base, hi - base, inside)
     s.gcode = {"up": np.asarray(up, float) / np.linalg.norm(up), "toolpath": tp, "q": q, "shift": shift + base, "rot": rot, "printed": {}}
+    s.warp = None
     vol = {KIND_NAMES[k]: round(float(tp.volume[tp.kind == k].sum()) / 1000, 2) for k in range(len(KIND_NAMES))}
     lost = time_lost(tp)
     return {"slicer": tp.slicer, "firmware": tp.firmware, "layers": int(len(tp.layer_z)), "lines": int(tp.part().sum()),

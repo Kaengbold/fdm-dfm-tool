@@ -37,10 +37,10 @@ import numpy as np
 
 from . import progress
 from .gcode import (BRIDGE, LAYER_TIME, NOT_SLOWED, OVERHANG, PART_KINDS, SMALL_PERIMETER, UNKNOWN, VOLUMETRIC_CAP,
-                    Toolpath, fan_levels, fan_mask, flow_cap)
+                    Toolpath, _number, fan_levels, fan_mask, flow_cap)
 from .kinematics import timing
 from .profile import Profile, load_data
-from .thermal import Heat, _interp, aux_cooling, constants, simulate, window
+from .thermal import Heat, _interp, aux_cooling, chamber_air, constants, simulate, window
 
 PROTECTED = (OVERHANG, BRIDGE, SMALL_PERIMETER, VOLUMETRIC_CAP, UNKNOWN)  # slowdowns that protect the print
 FIRST_LAYER = 2  # layers 0 and 1 keep the slicer's settings (bed adhesion)
@@ -167,12 +167,19 @@ def apply(tp: Toolpath, plan: Plan) -> Toolpath:
         fans = {key: np.r_[added[key], v[keep]] for key, v in fans.items()}
     order = np.argsort(fans["line"], kind="stable")
     fans = {key: v[order].astype(tp.fans[key].dtype) for key, v in fans.items()}
-    travel, dwells = _parks(tp, plan)
     return replace(tp, speed=speed.astype(np.float32), cause=cause, part_fan=fan.astype(np.float32), fans=fans, fan_names=names,
-                   travel=travel, dwells=dwells)
+                   **_park_events(tp, plan))
 
 
 PARK_MM = 20.0  # a park move goes this far past the part (in x), so the nozzle's heat doesn't reach it
+
+
+def park_feeds(tp: Toolpath) -> tuple[float, float, float]:
+    """Retraction length (mm), retraction and travel feeds (mm/min), at the writer's precision."""
+    retract = _number(tp.settings.get("retraction_length"), 0.8) or 0.8
+    retract_speed = _number(tp.settings.get("retraction_speed"), 35.0) or 35.0
+    travel_speed = float(np.median(tp.travel["speed"])) if len(tp.travel["speed"]) else 150.0
+    return round(retract, 3), max(1, round(retract_speed * 60)), max(1, round(travel_speed * 60))
 
 
 def park_moves(tp: Toolpath, plan: Plan) -> list[dict]:
@@ -201,33 +208,45 @@ def park_moves(tp: Toolpath, plan: Plan) -> list[dict]:
     return out
 
 
-def _parks(tp: Toolpath, plan: Plan) -> tuple[dict, dict]:
-    """Travel and pause events with the plan's park moves (kinematics.timing puts a pause at the move after it)."""
+def _park_events(tp: Toolpath, plan: Plan) -> dict:
+    """Put the park after the original commands before the line, just as in the exported file."""
     moves = park_moves(tp, plan)
     if not moves:
-        return tp.travel, tp.dwells
-    tr = tp.travel
-    speed = float(np.median(tr["speed"])) if len(tr["speed"]) else 150.0
-    add = {key: [] for key in ("p0", "p1", "t0", "t1", "speed", "line")}
-    pauses = {"line": [], "t": [], "s": []}
+        return {}
+    retract, retract_feed, travel_feed = park_feeds(tp)
+    t0 = tp.t0.copy()
+    travel, dwells, retracts = [], [], []
     for m in moves:
-        tf = float(tp.t0[m["line"]])
-        for a, b, t in ((m["here"], m["away"], tf - 2e-6), (m["away"], m["here"], tf - 1e-6)):
-            add["p0"].append(a), add["p1"].append(b), add["t0"].append(t), add["t1"].append(t)
-            add["speed"].append(speed), add["line"].append(m["line"])
-        pauses["line"].append(m["line"]), pauses["t"].append(tf - 1.5e-6), pauses["s"].append(m["seconds"])
-    travel = {key: np.concatenate([np.asarray(tr[key]), np.asarray(add[key], dtype=np.asarray(tr[key]).dtype if len(tr[key]) else None)])
-              for key in add}
-    travel.update({key: tr[key] for key in tr if key not in add})
-    dwells = {key: np.concatenate([np.asarray(tp.dwells[key], float), np.asarray(pauses[key], float)]) for key in pauses}
-    return travel, dwells
+        line = m["line"]
+        # These timestamps only order events. The motion planner calculates their durations.
+        out = t0[line]
+        back = np.nextafter(out, np.inf)
+        t0[line] = np.nextafter(back, np.inf)
+        here, away = m["here"], m["away"]
+        rounded_here, rounded_away = here.copy(), away.copy()
+        rounded_here[:2], rounded_away[:2] = np.round(here[:2], 3), np.round(away[:2], 3)
+        for a, b, t in ((here, rounded_away, out), (rounded_away, rounded_here, back)):
+            if np.linalg.norm(b - a) > 1e-6:
+                travel.append((a, b, t, t, travel_feed / 60, line))
+        dwells.append((line, back, float(f'{m["seconds"]:g}')))
+        if retract:
+            retracts.extend(((line, out, -retract, retract_feed / 60, False),
+                             (line, t0[line], retract, retract_feed / 60, False)))
+
+    def append(original: dict, rows: list, keys: tuple) -> dict:
+        return {key: np.concatenate([original[key], np.asarray(values, dtype=original[key].dtype)])
+                for key, values in zip(keys, zip(*rows))} if rows else original
+
+    return {"t0": t0, "travel": append(tp.travel, travel, ("p0", "p1", "t0", "t1", "speed", "line")),
+            "dwells": append(tp.dwells, dwells, ("line", "t", "s")),
+            "retracts": append(tp.retracts, retracts, ("line", "t", "mm", "speed", "moving"))}
 
 
 @dataclass
 class _Law:
     """The fitted cooling law (see the module docstring)."""
 
-    air: float
+    air: np.ndarray
     a: np.ndarray  # (M,) 1/s
     b: np.ndarray  # (M,) 1/s per W/m²K of fan
     h_base: np.ndarray  # (M,) fan h while the node cooled as sliced
@@ -250,17 +269,18 @@ def _below(h: Heat) -> np.ndarray:
 
 def _fit(tp: Toolpath, base: Heat, ref: Heat, c: dict, ref_fan: float) -> _Law:
     """``ref``: the run with the part fan at ``ref_fan`` from layer 2 on."""
-    air = float(c["chamber_c"])
+    air = chamber_air(c, base.born_s + np.nan_to_num(base.cover_s) / 2)
     h_ref = float(_interp(c["h_fan"], 100.0 * ref_fan))
     layer_fan = np.zeros(int(base.layer.max()) + 2)
     np.maximum.at(layer_fan, tp.layer, tp.part_fan)  # the slicer's fan in each layer
     h_base = np.array([float(_interp(c["h_fan"], 100.0 * f)) for f in layer_fan])[np.minimum(base.layer + 1, len(layer_fan) - 1)]
 
-    def rate(h: Heat) -> np.ndarray:
+    def rate(h: Heat, air: np.ndarray) -> np.ndarray:
         with np.errstate(all="ignore"):
             return np.log((h.birth_c - air) / np.maximum(h.cover_c - air, 0.5)) / np.maximum(h.cover_s, 1e-3)
 
-    k0, k1 = rate(base), rate(ref)
+    k0 = rate(base, air)
+    k1 = rate(ref, chamber_air(c, ref.born_s + np.nan_to_num(ref.cover_s) / 2))
     dh = h_ref - h_base
     with np.errstate(all="ignore"):
         b = np.where(np.isfinite(k0 + k1) & (np.abs(dh) > 1e-6), np.maximum((k1 - k0) / dh, 0.0), 0.0)
@@ -334,7 +354,8 @@ def _search(tp: Toolpath, h: Heat, law: _Law, win: dict, weight: np.ndarray, all
                 t = np.maximum(t0 + extra, 0.05)
                 k0 = law.a[under] + law.b[under] * law.h_base[under]
                 k1 = law.a[under] + law.b[under] * hf
-                temp = law.air + (h.cover_c[under] - law.air) * np.exp(-(k1 * t - k0 * t0))
+                air = law.air[under]
+                temp = air + (h.cover_c[under] - air) * np.exp(-(k1 * t - k0 * t0))
                 over = np.nan_to_num(temp - win["limit_c"][under], nan=0.0)
                 cost += hot_worth * _by_column(over, weight[under], hot_groups)
                 cover = temp
@@ -409,9 +430,12 @@ def _score(h: Heat, win: dict, weight: np.ndarray) -> dict:
             "bond_median": round(float(np.nanmedian(h.bond)), 3) if np.isfinite(h.bond).any() else None}
 
 
-def _extra_cooling_s(h: Heat, win: dict, air: float, layers: int) -> np.ndarray:
-    """Extra cooling time to reach the sag limit, using the trial's birth-to-cover cooling rate."""
+def _extra_cooling_s(h: Heat, win: dict, air: np.ndarray, layers: int) -> np.ndarray:
+    """Extra cooling time to reach the sag limit, using the trial's birth-to-cover cooling rate. ``air``:
+    each spot's chamber air (it warms up during the print)."""
+    air = np.broadcast_to(air, h.cover_c.shape)
     hot = win["too_hot"] & (h.cover_c > win["limit_c"]) & (win["limit_c"] > air) & (h.birth_c > h.cover_c)
+    air = air[hot]
     above_air = h.cover_c[hot] - air
     extra = h.cover_s[hot] * np.log(above_air / (win["limit_c"][hot] - air)) / np.log((h.birth_c[hot] - air) / above_air)
     needed = np.zeros(layers + 1)
@@ -424,7 +448,7 @@ def optimize(tp: Toolpath, profile: Profile, weight_at=None, intents_at=None, ti
     ``intents_at(heat)`` -> design-intent masks (thermal.window); both optional. Returns the plans, the print
     time and the window before and after, and the heat results (``heat``: before, gcode, slicer)."""
     cfg = settings()
-    c = constants(profile, tp.settings)
+    c = constants(profile, toolpath=tp)
     stages = iter(np.linspace(0, 1, 7))
 
     def run(path: Toolpath, snapshots: bool = False) -> tuple[Heat, float]:

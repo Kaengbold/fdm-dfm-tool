@@ -1332,8 +1332,12 @@ Not reachable: Pollák & Goryl 2025.
   - Outcome: First-layer springs weaken and break under shrinkage. The 40 mm ABS bar holds and the 90 mm bar starts to lift. The default-grid calibration reproduces 80 mm held and 120 mm lifted in Python and Pyodide.
 - [x] **T-594 P2** Check the peel while printing, not only at the end. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` (adhesion finding), `web/steps/simulate.js` (onset note) · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-594-peel-while-printing`)
   - Do: run the peel check at each warp step (corners usually lift in the first layers, bed hot, part still soft); report the height where it starts.
-- [~] **T-595 P2** Heated chamber: the real set point and its warm-up. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml`, `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-595-chamber-warmup`)
+- [x] **T-595 P2** Heated chamber: the real set point and its warm-up. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml`, `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-595-chamber-warmup`)
   - Do: read the chamber temperature from the G-code / printer profile instead of a fixed 60 °C; enclosures (passive and heated) warm up over the first ~30 min instead of being warm from layer 1.
+  - Outcome: Heat and warping use the startup chamber setting or the printer preset, with an estimated 30-minute warm-up when the chamber starts cold. A startup M191 wait starts the print warm.
+- [x] **T-622 P2** Cooling plan: the rewritten G-code must match the plan. · files: `core/fdmcore/thermal_opt.py`, `core/fdmcore/gcode_rewrite.py` · owner: GPT-6.2 Sol (`task/T-595-chamber-warmup`)
+  - Do: with T-595's cold chamber start, the in-memory plan on the cooling fixture shows no cold joints, but the rewritten file re-simulates about 0.7 s longer with 60 newly too-cold spots, so the export check falls back to OrcaSlicer's slice. Find where plan and rewrite differ (dwell or park timing) and close the gap. After T-596's optimizer fix the fixture's cold-start plan passes again, so first check whether the gap remains.
+  - Outcome: The planner includes each park's retract and prime and applies preceding motion commands before the park. The cold-start Orca export passes the heat check with 40 → 10 hot spots and zero cold joints.
 - [x] **T-596 P2** Layer joints as a bead neck. · files: `core/fdmcore/thermal.py`, `core/fdmcore/data/thermal.yaml` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-596-bead-neck`)
   - Do: heat between layers flows through the neck where two round beads touch: contact width from line width and layer height (0.3 × 0.8 vs 0.05 × 0.45 differ), not the whole cell; contact conductance from T-590 (today 500 W/m²K, range 100–5000, the most uncertain number).
   - Outcome: Layer joints use estimated bead necks from the G-code or profile, while keeping the contact conductance estimate and its range unchanged.
@@ -1348,7 +1352,7 @@ Not reachable: Pollák & Goryl 2025.
 - [x] **T-600 P3** Strength: big bending and buckling. · files: `core/fdmcore/strength.py`, `core/fdmcore/fea.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-600-large-deflection-buckling`)
   - Do: large-deflection solve for snap fits and TPU; a buckling check for thin, tall walls under pressure.
   - Outcome: large-deflection (elastica within 4 %) and linear buckling (Euler within 4 %) checks, only when movement is large or a slender wall is compressed; the optimizer runs them once on shortlisted options that meet their target.
-- [ ] **T-601 P3** Warping: plastic relaxes while warm. · files: `core/fdmcore/warp.py` · owner: —
+- [~] **T-601 P3** Warping: plastic relaxes while warm. · files: `core/fdmcore/warp.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-601-warm-relaxation`)
   - Do: stress relaxation near the softening point (bed-warm layers), from published data; check whether PLA warping is over-predicted today.
 - [ ] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: —
 - [ ] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: —

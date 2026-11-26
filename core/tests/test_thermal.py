@@ -42,6 +42,59 @@ def plate_then_dot(pause_s: float, size: float = 12.0) -> str:
     return "\n".join(out)
 
 
+@pytest.mark.parametrize(("prefix", "settings", "target", "waited"), [
+    ("M141 S52.5 ; heater on\n", {"chamber_temperature": [45, 50]}, 52.5, False),
+    ("M141 S40\nM191 R55\n", {}, 55, True),
+    ("M141 S56\nM191\n", {}, 56, True),
+    ("M83\nG1 Z0.2\nG1 X10 E1\nM191 S54\n", {}, 54, True),
+    ("; chamber_temperature=57,65\n", {"chamber_temperature": [45]}, 57, False),
+    ("", {"chamber_temperature": [58, 65]}, 58, False),
+    ("M141 S0\n", {"chamber_temperature": 70}, 35, False),
+    ("; chamber_temperature = inf\n", {}, 60, False),
+])
+def test_chamber_set_point(prefix, settings, target, waited):
+    profile = Profile.from_dict({"printer": "bambu_h2d"})
+    tp = gcode.parse(prefix + plate_then_dot(2) + "\nM141 S0\n", settings)
+    climate = thermal.chamber_conditions(profile, toolpath=tp)
+    assert climate["chamber_c"] == target
+    assert thermal.chamber_air(climate, 0) == (target if waited else 25)
+
+
+def test_chamber_uses_the_printer_setting_when_the_file_has_none():
+    api.custom_presets(printers={"warm": {"based_on": "bambu_h2d", "chamber_temp_c": 53}})
+    try:
+        profile = Profile.from_dict({"printer": "my_warm"})
+        assert thermal.chamber_conditions(profile)["chamber_c"] == 53
+        assert thermal.chamber_conditions(profile, {"chamber_temperature": "57"})["chamber_c"] == 57
+    finally:
+        api.custom_presets()
+
+
+@pytest.mark.parametrize(("printer", "settings", "steady"), [
+    ("bambu_a1", {}, 25), ("bambu_p1s", {}, 35),
+    ("bambu_p1s", {"bed_temperature": "100"}, 48), ("bambu_h2d", {}, 60),
+])
+def test_chamber_fallback_and_warmup(printer, settings, steady):
+    profile = Profile.from_dict({"printer": printer})
+    climate = thermal.chamber_conditions(profile, settings)
+    assert climate["chamber_c"] == steady
+    early, middle, late = thermal.chamber_air(climate, np.array([0, 600, 1800]))
+    assert early == 25
+    if steady == 25:
+        assert middle == late == 25
+    else:
+        assert early < middle < late < steady
+        assert (late - early) / (steady - early) == pytest.approx(0.95, abs=0.001)
+
+
+def test_chamber_wait_warms_the_first_layer_in_the_heat_simulation():
+    profile = Profile.from_dict({"printer": "bambu_h2d"})
+    overrides = {"air_bed_mm": 0.01, "bed_contact": 0.0}
+    cold, warm = [gcode.parse(f"{command} S65\n" + plate_then_dot(30)) for command in ("M141", "M191")]
+    cover = [thermal.simulate(tp, kinematics.timing(tp), profile, overrides=overrides).cover_c for tp in (cold, warm)]
+    assert np.nanmean(cover[1]) > np.nanmean(cover[0]) + 10
+
+
 def stacked_beads(width: float, height: float) -> gcode.Toolpath:
     """Two one-mm lines directly above one another, each inside the same cell."""
     volume = height * (width - height) + np.pi * height**2 / 4
@@ -141,7 +194,8 @@ def test_hot_pin_has_a_higher_peak_on_the_refined_grid(orca, quick):
     assert fine.cell_mm == 0.5
     quick_peak = np.nanmax(quick.cover_c[quick.z > PIN_Z])
     fine_peak = np.nanmax(fine.cover_c[fine.z > PIN_Z])
-    assert fine_peak - quick_peak == pytest.approx(9.97, abs=0.05)
+    # The fixture has no M191, so the chamber starts cold and warms up (T-595); held at 35 °C it is 9.97.
+    assert fine_peak - quick_peak == pytest.approx(10.20, abs=0.05)
 
 
 def test_refined_boundary_follows_quick_temperatures_and_transfers_heat(monkeypatch):
