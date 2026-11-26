@@ -300,3 +300,7 @@ strength.grid.failed: "The finer check could not finish reliably, so this estima
 strength.grid.similar: "A check with smaller cells gave a similar strength estimate."
 strength.grid.changed: "A check with smaller cells changed the strength estimate."
 strength.grid.changed_safety: "A check with smaller cells changed the safety factor from {before} to {after}."
+strength.residual.included: "This check includes stress locked in while printing."
+strength.residual.lower: "Stress locked in while printing lowers the safety margin from ×{before} to ×{after}."
+strength.residual.higher: "Stress locked in while printing raises the safety margin from ×{before} to ×{after}."
+strength.residual.likely_to_break: "It will most likely break under the load you set."
