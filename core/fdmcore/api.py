@@ -1144,7 +1144,7 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     head = {
         "fine": "It should hold the load you set.",
         "borderline": "It might break under the load you set; real prints vary.",
-        "likely to break": (format_message("strength.residual.likely_to_break") if r["residual_stress"]["included"]
+        "likely to break": (format_message("strength.residual.likely_to_break") if r.get("residual_stress", {}).get("included")
                             else f"It will most likely break: it holds only about {sf:.0%} of the load you set."),
     }[r["verdict"]]
     why = _strength_story_parts(r)["why"]
