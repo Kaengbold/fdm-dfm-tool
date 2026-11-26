@@ -30,6 +30,40 @@ const call = (method, args = {}, data = null) => {
   return r;
 };
 const secs = (t) => ((performance.now() - t) / 1000).toFixed(1);
+// A small cantilever checks the extra sparse solves, including ARPACK, on the browser runtime.
+console.log(py.runPython(`
+from time import perf_counter
+import numpy as np
+from fdmcore.fea import Material, build_model, solve, element_stress, buckling_load_factor, large_deflection
+from fdmcore.voxel import VoxelGrid
+
+def check_strength_geometry():
+    model = build_model(VoxelGrid(np.ones((40, 4, 4), bool), np.zeros(3), 1.0))
+    fixed = np.zeros(model.n_nodes, bool)
+    fixed[model.node_index[0].ravel()] = True
+    tip = model.node_index[-1].ravel()
+    force = np.zeros((model.n_nodes, 3))
+    scale = np.ones(len(model.elems))
+    c = Material(1000, 1000, 0.3, 0.3).stiffness_print_frame()
+    force[tip, 0] = -20 / len(tip)
+    u, info = solve(model, c, scale, force, fixed, rtol=1e-7)
+    assert info == 0
+    t = perf_counter()
+    critical, _ = buckling_load_factor(model, c, scale, fixed, element_stress(model, c, scale, u))
+    buckling_s = perf_counter() - t
+    assert abs(20 * critical / 32.89868133696 - 1) < 0.04
+    force[tip, 0], force[tip, 2] = 0, -20 / len(tip)
+    u, info = solve(model, c, scale, force, fixed, rtol=1e-7)
+    assert info == 0
+    t = perf_counter()
+    curved, _ = large_deflection(model, c, scale, force, fixed, u)
+    bending_s = perf_counter() - t
+    assert abs(-curved[tip, 2].mean() / 16.4382350008 - 1) < 0.04
+    assert curved[tip, 2].mean() / u[tip, 2].mean() < 0.85
+    return f"ok strength geometry: buckling {20 * critical:.2f} N in {buckling_s:.2f} s, bend {-curved[tip, 2].mean():.2f} mm in {bending_s:.2f} s"
+
+check_strength_geometry()
+`));
 for (const file of files) {
   const name = path.basename(file);
   let t = performance.now();
