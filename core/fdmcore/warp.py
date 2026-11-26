@@ -33,6 +33,9 @@ from itertools import product
 from math import exp, isfinite, log, tanh
 
 import numpy as np
+import shapely
+from scipy.ndimage import binary_propagation
+from shapely.geometry.polygon import orient
 
 from .fea import Model, b_matrix, build_model, cohesive_bed, element_stiffness, prolongation, solve, stiffness
 from .heat import H_FAN, H_STILL, K_PLASTIC, layer_seconds
@@ -41,6 +44,7 @@ from .messages import format_message
 from .orientation import rotation_to_z
 from .profile import WARPING_TEST_MM, Profile, load_data
 from .progress import report
+from .slicer import parts, section
 from .strength import Shells, element_scale, material_for, von_mises
 from .thermal import chamber_air, chamber_conditions
 from .voxel import VoxelGrid, voxelize
@@ -50,6 +54,104 @@ REF_BAR = (10.0, 3.0)  # width and height of the warping calibration bars (api.c
 RELEASE_SPRING = 1e-6  # × E·h: keeps the part from floating away once it is off the bed
 THIN_WALL_MM = 1.0  # A/P of a thin wall: the fade used when no cross-sections are known
 ROOM_C = 25.0
+BRIM_TYPES = ("outer_only", "brim_ears")
+
+
+def _brim_corners(poly: shapely.Polygon, angle: float, tolerance: float, *, inside: bool = False) -> np.ndarray:
+    """Find sharp turns on the simplified contour, as in the browser's OrcaSlicer build."""
+    ring = orient(poly).exterior
+    simple = ring.simplify(tolerance, preserve_topology=False)
+    xy = np.asarray((simple if len(simple.coords) > 4 else ring).coords)[:-1]
+    a, b = xy - np.roll(xy, 1, axis=0), np.roll(xy, -1, axis=0) - xy
+    turn = np.arctan2(a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0], (a * b).sum(axis=1))
+    turn = -turn if inside else turn
+    return xy[(turn > 0) & (turn >= np.deg2rad(180 - angle))]
+
+
+def _brim_outline(mesh: Mesh, settings: dict, thickness: float, nozzle: float) -> shapely.Geometry:
+    """Approximate the exported first-layer toolpaths from the slicer's width and corner settings."""
+    if not isfinite(thickness) or thickness <= 0:
+        return shapely.Polygon()
+    lo, hi = mesh.bounds()
+    z = lo[2] + min(thickness, hi[2] - lo[2]) * 0.500001
+    width = float(settings["brim_width"])
+    gap = float(settings.get("brim_object_gap", 0))
+    base = parts(section(mesh.triangles, z))
+    outlines = [shapely.Polygon(p.exterior) for p in base]
+    exterior = shapely.union_all(outlines)
+    if settings["brim_type"] == "brim_ears":
+        # Orca's automatic ears use the brim width as a radius, less the gap and one line spacing.
+        radius = width - gap - nozzle
+        if radius <= 0:
+            return shapely.Polygon()
+        angle = float(settings.get("brim_ears_max_angle", 125))
+        tolerance = float(settings.get("brim_ears_detection_length", 1))
+        outer = [q for p in outlines for q in parts(p.buffer(gap) if gap else p)]
+        corners = np.concatenate([_brim_corners(p, angle, tolerance) for p in outer]) if outer else np.empty((0, 2))
+        outside = shapely.difference(shapely.union_all(shapely.buffer(shapely.points(corners), radius)), exterior)
+        if str(settings.get("brim_ears_outer_only", "0")).lower() in ("1", "true"):
+            return outside
+        holes = [q for p in base for ring in p.interiors
+                 for q in parts(shapely.Polygon(ring).buffer(-gap) if gap else shapely.Polygon(ring))]
+        inside = []
+        for hole in holes:
+            centers = _brim_corners(hole, angle, tolerance, inside=True)
+            circles = shapely.union_all(shapely.buffer(shapely.points(centers), radius))
+            inside.append(shapely.intersection(circles, hole))
+        return shapely.difference(shapely.union_all([outside, *inside]), shapely.union_all(base))
+    # Keep the small slicer gap mechanically connected at voxel resolution. Exclude holes
+    # and other islands from exterior brim plastic.
+    expanded = shapely.buffer(outlines, width + gap)
+    return shapely.difference(shapely.union_all(expanded), exterior)
+
+
+def _add_brim(grid: VoxelGrid, outline: shapely.Geometry, thickness: float,
+              budget: int) -> tuple[VoxelGrid | None, np.ndarray | None]:
+    """Rasterise only bed-level material joined by a face so no loose island can hold the part."""
+    h = grid.h
+    nx, ny, nz = grid.solid.shape
+    if outline.is_empty:
+        return grid, None
+    x0, y0, x1, y1 = outline.bounds
+    lo = np.minimum(np.floor((np.array([x0, y0]) - grid.origin[:2]) / h).astype(int), 0)
+    hi = np.maximum(np.ceil((np.array([x1, y1]) - grid.origin[:2]) / h).astype(int), (nx, ny))
+    shape = hi - lo
+    if int(shape[0]) * int(shape[1]) * nz > max(grid.solid.size * 4, budget * 4):
+        return None, None
+    x, y = (grid.origin[i] + (np.arange(lo[i], hi[i]) + 0.5) * h for i in range(2))
+    footprint = shapely.contains_xy(outline, x[:, None], y[None, :])
+    part = np.zeros((*shape, nz), dtype=bool)
+    part[-lo[0]:nx - lo[0], -lo[1]:ny - lo[1]] = grid.solid
+    bottom = np.flatnonzero(grid.solid.any(axis=(0, 1)))[0]
+    base = part[:, :, bottom]
+    brim = binary_propagation(base, mask=base | footprint) & ~base
+    if not brim.any():
+        return grid, None
+    top = min(nz, bottom + max(1, int(np.ceil(thickness / h - 1e-9))))
+    solid = part.copy()
+    solid[:, :, bottom:top] |= brim[:, :, None]
+    if np.count_nonzero(solid) > budget:
+        return None, None
+    return VoxelGrid(solid, grid.origin + np.r_[lo, 0] * h, h), part
+
+
+def _warp_grid(mesh: Mesh, target: int, h: float | None, profile: Profile, settings: dict
+               ) -> tuple[VoxelGrid, np.ndarray | None, float]:
+    """Share the existing solve budget with the brim while keeping the original no-brim grid."""
+    base = voxelize(mesh, target, h)
+    thickness = float(settings.get("initial_layer_print_height", profile.layer_height))
+    outline = _brim_outline(mesh, settings, thickness, float(profile.nozzle))
+    grid = base
+    for _ in range(6):
+        combined, part = _add_brim(grid, outline, thickness, target)
+        if combined is not None and part is not None:
+            return combined, part, thickness
+        if combined is not None or h is not None:
+            break
+        grid = voxelize(mesh, h=grid.h * 1.12)
+        if not grid.solid.any():
+            break
+    return base, None, thickness
 
 
 def warp_limit(profile: Profile) -> float | None:
@@ -69,7 +171,8 @@ def shrink_factors(profile: Profile) -> list[float]:
 
 def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target_voxels: int = 6000, h: float | None = None,
              warm: tuple | None = None, *, climate: dict | None = None, sliced: dict | None = None,
-             adhesion: bool = False, grip_trial: bool = False, peel_range: bool = False) -> dict:
+             adhesion: bool = False, grip_trial: bool = False, peel_range: bool = False,
+             brim: dict | None = None) -> dict:
     """Print ``mesh`` (part coordinates) with build direction ``up``. Returns the model (voxelised in the
     print frame: ``rotation`` turns part coordinates into it, so a tilted part sits flat on the grid's
     bottom layer instead of touching the bed with one stair-step corner), displacement after coming off
@@ -80,17 +183,27 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     loaded print's chamber and timing instead of estimating both from the profile and shape.
     With ``adhesion``, find the first build step where the bed bond peels. With ``grip_trial``,
     find the strongest grip at which any step lifts.
+    ``brim`` uses the 3MF slicer settings. The full model includes the attachment, with part-only
+    arrays for the shape and curl. A brim that is too small for the grid leaves the base solve unchanged.
     ``peel_range`` changes shrink and grip: shrink controls the pull, and grip is how much the bed can take.
     Reuse the clamped solve and peel stiffness, but run the nonlinear peel law separately at each endpoint."""
     rotation = rotation_to_z(up)
     # Rounded: float noise from the turn (3.0000000001 mm) would add a whole voxel layer.
     print_mesh = Mesh(np.round(mesh.triangles @ rotation.T, 9))
-    model = build_model(voxelize(print_mesh, target_voxels, h))
+    has_brim = (brim is not None and brim.get("brim_type") in BRIM_TYPES
+                and 0 < float(brim.get("brim_width") or 0) < float("inf"))
+    grid, part, thickness = (_warp_grid(print_mesh, target_voxels, h, profile, brim) if has_brim
+                             else (voxelize(print_mesh, target_voxels, h), None, 0.0))
+    model = build_model(grid)
     up = np.array([0.0, 0.0, 1.0])
     grid = model.grid
     mat = material_for(profile)
     c = mat.stiffness_print_frame()
-    scale = element_scale(model, up, shells, profile)
+    part_model = build_model(VoxelGrid(part, grid.origin, grid.h)) if part is not None else model
+    part_elems = part[tuple(model.elems.T)] if part is not None else slice(None)
+    part_nodes = part_model.node_index[model.node_index >= 0] >= 0 if part is not None else slice(None)
+    scale = np.empty(len(model.elems))
+    scale[part_elems] = element_scale(part_model, up, shells, profile)
     ke = element_stiffness(c, grid.h)
     bt = sum(b_matrix(*g, grid.h).T for g in product((-1 / np.sqrt(3), 1 / np.sqrt(3)), repeat=3)) * (grid.h / 2) ** 3
     f_unit = bt @ (c @ -np.array([1, 1, 1, 0, 0, 0.0]))  # (24,) force of a unit isotropic shrink, scale 1
@@ -101,6 +214,11 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     zc = grid.centers(model.elems) @ up
     elem_level = np.round((zc - zc.min()) / grid.h).astype(int)
     heights = zc - zc.min() + grid.h / 2
+    if part is not None:
+        # Use only the amount of solid plastic printed in each brim cell, even on a coarse grid.
+        share = np.clip(thickness / grid.h - elem_level[~part_elems], 0, 1)
+        scale[~part_elems] = share
+        heights[~part_elems] -= (1 - share) * grid.h / 2
     climate = chamber_conditions(profile) if climate is None else climate
     seconds = (_chamber_seconds(grid, heights, elem_level, profile, sliced)
                if climate["chamber_c"] != climate["chamber_start_c"] else 0.0)
@@ -166,7 +284,8 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
             continue
         report((k + 0.5) / (len(groups) + 1), "Checking whether it lifts off the bed")
         nominal_grip = None if peel["may_lift"] else grip["grip_n_mm"]
-        trial = _edge_peel(sub, c, sub_scale, bed_load, spring_scale, nominal_grip, scenarios=active_scenarios)
+        trial = _edge_peel(sub, c, sub_scale, bed_load, spring_scale, nominal_grip, scenarios=active_scenarios,
+                           part_bed=part_nodes[full_n[fixed]] if part is not None else None)
         for name, result in trial.pop("scenarios").items():
             endpoints[name] = None if result["solver_failed"] else result["may_lift"]
         if nominal_grip is None:
@@ -177,7 +296,8 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
             z = grid.origin[2] + (bed_level + g[-1] + 1) * grid.h
             lo, hi = print_mesh.bounds()
             start_height = float(min(z, hi[2]) - lo[2])
-            message = {"key": "finding.bed_adhesion.start_height", "params": {"height": start_height}}
+            key = "finding.bed_adhesion.brim_start_height" if peel.get("brim_lifts") else "finding.bed_adhesion.start_height"
+            message = {"key": key, "params": {"height": start_height}}
             peel.update(start_step=k + 1, start_height_mm=start_height,
                         message=message, detail=format_message(message))
 
@@ -189,6 +309,10 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     pull = -(held_total @ up)  # the bed pulling the part down = the part pulling away from the bed
     out = {"model": model, "u": u_total + u_free, "pull": pull, "bed": bed, "up": up, "rotation": rotation,
            "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat}
+    if has_brim:
+        out["brim_modeled"] = part is not None
+    if part is not None:
+        out.update(part_model=part_model, part_nodes=part_nodes, part_elems=part_elems)
     if grip_trial:
         # The final build often has the strongest shrink load. Start there so
         # earlier steps only need a full search if they lift at the best grip so far.
@@ -293,7 +417,7 @@ def _shear_weight(offset_c: float) -> float:
 
 def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndarray,
                spring_scale: float, grip: float | None, lift_grip: float | None = None,
-               *, scenarios: dict | None = None) -> dict:
+               *, scenarios: dict | None = None, part_bed: np.ndarray | None = None) -> dict:
     """Let the bed bond open under the shrink already built up, with no pre-cut crack.
     Endpoint trials can share a preconditioner, but start fresh so one trial's slip cannot affect another."""
     h = model.grid.h
@@ -341,7 +465,12 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndar
         result = {"may_lift": may_lift, "detached_area_mm2": float(area[detached].sum()),
                   "solver_failed": not solved}
         if may_lift:
-            result["point"] = model.grid.origin + h * np.array([*xy[lift.argmax()], bottom])
+            # Prefer a lifting part node if one opened in this build step.
+            part_lift = lift * part_bed if part_bed is not None else lift
+            i = part_lift.argmax() if part_lift.any() else lift.argmax()
+            if part_bed is not None:
+                result["brim_lifts"] = not bool(part_bed[i])
+            result["point"] = model.grid.origin + h * np.array([*xy[i], bottom])
         return result
 
     if scenarios is not None:
@@ -512,6 +641,8 @@ def curl(result: dict) -> float:
     """How far the base curls off flat (mm, exaggerated): up-movement of the bed nodes after release,
     with the part's tilt taken out."""
     model, bed, up = result["model"], result["bed"], result["up"]
+    if "part_nodes" in result:
+        bed = bed & result["part_nodes"]
     pos = (model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h)[bed]
     w = result["u"][bed] @ up
     a, b = _plane_axes(up)

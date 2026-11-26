@@ -16,7 +16,7 @@ import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { fieldColor } from "../viewport/stage.js";
 import { t } from "../i18n.js";
-import { markedFaces, optimizeArgs } from "./args.js";
+import { markedFaces, optimizeArgs, targetSlicer } from "./args.js";
 
 export const DEPENDS = ["model", "option"];
 const COOLING = /^(heat_|small_layers_cooling$)/;
@@ -172,7 +172,8 @@ export async function runSimulations(store, services) {
     }
     const detailed = Boolean(gcode);
     setStage("warp");
-    const warp = await engine.call("warping", { up: o.up, profile, detailed });
+    const warp = await engine.call("warping", { up: o.up, profile, detailed, settings: o.settings,
+      slicer: targetSlicer(), excluded_settings: s.exportOff ?? [] });
     setStage("check");
     const check = await engine.call("check", { up: o.up, profile, detailed, faces: markedFaces(s) });
     const more = [];
@@ -328,6 +329,7 @@ registerStep("sim", {
         ? t(result.source === "file" ? "sim.basis.file" : "sim.basis.orca", { minutes: Math.round(result.gcode.print_time_min) })
         : result.gcodeError ? t("sim.basis.wrongFile", { reason: result.gcodeError }) : t("sim.basis.ours")));
       const grip = result.warp.adhesion;
+      if (result.warp.brim) body.append(h("p", { class: "ui-hint" }, result.warp.brim.detail));
       const curl = result.warp.range?.curl_mm;
       if (curl) body.append(h("p", {}, t("ranges.curl", { value: result.warp.curl_mm, low: curl[0], high: curl[1] })));
       if (curl || grip?.range) body.append(h("p", { class: "ui-hint" }, t("ranges.hint")));

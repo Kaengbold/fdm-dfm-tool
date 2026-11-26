@@ -13,6 +13,19 @@ export const TEMP_TIERS = {
 
 export const TOUCH_IDS = ["water", "food", "outdoors", "abrasion", "oil_fuel", "solvent", "skin"];
 
+export const SLICERS = ["orca", "bambu", "prusa", "cura"];
+export const SLICER_KEY = "fdm-target-slicer";
+
+/** The remembered export target also decides whether the slicer can print mouse ears. */
+export function targetSlicer() {
+  try {
+    const saved = localStorage.getItem(SLICER_KEY);
+    return SLICERS.includes(saved) ? saved : "orca";
+  } catch {
+    return "orca";
+  }
+}
+
 const HEAT_MARGIN_C = 10; // matches optimizer.py: heat_limit_c < temp + 10
 
 /** Available nozzle sizes (sorted strings) for a printer, falling back to the catalog's nozzle list. */

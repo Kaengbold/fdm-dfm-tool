@@ -1,4 +1,7 @@
+import io
 import json
+import zipfile
+from xml.etree import ElementTree as ET
 
 import numpy as np
 import pytest
@@ -20,7 +23,7 @@ def bar(length, height=3.0):
 
 def bar_adhesion(length, profile):
     api.load(to_binary_stl(bar(length)), "bar")
-    return api.warping([0, 0, 1], profile)["adhesion"]
+    return api.warping([0, 0, 1], profile, settings={"brim_type": "no_brim"})["adhesion"]
 
 
 def test_longer_bars_curl_more_and_the_reference_bar_rates_one():
@@ -163,6 +166,85 @@ def test_warping_result_for_the_view():
     low, high = r["adhesion"]["range"]
     assert low <= r["adhesion"]["may_lift"] <= high
     json.dumps(r, allow_nan=False, default=bytes.hex)
+
+
+def test_removing_the_brim_preserves_the_bare_part_solve():
+    p = Profile.from_dict(ABS_OPEN)
+    mesh = bar(20)
+    bare = warp.simulate(mesh, [0, 0, 1], p, h=1, adhesion=True)
+    off = warp.simulate(mesh, [0, 0, 1], p, h=1, adhesion=True, brim={"brim_type": "no_brim", "brim_width": 8})
+    np.testing.assert_array_equal(off["model"].grid.solid, bare["model"].grid.solid)
+    np.testing.assert_array_equal(off["u"], bare["u"])
+    assert warp.curl(off) == warp.curl(bare)
+    assert off["adhesion"] == bare["adhesion"]
+
+
+@pytest.mark.parametrize("kind", ["outer_only", "brim_ears"])
+def test_first_layer_brim_holds_a_bar_that_lifts_without_it(kind):
+    p = Profile.from_dict(ABS_OPEN)
+    mesh = bar(90)
+    bare = warp.simulate(mesh, [0, 0, 1], p, h=1, adhesion=True)
+    brim = warp.simulate(mesh, [0, 0, 1], p, h=1, adhesion=True, brim={"brim_type": kind, "brim_width": 8})
+    assert bare["adhesion"]["may_lift"]
+    assert not brim["adhesion"]["solver_failed"]
+    assert not brim["adhesion"]["may_lift"] or brim["adhesion"]["brim_lifts"]
+    assert brim["brim_modeled"]
+    added = brim["model"].grid.centers(brim["model"].elems[~brim["part_elems"]])
+    assert np.all(added[:, 2] == added[0, 2])
+    assert len(brim["model"].elems) <= 6000
+    assert warp.curl(brim) < warp.curl(bare)
+    if kind == "brim_ears":
+        assert np.all(np.minimum(abs(added[:, 0]), abs(90 - added[:, 0])) < 8)
+        assert all(np.any(np.linalg.norm(added[:, :2] - corner, axis=1) < 2)
+                   for corner in ((0, 0), (0, 10), (90, 0), (90, 10)))
+
+
+def test_warping_exports_brim_settings_and_displays_only_the_part():
+    mesh = bar(60)
+    api.load(to_binary_stl(mesh), "bar")
+    settings = {"brim_type": "brim_ears", "brim_width": "8"}
+    r = api.dispatch("warping", json.dumps({"up": [0, 0, 1], "profile": ABS_OPEN, "ranges": False,
+                                          "settings": settings, "slicer": "prusa"}))
+    with zipfile.ZipFile(io.BytesIO(api.export([0, 0, 1], ABS_OPEN, settings, slicer="prusa"))) as archive:
+        config = ET.fromstring(archive.read("Metadata/Slic3r_PE_model.config"))
+    exported = {m.attrib["key"]: m.attrib["value"] for m in config.iter("metadata")}
+    assert r["brim"]["type"] == exported["brim_type"] == "outer_only"
+    assert r["brim"]["width_mm"] == float(exported["brim_width"]) and r["brim"]["modeled"]
+    tris = np.frombuffer(r["field_triangles"], np.float32).reshape(-1, 3)
+    for actual, expected in zip((tris.min(axis=0), tris.max(axis=0)), mesh.bounds()):
+        np.testing.assert_array_equal(actual, expected)
+    assert len(np.frombuffer(r["vertex_disp"], np.float32)) == tris.size
+    assert len(np.frombuffer(r["stress_value"], np.float32)) == len(tris)
+    assert len(api._require().warp["model"].elems) < 6000
+    if "point_print" in r["adhesion"] and not r["adhesion"].get("brim_lifts"):
+        assert abs(r["adhesion"]["point_print"][0]) < 31
+    json.dumps(r, allow_nan=False, default=bytes.hex)
+
+
+def test_a_brim_smaller_than_a_grid_cell_falls_back_to_the_bare_part():
+    p = Profile.from_dict(ABS_OPEN)
+    r = warp.simulate(bar(20), [0, 0, 1], p, h=1, brim={"brim_type": "outer_only", "brim_width": 0.01})
+    assert r["brim_modeled"] is False
+    assert "part_model" not in r
+
+
+def test_first_lift_uses_the_brim_only_when_the_part_stays_down(monkeypatch):
+    p = Profile.from_dict(ABS_OPEN)
+    r = warp.simulate(bar(20), [0, 0, 1], p, h=1, brim={"brim_type": "outer_only", "brim_width": 2})
+    part_bed = r["part_nodes"][r["bed"]]
+    neighboring_brim_nodes = np.flatnonzero(~part_bed)
+    part_nodes = np.flatnonzero(part_bed)
+    assert len(neighboring_brim_nodes) and len(part_nodes)
+
+    lift = np.zeros(len(part_bed))
+    lift[neighboring_brim_nodes[0]] = 0.1
+    monkeypatch.setattr(warp, "cohesive_bed", lambda *args, **kwargs: (lift, lift, True))
+    load = np.zeros((len(lift), 3))
+    result = warp._edge_peel(r["model"], r["c"], r["scale"], load, 1, 1, part_bed=part_bed)
+    assert result["brim_lifts"]
+    lift[part_nodes[0]] = 0.05
+    result = warp._edge_peel(r["model"], r["c"], r["scale"], load, 1, 1, part_bed=part_bed)
+    assert not result["brim_lifts"]
 
 
 @pytest.mark.parametrize("h", [1.0, None])

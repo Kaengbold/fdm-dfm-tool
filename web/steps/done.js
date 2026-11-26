@@ -12,12 +12,11 @@ import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { t } from "../i18n.js";
 import { thumbnail } from "../viewport/stage.js";
-import { holdToEngine, loadToEngine, markedFaces, optimizeArgs } from "./args.js";
+import { holdToEngine, loadToEngine, markedFaces, optimizeArgs, SLICERS, SLICER_KEY, targetSlicer } from "./args.js";
 import { optionGcode, setupLine, simProfile } from "./simulate.js";
 import { openTool } from "./tools.js";
 import { exportZones } from "./tools/zones.js";
 
-const SLICERS = ["orca", "bambu", "prusa", "cura"];
 const CURA_GLOBAL_LABELS = {
   layer_height: "Layer Height",
   support_type: "Support Structure",
@@ -26,16 +25,11 @@ const CURA_GLOBAL_LABELS = {
   raft_layers: "Build Plate Adhesion Type (Raft)",
   slow_down_for_layer_cooling: "Minimum Layer Time",
 };
-const SLICER_KEY = "fdm-target-slicer";
 let busy = null; // {what, text} while an export runs
 let error = null;
 let checked = null; // {key, check, design} when Done had to run the check itself
 let gcodeCooled = false; // Download G-code on Done: plain vs cooling-optimized (T-615)
 
-/** The slicer the user exports for, remembered in this browser. */
-export function targetSlicer() {
-  try { return SLICERS.includes(localStorage.getItem(SLICER_KEY)) ? localStorage.getItem(SLICER_KEY) : "orca"; } catch { return "orca"; }
-}
 function setTargetSlicer(v) {
   try { localStorage.setItem(SLICER_KEY, v); } catch { /* storage blocked: this visit only */ }
 }

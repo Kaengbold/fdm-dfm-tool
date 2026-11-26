@@ -209,6 +209,10 @@ finding.warping.one_liner_len: "{length} mm {material} base cools and lifts corn
 finding.bed_adhesion.title: "May come loose here"
 finding.bed_adhesion.one_liner: "This corner may lift as the print shrinks. Bed grip is estimated."
 finding.bed_adhesion.start_height: "The corner may start lifting when the print is about {height} mm tall."
+finding.bed_adhesion.brim_start_height: "The brim may start lifting when the print is about {height} mm tall."
+warp.outer_brim: "This includes a {width} mm outer brim."
+warp.mouse_ears: "This includes mouse ears made with a {width} mm brim setting."
+warp.brim_unresolved: "The brim could not be represented on the simulation grid. This estimate is for the bare part."
 
 finding.weak_upright_pin.title: "Upright pin snaps easily"
 finding.weak_upright_pin.one_liner: "Layers run across the stem; a sideways bump snaps it off."
