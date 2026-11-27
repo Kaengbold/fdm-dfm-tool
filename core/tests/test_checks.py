@@ -956,3 +956,19 @@ def test_sideways_axis_on_a_bin_edge_does_not_crash():
     m._areas = np.array([1.0, 1.0])
     (angle,) = _axis_angles(m)
     assert min(angle, np.pi - angle) < 0.1  # along x
+
+
+@pytest.mark.parametrize("name", ["l_bracket", "hook", "hole_block", "feature_test"])
+def test_nozzle_comparison_check_matches_the_full_check(name):
+    """compare_nozzles' focused check (T-639) must give what run_checks gives for those numbers."""
+    from fdmcore.checks import NOZZLE_RULES, nozzle_comparison_check
+
+    oriented = orient(sample(name), np.eye(3))
+    for nozzle in ("0.2", "0.4", "0.8"):
+        p = Profile.from_dict({"nozzle": nozzle})
+        full = run_checks(oriented, p, max_layers=80)
+        fast = nozzle_comparison_check(oriented, p, max_layers=80)
+        assert fast["stats"]["print_time_min"] == pytest.approx(full["stats"]["print_time_min"])
+        assert fast["stats"]["filament_g"] == pytest.approx(full["stats"]["filament_g"])
+        want = [(f["rule"], f["detail"]) for f in full["findings"] if f["rule"] in NOZZLE_RULES]
+        assert [(f["rule"], f["detail"]) for f in fast["findings"]] == want

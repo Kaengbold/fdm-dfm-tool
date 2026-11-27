@@ -3891,21 +3891,25 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     if s.regions is None:
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks
+    check_layers = check_rot = None
     if findings is None:
-        findings = check(up, profile)["findings"]
+        findings, check_rot, check_layers = _check_for_design(up, profile)
     rotation, _ = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
     to_print = _print_frame_map(s.mesh, rotation)
     from_print = _part_frame_map(s.mesh, rotation)
+    feats = _features()
+    design_layers = (check_layers if check_layers is not None and np.allclose(check_rot, rotation_to_z(up)) else None)
     edits = design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
                          gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
-                         strength_verdict=s.strength_verdict, findings=findings, to_print=to_print)
+                         strength_verdict=s.strength_verdict, findings=findings, to_print=to_print,
+                         features=feats, cad_checks=s.cad_checks, layers=design_layers, coarse=coarse)
     if not s.cad_checks:  # an organic shape (T-408), until the user turns the CAD checks back on
         edits = [e for e in edits if not e["id"].startswith(CAD_ONLY_EDITS)]
     for e in edits:
         if "intent" in e:
             _cad_refs(e["intent"])
     edits = link_to_findings(edits, findings, to_print)
-    feats = _features()
     advice = design_advice(s.mesh, edits, findings, p, to_print, from_print, features=feats, up=up)
     return {
         "features": feats,
@@ -4323,24 +4327,24 @@ def _cost(oriented: Mesh, p: Profile, part_g: float, max_layers: int = 40) -> di
     return out
 
 
-def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None, detailed: bool = False) -> dict:
-    """Run all printability checks for one orientation, explain them and recommend settings.
-    ``faces`` as in ``orientations``: support on a face marked clean becomes a problem.
-    ``detailed``: the heat check uses the real layer times of the loaded G-code (if it is for this orientation)."""
+def _check_for_design(up, profile: dict | None = None) -> tuple[list[dict], np.ndarray, list]:
+    """Run only what design() needs from check(): findings and the sliced layers, skipping support
+    cost, settings recommendations and face temperature."""
     s = _require()
     p = Profile.from_dict(profile)
     rotation, fit = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
     oriented = orient(s.mesh, rotation)
-    sliced = None
-    if detailed and s.gcode is not None and np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999:
-        from .gcode import layer_times
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks
+    layers = slice_mesh(oriented, p.layer_height, 80 if coarse else 160)
+    result = run_checks(oriented, p, cad_checks=s.cad_checks, coarse=coarse, layers=layers)
+    findings, _ = _finish_check_findings(s, oriented, rotation, up, p, fit, result, mode="print", faces=None, spots=None)
+    return findings, rotation, layers
 
-        sliced = layer_times(s.gcode["toolpath"])
-    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks and not detailed
-    result = run_checks(oriented, p, sliced=sliced, cad_checks=s.cad_checks, coarse=coarse)
-    result["stats"]["heat_from_gcode"] = sliced is not None
-    result["stats"].update(_cost(oriented, p, result["stats"]["filament_g"], max_layers=20 if coarse else 40))
-    spots = _spot_heat(rotation, p) if sliced is not None else None
+
+def _finish_check_findings(s: Session, oriented: Mesh, rotation: np.ndarray, up, p: Profile, fit: dict,
+                           result: dict, mode: str, faces: dict | None, spots) -> tuple[list[dict], dict]:
+    """Post-process run_checks findings with session-level rules, risk, summaries and explanations.
+    ``result["findings"]`` keeps the raw findings (recommend_settings reads them); returns (explained, risk)."""
     if spots is not None:
         result["findings"] += _spot_findings(spots, p, result["findings"])
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
@@ -4370,7 +4374,28 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         if "finding_id" not in f:
             result["findings"][i] = summarize_finding(f, p)
     findings = [explain_finding(f, mode) for f in result["findings"]]
-    findings = emphasize_for_goal(findings, p.goal)
+    return emphasize_for_goal(findings, p.goal), risk
+
+
+def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None, detailed: bool = False) -> dict:
+    """Run all printability checks for one orientation, explain them and recommend settings.
+    ``faces`` as in ``orientations``: support on a face marked clean becomes a problem.
+    ``detailed``: the heat check uses the real layer times of the loaded G-code (if it is for this orientation)."""
+    s = _require()
+    p = Profile.from_dict(profile)
+    rotation, fit = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
+    oriented = orient(s.mesh, rotation)
+    sliced = None
+    if detailed and s.gcode is not None and np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999:
+        from .gcode import layer_times
+
+        sliced = layer_times(s.gcode["toolpath"])
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks and not detailed
+    result = run_checks(oriented, p, sliced=sliced, cad_checks=s.cad_checks, coarse=coarse)
+    result["stats"]["heat_from_gcode"] = sliced is not None
+    result["stats"].update(_cost(oriented, p, result["stats"]["filament_g"], max_layers=20 if coarse else 40))
+    spots = _spot_heat(rotation, p) if sliced is not None else None
+    findings, risk = _finish_check_findings(s, oriented, rotation, up, p, fit, result, mode=mode, faces=faces, spots=spots)
     return {
         "up": list(map(float, up)),
         "rotation": rotation.tolist(),
@@ -4861,19 +4886,26 @@ def _unit_shape(shape: str, n: int = 32) -> np.ndarray:
 def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
     """The same part with every nozzle: print time, filament, the nozzle-dependent problems (``new``:
     not there with the smallest nozzle) and the detail it can't trace (checks.lost_detail)."""
-    from .checks import NOZZLE_RULES, lost_detail
+    from .checks import NOZZLE_RULES, lost_detail, nozzle_comparison_check
+    from .holes import horizontal_holes
 
     s = _require()
     base = Profile.from_dict(profile)
     rotation, _ = print_rotation(s.mesh, up, base.printer["bed"], _moving(base))
     oriented = orient(s.mesh, rotation)
-    detail_layers = slice_mesh(oriented, 0.2, 80)  # one set of layers, so only the nozzle differs
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks
+    max_layers = 80
+    detail_layers = slice_mesh(oriented, 0.2, max_layers)  # one set of layers, so only the nozzle differs
+    hholes = horizontal_holes(oriented)
+    surface = oriented.normals_and_areas()
     out = []
     nozzles = sorted(presets()["nozzles"], key=float)
     for i, nozzle in enumerate(nozzles):
         p = Profile.from_dict({**(profile or {}), "nozzle": nozzle})
+        reuse_layers = detail_layers if abs(p.layer_height - 0.2) < 1e-6 else None
         with stage(i / len(nozzles), (i + 1) / len(nozzles)):
-            r = run_checks(oriented, p, max_layers=80)
+            r = nozzle_comparison_check(oriented, p, max_layers=max_layers, cad_checks=s.cad_checks,
+                                        coarse=coarse, hholes=hholes, layers=reuse_layers, surface=surface)
         issues = [explain_finding(f) for f in r["findings"] if f["rule"] in NOZZLE_RULES]
         out.append({
             "nozzle": nozzle,

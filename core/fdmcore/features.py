@@ -367,7 +367,9 @@ def _annotate_growth(edits: list[dict], mesh: Mesh) -> list[dict]:
 def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | None = None, tags: dict | None = None,
                  weak_spot=None, voxel_mm: float = 1.0, fits: dict | None = None, gaps: dict | None = None,
                  hot_spots=None, fasteners: dict | None = None, strength_verdict: str | None = None,
-                 findings: list[dict] | None = None, to_print=None) -> list[dict]:
+                 findings: list[dict] | None = None, to_print=None,
+                 *, features: list[dict] | None = None, cad_checks: bool = True,
+                 layers: list | None = None, coarse: bool = False) -> list[dict]:
     """Suggested geometry changes for this build direction, as closed meshes in part coordinates.
     ``weak_spot`` (part coordinates, from the last strength check) adds a chamfer at the nearest inside corner
     and thickens the weak stretch — only when ``strength_verdict`` is not ``"fine"`` (a part that is already
@@ -376,13 +378,14 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
     ``fits`` ({region: {"partner_mm", "fit"}}) resizes holes and posts for what goes into them; ``gaps``
     ({(face a, face b): {"partner_mm", "fit", "warp_mm"}}) slots and tabs between two flat faces;
     ``fasteners`` ({region: {"size", "use"}}) holes for screws, inserts and nuts (see fastener_plan)."""
-    from .additions import ledge_chamfers, magnet_slots, sacrificial_layers, thicken_walls
+    from .additions import ceilings, ledge_chamfers, magnet_slots, sacrificial_layers, thicken_walls
 
     up = np.asarray(up, float) / np.linalg.norm(up)
     prm = edit_params(params)
     angle = prm["teardrop_angle_deg"]
     edits = []
-    for f in accepted(detect_features(mesh, region, tags)):
+    detected = accepted(detect_features(mesh, region, tags) if features is None else features)
+    for f in detected:
         axis = np.asarray(f["axis"])
         # Not for a screw / nut hole: it gets its own size (a teardrop at the old size would undo it).
         if (f["type"] == "hole" and f["full_circle"] and abs(axis @ up) < 0.2 and f["diameter"] >= TEARDROP_MIN_DIAMETER
@@ -396,12 +399,12 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
                         "now": None, "target": round(float(angle), 1), "unit": "°", "point": f["center"]},
                 intent=_intent("teardrop", {"diameter_mm": f["diameter"], "angle_deg": angle},
                                [_prism_shape([q - half for q in kite], 2 * half, add=False)], regions=[f["region"]])))
-    edits += _fit_edits(accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
-    edits += _grip_fins(mesh, accepted(detect_features(mesh, region, tags)), fits or {}, up, profile)
+    edits += _fit_edits(detected, fits or {}, up, profile)
+    edits += _grip_fins(mesh, detected, fits or {}, up, profile)
     edits += _gap_edits(mesh, region, gaps or {}, up, profile)
     edits += _open_gaps(mesh, region, up, profile, gaps or {})
-    edits += _fastener_edits(mesh, accepted(detect_features(mesh, region, tags)), fasteners or {}, up, profile)
-    edits += _boss_ribs(mesh, accepted(detect_features(mesh, region, tags)))
+    edits += _fastener_edits(mesh, detected, fasteners or {}, up, profile)
+    edits += _boss_ribs(mesh, detected)
     r = rotation_to_z(up)
     oriented = orient(mesh, r)
     to_part = _to_part(mesh, r)
@@ -419,20 +422,22 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
         edits += _thicker_weak_spot(mesh, weak_spot, prm["thicken_mm"], hot_spots, up)
     part_pts = mesh.triangles.reshape(-1, 3)
     part_lo, part_hi = part_pts.min(axis=0) - GROW_TOL_MM, part_pts.max(axis=0) + GROW_TOL_MM
-    for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"])):
-        # The wedges are clipped in the print frame; on a tilted part (a round part on a resting side)
-        # one can still poke past the part's own box. A ledge fill never grows the part: drop those.
-        pieces = [q for q in (to_part(p) for p in c["pieces"])
-                  if np.all(q.reshape(-1, 3) >= part_lo) and np.all(q.reshape(-1, 3) <= part_hi)]
-        if not pieces:
-            continue
-        edits.append(_edit(
-            f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
-            "Fills the corner under the overhang at 45°, so it prints without support (and without support marks).",
-            pieces, op="add", param="ledge_max_mm",
-            advice={"text": f"Add a 45° chamfer under this {c['width']:.0f} mm ledge",
-                    "now": None, "target": 45.0, "unit": "°"}))
-    for i, s in enumerate(sacrificial_layers(oriented, profile)):
+    ceiling_list = ceilings(oriented, 2 * profile.layer_height)
+    if cad_checks:
+        for i, c in enumerate(ledge_chamfers(oriented, profile, prm["ledge_max_mm"], ceiling_list=ceiling_list)):
+            # The wedges are clipped in the print frame; on a tilted part (a round part on a resting side)
+            # one can still poke past the part's own box. A ledge fill never grows the part: drop those.
+            pieces = [q for q in (to_part(p) for p in c["pieces"])
+                      if np.all(q.reshape(-1, 3) >= part_lo) and np.all(q.reshape(-1, 3) <= part_hi)]
+            if not pieces:
+                continue
+            edits.append(_edit(
+                f"ledge-{i}", "support_marks", f"45° fill under the {c['width']:.0f} mm ledge at {c['z']:.1f} mm",
+                "Fills the corner under the overhang at 45°, so it prints without support (and without support marks).",
+                pieces, op="add", param="ledge_max_mm",
+                advice={"text": f"Add a 45° chamfer under this {c['width']:.0f} mm ledge",
+                        "now": None, "target": 45.0, "unit": "°"}))
+    for i, s in enumerate(sacrificial_layers(oriented, profile, ceiling_list=ceiling_list)):
         edits.append(_edit(
             f"sacrificial-{i}", "sacrificial_layer", f"Sacrificial layer over the Ø{s['diameter']:.1f} mm hole at {s['z']:.1f} mm",
             f"Closes the hole with one {profile.layer_height} mm layer where it starts in mid-air, so the layer below "
@@ -450,7 +455,7 @@ def design_edits(mesh: Mesh, region: np.ndarray, up, profile, params: dict | Non
                           "now": None, "target": round(float(m["length_mm"]), 1), "unit": "mm"})
         e["piece_ops"] = m["ops"]
         edits.append(e)
-    for i, w in enumerate(thicken_walls(oriented, profile, prm["wall_lines"])):
+    for i, w in enumerate(thicken_walls(oriented, profile, prm["wall_lines"], layers=layers, coarse=coarse)):
         n_lines = int(round(prm["wall_lines"]))
         edits.append(_edit(
             f"wall-{i}", "single_line_wall", f"Thicken the {w['width']:.2f} mm wall to {w['target']:.2f} mm",
