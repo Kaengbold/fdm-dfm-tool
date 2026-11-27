@@ -61,7 +61,9 @@ export class Picker {
 
   /** Repaint the part after a theme change: new base colour, any step region colours, then the hover highlight. */
   recolor() {
-    if (!this.stage.part) return;
+    // Only on picking steps: elsewhere the part may carry another step's paint (overhangs, heat), and the
+    // region colours left from an earlier step must not come back.
+    if (!this.stage.part || !this.enabled) return;
     this.stage.paint(() => null);
     if (this.data && this.colorFor) {
       this.colored = null;
