@@ -193,6 +193,9 @@
 .ui-progress__stages li.is-running { color: var(--text); font-weight: var(--fw-bold); }
 .ui-progress__stages li.is-running::before { border-color: var(--accent); border-right-color: transparent; animation: ui-spin 0.9s linear infinite; }
 @keyframes ui-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ui-progress__stages li.is-running::before { animation: none; border-right-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface-raised); }
+}
 .ui-progress__foot { display: flex; justify-content: space-between; }
 
 /* ---------- Toast and Modal ---------- */
