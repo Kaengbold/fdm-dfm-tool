@@ -36,7 +36,7 @@ export async function loadPart({ name, bytes, store, go, services, rerender }) {
   if (isProject(name)) return openProject({ name, bytes, store, go, services, set });
   try {
     set({ mode: "loading", text: t("part.reading") });
-    let faceIds, stepBodies = null;
+    let faceIds, stepBodies = null, stepIndex = 0;
     let data = bytes;
     if (kind === "step") {
       set({ mode: "loading", text: t("part.readingStep") });
@@ -47,25 +47,28 @@ export async function loadPart({ name, bytes, store, go, services, rerender }) {
       let index = 0;
       if (bodies.length > 1) index = await new Promise((resolve) => set({ mode: "bodies", bodies: bodies.map((b) => ({ name: b.name, volume: b.volume })), pick: resolve }));
       stepBodies = bodies;
+      stepIndex = index;
       data = stlBytes(bodies[index].soup);
       faceIds = Array.from(bodies[index].faceIds);
       set({ mode: "loading", text: t("part.reading") });
     }
     let info = await engine.call("load", { name, face_ids: faceIds }, data);
-    let bodyChanged = false;
+    let bodyChanged = false, scaled = false;
     if (!stepBodies && info.bodies.length > 1) {
       const index = await new Promise((resolve) => set({ mode: "bodies", bodies: info.bodies.map((b) => ({ name: b.name, volume: b.volume_mm3 })), pick: resolve }));
       if (index) { info = await engine.call("select_body", { index }); bodyChanged = true; }
     }
     if (info.unit_hint) {
       const factor = await new Promise((resolve) => set({ mode: "unit", hint: info.unit_hint, pick: resolve }));
-      if (factor !== 1) { info = await engine.call("scale", { factor }); bodyChanged = true; }
+      if (factor !== 1) { info = await engine.call("scale", { factor }); bodyChanged = scaled = true; }
     }
     if (bodyChanged) {
       const { stlBytes } = await import("../geometry.js");
       data = stlBytes(trianglesOf(info));
     }
-    services.setPart?.({ name, bytes: data, ...(kind === "step" ? { stepBytes: bytes } : {}), faceIds, kind });
+    // The CAD file keeps its own units: after a rescale its edits would no longer line up, so no STEP write-back.
+    const step = kind === "step" && !scaled ? { stepBytes: bytes, stepVolume: stepBodies[stepIndex].volume, stepEdits: [] } : {};
+    services.setPart?.({ name, bytes: data, ...step, faceIds, kind });
     stage?.showPart(trianglesOf(info));
     const health = info.mesh_health ?? {};
     const damaged = ["holes", "non_manifold_edges", "flipped_faces"].some((k) => health[k] > 0);
