@@ -1118,6 +1118,7 @@ export default {
   "problems.group.surface": "Looks rough",
   "problems.group.weak": "Weak",
   "problems.group.info": "Info",
+  "problems.optionalImprovements": "Optional improvements",
   "problems.changesModel": "{text} (changes your model)",
   "problems.modelTitle": "This changes your model",
   "problems.modelBody": "You chose slicer settings only. This fix changes the shape of your part. You can undo it.",

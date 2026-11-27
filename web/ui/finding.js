@@ -5,6 +5,21 @@ import { h, uid } from "./dom.js";
 import { Button } from "./button.js";
 import { t } from "../i18n.js";
 
+export function FixRow({ fix, onHoverFix, onAdd }) {
+  const item = h("div", { class: ["ui-fix", fix.added && "is-added"] },
+    h("span", { class: ["ui-tag", `is-${fix.tag}`] }, t(`ui.tag.${fix.tag}`)),
+    h("span", { class: "ui-fix__text" }, fix.text),
+    fix.added ? h("span", { class: "ui-fix__added" }, t("ui.added"))
+      : Button({ label: fix.action ?? (fix.steps ? t("ui.showSteps") : t("ui.add")), size: "small", onClick: () => onAdd?.(fix) }));
+  if (onHoverFix) {
+    item.addEventListener("mouseenter", () => onHoverFix(fix));
+    item.addEventListener("mouseleave", () => onHoverFix(null));
+    item.addEventListener("focusin", () => onHoverFix(fix));
+    item.addEventListener("focusout", (e) => { if (!item.contains(e.relatedTarget)) onHoverFix(null); });
+  }
+  return item;
+}
+
 /** finding: {title, place, line, severity: bad|warn|info, state: pending|fixed|accepted|new, fixes: [{tag, text, added?, steps?}], more?}. */
 export function FindingRow({ finding, expanded = false, preview = null, onFocus, onBlur, onHoverFix, onAdd, onAccept, onMore }) {
   const id = uid("find");
@@ -15,20 +30,7 @@ export function FindingRow({ finding, expanded = false, preview = null, onFocus,
     h("span", { class: "ui-find__title" }, finding.title),
     finding.place && h("span", { class: "ui-find__place num" }, finding.place),
     state);
-  const fixes = finding.fixes.map((fix) => {
-    const item = h("div", { class: ["ui-fix", fix.added && "is-added"] },
-      h("span", { class: ["ui-tag", `is-${fix.tag}`] }, t(`ui.tag.${fix.tag}`)),
-      h("span", { class: "ui-fix__text" }, fix.text),
-      fix.added ? h("span", { class: "ui-fix__added" }, t("ui.added"))
-        : Button({ label: fix.action ?? (fix.steps ? t("ui.showSteps") : t("ui.add")), size: "small", onClick: () => onAdd?.(fix) }));
-    if (onHoverFix) {
-      item.addEventListener("mouseenter", () => onHoverFix(fix));
-      item.addEventListener("mouseleave", () => onHoverFix(null));
-      item.addEventListener("focusin", () => onHoverFix(fix));
-      item.addEventListener("focusout", (e) => { if (!item.contains(e.relatedTarget)) onHoverFix(null); });
-    }
-    return item;
-  });
+  const fixes = finding.fixes.map((fix) => FixRow({ fix, onHoverFix, onAdd }));
   const body = h("div", { id, class: "ui-find__body", hidden: !expanded },
     finding.line && h("p", { class: "ui-find__line" }, finding.line),
     preview,
