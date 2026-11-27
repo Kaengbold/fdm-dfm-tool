@@ -256,13 +256,20 @@ function showOverlay(store, services, legend) {
       stage.paint(() => null);
     }
   }
-  if (overlay === "heat") legend.append(h("b", {}, t("sim.legend.heat")), h("span", {}, t("sim.legend.heatNote")));
-  if (overlay === "overhang") legend.append(h("b", {}, t("sim.legend.overhang")), h("span", {}, t("sim.legend.overhangNote")));
+  if (overlay === "heat") {
+    legend.append(h("b", {}, t("sim.legend.heat")), h("span", {}, t("sim.legend.heatNote")));
+    if (!result?.detailed) legend.append(h("span", { class: "sim-legend__note" }, t("sim.legend.heatFallback")));
+  }
+  if (overlay === "overhang") {
+    legend.append(h("b", {}, t("sim.legend.overhang")), h("span", {}, t("sim.legend.overhangNote")),
+      h("span", { class: "sim-legend__note" }, t("sim.legend.overhangHint")));
+  }
   shown = key;
 }
 
 function clearOverlay(services) {
   for (const sim of extra) sim.clearHeat?.(services);
+  if (overlay === "overhang" && services.stage?.camera?.position?.z < 0) services.stage.view("iso");
   if (shown == null) return;
   services.stage.hideField();
   services.stage.paint(() => null);
@@ -356,8 +363,11 @@ registerStep("sim", {
     const legend = h("div", { class: "sim-legend" });
     const bar = h("div", { class: "sim-views" },
       SegmentedControl({ label: t("sim.view.label"), size: "small", options: choices, value: overlay, onChange: (v) => {
-        const toHeat = v === "heat" && overlay !== "heat";
+        const prev = overlay;
+        const toHeat = v === "heat" && prev !== "heat";
         overlay = v;
+        if (v === "overhang" && prev !== "overhang") services.stage?.view("under");
+        else if (prev === "overhang" && v !== "overhang" && services.stage?.camera?.position?.z < 0) services.stage.view("iso");
         services.rerender();
         if (toHeat) requestAnimationFrame(() => document.querySelector(".heat-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }));
       } }));
