@@ -178,15 +178,24 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
       next ? Button({ label: own?.label ?? t("shell.next"), variant: "primary", disabled: Boolean(blocked), title: blocked ? t(blocked) : null, onClick: () => (own?.confirm ? own.confirm(() => navigate(next)) : navigate(next)) }) : h("span"));
     const head = h("div", { class: "panel-head" }, title, h("p", { class: "hint" }, t(`step.${s.step}.purpose`)));
     (steps.get(s.step)?.render ?? (() => {}))({ body, stage: stageUi, store, go, openRoute, services });
+    let panel = null;
     if (def.layout === "part") {
-      screen.replaceChildren(rail, stageEl);
       stageUi.prepend(head);
       stageUi.append(body, foot);
       stageEl.classList.add("stage--part");
     } else if (def.layout === "options") {
-      screen.replaceChildren(rail, stageEl, h("section", { class: "compare panel" }, head, body, foot));
+      panel = h("section", { class: "compare panel" }, head, body, foot);
     } else {
-      screen.replaceChildren(rail, stageEl, h("aside", { class: "panel", "aria-labelledby": "step-title" }, head, body, foot));
+      panel = h("aside", { class: "panel", "aria-labelledby": "step-title" }, head, body, foot);
+    }
+    if (stageEl.parentElement !== screen) {
+      screen.replaceChildren(rail, stageEl, ...(panel ? [panel] : []));
+    } else {
+      // Keep stageEl mounted in place so panel-only rerenders don't detach the WebGL canvas or churn ResizeObserver.
+      while (stageEl.previousSibling) stageEl.previousSibling.remove();
+      while (stageEl.nextSibling) stageEl.nextSibling.remove();
+      screen.insertBefore(rail, stageEl);
+      if (panel) screen.append(panel);
     }
     services.stage?.attach(stageEl);
     if (s.part && def.layout !== "part" && services.cameraBar) stageUi.append(services.cameraBar());

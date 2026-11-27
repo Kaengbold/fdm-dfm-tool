@@ -35,7 +35,20 @@ export function parseStl(buffer) {
   return Float32Array.from(nums.flatMap((v) => v.split(/\s+/).slice(1).map(Number)));
 }
 
-function partGroup(triangles, colors) {
+const MAX_EDGE_TRIANGLES = 20_000;
+
+/** Dispose every geometry and material in a group so replaced parts, beds and thumbnails don't leak GPU memory. */
+function disposeGroup(group) {
+  if (!group) return;
+  group.traverse((obj) => {
+    obj.geometry?.dispose?.();
+    if (Array.isArray(obj.material)) obj.material.forEach((m) => m?.dispose?.());
+    else obj.material?.dispose?.();
+  });
+  group.clear();
+}
+
+function partGroup(triangles, colors, { edges = true } = {}) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(triangles, 3));
   geo.computeVertexNormals();
@@ -52,10 +65,63 @@ function partGroup(triangles, colors) {
   for (let i = 0; i < col.length; i += 3) { col[i] = base.r; col[i + 1] = base.g; col[i + 2] = base.b; }
   geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
   const group = new THREE.Group();
-  group.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02 })));
-  group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo, 28),
-    new THREE.LineBasicMaterial({ color: colors.edge, transparent: true, opacity: 0.55 })));
-  return { group, geo, offset, base };
+  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02 }));
+  group.add(mesh);
+  let edgeLines = null;
+  // EdgesGeometry is O(triangles) and heavy on organic/scanned meshes; keep it for CAD-sized parts where crisp edges help.
+  if (edges && triangles.length / 9 <= MAX_EDGE_TRIANGLES) {
+    edgeLines = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 28),
+      new THREE.LineBasicMaterial({ color: colors.edge, transparent: true, opacity: 0.55 }));
+    group.add(edgeLines);
+  }
+  return { group, geo, mesh, edges: edgeLines, offset, base, orientCache: new Map() };
+}
+
+/** Placement [x, y, z] that centres a rotated part on the bed with its lowest vertex at z = 0, cached per rotation. */
+function rotatedPlacement(part, quat, key, exactXY = false) {
+  const hit = part.orientCache.get(key);
+  if (hit) return hit;
+  const e = new THREE.Matrix4().makeRotationFromQuaternion(quat).elements;
+  const m00 = e[0], m01 = e[4], m02 = e[8];
+  const m10 = e[1], m11 = e[5], m12 = e[9];
+  const m20 = e[2], m21 = e[6], m22 = e[10];
+  const arr = part.geo.attributes.position.array;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity;
+  if (exactXY) {
+    for (let i = 0; i < arr.length; i += 3) {
+      const x = arr[i], y = arr[i + 1], z = arr[i + 2];
+      const rx = m00 * x + m01 * y + m02 * z;
+      const ry = m10 * x + m11 * y + m12 * z;
+      const rz = m20 * x + m21 * y + m22 * z;
+      if (rx < minX) minX = rx;
+      if (rx > maxX) maxX = rx;
+      if (ry < minY) minY = ry;
+      if (ry > maxY) maxY = ry;
+      if (rz < minZ) minZ = rz;
+    }
+  } else {
+    const { min, max } = part.geo.boundingBox;
+    for (const x of [min.x, max.x]) {
+      for (const y of [min.y, max.y]) {
+        for (const z of [min.z, max.z]) {
+          const rx = m00 * x + m01 * y + m02 * z;
+          const ry = m10 * x + m11 * y + m12 * z;
+          if (rx < minX) minX = rx;
+          if (rx > maxX) maxX = rx;
+          if (ry < minY) minY = ry;
+          if (ry > maxY) maxY = ry;
+        }
+      }
+    }
+    // Exact min z in one tight pass so the part sits flush on the bed even for diagonal orientations.
+    for (let i = 0; i < arr.length; i += 3) {
+      const rz = m20 * arr[i] + m21 * arr[i + 1] + m22 * arr[i + 2];
+      if (rz < minZ) minZ = rz;
+    }
+  }
+  const pos = [-(minX + maxX) / 2, -(minY + maxY) / 2, -minZ];
+  part.orientCache.set(key, pos);
+  return pos;
 }
 
 function lights(scene) {
@@ -82,32 +148,58 @@ export class Stage {
     this.camera.up.set(0, 0, 1);
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
-    this.controls.addEventListener("change", () => this.render());
+    this._dragging = false;
+    this.frame = 0;
+    this._inTick = false;
+    const tick = () => {
+      this.frame = 0;
+      this._inTick = true;
+      const moved = this.controls.update();
+      this._inTick = false;
+      if (moved || this._dragging) this.frame = requestAnimationFrame(tick);
+    };
+    this._startLoop = () => {
+      if (!this.frame) this.frame = requestAnimationFrame(tick);
+    };
+    this.controls.addEventListener("start", () => { this._dragging = true; this._startLoop(); });
+    this.controls.addEventListener("end", () => { this._dragging = false; this._startLoop(); });
+    this.controls.addEventListener("change", () => {
+      this.render();
+      if (!this._inTick) this._startLoop();
+    });
     this.bed = new THREE.Group();
     this.scene.add(this.bed);
     this.part = null;
+    this.oriented = null;
+    this._orientKey = null;
+    this._w = 0;
+    this._h = 0;
     this.bedSize = [256, 256];
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.attach(el);
     this.setBed(this.bedSize);
-    const tick = () => { if (this.controls.update()) this.render(); this.frame = requestAnimationFrame(tick); };
-    this.frame = requestAnimationFrame(tick);
     this.themeObserver = new MutationObserver(() => this.recolor());
     this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   }
 
   /** Move the canvas into another stage element (the shell rebuilds its panels, the 3D view stays). */
   attach(el) {
-    this.resizeObserver.disconnect();
-    this.el = el;
-    el.prepend(this.canvas);
-    this.resizeObserver.observe(el);
+    if (this.el !== el || this.canvas.parentElement !== el) {
+      this.resizeObserver.disconnect();
+      this.el = el;
+      el.prepend(this.canvas);
+      this.resizeObserver.observe(el);
+    }
     this.resize();
   }
 
   resize() {
     const { width, height } = this.el.getBoundingClientRect();
     if (!width || !height) return;
+    const w = Math.round(width), h = Math.round(height);
+    if (w === this._w && h === this._h) return;
+    this._w = w;
+    this._h = h;
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
@@ -116,9 +208,26 @@ export class Stage {
 
   render() { this.renderer.render(this.scene, this.camera); }
 
+  /** Square PNG data URL from the existing renderer (avoids a second WebGL context and rebuilding the mesh). */
+  snapshot(size = 112) {
+    if (!this.part || !this.canvas.width || !this.canvas.height) return null;
+    const bedVis = this.bed.visible;
+    this.bed.visible = false;
+    this.renderer.render(this.scene, this.camera);
+    const out = document.createElement("canvas");
+    out.width = size;
+    out.height = size;
+    const sw = this.canvas.width, sh = this.canvas.height;
+    const side = Math.min(sw, sh);
+    out.getContext("2d").drawImage(this.canvas, (sw - side) / 2, (sh - side) / 2, side, side, 0, 0, size, size);
+    this.bed.visible = bedVis;
+    this.renderer.render(this.scene, this.camera);
+    return out.toDataURL("image/png");
+  }
+
   setBed([w, d]) {
     this.bedSize = [w, d];
-    this.bed.clear();
+    disposeGroup(this.bed);
     const c = palette();
     const plate = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ color: c.bed, roughness: 0.9 }));
     plate.position.z = -0.05;
@@ -135,8 +244,10 @@ export class Stage {
     this.hideField();
     this.clearGhosts();
     this.clearMarker();
-    if (this.part) { this.scene.remove(this.part.group); this.part.geo.dispose(); }
+    if (this.part) { this.scene.remove(this.part.group); disposeGroup(this.part.group); }
     this.part = partGroup(triangles, palette());
+    this.oriented = null;
+    this._orientKey = null;
     this.scene.add(this.part.group);
     if (this.printUp) this.orient(this.printUp); // an edited part comes back as loaded: stand it as it prints again
     this.view("iso");
@@ -161,16 +272,19 @@ export class Stage {
    * hover picker maps points for the part as loaded, so steps that pick call ``orient(null)`` to go back. */
   orient(up) {
     if (!this.part) return;
+    const identity = !up || (Math.abs(up[0]) < 1e-6 && Math.abs(up[1]) < 1e-6 && up[2] > 0);
+    const key = identity ? "id" : `u:${up[0]},${up[1]},${up[2]}`;
+    if (this._orientKey === key) return;
     const g = this.part.group;
     g.quaternion.identity();
     g.position.set(0, 0, 0);
-    if (up && !(Math.abs(up[0]) < 1e-6 && Math.abs(up[1]) < 1e-6 && up[2] > 0)) {
+    if (!identity) {
       g.quaternion.setFromUnitVectors(new THREE.Vector3(...up).normalize(), new THREE.Vector3(0, 0, 1));
-      g.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(g.children[0]);
-      g.position.set(-(box.min.x + box.max.x) / 2, -(box.min.y + box.max.y) / 2, -box.min.z);
+      const [px, py, pz] = rotatedPlacement(this.part, g.quaternion, key, false);
+      g.position.set(px, py, pz);
     }
     this.oriented = up ?? null;
+    this._orientKey = key;
     g.updateMatrixWorld(true);
     this.render();
   }
@@ -183,14 +297,15 @@ export class Stage {
    * centred like the engine's oriented frame, so overlays in that frame (heat spots, G-code lines) sit on it. */
   orientBy(rotation) {
     if (!this.part) return;
-    const g = this.part.group;
     const [a, b, c] = rotation;
+    const key = `m:${a.join(",")};${b.join(",")};${c.join(",")}`;
+    if (this._orientKey === key) return;
+    const g = this.part.group;
     g.quaternion.setFromRotationMatrix(new THREE.Matrix4().set(a[0], a[1], a[2], 0, b[0], b[1], b[2], 0, c[0], c[1], c[2], 0, 0, 0, 0, 1));
-    g.position.set(0, 0, 0);
-    g.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(g.children[0], true);
-    g.position.set(-(box.min.x + box.max.x) / 2, -(box.min.y + box.max.y) / 2, -box.min.z);
+    const [px, py, pz] = rotatedPlacement(this.part, g.quaternion, key, true);
+    g.position.set(px, py, pz);
     this.oriented = rotation;
+    this._orientKey = key;
     g.updateMatrixWorld(true);
     this.render();
   }
@@ -198,7 +313,7 @@ export class Stage {
   /** X-ray: see through the part (holds and loads behind it stay visible). */
   setXray(on) {
     if (!this.part) return;
-    const m = this.part.group.children[0].material;
+    const m = this.part.mesh.material;
     m.transparent = on;
     m.opacity = on ? 0.35 : 1;
     m.depthWrite = !on;
@@ -213,8 +328,10 @@ export class Stage {
     this.clearMarker();
     if (!this.part) return;
     this.scene.remove(this.part.group);
-    this.part.geo.dispose();
+    disposeGroup(this.part.group);
     this.part = null;
+    this.oriented = null;
+    this._orientKey = null;
     this.render();
   }
 
@@ -375,7 +492,7 @@ export class Stage {
     if (this.part) {
       const c = palette();
       this.part.base.set(c.part);
-      this.part.group.children[1].material.color.set(c.edge);
+      this.part.edges?.material.color.set(c.edge);
       this.onRecolor?.(); // a picker re-tints its regions on the new base colour
       if (!this.onRecolor) this.paint(() => null);
     }
@@ -392,7 +509,7 @@ export function thumbnail(triangles, size = 112) {
   thumbRenderer.setClearColor(0x000000, 0);
   const scene = new THREE.Scene();
   lights(scene);
-  const { group, geo } = partGroup(triangles, palette());
+  const { group, geo } = partGroup(triangles, palette(), { edges: false });
   scene.add(group);
   const box = geo.boundingBox, s = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
   const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 10000);
@@ -401,8 +518,9 @@ export function thumbnail(triangles, size = 112) {
   cam.position.copy(c).add(new THREE.Vector3(0.62, -0.78, 0.55).normalize().multiplyScalar(dist));
   cam.lookAt(c);
   thumbRenderer.render(scene, cam);
-  geo.dispose();
-  return thumbRenderer.domElement.toDataURL("image/png");
+  const url = thumbRenderer.domElement.toDataURL("image/png");
+  disposeGroup(group);
+  return url;
 }
 
 /** Camera bar element (Iso, Top, Front, Fit), bottom-left of the stage (§1.6). */
