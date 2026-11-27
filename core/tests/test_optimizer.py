@@ -33,6 +33,25 @@ def test_targets_are_floors():
     assert [optimizer.target_for(g, True) for g in ("strong", "balanced", "fast", "light")] == [5, 3, 3, 3]
 
 
+def test_pros_cons_deltas_match_rounded_table_values():
+    """Options 'Why' deltas come from the rounded integers shown in the table (T-632)."""
+    base = {"minutes": 8.4, "total_g": 4.4, "support_g": 2.4, "safety": 3.86, "target": 3.0, "nozzle": "0.4", "material": "pla"}
+    stronger = {**base, "minutes": 11.6, "total_g": 5.6, "support_g": 0.6}
+    optimizer.pros_cons(stronger, base, {})
+    # Table shows 8 min vs 12 min (+4 min), 4 g vs 6 g (+2 g), 2 g vs 1 g support (-1 g).
+    assert "4 min slower" in stronger["cons"]
+    assert "2 g more plastic" in stronger["cons"]
+    assert "1 g less support" in stronger["pros"]
+
+    # Half-integers round half-up to match JS Math.round (8.5 -> 9, 4.5 -> 5).
+    half_base = {**base, "minutes": 8.5, "total_g": 4.5, "support_g": 1.6}
+    half_alt = {**base, "minutes": 11.4, "total_g": 5.4, "support_g": 1.5}
+    optimizer.pros_cons(half_alt, half_base, {})
+    assert "2 min slower" in half_alt["cons"]
+    assert not any("plastic" in x for x in half_alt["pros"] + half_alt["cons"])
+    assert not any("support" in x for x in half_alt["pros"] + half_alt["cons"])
+
+
 def test_geometry_only_checked_for_shortlisted_options(hook, monkeypatch):
     from fdmcore import strength
 

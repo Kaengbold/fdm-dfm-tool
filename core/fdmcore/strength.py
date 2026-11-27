@@ -29,7 +29,7 @@ import math
 
 import numpy as np
 
-from .fea import (Material, Model, buckling_load_factor, build_model, element_stress,
+from .fea import (VOIGT, Material, Model, buckling_load_factor, build_model, element_stress,
                   large_deflection, lowest_mode, rotate_stiffness, solve, voigt_tensor)
 from .messages import format_message
 from .mesh import Mesh
@@ -651,11 +651,43 @@ def _depth_along(grid: VoxelGrid, pts: np.ndarray, dirs: np.ndarray, cap: float)
     return out
 
 
+@dataclass(frozen=True, eq=False)
+class ReleasedStrain:
+    """Elastic strain from the warp grid after release, in the print frame."""
+
+    model: Model
+    turn: np.ndarray
+    elastic: np.ndarray  # (E, 6), engineering shear in Voigt order
+
+    def on_grid(self, model: Model) -> np.ndarray | None:
+        """Transfer strain to nearby solid cubes and rotate it into the part frame."""
+        from scipy.spatial import cKDTree
+
+        source = self.model.grid
+        centers = model.grid.centers(model.elems) @ self.turn.T
+        # A source cube's half diagonal covers points within the cube and tolerates
+        # small differences at the boundary of the two discretizations.
+        distance, idx = cKDTree(source.centers(self.model.elems)).query(
+            centers, distance_upper_bound=np.sqrt(3) * source.h / 2 + 1e-9)
+        found = np.isfinite(distance)
+        if not found.any():
+            return None
+        elastic = self.elastic[idx[found]]
+        elastic[:, 3:] *= 0.5  # engineering shear -> tensor shear
+        tensor = self.turn.T @ voigt_tensor(elastic) @ self.turn
+        i, j = np.asarray(VOIGT).T
+        mapped = np.zeros((len(centers), 6))
+        mapped[found] = tensor[:, i, j] * np.array([1, 1, 1, 2, 2, 2])
+        return mapped
+
+
 def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None,
              x0: np.ndarray | None = None, rtol: float = 1e-4, precond_cache: dict | None = None, *,
-             large_rotations: bool = True, geometry_checks: bool = True) -> dict:
+             large_rotations: bool = True, geometry_checks: bool = True,
+             residual_strain: np.ndarray | None = None) -> dict:
     """Solve with the anisotropic material for build direction ``up``. With ``printed`` (from the
-    G-code) the plastic in each cube and the line directions replace the shells model."""
+    G-code) the plastic in each cube and the line directions replace the shells model.
+    ``residual_strain`` is the released elastic strain already mapped into part coordinates."""
     mat = material_for(profile)
     r = rotation_to_z(up)
     c = rotate_stiffness(mat.stiffness_print_frame(), r)
@@ -667,9 +699,16 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
     do_bending = geometry_checks and large_rotations and info == 0 and large_motion(case, u)
     can_solve = (len(model.elems) <= GEOMETRY_MAX_CELLS and
                  (case.contact is None or len(case.contact[0]) == 0))
+    # The warp solve already let the part deform freely. Use the mapped stress as an estimate of
+    # that equilibrium state; supports, buckling and bending act on the load alone.
+    locked = None if residual_strain is None else scale[:, None] * (residual_strain @ c.T)
+
+    def indices(s: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+        fi_layer, fi_plane = failure_indices(s, np.asarray(up, float), mat, scale, None if printed is None else printed.bond)
+        return fi_layer, fi_plane, None if printed is None else lines_index(s, np.asarray(up, float), mat, printed)
+
     def summarize():
-        fi_layer, fi_plane = failure_indices(stress, np.asarray(up, float), mat, scale, None if printed is None else printed.bond)
-        fi_lines = None if printed is None else lines_index(stress, np.asarray(up, float), mat, printed)
+        fi_layer, fi_plane, fi_lines = indices(stress if locked is None else stress + locked)
         return _summary(case, fi_layer, fi_plane, u, info, fi_lines)
 
     out = summarize()
@@ -703,6 +742,10 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
                     **_geometry_message("large_deflection", rule="large_deflection",
                                         linear=round(linear_mm, 2), curved=round(out["max_displacement_mm"], 2)),
                 }
+    without = None
+    if locked is not None:
+        worst = max(fi[~case.ignore].max(initial=0) for fi in indices(stress) if fi is not None)
+        without = float(1 / worst) if worst > 0 else None
     if buckling is not None:
         factor, shape = buckling
         if factor <= need or factor < out["safety_factor"]:
@@ -713,6 +756,15 @@ def evaluate(case: LoadCase, up, profile: Profile, shells: Shells = Shells(), pr
             crit = np.argmax(np.where(usable, movement, -1) if usable.any() else movement)
             out.update(safety_factor=factor, mode="buckling", near_support=False,
                        critical_point=model.grid.centers(model.elems[crit]).tolist())
+        if without is not None:
+            without = min(without, factor)
+    if locked is not None:
+        grid = model.grid
+        near = np.max(np.abs(grid.centers(model.elems) - out["critical_point"]), axis=1) <= grid.h * (1 + 1e-6)
+        out["residual_stress"] = {"included": True,
+                                  "peak_near_weak_spot_mpa": float(von_mises(locked[near]).max(initial=0)),
+                                  "safety_factor_without": without}
+        stress = stress + locked
     if checks:
         out["geometry_checks"] = checks
     out["verdict"] = verdict(out["safety_factor"], need)
@@ -832,11 +884,13 @@ def impact_factor(drop_mm: float, deflection_mm: float) -> float:
 
 def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells = Shells(), printed: Printed | None = None,
                    x0: list[np.ndarray | None] | None = None, rtol: float = 1e-4,
-                   precond_cache: dict | None = None, *, large_rotations: bool = True, geometry_checks: bool = True) -> dict:
+                   precond_cache: dict | None = None, *, large_rotations: bool = True, geometry_checks: bool = True,
+                   released: ReleasedStrain | None = None) -> dict:
     """``evaluate`` for every case; the weakest one is returned, with all safety factors in ``cases``."""
     starts = x0 if x0 is not None else [None] * len(cases)
+    residual = None if released is None else released.on_grid(cases[0].model)
     results = [evaluate(c, up, profile, shells, printed, x0=s, rtol=rtol, precond_cache=precond_cache,
-                        large_rotations=large_rotations, geometry_checks=geometry_checks)
+                        large_rotations=large_rotations, geometry_checks=geometry_checks, residual_strain=residual)
                for c, s in zip(cases, starts)]
     k = int(np.argmin([r["safety_factor"] for r in results]))
     worst = results[k]
@@ -852,6 +906,13 @@ def evaluate_cases(cases: list[LoadCase], up, profile: Profile, shells: Shells =
         worst["case_fi"].append(limits if buckling is None else (*limits, 1 / buckling))
     worst["_cases_converged"] = all(r["solver_converged"] for r in results)
     worst["_u_all"] = [r["u"] for r in results]
+    if residual is not None:
+        report = worst["residual_stress"]
+        baseline = min((r["residual_stress"]["safety_factor_without"] for r in results
+                        if r["residual_stress"]["safety_factor_without"] is not None), default=None)
+        report["safety_factor_without"] = baseline
+        safety = worst["safety_factor"]
+        report["safety_factor_change"] = float(safety - baseline) if baseline is not None and np.isfinite(safety) else None
     return worst
 
 
