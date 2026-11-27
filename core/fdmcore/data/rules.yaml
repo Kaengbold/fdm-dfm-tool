@@ -84,7 +84,7 @@ rules:
     - domain: geometry
       text: Turn the part so a wider, flatter side lies on the bed, or round the sharp corners of the base.
     - domain: slicer
-      text: A brim holds the edges down. Where the base is tiny and the part also warps or tips, print it on a raft (a
+      text: An outer brim holds the edges down. Where the base is tiny and the part also warps or tips, print it on a raft (a
         few layers of plastic under the part, cut off after printing).
       settings:
         raft_layers: '3'
@@ -107,7 +107,7 @@ rules:
     - domain: geometry
       text: Rotate the part so it lies flat on its broadest side rather than standing upright.
     - domain: slicer
-      text: Add a wide brim to anchor the base securely against leverage from tall movements.
+      text: Add a wide outer brim to anchor the base securely against leverage from tall movements.
       settings:
         brim_type: outer_only
         brim_width: '10'
@@ -129,7 +129,7 @@ rules:
       lines, blobs, or print failure.
     fixes:
     - domain: geometry
-      text: Thicken the pin or add gussets and ribs around the base to stiffen it against bending forces.
+      text: Thicken the pin or add triangular support ribs around the base to stiffen it against bending forces.
     - domain: slicer
       text: Turn on tree supports around the tall column to physically brace it as it grows upward.
       settings:
@@ -172,7 +172,7 @@ rules:
     - Prusa Knowledge Base — Max volumetric speed (Layer time cooldown) — https://help.prusa3d.com/article/max-volumetric-speed_127176
     - OrcaSlicer Wiki — Material cooling — https://github.com/OrcaSlicer/OrcaSlicer/wiki/material_cooling
   heat_too_hot:
-    title: Still too hot when the next layer goes on
+    title: Spot stays too hot
     why: This spot gets the next layer while it is still soft from the last one, so it can sag, blob or lose its
       sharp shape. Small or thin areas stay hot because each of their layers prints so quickly.
     fixes:
@@ -326,7 +326,7 @@ rules:
     - Rahix — Design for 3D-Printing (fillets vs chamfers by print direction) — https://blog.rahix.de/design-for-3d-printing/
   too_hot_in_use:
     title: Gets too hot where it's used
-    why: Printed plastic softens and loses stiffness near its glass transition temperature, around 60 °C for PLA. Heat
+    why: Printed plastic softens and loses stiffness near its softening temperature, around 60 °C for PLA. Heat
       makes the printed part bend, sag, or creep out of shape under load.
     fixes:
     - domain: process
@@ -344,7 +344,7 @@ rules:
     - Grasso et al. 2018, Effect of temperature on the mechanical properties of 3D-printed PLA tensile specimens,
       Rapid Prototyping Journal, https://doi.org/10.1108/RPJ-04-2017-0055
   side_detail_small:
-    title: Text on an upright face is too small or too deep
+    title: Side text too fine
     why: Letters on an upright face shorter than 3 mm lack enough layers for clear horizontal strokes. Engraving deeper
       than 0.8 mm leaves an unsupported roof that droops.
     fixes:
@@ -440,7 +440,7 @@ rules:
       supports require an air gap.
     fixes:
     - domain: geometry
-      text: Reorient the part to eliminate the overhang, or add 45-degree chamfers and gussets beneath the ledge
+      text: Reorient the part to eliminate the overhang, or add 45-degree chamfers and triangular support ribs beneath the ledge
         so it supports itself cleanly without any support material.
     - domain: slicer
       text: If using a multi-material system, set the support interface material to an incompatible plastic (such
@@ -497,7 +497,7 @@ rules:
     fixes:
     - domain: geometry
       text: Redesign the top of horizontal holes with a 90-degree or 120-degree teardrop peak, or add a flat-top
-        bridge roof raised 0.3 mm above nominal diameter so bridge droop stays outside the fastener clearance.
+        bridge roof raised 0.3 mm above the target size so bridge droop stays outside the fastener clearance.
     - domain: slicer
       text: Slow down bridge printing speed to let the cooling fan freeze molten strands instantly before gravity
         pulls them downward.
@@ -524,7 +524,7 @@ rules:
       text: Add a sacrificial layer — one layer that closes the small hole where it starts. The layer below then bridges
         cleanly across the opening; poke or drill the thin skin open after printing. (The design panel can add it.)
     - domain: geometry
-      text: Or turn the part over so the counterbore faces up; then the hole starts on solid plastic.
+      text: Or turn the part over so the wider pocket faces up; then the hole starts on solid plastic.
     - domain: slicer
       text: Enable support from the build plate only, so the ring gets support from below inside the open space.
       settings:
@@ -545,15 +545,15 @@ rules:
     fixes:
     - domain: geometry
       text: Give the hole a teardrop top (a 45° point instead of the round ceiling), or make it 0.3–0.4 mm taller
-        than the nominal size. The design panel can add the teardrop for you.
+        than the target size. The design panel can add the teardrop for you.
     - domain: slicer
       text: Slow down bridges and run the part fan at full speed over bridges so the ceiling strands set before they
         sag.
       settings:
         bridge_speed: '25'
     - domain: process
-      text: Print the part so the hole points up (if the rest of the part allows), or ream the hole with a drill bit
-        of the nominal size after printing.
+      text: Print the part so the hole points up (if the rest of the part allows), or clean out the hole with a matching
+        drill bit after printing.
     tags:
     - holes
     - horizontal-holes
@@ -591,7 +591,7 @@ rules:
         use the "combined" generator with Arachne walls, it keeps the wall closed; painted-only fuzzy skin puts it on
         just the gripped faces. The jiggling walls print slower (up to about half speed on those walls).
     - domain: geometry
-      text: Or model the texture - knurling, flutes or ribs about 0.3-0.6 mm deep, with a 0.5-1 mm smooth border
+      text: Or model the texture - small ridges, grooves or diamond grip patterns about 0.3-0.6 mm deep, with a 0.5-1 mm smooth border
         around holes and mating faces - so it prints at full speed and is the same in every slicer.
     tags:
     - surface
@@ -600,7 +600,7 @@ rules:
     - OrcaSlicer wiki, Fuzzy skin — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_fuzzy_skin
     - Slant 3D — 10 Ways to Hide Layer Lines, Design 3D Printed Textures — https://www.youtube.com/watch?v=pUabxkiJAdE
   floor_shrink_line:
-    title: Line round the outside where a floor ends
+    title: Floor pulls outer line
     why: A solid internal floor meets a thinner outer wall. As the floor cools, it shrinks and pulls the outer wall
       inward to form a visible ridge.
     fixes:
@@ -620,7 +620,7 @@ rules:
     sources:
     - Slant 3D — How to Eliminate Shrink Lines — https://www.youtube.com/watch?v=d61u_lKFa-U
   rib_sink_line:
-    title: Rib pulls a line into the outer wall
+    title: Rib leaves sink line
     why: An internal rib meets an outer wall. Extra plastic at the joint shrinks as it cools, pulling the wall inward
       and leaving a vertical sink line on the outside.
     fixes:
@@ -684,18 +684,18 @@ rules:
       circles, choking the opening or closing it completely.
     fixes:
     - domain: geometry
-      text: Enlarge small holes in CAD to at least 2.0 mm diameter, or model them as faceted polygons (polyholes)
-        so the nozzle extrudes short straight segments instead of pulling loops inward.
+      text: Enlarge small holes in CAD to at least 2.0 mm diameter, or model them as a many-sided polygon (hexagon or octagon)
+        so the slicer prints short straight segments instead of pulling loops inward.
     - domain: slicer
-      text: Enable the Arachne wall generator to dynamically thin extrusion lines around miniature perimeters, and
+      text: Enable the Arachne wall generator to dynamically thin extrusion lines around tiny walls, and
         apply positive hole compensation.
       settings:
         wall_generator: arachne
         xy_hole_compensation: '0.15'
     - domain: process
-      text: Ream the closed hole open after printing using a small twist drill bit or a 1.5 mm pin vise.
+      text: Clean out the closed hole after printing using a small twist drill bit in a small hand drill.
     - domain: process
-      text: Swap to a smaller 0.2 mm nozzle assembly that can trace tiny inner perimeters without crowding into
+      text: Swap to a smaller 0.2 mm nozzle assembly that can trace tiny inner walls without crowding into
         the center of the bore.
     tags:
     - holes
@@ -712,13 +712,13 @@ rules:
     fixes:
     - domain: geometry
       text: Oversize vertical fastener holes in CAD by +0.2 to +0.3 mm (for example, design M3 clearance holes at
-        3.3 to 3.4 mm), or use Nophead's polyhole polygon formula.
+        3.3 to 3.4 mm), or model the hole as a many-sided polygon (hexagon or octagon) so the slicer prints straight segments.
     - domain: slicer
-      text: Apply positive X-Y hole compensation in your slicer to automatically offset inner hole perimeters outward.
+      text: Apply positive X-Y hole compensation in your slicer to automatically offset inner hole walls outward.
       settings:
         xy_hole_compensation: '0.15'
     - domain: process
-      text: Clean out undersized holes with a drill bit sized for your fastener or use a hand reamer for a precise
+      text: Clean out undersized holes with a drill bit sized for your fastener or a small round file for a precise
         sliding fit.
     tags:
     - holes
@@ -756,7 +756,7 @@ rules:
       the wall to bulge or split.
     fixes:
     - domain: geometry
-      text: Give the hole about 2 mm of wall all round (a boss around twice the insert's diameter), and make it about
+      text: Give the hole about 2 mm of wall all round (a thicker collar, or raised ring, around twice the insert's diameter), and make it about
         1 mm deeper than the insert is long.
     - domain: slicer
       text: Print more walls so the plastic around the insert is solid, not infill.
@@ -779,7 +779,7 @@ rules:
       splitting the wall along the layers or stripping the thread.
     fixes:
     - domain: geometry
-      text: Give the hole a round boss with at least the screw's diameter of plastic all round (M3 needs about 3 mm),
+      text: Give the hole a thicker collar (raised ring) with at least the screw's diameter of plastic all round (M3 needs about 3 mm),
         or move the hole further from the edge.
     - domain: slicer
       text: Print more walls so the screw cuts into solid plastic, not infill.
@@ -800,10 +800,10 @@ rules:
       the plastic outward, blurring the shapes and squashing narrow grooves shut.
     fixes:
     - domain: geometry
-      text: Deboss text into the bottom face by at least 0.4 to 0.6 mm using wide, bold sans-serif fonts with stroke
+      text: Recess (engrave) text into the bottom face by at least 0.4 to 0.6 mm using wide, bold sans-serif fonts with stroke
         widths of at least 0.8 mm, or move fine logos onto top or vertical side faces.
     - domain: slicer
-      text: Increase elephant foot compensation in your slicer to pull the first-layer perimeter inward and keep
+      text: Increase elephant foot compensation in your slicer to pull the first-layer outer wall inward and keep
         recessed lines open.
       settings:
         elefant_foot_compensation: '0.20'
@@ -846,15 +846,15 @@ rules:
     - Slant 3D — How to Design Text for 3D Printing — https://www.youtube.com/watch?v=uvL8Bdf0Hac
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   warping:
-    title: Corners of a long base lift off the bed
+    title: Base corners can lift
     why: This part has a long flat base with sharp corners. As the plastic cools, it shrinks along the base and pulls
       the corners off the build plate.
     fixes:
     - domain: geometry
-      text: Round sharp exterior base corners with large fillets (3 mm radius or larger), or add circular mouse-ear
-        pads at the corners in CAD to disperse lifting tension.
+      text: Round sharp exterior base corners with large fillets (3 mm radius or larger), or add circular mouse ears
+        at the corners in CAD to disperse lifting tension.
     - domain: slicer
-      text: Add mouse-ear brims or a wide outer brim to clamp down the corners, and choose Gyroid infill at moderate
+      text: Add mouse ears or a wide outer brim to clamp down the corners, and choose Gyroid infill at moderate
         density to balance internal shrinkage forces in all directions.
       settings:
         brim_type: brim_ears
@@ -900,18 +900,18 @@ rules:
       easily snaps it off.
     fixes:
     - domain: geometry
-      text: Reorient the part to print the pin lying flat on the build plate so continuous perimeter strands run
+      text: Reorient the part to print the pin lying flat on the build plate so continuous wall lines run
         lengthwise, add a generous fillet at the pin root, or design an internal bore to press in a steel dowel
         pin or screw.
     - domain: slicer
-      text: Increase wall loops so the pin is printed entirely as solid concentric perimeters, and lower layer height
+      text: Add more walls so the pin prints entirely as solid walls, and lower layer height
         to pack more bonded surface area into the column.
       settings:
         wall_loops: '6'
         layer_height: '0.12'
     - domain: process
       text: Print at the upper end of your filament's recommended nozzle temperature and reduce cooling fan speed
-        to improve molecular bonding between layers.
+        so the layers fuse better.
     tags:
     - strength
     - orientation
@@ -1019,11 +1019,11 @@ rules:
       across the small layer bonds.
     fixes:
     - domain: geometry
-      text: Thicken the narrow neck in CAD, add triangular gusset ribs, and use large transitional fillets (3 mm
+      text: Thicken the narrow neck in CAD, add triangular support ribs, and use large transitional fillets (3 mm
         radius or larger) to blend the neck smoothly into the larger sections and eliminate sharp stress-raising
         notches.
     - domain: slicer
-      text: Increase wall loops so the entire narrow neck is filled with dense solid perimeters rather than sparse
+      text: Add more walls so the entire narrow neck is filled with solid walls rather than sparse
         internal infill.
       settings:
         wall_loops: '6'
@@ -1048,7 +1048,7 @@ rules:
     fixes:
     - domain: geometry
       text: Thicken the wall in CAD to at least 1.2 mm (or at least 0.85 mm for a 0.4 mm nozzle) so the slicer fits
-        inner and outer perimeter loops with solid overlap.
+        inner and outer walls with solid overlap.
     - domain: slicer
       text: Turn on the Arachne wall generator to dynamically widen extrusion paths and eliminate hollow gaps in
         thin sections.
@@ -1056,8 +1056,8 @@ rules:
         wall_generator: arachne
         wall_loops: '3'
     - domain: process
-      text: If thin walls are required by your design, install a smaller 0.2 mm nozzle assembly so multiple perimeter
-        passes can fit inside the narrow wall thickness.
+      text: If thin walls are required by your design, install a smaller 0.2 mm nozzle assembly so multiple wall
+        lines can fit inside the narrow wall thickness.
     tags:
     - thin-wall
     - perimeters
@@ -1145,11 +1145,11 @@ rules:
     - OrcaSlicer Wiki — Special mode, spiral vase — https://github.com/OrcaSlicer/OrcaSlicer/wiki/others_settings_special_mode
   coarse_facets:
     title: Curves exported too coarse
-    why: Curved surfaces are exported as coarse flat facets. The printer prints visible flat edges, making round features
+    why: Curved surfaces are exported with low mesh quality (too few triangles). The printer prints visible flat edges, making round features
       come out the wrong size.
     fixes:
     - domain: process
-      text: Export the STL again with a finer setting (smaller deviation / chord height, more facets, e.g. 0.01 mm
+      text: Export the STL again with higher mesh quality (more triangles, e.g. 0.01 mm
         or "high" quality), or load the STEP file instead - this app reads it with its exact curves.
     - domain: slicer
       text: Nothing in the slicer brings the curve back; the slicer's arc fitting only smooths the moves, not
@@ -1180,7 +1180,7 @@ rules:
     - Prusa Knowledge Base — Variable layer height function — https://help.prusa3d.com/article/variable-layer-height-function_1750
     - Prusa Knowledge Base — Layers and perimeters (ensure vertical shell thickness on shallow slopes) — https://help.prusa3d.com/article/layers-and-perimeters_1748
   pause_to_insert:
-    title: Pocket for a part put in while printing
+    title: Closed pocket needs pause
     why: An internal pocket is closed inside the part. The print must pause before the roof closes, or support material
       fills the pocket and a flat roof can sag.
     fixes:
@@ -1212,7 +1212,7 @@ rules:
       unless extra clearance is provided.
     fixes:
     - domain: slicer
-      text: Print the threaded part with finer layers (at most a quarter of the pitch, e.g. 0.12 mm for M8), using
+      text: Print the threaded part with finer layers (at most a quarter of the thread spacing (pitch), e.g. 0.12 mm for M8), using
         variable layer height over the thread only.
       settings:
         layer_height: '0.12'
@@ -1229,7 +1229,7 @@ rules:
     - Hubs — How to assemble 3D printed parts with threaded fasteners (avoid printed threads below M5; clean the thread) — https://www.hubs.com/knowledge-base/how-assemble-3d-printed-parts-threaded-fasteners/
     - Prusa Knowledge Base — Modeling with 3D printing in mind (at least 0.3 mm for moving parts) — https://help.prusa3d.com/article/modeling-with-3d-printing-in-mind_164135
   fibre_filled:
-    title: Carbon or glass fibre filament makes it stiffer, not stronger
+    title: Fibre filament breaks suddenly
     why: Short fibres in this filament align along the printed lines and never cross between layers. The part bends
       and warps less, but the layer bonds are weaker and break more suddenly.
     fixes:
@@ -1271,15 +1271,15 @@ rules:
     - Prusa Knowledge Base — Arachne perimeter generator — https://help.prusa3d.com/article/arachne-perimeter-generator_352769
     - CNC Kitchen — The Effect of Extrusion Width on Strength and Quality of 3D Prints — https://www.cnckitchen.com/blog/the-effect-of-extrusion-width-on-strength-and-quality-of-3d-prints
   load_bearing_wall_thin:
-    title: Wall is thin for a part that carries a load
-    why: Walls under about 1.6 mm only fit two or three perimeter lines. They are fine for light covers, but flex and
+    title: Wall thin for loads
+    why: Walls under about 1.6 mm only fit two or three wall lines. They are fine for light covers, but flex and
       crack quickly under steady load, clamping, or impact.
     fixes:
     - domain: geometry
-      text: Thicken load-bearing walls to at least 1.6 mm (about 4 perimeter lines on a 0.4 mm nozzle) or add ribs
+      text: Thicken load-bearing walls to at least 1.6 mm (about 4 wall lines on a 0.4 mm nozzle) or add ribs
         along the load path.
     - domain: slicer
-      text: Increase wall loops so thin sections print completely solid instead of with sparse infill, and try slightly
+      text: Add more walls so thin sections print completely solid instead of with sparse infill, and try slightly
         wider extrusion lines (up to 1.4x the nozzle) for better layer bonding.
       settings:
         wall_loops: '4'
@@ -1295,7 +1295,7 @@ rules:
     - CNC Kitchen — The Effect of Extrusion Width on Strength and Quality of 3D Prints — https://www.cnckitchen.com/blog/the-effect-of-extrusion-width-on-strength-and-quality-of-3d-prints
     - Prusa Knowledge Base — Layers and perimeters — https://help.prusa3d.com/article/layers-and-perimeters_1748
   uneven_wall_thickness:
-    title: Thick section right next to a thin wall
+    title: Thick next to thin wall
     why: Thick solid sections hold heat longer and shrink more as they cool than thin walls right beside them. That
       uneven pull can leave sink marks along the transition or warp the thinner wall.
     fixes:
@@ -1304,7 +1304,7 @@ rules:
         stepped transitions with gradual chamfers or fillets.
     - domain: slicer
       text: Keep infill low and uniform (around 15% gyroid) inside the thick section so it holds less heat and pulls
-        less as it cools, and add a brim if the thin wall sits near the bed.
+        less as it cools, and add an outer brim if the thin wall sits near the bed.
       settings:
         sparse_infill_density: 15%
         sparse_infill_pattern: gyroid
