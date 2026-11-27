@@ -23,12 +23,16 @@ const isProject = (name) => /\.(json|html?)$/i.test(name);
 // What the step shows between renders (a load in progress, a question, an error). Not in the store: it isn't
 // the user's input and shouldn't be undone or saved.
 let view = { mode: "idle" }; // idle | loading {text, share} | bodies {bodies, pick} | unit {hint} | error {message}
+let stepMod = null; // cached ../step.js module once imported, so replacing a part or cancelling frees its worker
+let closeSamples = null; // closes the open sample popover and removes its document listener
+let dropZone = null; // stage element carrying drag/drop handlers while on the Part step
 
 /** Load a file (bytes) into the engine, show it, and move on (or ask what's needed first). */
 export async function loadPart({ name, bytes, store, go, services, rerender }) {
   const { engine, stage } = services;
   const kind = kindOf(name);
   const set = (v) => { view = v; rerender(); };
+  stepMod?.disposeStepReader?.();
   if (isProject(name)) return openProject({ name, bytes, store, go, services, set });
   try {
     set({ mode: "loading", text: t("part.reading") });
@@ -36,9 +40,9 @@ export async function loadPart({ name, bytes, store, go, services, rerender }) {
     let data = bytes;
     if (kind === "step") {
       set({ mode: "loading", text: t("part.readingStep") });
-      const { readStep } = await import("../step.js");
+      stepMod = await import("../step.js");
       const { stlBytes } = await import("../geometry.js");
-      const bodies = await readStep(bytes);
+      const bodies = await stepMod.readStep(bytes);
       if (!bodies.length) throw new Error(t("part.noSolid"));
       let index = 0;
       if (bodies.length > 1) index = await new Promise((resolve) => set({ mode: "bodies", bodies: bodies.map((b) => ({ name: b.name, volume: b.volume })), pick: resolve }));
@@ -128,7 +132,7 @@ registerStep("part", {
 
     if (view.mode === "loading") {
       drop.append(h("div", { class: "drop-progress", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("b", {}, view.text)),
-        Button({ label: t("ui.cancel"), variant: "ghost", onClick: () => { services.engine.cancel(); view = { mode: "idle" }; services.rerender(); } }));
+        Button({ label: t("ui.cancel"), variant: "ghost", onClick: () => { stepMod?.disposeStepReader?.(); services.engine.cancel(); view = { mode: "idle" }; services.rerender(); } }));
     } else if (view.mode === "bodies") {
       drop.append(h("h2", {}, t("part.whichBody")), h("div", { class: "body-list" }, view.bodies.map((b, i) =>
         Button({ label: `${b.name} · ${Math.round(b.volume / 1000)} cm³`, variant: i ? "secondary" : "primary", onClick: () => view.pick(i) }))));
@@ -153,10 +157,18 @@ registerStep("part", {
 
     // The whole stage takes a dropped file.
     const zone = stage.parentElement;
+    dropZone = zone;
     zone.ondragover = (e) => { e.preventDefault(); drop.classList.add("is-over"); };
     zone.ondragleave = () => drop.classList.remove("is-over");
     zone.ondrop = (e) => { e.preventDefault(); drop.classList.remove("is-over"); const f = e.dataTransfer.files[0]; if (f) open(f); };
     if (!store.get().part) services.stage?.clearPart?.();
+  },
+  leave() {
+    closeSamples?.(false);
+    if (dropZone) {
+      dropZone.ondragover = dropZone.ondragleave = dropZone.ondrop = null;
+      dropZone = null;
+    }
   },
 });
 
@@ -164,6 +176,7 @@ const thumbCache = new Map();
 
 /** The sample list: a popover of thumbnails with 2–3-word names (§4). */
 function openSamples(anchor, services, onPick) {
+  closeSamples?.(false);
   document.querySelector(".sample-pop")?.remove();
   const grid = h("div", { class: "sample-grid" });
   const pop = h("div", { class: "sample-pop", role: "dialog", "aria-label": t("part.samples") }, h("div", { class: "ui-label" }, t("part.samples")), grid);
@@ -172,7 +185,7 @@ function openSamples(anchor, services, onPick) {
     const img = h("img", { alt: "", width: 96, height: 96, ...(cached ? { src: cached } : {}) });
     const thumb = h("span", { class: ["sample-thumb", cached ? null : "is-loading"] }, img);
     const card = h("button", { type: "button", class: "sample-card", onclick: async () => {
-      close();
+      close(false);
       const bytes = new Uint8Array(await (await fetch(new URL(`../samples/${file}`, import.meta.url))).arrayBuffer());
       onPick(file, bytes);
     } }, thumb, h("span", {}, t(key)));
@@ -194,7 +207,16 @@ function openSamples(anchor, services, onPick) {
   pop.style.top = `${Math.round(r.top - 8)}px`;
   document.getElementById("portal-root").append(pop);
   grid.querySelector("button")?.focus();
-  const close = () => { pop.remove(); document.removeEventListener("pointerdown", outside, true); anchor.focus(); };
+  let closed = false;
+  const close = (refocus = true) => {
+    if (closed) return;
+    closed = true;
+    if (closeSamples === close) closeSamples = null;
+    pop.remove();
+    document.removeEventListener("pointerdown", outside, true);
+    if (refocus && anchor.isConnected) anchor.focus();
+  };
+  closeSamples = close;
   const outside = (e) => { if (!pop.contains(e.target)) close(); };
   pop.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); close(); }
@@ -207,5 +229,5 @@ function openSamples(anchor, services, onPick) {
       els[to]?.focus();
     }
   });
-  setTimeout(() => document.addEventListener("pointerdown", outside, true));
+  setTimeout(() => { if (!closed) document.addEventListener("pointerdown", outside, true); });
 }

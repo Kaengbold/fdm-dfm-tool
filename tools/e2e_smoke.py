@@ -207,6 +207,13 @@ def check_new_ui(browser, port: int) -> str:
                                timeout=240_000)
         part = page.evaluate("() => fdmUI.store.get().part")
         assert part["kind"] == "step" and round(part["size"][0]) == 60, part
+        # The STEP reader worker (~8 MB OpenCascade) must be torn down right after import (T-646).
+        cdp = page.context.new_cdp_session(page)
+        try:
+            workers = [t["url"] for t in cdp.send("Target.getTargets")["targetInfos"] if t["type"] == "worker"]
+        finally:
+            cdp.detach()
+        assert not any("step-worker.js" in u for u in workers), f"step-worker still running after import: {workers}"
         # Reload and "Continue where you left off" restores the STEP part (T-636).
         before_step = page.evaluate("""async () => {
           await fdmUI.saving.flush();

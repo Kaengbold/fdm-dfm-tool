@@ -323,3 +323,116 @@ slicer.dispose();
 console.log("OK");
 """
     assert _run_node(script, worker_url, profiles_gz).strip() == "OK"
+
+
+def test_worker_idle_teardown(tmp_path):
+    """Both createBrowserSlicer() and jobWorker() terminate idle workers, keep caches, and never cut off in-flight work."""
+    worker_mjs = tmp_path / "slicer-worker.mjs"
+    job_mjs = tmp_path / "jobworker.mjs"
+    shutil.copyfile(ROOT / "web" / "slicer-worker.js", worker_mjs)
+    shutil.copyfile(ROOT / "web" / "jobworker.js", job_mjs)
+    profiles_gz = str(ROOT / "core" / "fdmcore" / "data" / "orca_profiles.json.gz")
+    script = """
+import fs from "node:fs";
+import zlib from "node:zlib";
+import { EventEmitter } from "node:events";
+
+const mod = await import(process.argv[1]);
+const { jobWorker } = await import(process.argv[2]);
+const snap = JSON.parse(zlib.gunzipSync(fs.readFileSync(process.argv[3])).toString("utf8"));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const cube = new Float32Array([
+  0,0,0, 10,0,0, 10,10,0,  0,0,0, 10,10,0, 0,10,0,
+  0,0,10, 10,10,10, 10,0,10,  0,0,10, 0,10,10, 10,10,10,
+]);
+
+// 1. Browser slicer idle teardown: drops worker after idleMs, keeps G-code cache, respawns on new slice, never kills in-flight.
+let created = 0;
+let terminated = 0;
+let sliceDelayMs = 0;
+class MockSlicerWorker extends EventEmitter {
+  constructor() { super(); created++; }
+  postMessage(msg) {
+    const reply = () => {
+      if (this.terminated) return;
+      if (msg.op === "hello") {
+        this.emit("message", { v: 2, id: msg.id, kind: "result", result: {
+          engine: { name: "Mock", version: mod.ENGINE_VERSION, orca: { version: "2.5.0-dev" }, license: "AGPL-3.0-only" },
+          limits: { maxHeapBytes: 4e9 },
+        }});
+      } else if (msg.op === "load") {
+        this.emit("message", { v: 2, id: msg.id, kind: "result", result: { variant: "st", initMs: 1 } });
+      } else if (msg.op === "config.definitions") {
+        this.emit("message", { v: 2, id: msg.id, kind: "result", result: { presetKeys: {}, options: {} } });
+      } else if (msg.op === "slice") {
+        this.emit("message", { v: 2, id: msg.id, kind: "result", result: {
+          gcode: new TextEncoder().encode("; ok\\nG1 X1 Y1 E0.1\\n"),
+          stats: { layers: 10 }, warnings: [], timings: { total: 5 },
+        }});
+      }
+    };
+    if (msg.op === "slice" && sliceDelayMs > 0) setTimeout(reply, sliceDelayMs);
+    else queueMicrotask(reply);
+  }
+  terminate() { if (!this.terminated) { this.terminated = true; terminated++; } }
+}
+
+const manifestJson = {
+  version: mod.ENGINE_VERSION,
+  host: { file: "host.js", sha256: mod.ENGINE_SHA256.host },
+  variants: { st: { mjs: "engine-st.mjs", wasm: "engine-st.wasm", wasmBytes: 100, sha256: { mjs: mod.ENGINE_SHA256.mjs, wasm: mod.ENGINE_SHA256.wasm } } },
+};
+const slicer = mod.createBrowserSlicer({
+  engineBase: "http://127.0.0.1/vendor/muon3d/",
+  loadProfiles: async () => snap,
+  fetchImpl: async () => ({ ok: true, status: 200, json: async () => manifestJson }),
+  workerFactory: () => new MockSlicerWorker(),
+  idleMs: 30,
+});
+
+const s1 = await slicer.slice({ mesh: cube, printer: "Bambu Lab P1S", nozzle: "0.4", material: "pla", settings: { wall_loops: 2 } });
+if (!s1.ok || created !== 1 || terminated !== 0) throw new Error("initial slice state wrong");
+await sleep(80);
+if (terminated !== 1 || slicer.status().state !== "idle") throw new Error("slicer did not tear down when idle");
+
+// Cached slice must NOT respawn the worker
+const sCached = await slicer.slice({ mesh: cube, printer: "Bambu Lab P1S", nozzle: "0.4", material: "pla", settings: { wall_loops: 2 } });
+if (!sCached.ok || !sCached.cached || created !== 1) throw new Error("cached slice respawned worker");
+
+// In-flight slice longer than idleMs must NOT be cut off
+sliceDelayMs = 70;
+const sSlow = await slicer.slice({ mesh: cube, printer: "Bambu Lab P1S", nozzle: "0.4", material: "pla", settings: { wall_loops: 4 } });
+if (!sSlow.ok || created !== 2 || terminated !== 1) throw new Error("in-flight slice was cut off or did not respawn");
+await sleep(80);
+if (terminated !== 2) throw new Error("second slicer worker did not tear down when idle");
+
+// 2. jobWorker() idle teardown + disposeIdle()
+let jwCreated = 0;
+let jwTerminated = 0;
+let jwDelayMs = 0;
+globalThis.Worker = class MockJobWorker {
+  constructor() { jwCreated++; }
+  postMessage(msg) {
+    const done = () => { if (!this.terminated) this.onmessage?.({ data: { id: msg.id, v: msg.x * 2 } }); };
+    if (jwDelayMs > 0) setTimeout(done, jwDelayMs);
+    else queueMicrotask(done);
+  }
+  terminate() { if (!this.terminated) { this.terminated = true; jwTerminated++; } }
+};
+
+const run = jobWorker("http://127.0.0.1/fake-worker.js", { idleMs: 30 });
+const j1 = await run({ x: 21 });
+if (j1.v !== 42 || jwCreated !== 1 || jwTerminated !== 0) throw new Error("jobWorker basic failed");
+await sleep(80);
+if (jwTerminated !== 1) throw new Error("jobWorker did not tear down when idle");
+
+jwDelayMs = 70;
+const j2 = await run({ x: 5 });
+if (j2.v !== 10 || jwCreated !== 2 || jwTerminated !== 1) throw new Error("jobWorker cut off in-flight job");
+run.disposeIdle();
+if (jwTerminated !== 2) throw new Error("jobWorker.disposeIdle did not terminate idle worker");
+
+console.log("OK");
+"""
+    assert _run_node(script, worker_mjs.as_uri(), job_mjs.as_uri(), profiles_gz).strip() == "OK"

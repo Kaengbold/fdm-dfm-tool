@@ -8,6 +8,7 @@ export const ENGINE_VERSION = "0.6.0-m1.1";
 export const ENGINE_BASE = new URL(`../vendor/muon3d-slicer-engine@${ENGINE_VERSION}/`, import.meta.url).href;
 export const PROFILES_URL = new URL("../core/fdmcore/data/orca_profiles.json.gz", import.meta.url).href;
 export const MAX_SLICER_TRIANGLES = 500_000;
+export const DEFAULT_IDLE_MS = 60_000;
 
 // Pinned hashes matching tools/vendor.py (checked by core/tests/test_web_csp.py).
 export const ENGINE_SHA256 = Object.freeze({
@@ -530,6 +531,7 @@ export function createBrowserSlicer(options = {}) {
   const maxCacheEntries = options.maxCacheEntries ?? 8;
   const maxCacheBytes = options.maxCacheBytes ?? 64 * 1024 * 1024;
   const defaultMaxTriangles = options.maxTriangles ?? MAX_SLICER_TRIANGLES;
+  let idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
 
   let state = "idle"; // idle | loading | ready | slicing | unavailable | error
   let lastReason = null;
@@ -544,6 +546,7 @@ export function createBrowserSlicer(options = {}) {
   let worker = null;
   let detachWorker = null;
   let readyPromise = null;
+  let idleTimer = null;
   let nextReqId = 0;
   const pending = new Map();
   let activeSlice = null; // { id, hash, cancel }
@@ -582,7 +585,28 @@ export function createBrowserSlicer(options = {}) {
     cacheBytes = 0;
   }
 
+  function clearIdleTimer() {
+    if (idleTimer != null) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  function scheduleIdleTimer() {
+    clearIdleTimer();
+    if (!(idleMs > 0) || !worker || activeSlice || pending.size > 0 || state === "loading" || state === "slicing") return;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (!worker || activeSlice || pending.size > 0 || state === "loading" || state === "slicing") return;
+      // Drop the WASM worker to free its heap; keep the cheap G-code, profile, manifest and definition caches (T-646).
+      tearDownWorker();
+      if (state === "ready") state = "idle";
+    }, idleMs);
+    idleTimer.unref?.();
+  }
+
   function tearDownWorker(reasonError = null) {
+    clearIdleTimer();
     if (detachWorker) {
       detachWorker();
       detachWorker = null;
@@ -679,6 +703,7 @@ export function createBrowserSlicer(options = {}) {
   }
 
   async function ensureReady(onProgress = null) {
+    clearIdleTimer();
     if (typeof WebAssembly !== "object") {
       state = "unavailable";
       lastReason = "unavailable";
@@ -839,6 +864,7 @@ export function createBrowserSlicer(options = {}) {
   async function warmup(onProgress = null) {
     try {
       const [boot] = await Promise.all([ensureReady(onProgress), loadProfiles()]);
+      scheduleIdleTimer();
       return { ok: true, available: true, initMs: boot.initMs, engine: boot.engine };
     } catch (err) {
       return {
@@ -1068,11 +1094,17 @@ export function createBrowserSlicer(options = {}) {
         if (activeSlice === mySlice) activeSlice = null;
         signal?.removeEventListener("abort", onAbort);
         inFlightByHash.delete(inputHash);
+        scheduleIdleTimer();
       }
     })();
 
     inFlightByHash.set(inputHash, runPromise);
     return runPromise;
+  }
+
+  function setIdleMs(ms) {
+    idleMs = ms;
+    scheduleIdleTimer();
   }
 
   return {
@@ -1083,6 +1115,7 @@ export function createBrowserSlicer(options = {}) {
     cancel,
     clearCache,
     dispose,
+    setIdleMs,
   };
 }
 

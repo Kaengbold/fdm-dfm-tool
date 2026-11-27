@@ -191,6 +191,7 @@ export async function runSimulations(store, services) {
     return false;
   } finally {
     if (me.timer) clearInterval(me.timer);
+    me.card = null;
     if (services.onProgress && run === me) services.onProgress = prevProgress;
     if (run === me) run = null;
     services.rerender();
