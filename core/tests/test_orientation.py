@@ -415,8 +415,8 @@ def test_bed_checks_override_a_better_score(monkeypatch, rule):
     bed_findings = checks._bed_findings
     refine = api._refine
 
-    def force_score(mesh, results, placed, settings, profile):
-        refine(mesh, results, placed, settings, profile)
+    def force_score(mesh, results, placed, settings, profile, **kw):
+        refine(mesh, results, placed, settings, profile, **kw)
         for result in results:
             if np.allclose(result.up, [0, 0, 1]):
                 result.penalize("faces", 100)
@@ -438,8 +438,8 @@ def test_pareto_guard_overrides_other_score_terms(monkeypatch):
 
     refine = api._refine
 
-    def force_score(mesh, results, placed, settings, profile):
-        refine(mesh, results, placed, settings, profile)
+    def force_score(mesh, results, placed, settings, profile, **kw):
+        refine(mesh, results, placed, settings, profile, **kw)
         for result in results:
             if np.allclose(result.up, [0, 0, 1]):
                 result.penalize("faces", 100)
