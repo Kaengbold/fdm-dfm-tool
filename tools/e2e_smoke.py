@@ -201,6 +201,25 @@ def check_new_ui(browser, port: int) -> str:
                                timeout=240_000)
         part = page.evaluate("() => fdmUI.store.get().part")
         assert part["kind"] == "step" and round(part["size"][0]) == 60, part
+        # Reload and "Continue where you left off" restores the STEP part (T-636).
+        before_step = page.evaluate("""async () => {
+          await fdmUI.saving.flush();
+          const p = fdmUI.services.getPart();
+          const r = await fdmUI.services.engine.call('regions');
+          return { faces: p.faceIds?.length ?? 0, stepLen: p.stepBytes?.length ?? 0, regions: r.regions.length };
+        }""")
+        assert before_step["faces"] > 0 and before_step["stepLen"] > 0, before_step
+        page.reload()
+        page.wait_for_selector("body[data-ready]")
+        page.locator(".recent-card", has_text="l_bracket.step").click()
+        page.wait_for_function("() => fdmUI.store.get().part?.name === 'l_bracket.step' && document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.services.stage.part !== null",
+                               timeout=240_000)
+        after_step = page.evaluate("""async () => {
+          const p = fdmUI.services.getPart();
+          const r = await fdmUI.services.engine.call('regions');
+          return { kind: fdmUI.store.get().part.kind, faces: p.faceIds?.length ?? 0, stepLen: p.stepBytes?.length ?? 0, regions: r.regions.length };
+        }""")
+        assert after_step == {"kind": "step", **before_step}, (before_step, after_step)
         # A broken file: a plain reason and "Try another file", the flow stays on Part.
         page.locator(".part-pill").click()
         page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "broken.stl", "mimeType": "model/stl", "buffer": b"not a mesh at all"}])
@@ -1113,9 +1132,16 @@ def check_new_ui_done(browser, port: int) -> str:
         assert dl.value.suggested_filename == "hole_block.3mf", dl.value.suggested_filename
         assert "elefant_foot_compensation" in config and "ironing_type" not in config, config[:400]
         assert page.evaluate("() => localStorage.getItem('fdm-target-slicer')") == "prusa"
+        page.evaluate("""() => fdmUI.store.set({
+          environment: { temp: 'car', tempC: 70, touches: ['water', 'outdoors'] },
+          details: { duration: 'always', vibration: 'vibration', mountedKg: 0.5 },
+          copies: 3, pauses: [4.2],
+          boxes: [{ id: 'box-e2e', kind: 'void', up: [0, 0, 1], region: 0, box: { kind: 'void', lo: [0, 0, 0], hi: [4, 4, 4] }, notes: ['Hidden gap'] }],
+        }, { undoable: false })""")
         with page.expect_download(timeout=120_000) as dl:
             page.get_by_role("button", name="Save project").click()
-        project = json.loads(open(dl.value.path(), encoding="utf-8").read())
+        project_bytes = open(dl.value.path(), "rb").read()
+        project = json.loads(project_bytes.decode("utf-8"))
         assert project["format"] == "fdm-check-project" and project["up"] == [0, 0, 1] and "ironing_type" in project["excluded_settings"], project.keys()
         with page.expect_download(timeout=120_000) as dl:
             page.get_by_role("button", name="Share report").click()
@@ -1146,6 +1172,25 @@ def check_new_ui_done(browser, port: int) -> str:
             page.locator("dialog.ui-modal").get_by_role("button", name="Export 3MF").click()
         assert dl.value.suggested_filename.endswith(".3mf")
         assert len(manifest_reqs) == 1, f"expected 1 slicer manifest probe across sim+done, got {len(manifest_reqs)}: {manifest_reqs}"
+        # Reopening the saved project brings back goal, touches, load details, copies, pauses, boxes and exportOff (T-636).
+        page.evaluate("""() => fdmUI.store.set({
+          goal: 'balanced', environment: { temp: 'indoors', tempC: 20, touches: [] },
+          details: { duration: 'often', vibration: 'no' }, copies: 1, pauses: [], boxes: [], exportOff: [],
+        }, { undoable: false })""")
+        page.locator(".part-pill").click()
+        page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "hole_block.fdmcheck.json", "mimeType": "application/json", "buffer": project_bytes}])
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        restored = page.evaluate("""() => { const s = fdmUI.store.get();
+          return { goal: s.goal, env: s.environment, details: s.details, copies: s.copies, pauses: s.pauses,
+            boxes: s.boxes.map((b) => [b.kind, b.box.lo, b.box.hi]), exportOff: s.exportOff }; }""")
+        assert restored == {
+            "goal": "fast",
+            "env": {"temp": "car", "tempC": 70, "touches": ["water", "outdoors"]},
+            "details": {"duration": "always", "vibration": "vibration", "mountedKg": 0.5},
+            "copies": 3, "pauses": [4.2],
+            "boxes": [["void", [0, 0, 0], [4, 4, 4]]],
+            "exportOff": ["ironing_type"],
+        }, restored
         assert not errors, errors
         return f"{grid}; {len(labels)} slicer changes, unticked ironing stays out; 3MF for PrusaSlicer remembered; project, report, {got}; header export"
     finally:

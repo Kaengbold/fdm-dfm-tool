@@ -6,6 +6,8 @@ holes, screws and slots (``holes``: api.holes_state, sized again with api.restor
 (JSON of kind, source region, point and normal) to pending boxes including their ``use`` boolean.
 Pending boxes keep their geometry because a strength result that placed one isn't saved.
 ``excluded_settings`` lists per-object setting keys left to the user's slicer profile.
+``environment`` (temperature tier / °C / touches), ``details`` (load duration / vibration),
+``copies``, ``pauses`` (mm heights) and ``boxes`` (UI zones and hidden gaps) round-trip the web app's setup.
 
 JSON with the part as base64 binary STL, so it opens anywhere and diffs as text. Face ids in loads and
 marks refer to the part's face regions, which come out the same when the same triangles load again
@@ -20,7 +22,8 @@ import json
 FORMAT = "fdm-check-project"
 VERSION = 1
 FIELDS = ("profile", "mode", "up", "loads", "faces", "zones", "volumes", "settings", "holes",
-          "edit_selections", "suggested_boxes", "excluded_settings", "load_settings")
+          "edit_selections", "suggested_boxes", "excluded_settings", "load_settings",
+          "environment", "details", "copies", "pauses", "boxes")
 
 
 def dump(name: str, stl: bytes, face_ids: list[int] | None = None, **fields) -> str:
