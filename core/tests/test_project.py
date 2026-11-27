@@ -187,3 +187,22 @@ def test_not_a_project():
         project.read('{"format": "other"}')
     with pytest.raises(ValueError, match="newer"):
         project.read(json.dumps({"format": project.FORMAT, "version": 99, "part": {}}))
+
+
+def test_project_js_tiers_and_touches_match_the_environment_step():
+    """project.js keeps its own copy (it must load without relative imports); it must not drift from args.js."""
+    import re
+
+    web = Path(__file__).resolve().parents[2] / "web"
+    proj = (web / "project.js").read_text(encoding="utf-8")
+    args = (web / "steps" / "args.js").read_text(encoding="utf-8")
+
+    def tiers(text):
+        body = re.search(r"TEMP_TIERS = \{(.*?)\}", text, re.S).group(1)
+        return {k: int(v) for k, v in re.findall(r"(\w+):\s*(-?\d+)", body)}
+
+    def touches(text):
+        return re.findall(r'"(\w+)"', re.search(r"TOUCH_IDS = \[(.*?)\]", text, re.S).group(1))
+
+    assert tiers(proj) == tiers(args)
+    assert touches(proj) == touches(args)
