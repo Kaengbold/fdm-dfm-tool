@@ -226,6 +226,29 @@ def check_new_ui(browser, port: int) -> str:
           return { kind: fdmUI.store.get().part.kind, faces: p.faceIds?.length ?? 0, stepLen: p.stepBytes?.length ?? 0, regions: r.regions.length };
         }""")
         assert after_step == {"kind": "step", **before_step}, (before_step, after_step)
+        # The kept STEP takes a design change back as STEP (T-637): the stored file and body volume plus an engine
+        # edit through stepwrite.js (OpenCascade from the CDN, so it needs the network; skipped offline).
+        step_out = page.evaluate("""async () => {
+          const p = fdmUI.services.getPart();
+          const design = await fdmUI.services.engine.call('design', { up: [0, 0, 1], profile: {} });
+          const e = (design.edits ?? []).find((x) => !x.clash && x.mesh);
+          if (!e) return { skip: 'no design edit on the bracket' };
+          const edit = { ...e, mesh: new Float32Array(new Uint8Array(e.mesh).slice().buffer) };
+          if (!(p.stepVolume > 0) || !Array.isArray(p.stepEdits)) return { bad: { volume: p.stepVolume, edits: p.stepEdits } };
+          try {
+            const { stepWithEdits } = await import('./stepwrite.js');
+            const r = await stepWithEdits(p.stepBytes, p.stepVolume, [edit]);
+            return { head: new TextDecoder().decode(r.out.slice(0, 13)), size: r.out.length, notes: r.notes.map((n) => n.how) };
+          } catch (err) {
+            const why = String(err.message ?? err);
+            return /fetch|network|load/i.test(why) ? { skip: why } : { error: why };
+          }
+        }""")
+        assert "bad" not in step_out, step_out
+        if "skip" in step_out:
+            print(f"  (STEP write-back not run: {step_out['skip']})")
+        else:
+            assert step_out["head"] == "ISO-10303-21;" and step_out["size"] > 1000 and step_out["notes"] != ["skipped"], step_out
         # A broken file: a plain reason and "Try another file", the flow stays on Part.
         page.locator(".part-pill").click()
         page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "broken.stl", "mimeType": "model/stl", "buffer": b"not a mesh at all"}])
@@ -615,7 +638,7 @@ def check_new_ui_loads(browser, port: int) -> str:
         click_at(0.55, 0.62)  # the base's top face
         page.locator(".ui-pop [role=radio]", has_text="MPa").click()
         page.locator(".ui-pop input").fill("0.5")
-        assert "MPa ×" in page.locator(".ui-pop .ui-num__hint").inner_text()
+        assert "N total" in page.locator(".ui-pop .ui-num__hint").inner_text() and "MPa" in page.locator(".ui-pop .ui-num__hint").inner_text()
         page.get_by_role("button", name="OK").click()
         page.wait_for_selector(".ui-pop", state="detached")
         loads = page.evaluate("() => fdmUI.store.get().loads.map((l) => [Math.round(l.newtons), l.unit])")
@@ -828,7 +851,7 @@ def check_new_ui_options(browser, port: int) -> str:
         # Below the target: a clear warning first, and the warning travels with the option.
         page.evaluate("() => { const r = fdmUI.store.result('optimize'); r.options[0] = { ...r.options[0], meets_target: false, safety: 1.2, target: 3 }; fdmUI.services.rerender(); }")
         page.get_by_role("button", name="Use this option").first.click()
-        assert "Below the safety target" in page.locator("dialog.ui-modal").inner_text()
+        assert "Below the strength target" in page.locator("dialog.ui-modal").inner_text()
         page.get_by_role("button", name="Use it anyway").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Simulation'")
         assert page.evaluate("() => fdmUI.store.get().option.warning") == "below_target"
@@ -977,7 +1000,7 @@ def check_new_ui_heat(browser, port: int) -> str:
         page.screenshot(path=str(OUT / "new-ui-heat-gcode.png"))
         charts = page.locator(".heat-chart").count()
         with page.expect_download(timeout=600_000) as dl:
-            page.get_by_role("button", name="Download cooling-optimized G-code").click()
+            page.get_by_role("button", name="Download cooled G-code").click()
         name = dl.value.suggested_filename
         assert name == "part_cooled.gcode", name
         page.wait_for_selector(".heat-ok")
@@ -1034,7 +1057,7 @@ def check_new_ui_quality(browser, port: int) -> str:
         page.wait_for_selector(".ui-col")
         show_comparison_row(page, "time")
         labels = page.locator(".options-labels").inner_text()
-        assert "Safety" not in labels and "Print time" in labels, labels
+        assert "Strength" not in labels and "Print time" in labels, labels
         assert page.evaluate("() => fdmUI.services.picker.colored?.size ?? 0") == 0, "Analyse's tint stayed on the part"
         assert not errors, errors
         return f"rail without holds/loads; Fast/Extended; {guessed} faces guessed as seen, show face {marked} marked and sent; Options without Strength"
