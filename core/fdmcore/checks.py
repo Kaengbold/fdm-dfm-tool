@@ -168,9 +168,12 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _hole_findings(tracker, profile, T)
     findings += _fastener_findings(tracker, profile, T)
     findings = _sideways_hole_findings(mesh, profile, T, findings)
-    findings += _first_layer_findings(layers, profile, T)
     above = section(mesh.triangles, layers[0].z + FOOT_PROBE_MM)
-    findings += _bed_findings(layers, profile, T, above)
+    bed_findings = _bed_findings(layers, profile, T, above)
+    # A thin sliver touching the bed can look like fine detail.
+    if not any(f["rule"] == "small_bed_contact" for f in bed_findings):
+        findings += _first_layer_findings(layers, profile, T)
+    findings += bed_findings
     findings += _weak_findings(layers, tracker, profile, T)
     findings += _flex_findings(layers, profile, T)
     wall_layers: list = []

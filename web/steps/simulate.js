@@ -17,6 +17,7 @@ import { Cancelled } from "../engine.js";
 import { fieldColor } from "../viewport/stage.js";
 import { t } from "../i18n.js";
 import { markedFaces, optimizeArgs } from "./args.js";
+import { formatSafety } from "./format.js";
 
 export const DEPENDS = ["model", "option"];
 const COOLING = /^(heat_|small_layers_cooling$)/;
@@ -293,7 +294,7 @@ registerStep("sim", {
     body.append(h("div", { class: "sim-setup" },
       h("span", {}, setupLine(o, s.catalog)),
       h("button", { type: "button", class: "ui-link", onclick: () => go("options") }, t("sim.change"))));
-    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: o.safety, target: o.target })));
+    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: formatSafety(o.safety), target: o.target })));
 
     const printer = s.catalog?.printers?.[s.profile?.printer];
     const material = s.catalog?.materials?.[o.material];

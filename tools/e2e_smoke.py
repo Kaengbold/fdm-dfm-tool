@@ -794,7 +794,7 @@ def check_new_ui_simulation(browser, port: int) -> str:
               walls: 3, top: 4, bottom: 3, infill: 0.15, safety: 2.4, target: 2,
               settings: { wall_loops: '3', top_shell_layers: '4', bottom_shell_layers: '3', sparse_infill_density: '15%', layer_height: '0.20' } } });
           fdmUI.go('sim'); }""")
-        assert "Flat · PLA · 0.4 mm · 3 walls · 15 % infill" in page.locator(".sim-setup").inner_text()
+        assert "Flat · PLA · 0.4 mm · 3 walls · 15 % infill" in page.locator(".sim-setup").inner_text().replace("\u00a0", " ")
         assert page.get_by_role("button", name="Next").count() == 1, "Next before a run (skipping is allowed)"
         page.wait_for_function("() => !/Slicing|Getting ready/.test(document.querySelector('.sim-slice__text')?.textContent ?? 'Slicing')", timeout=180_000)
         sliced = page.locator(".sim-slice__text").inner_text()
@@ -862,7 +862,7 @@ def check_new_ui_heat(browser, port: int) -> str:
         status = page.locator(".sim-status").inner_text()
         outside = re.search(r"(\d+) spots outside their window, (\d+) with the plan", status)
         assert "Cooling plan" in status and outside and int(outside[1]) > int(outside[2]), status
-        assert re.search(r"Base curl: [\d.]+ mm \([\d.]+–[\d.]+ mm\)", page.locator("aside.panel").inner_text())
+        assert re.search(r"Base curl: [\d.]+\s+mm \([\d.]+–[\d.]+\s+mm\)", page.locator("aside.panel").inner_text())
         summary = page.locator(".heat-summary").inner_text()
         hot_spots = re.search(r"Too hot: (\d+) spots before, (\d+) after", summary)
         assert hot_spots and int(hot_spots[1]) > int(hot_spots[2]) and "Rough" in summary, summary

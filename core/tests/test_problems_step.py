@@ -95,6 +95,26 @@ def test_pending_batch_conflicts_and_settings():
     assert out["status"] == ["fixed", "pending", "accepted"]
 
 
+def test_unattached_bracket_corner_edits_can_go_into_pending_batch():
+    api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")
+    up = [0, 0, 1]
+    findings = api.check(up, PROFILE)["findings"]
+    assert not any(f["rule"] == "warping" for f in findings)
+    design = api.design(up, PROFILE, findings=findings)
+    corner_ids = [e["id"] for e in design["edits"] if e["rule"] == "sharp_bed_corners"]
+    assert len(corner_ids) == 4
+    blocked = {**design["edits"][0], "id": "blocked", "source": "other", "clash": True}
+    out = run_js("""
+      const fixes = F.optionalImprovements(D, { modelLocked: true });
+      return { fixes, pending: F.pendingItem(fixes[0], null, {}) };""",
+                 _no_bytes({**design, "edits": [*design["edits"], blocked]}))
+    assert sorted(i for fix in out["fixes"] for i in fix["editIds"]) == sorted(corner_ids)
+    assert all(fix["changesModel"] for fix in out["fixes"])
+    first = out["fixes"][0]
+    assert out["pending"] == {"id": first["id"], "kind": "design", "findingId": None,
+                              "title": first["text"], "editIds": first["editIds"]}
+
+
 def test_new_and_fixed_problems():
     before = [{"finding_id": "x1", "rule": "hole", "severity": "warn"}, {"finding_id": "x2", "rule": "hole", "severity": "warn"},
               {"finding_id": "i1", "rule": "note", "severity": "info"}]
@@ -135,3 +155,31 @@ def test_a_finding_box_maps_back_to_the_part():
     corners = np.asarray(out)
     assert np.allclose(corners.min(axis=0), soup.min(axis=0), atol=1e-3)
     assert np.allclose(corners.max(axis=0), soup.max(axis=0), atol=1e-3)
+
+
+def test_shared_number_formatters():
+    """Safety factors, safety ranges and layer heights share one format across Options, Problems and Done (T-632)."""
+    if not NODE:
+        pytest.skip("node not installed")
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        (tmp / "format.mjs").write_text((ROOT / "web" / "steps" / "format.js").read_text(encoding="utf-8"), encoding="utf-8")
+        script = (
+            f'import {{ formatSafety, formatSafetyRange, formatLayerHeight }} from "{(tmp / "format.mjs").as_uri()}";\n'
+            "const out = {\n"
+            "  sf: [formatSafety(3.86), formatSafety(4), formatSafety(3.32), formatSafety(null)],\n"
+            "  rangeSame: [formatSafetyRange([3.96, 4.04]), formatSafetyRange([3.28, 3.31]), formatSafetyRange(null)],\n"
+            "  rangeDiff: formatSafetyRange([3.14, 4.02]),\n"
+            "  layer: [formatLayerHeight(0.2), formatLayerHeight(0.16), formatLayerHeight(null)],\n"
+            "};\n"
+            "console.log(JSON.stringify(out));"
+        )
+        proc = subprocess.run([NODE, "--input-type=module", "-e", script], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout.strip().splitlines()[-1])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    assert out["sf"] == ["3.9", "4.0", "3.3", None]
+    assert out["rangeSame"] == [None, None, None]
+    assert out["rangeDiff"] == {"low": "3.1", "high": "4.0"}
+    assert out["layer"] == ["0.20", "0.16", None]

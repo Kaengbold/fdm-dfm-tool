@@ -16,6 +16,7 @@ import { holdToEngine, loadToEngine, markedFaces, optimizeArgs } from "./args.js
 import { optionGcode, setupLine, simProfile } from "./simulate.js";
 import { openTool } from "./tools.js";
 import { exportZones } from "./tools/zones.js";
+import { formatLayerHeight, formatSafety } from "./format.js";
 
 const SLICERS = ["orca", "bambu", "prusa", "cura"];
 const CURA_GLOBAL_LABELS = {
@@ -87,7 +88,7 @@ export function settingRows(state, check) {
   const fine = fineLayers(check);
   if (fine.length) {
     rows.set("fine_layers", { key: "fine_layers", value: fine.map((f) => `${f.z0}–${f.z1} mm`).join(", "), label: t("done.key.fine"),
-      reason: t("done.fineWhy", { height: fine[0].layer_height }) });
+      reason: t("done.fineWhy", { height: formatLayerHeight(fine[0].layer_height) ?? fine[0].layer_height }) });
   }
   return [...rows.values()];
 }
@@ -276,11 +277,11 @@ function summaryGrid(store) {
   const cell = (label, value) => h("div", { class: "done-cell" }, h("span", {}, label), h("b", {}, value));
   return h("div", { class: "done-grid" },
     cell(t("done.sum.material"), o.material_name ?? s.catalog?.materials?.[o.material]?.name ?? o.material),
-    cell(t("done.sum.nozzle"), t("done.sum.nozzleValue", { nozzle: o.nozzle, layer: o.layer_height })),
+    cell(t("done.sum.nozzle"), t("done.sum.nozzleValue", { nozzle: o.nozzle, layer: formatLayerHeight(o.layer_height) ?? "—" })),
     cell(t("done.sum.walls"), t("done.sum.wallsValue", { walls: o.walls, infill: Math.round((o.infill ?? 0) * 100) })),
     cell(t("done.sum.time"), minutes(printMinutes(store))),
     cell(t("done.sum.plastic"), o.support_g ? t("done.sum.plasticSupport", { g: Math.round(o.part_g ?? o.total_g), s: Math.round(o.support_g) }) : `${Math.round(o.total_g ?? o.part_g ?? 0)} g`),
-    o.safety != null ? cell(t("done.sum.safety"), t("done.sum.safetyValue", { sf: o.safety, target: o.target ?? "—" })) : cell(t("done.sum.safety"), t("done.sum.noStrength")));
+    o.safety != null ? cell(t("done.sum.safety"), t("done.sum.safetyValue", { sf: formatSafety(o.safety), target: o.target ?? "—" })) : cell(t("done.sum.safety"), t("done.sum.noStrength")));
 }
 
 function settingsList(store, rows) {
@@ -306,7 +307,7 @@ registerStep("done", {
     }
     checkSlicer(services);
     body.append(summaryGrid(store));
-    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: o.safety, target: o.target })));
+    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: formatSafety(o.safety), target: o.target })));
     if (s.pending?.length) body.append(h("p", { class: "analyse-stale" }, t("done.pendingLeft", { count: s.pending.length }), " ",
       h("button", { type: "button", class: "ui-link", onclick: () => go("problems") }, t("done.toProblems"))));
 

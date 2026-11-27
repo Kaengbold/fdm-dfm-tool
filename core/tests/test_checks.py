@@ -57,6 +57,12 @@ def test_hook_upright_is_tippy():
     assert {"tipping_risk", "support_marks"} <= set(found)
 
 
+def test_tilted_hook_bed_contact_is_not_first_layer_detail():
+    found = rules_for("hook", up=(1, 0, 1))
+    assert "small_bed_contact" in found
+    assert "first_layer_detail" not in found
+
+
 def test_warping_depends_on_material_and_enclosure():
     found = rules_for("l_bracket", material="abs", printer="prusa_mk4s")
     assert len(found["warping"]["metrics"]["points"]) == 4
