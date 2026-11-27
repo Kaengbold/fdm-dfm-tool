@@ -13,7 +13,7 @@ A new feature task names the use case it serves (`serves: 1, 3`; the numbered li
 - [x] **T-190 P2** Orientation search: offer "lying down" for round pins and rods. · owner: Claude (`task/T-190-lying-pins`) — lying down is scored but rightly loses as modelled: a round pin touches the bed in a line and needs support along its length (score 5+ vs 1.7). Added a stability term (tall on a narrow base, same limit as the tipping check) so a standing option says why it's risky. A "flat along one side" design change would make lying down win; no solid source found for it yet (only maker listings), so not suggested.
 - [x] **T-191 P1** Keep the computer usable while simulations run. · owner: Claude (`task/T-190-lying-pins`) — the browser engine is one web worker (one core); `mcp_server.py` caps OMP/OpenBLAS/MKL threads at half the cores (user settings win); rule recorded in PRODUCT.md.
 - [~] **T-004 P1** Browser performance on big parts (200k–1M triangles): measure load/orient/check/strength times, fix the worst. · owner: Claude (`task/T-004-performance`) — 572k-face CAD export in Pyodide: load 12→1.6 s, check ~50→16 s, orient 8 s (`node tools/pyodide_check.mjs part.stl`). Fixes: outlines simplified to 0.01 mm, vectorised ring building, no vertex dedupe in placement, `to_bytes()` for uploads. Same part, native: face list 50→4 s, design 59→16 s (Pyodide 99→33 s), strength 29→3 s, stronger options 84→6 s; strength no longer fails on voxel islands. 2026-10-31 orient on a 1.08M-face part natively 12.7 → 3.8 s (same pick): cached mesh bounds/volume (were recomputed 31×), integer keys to group face normals, finalists re-scored on a 200k-face area sample. In Pyodide (`node tools/pyodide_check.mjs`, 1.08M faces): load 2.5 s, orient 5.1 s (was ~12 s), check 11.4 s, design 45.5 s. Left: the design suggestions (45 s) and the check (11 s) on huge parts.
-- [ ] **T-005 P2** Manual UI review on a laptop screen and a phone; file issues as tasks. · owner: —
+- [~] **T-005 P2** Manual UI review on a laptop screen and a phone; file issues as tasks. · owner: Gemini 4 Neon, reviewed by Claude (laptop only; phone is out of scope)
 
 ## Orientation
 
@@ -749,7 +749,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### L. Big and broken parts
 
-- [~] **T-458 P1** [L] Curved parts are slow even when small. · files: `core/fdmcore/orientation.py` (`candidate_directions`), `core/fdmcore/api.py` (`orientations`, the sliced refinement), `core/fdmcore/slicer.py`, `core/fdmcore/checks.py` · owner: Claude (`task/T-458-curved-speed`) · continues T-004
+- [~] **T-458 P1** [L] Curved parts are slow even when small. · files: `core/fdmcore/orientation.py` (`candidate_directions`), `core/fdmcore/api.py` (`orientations`, the sliced refinement), `core/fdmcore/slicer.py`, `core/fdmcore/checks.py` · owner: Claude, part 2 GPT-6.2 Sol (`task/T-458-curved-speed-2`) · continues T-004
   - Seen (browser, one core): the blob with 80,000 triangles: load + orient + check 53 s; 320,000: 46 s; 980,000: 77 s. The flat-sided samples take 2–3 s. So it is the curved surface (many candidate directions, many-cornered outlines), not the triangle count.
   - Do: profile the 80,000 blob in Pyodide (`node tools/pyodide_check.mjs part.stl`). Likely: cap and cluster candidate directions for organic parts (T-408 gives the kind), simplify layer outlines before the checks, check fewer finalists in full. Show progress with what is being done.
   - Done when: the 80,000 blob is under 15 s in Pyodide with the same pick; numbers in this line.
