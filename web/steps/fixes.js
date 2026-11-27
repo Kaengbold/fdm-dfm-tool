@@ -16,6 +16,15 @@ export function groupFindings(findings) {
 
 export const severityOf = (finding) => SEVERITY[finding.severity] ?? "info";
 const findingOf = (x) => x.finding_id ?? x.fixes?.finding_id ?? null;
+const designFix = (edit, findingId, modelLocked) => ({
+  id: `edit:${findingId}:${edit.id}`, tag: "design", text: edit.title, editIds: [edit.id], changesModel: modelLocked,
+});
+
+/** Design edits that the engine offers without a finding. */
+export function optionalImprovements(design, { modelLocked = false } = {}) {
+  return (design?.edits ?? []).filter((e) => e.source === "other" && !e.clash)
+    .map((e) => designFix(e, "other", modelLocked));
+}
 
 /**
  * The fixes under one finding, fixes first in the order Slicer, Design, Process (§13). ``design`` is api.design's
@@ -32,9 +41,9 @@ export function fixesFor(finding, design, { modelLocked = false } = {}) {
   const edits = new Map();
   for (const e of design?.edits ?? []) {
     if (findingOf(e) !== fid || e.clash) continue;
-    const fix = edits.get(e.title) ?? { id: `edit:${fid}:${e.id}`, tag: "design", text: e.title, editIds: [], changesModel: modelLocked };
-    fix.editIds.push(e.id);
-    edits.set(e.title, fix);
+    const fix = edits.get(e.title);
+    if (fix) fix.editIds.push(e.id);
+    else edits.set(e.title, designFix(e, fid, modelLocked));
   }
   out.push(...edits.values());
   for (const a of design?.advice ?? []) {
@@ -50,7 +59,7 @@ export function fixesFor(finding, design, { modelLocked = false } = {}) {
 
 /** What a fix puts into the pending batch: a design change (edit ids) or settings with their old and new values. */
 export function pendingItem(fix, finding, option) {
-  if (fix.tag === "design") return { id: fix.id, kind: "design", findingId: finding.finding_id, title: fix.text, editIds: fix.editIds };
+  if (fix.tag === "design") return { id: fix.id, kind: "design", findingId: finding?.finding_id ?? null, title: fix.text, editIds: fix.editIds };
   const changes = Object.entries(fix.settings).map(([key, to]) => ({ key, from: option?.settings?.[key] ?? null, to: String(to) }));
   return { id: fix.id, kind: "setting", findingId: finding.finding_id, title: fix.text, changes };
 }
