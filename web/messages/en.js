@@ -992,7 +992,9 @@ export default {
   "heat.fixRefused": "No new G-code: it didn't pass its checks.",
   // Show faces for the Quality goal (T-563).
   "showFaces.title": "Faces people see",
+  "showFaces.loading": "Finding the outer faces… Click a face to mark one that must look good.",
   "showFaces.guess": "We assume the tinted outer faces are seen and keep support off them. Click a face to mark the one that must look good instead.",
+  "showFaces.none": "We couldn't guess which faces are seen on this shape. Click a face to mark one that must look good.",
   "showFaces.marked": {"one": "{count} show face marked: support stays off it. Click a face to add or remove one.", "other": "{count} show faces marked: support stays off them. Click a face to add or remove one."},
   "showFaces.reset": "Use our guess again",
   // Done step and export (T-562).

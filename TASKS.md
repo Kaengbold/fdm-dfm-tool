@@ -1417,8 +1417,9 @@ Found from owner screenshot review (`l_bracket.stl`) and Flash subagent normal-u
   - Do: open a short help dialog (what the steps do, mouse controls in the 3D view, where to report problems) or remove the button.
 - [~] **T-632 P2** [UI] Numbers that don't add up between Options, Problems and Done. · serves: 1, 2 · files: `web/steps/options.js`, `web/steps/problems.js`, `web/steps/done.js`, `core/fdmcore/optimizer.py` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-632-consistent-numbers`)
   - Do: Options "Why" deltas from the rounded values shown (8 vs 12 min said "3 min slower"; 4 vs 6 g said "1 g more"); one safety-factor format everywhere (×3.9 on Options vs ×3.86 on Done; "×3.3, was ×3.32"), no "(×4 to ×4)" ranges when both ends match; layer height 0.20 mm everywhere (Done shows 0.2).
-- [~] **T-633 P2** [UI] Missing feedback: face tint, sample thumbnails, repeated slicer probe. · serves: 1, 2 · files: `web/steps/showfaces.js`, `web/steps/part.js`, `web/steps/part.css`, `web/slicer-worker.js`, `web/steps/done.js` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-633-feedback`)
+- [x] **T-633 P2** [UI] Missing feedback: face tint, sample thumbnails, repeated slicer probe. · serves: 1, 2 · files: `web/steps/showfaces.js`, `web/steps/part.js`, `web/steps/part.css`, `web/slicer-worker.js`, `web/steps/done.js` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-633-feedback`)
   - Do: Analyse (Quality) says the outer faces are tinted but none show on mushroom / cable_clip; sample picker shows blank grey squares while thumbnails render (add a placeholder); cache `checkAvailable()` in slicer-worker.js so Done doesn't repeat the failed manifest fetch Simulation already made.
+  - Outcome: Fixed stale picker regions on part change, strengthened linear-RGB outer-face tint and added loading/empty-guess messages (`showFaces.loading`, `showFaces.none`), added reduced-motion-aware shimmer placeholders with thumbnail caching in Sample parts, and cached `fetchManifest()`/`checkAvailable()` in `slicer-worker.js` (with unit + e2e checks).
 
 ## Done
 

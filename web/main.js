@@ -123,10 +123,17 @@ const picks = (s) => PICK_STEPS.has(s.step) || s.step === "tolerances" || s.step
 let regionsFor = null;
 async function preparePicker() {
   const s = store.get();
+  if (regionsFor && regionsFor !== s.part) {
+    regionsFor = null;
+    services.picker.clearData();
+  }
   const on = Boolean(s.part) && picks(s) && app.route === "flow";
   if (on && regionsFor !== s.part) {
-    regionsFor = s.part;
-    services.picker.setData(await engine.call("regions"));
+    const part = s.part;
+    regionsFor = part;
+    const data = await engine.call("regions");
+    if (store.get().part !== part) return;
+    services.picker.setData(data);
     services.rerender(); // steps tint their faces once the regions are there
   }
   services.picker.enable(on);

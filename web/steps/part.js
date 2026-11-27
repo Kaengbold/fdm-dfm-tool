@@ -160,20 +160,34 @@ registerStep("part", {
   },
 });
 
+const thumbCache = new Map();
+
 /** The sample list: a popover of thumbnails with 2–3-word names (§4). */
 function openSamples(anchor, services, onPick) {
   document.querySelector(".sample-pop")?.remove();
   const grid = h("div", { class: "sample-grid" });
   const pop = h("div", { class: "sample-pop", role: "dialog", "aria-label": t("part.samples") }, h("div", { class: "ui-label" }, t("part.samples")), grid);
   for (const [file, key] of SAMPLES) {
-    const img = h("img", { alt: "", width: 96, height: 96 });
+    const cached = thumbCache.get(file);
+    const img = h("img", { alt: "", width: 96, height: 96, ...(cached ? { src: cached } : {}) });
+    const thumb = h("span", { class: ["sample-thumb", cached ? null : "is-loading"] }, img);
     const card = h("button", { type: "button", class: "sample-card", onclick: async () => {
       close();
       const bytes = new Uint8Array(await (await fetch(new URL(`../samples/${file}`, import.meta.url))).arrayBuffer());
       onPick(file, bytes);
-    } }, img, h("span", {}, t(key)));
+    } }, thumb, h("span", {}, t(key)));
     grid.append(card);
-    fetch(new URL(`../samples/${file}`, import.meta.url)).then((r) => r.arrayBuffer()).then((b) => { img.src = thumbnail(parseStl(b)); }).catch(() => {});
+    if (!cached) {
+      fetch(new URL(`../samples/${file}`, import.meta.url))
+        .then((r) => r.arrayBuffer())
+        .then((b) => {
+          const url = thumbnail(parseStl(b));
+          thumbCache.set(file, url);
+          img.src = url;
+          thumb.classList.remove("is-loading");
+        })
+        .catch(() => { thumb.classList.remove("is-loading"); });
+    }
   }
   const r = anchor.getBoundingClientRect();
   pop.style.left = `${Math.round(r.left + r.width / 2)}px`;

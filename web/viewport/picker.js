@@ -54,10 +54,32 @@ export class Picker {
       if (!this.enabled || !this.hit || (this.down && Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 4)) return;
       this.listeners.pick.forEach((fn) => fn(this.hit, e.clientX, e.clientY));
     });
-    stage.onRecolor = () => this.retint();
+    stage.onRecolor = () => this.recolor();
   }
 
   on(event, fn) { this.listeners[event].add(fn); return () => this.listeners[event].delete(fn); }
+
+  /** Repaint the part after a theme change: new base colour, any step region colours, then the hover highlight. */
+  recolor() {
+    if (!this.stage.part) return;
+    this.stage.paint(() => null);
+    if (this.data && this.colorFor) {
+      this.colored = null;
+      this.setRegionColors(this.colorFor);
+    }
+    this.retint();
+  }
+
+  /** Drop region data when a new part is loaded so stale regions aren't painted onto it. */
+  clearData() {
+    this.data = null;
+    this.colored = null;
+    this.tinted = null;
+    this.hit = null;
+    this.badge.hidden = true;
+    this.edgeLines.clear();
+    this.outlines = new Map();
+  }
 
   /** Colour regions a step marks (holds, loads): ``colorFor(region)`` → THREE.Color or null. Repaints them now. */
   setRegionColors(colorFor) {
@@ -94,6 +116,8 @@ export class Picker {
     this.regionStart = counts;
     this.regionOrder = order;
     this.buildIdMesh();
+    this.colored = null;
+    this.tinted = null;
     this.outlines = new Map();
     this.setHit(null);
   }
