@@ -808,9 +808,14 @@ def check_new_ui_simulation(browser, port: int) -> str:
         for name in ("Heat", "Warping", "Internal stress", "Overhangs"):
             page.locator(".sim-views").get_by_role("radio", name=name).click()
             seen.append(page.evaluate("() => Boolean(fdmUI.services.stage.field)"))
+            if name == "Heat" and "OrcaSlicer in" not in sliced:
+                assert "without G-code" in page.locator(".sim-legend").inner_text()
             if name == "Warping":
                 page.locator(".sim-views").get_by_role("radio", name="Exaggerated").click()
                 assert "exaggerated" in page.locator(".sim-legend").inner_text()
+            if name == "Overhangs":
+                assert "undersides" in page.locator(".sim-legend").inner_text()
+                assert page.evaluate("() => fdmUI.services.stage.camera.position.z < 0")
         assert seen == [False, True, True, False], seen
         painted = page.evaluate("() => { const c = fdmUI.services.stage.part.geo.attributes.color.array; return new Set(Array.from(c.slice(0, 30000), (v) => v.toFixed(2))).size > 3; }")
         nxt = page.locator(".panel-foot .ui-btn--primary").inner_text()
@@ -1090,10 +1095,16 @@ def check_new_ui_done(browser, port: int) -> str:
             assert dl.value.suggested_filename == "hole_block.gcode" and b"G1 " in gcode, len(gcode)
             got = f"G-code ({len(gcode) // 1024} kB)"
         else:
-            page.get_by_role("button", name="Download G-code").click()
-            page.wait_for_selector(".drop-error", timeout=120_000)
-            got = page.locator(".drop-error").inner_text()
+            btn = page.get_by_role("button", name="Download G-code")
+            page.wait_for_function("() => [...document.querySelectorAll('.done-gcode button')].some((b) => b.textContent.includes('Download G-code') && b.disabled)", timeout=15_000)
+            assert btn.is_disabled()
+            got = page.locator(".done-gcode").inner_text()
             assert "isn't available" in got, got
+        # Simulation's real G-code print time overrides the option's estimate on Done (T-621).
+        page.evaluate("""() => {
+          fdmUI.store.setResult('simulate', { detailed: true, gcode: { print_time_min: 73 } }, fdmUI.store.deps('model', 'option'));
+          fdmUI.services.rerender(); }""")
+        assert "1 h 13 min" in page.locator(".done-grid").inner_text()
         page.locator(".app-header").get_by_role("button", name="Export 3MF").click()
         what = page.locator("dialog.ui-modal").inner_text()
         assert "Chosen option: Flat" in what, what

@@ -16,3 +16,4 @@
 .sim-legend { position: absolute; top: calc(var(--s-7) + var(--s-4)); right: var(--s-4); display: grid; gap: var(--s-1); max-width: 320px;
   padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: var(--fs-sm); pointer-events: auto; }
 .sim-legend span { color: var(--text-3); }
+.sim-legend__note { padding-top: var(--s-1); border-top: 1px solid var(--line); color: var(--text-2); }
