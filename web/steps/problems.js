@@ -419,10 +419,10 @@ registerStep("problems", {
 
     if (s.pending.length) {
       const clashes = F.conflicts(s.pending).length;
-      body.append(h("div", { class: "prob-bar" },
-        PendingBar({ count: s.pending.length, conflicts: clashes, onReview: () => review(store), onDiscard: () => store.set({ pending: [] }),
-          onConfirm: () => !work && confirmBatch(store, services, true) }),
-        h("button", { type: "button", class: "ui-link is-quiet", disabled: clashes > 0 || Boolean(work), onclick: () => confirmBatch(store, services, false) }, t("problems.noRecheck"))));
+      const bar = PendingBar({ count: s.pending.length, conflicts: clashes, onReview: () => review(store), onDiscard: () => store.set({ pending: [] }),
+        onConfirm: () => !work && confirmBatch(store, services, true) });
+      bar.append(h("button", { type: "button", class: "ui-link is-quiet prob-bar__skip", disabled: clashes > 0 || Boolean(work), onclick: () => confirmBatch(store, services, false) }, t("problems.noRecheck")));
+      body.append(h("div", { class: "prob-bar" }, bar));
     }
     showGhosts(store, services);
   },
