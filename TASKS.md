@@ -557,9 +557,10 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### D. Navigation rebuild (needs the user's yes first)
 
-- [~] **T-420 P2** [D] Split `core/fdmcore/api.py` (5,100 lines) the same way. · files: `core/fdmcore/api.py` → `core/fdmcore/api/*.py`, `tools/make_manifest.py`, `web/worker.js` (`NEEDS_SCIPY`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-420-split-api`)
+- [x] **T-420 P2** [D] Split `core/fdmcore/api.py` (5,100 lines) the same way. · files: `core/fdmcore/api.py` → `core/fdmcore/api/*.py`, `tools/make_manifest.py`, `web/worker.js` (`NEEDS_SCIPY`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-420-split-api`)
   - Do: keep `api.dispatch` and `METHODS` as the one entry; move the methods into modules by area (load, orientation, check, strength, design, export, presets). Run `python tools/make_manifest.py` after (a test fails otherwise) and `node tools/pyodide_check.mjs`.
   - Done when: same `METHODS` keys, all tests green, MCP server and CLI unchanged.
+  - Outcome: split into `core/fdmcore/api/` (`__init__.py` 441, `session.py` 61, `load.py` 229, `orientation.py` 472, `check.py` 437, `strength.py` 1206, `zones.py` 444, `warping.py` 248, `heat.py` 1078, `design.py` 385, `export.py` 162, `presets.py` 533); 63 `METHODS` unchanged; `manifest.json` updated (57 files); 975 passed / 18 skipped (full pytest `-n 2`), `pyodide_check.mjs` passed, `e2e_smoke.py --quick` 20/20 passed.
 
 ### E. The 3D view shows the problem
 
