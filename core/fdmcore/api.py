@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -31,6 +32,9 @@ from . import progress
 from .progress import stage
 from .recommend import bambu, cooling_ranges, goal_plan, grip_settings, print_risk, recommend_settings
 from .service import CREEP_LIFE_DAYS, CREEP_TIMES_MIN, creep_estimate, required_safety
+
+if TYPE_CHECKING:
+    from .strength import ReleasedStrain, Shells
 
 MODES = {"print": {"slicer", "process"}, "design": {"geometry", "process"}, "both": {"geometry", "slicer", "process"}}
 
@@ -1141,7 +1145,8 @@ def _strength_story(mesh: Mesh, up, r: dict, p: Profile) -> str:
     head = {
         "fine": "It should hold the load you set.",
         "borderline": "It might break under the load you set; real prints vary.",
-        "likely to break": f"It will most likely break: it holds only about {sf:.0%} of the load you set.",
+        "likely to break": (format_message("strength.residual.likely_to_break") if r.get("residual_stress", {}).get("included")
+                            else f"It will most likely break: it holds only about {sf:.0%} of the load you set."),
     }[r["verdict"]]
     if r["mode"] == "buckling":
         head = format_message(f"strength.geometry.buckling_{'holds' if r['verdict'] == 'fine' else 'risk'}")
@@ -1868,7 +1873,9 @@ WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, l
 _warp_reference: dict = {}
 
 
-def warping(up, profile: dict | None = None, detailed: bool = False, ranges: bool = True) -> dict:
+def warping(up, profile: dict | None = None, detailed: bool = False, ranges: bool = True, *,
+            walls: int | None = None, infill: float | None = None, top: int | None = None,
+            bottom: int | None = None, zones: list[dict] | None = None) -> dict:
     """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
     longest bar that stays flat (1 = like that bar), where it lifts first, and the curled shape
     (exaggerated) for the FEA view: ``field_triangles``, ``vertex_disp`` (part frame), ``vertex_value`` (mm);
@@ -1876,15 +1883,16 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
     of the elements: single voxel corners spike) and ``stress_share`` (of what the layers hold).
     ``detailed``: with the loaded G-code's real layer times (layers that come quickly are still warm
     when the next go on and shrink less); ``from_gcode`` says whether it was used. ``ranges`` includes
-    a curl range in mm and, for quick runs where both peel trials settle, possible bed lift verdicts."""
+    a curl range in mm and, for quick runs where both peel trials settle, possible bed lift verdicts.
+    Walls, infill, top, bottom and zones use the same settings as ``strength``."""
     from . import warp
     from .gcode import layer_times
-    from .strength import refine, sample_nodes, surface_values
+    from .strength import ReleasedStrain, refine, sample_nodes, surface_values
     from .thermal import chamber_conditions
 
     s = _require()
     p = Profile.from_dict(profile)
-    sh = _shells(p)
+    sh = _shells(p, walls, infill, top, bottom, zones)
     tp = None
     if s.gcode is not None and np.dot(s.gcode["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999:
         tp = s.gcode["toolpath"]
@@ -1895,7 +1903,10 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
                       peel_range=ranges and not detailed)
     model, turn = r["model"], r["rotation"]  # model in the print frame; turn: part -> print
     s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"] @ turn, "turn": turn}  # set_fit / set_gap use it
-    setup = _warp_setup(p)
+    elastic = warp.residual_strain(r)
+    if r["solver_converged"] and np.isfinite(elastic).all():
+        s.warp.update(released=ReleasedStrain(model, turn, elastic), from_gcode=warm is not None)
+    setup = _warp_setup(p, sh)
     key = (*setup, round(model.grid.h, 3))
     if key not in _warp_reference:
         _warp_reference[key] = warp.reference(p, model.grid.h, sh)
@@ -1968,16 +1979,16 @@ def _without_rigid_motion(pos: np.ndarray, u: np.ndarray) -> np.ndarray:
     return u - (a @ coef).reshape(-1, 3)
 
 
-def _warp_setup(p: Profile) -> tuple:
+def _warp_setup(p: Profile, shells: Shells | None = None) -> tuple:
     return (p.material_id, json.dumps(p.material, sort_keys=True), p.enclosure,
             p.printer.get("chamber_temp_c"), p.printer["speed"], p.goal,
-            p.printer.get("bed_surface", "unknown"), p.nozzle, p.layer_height, _shells(p))
+            p.printer.get("bed_surface", "unknown"), p.nozzle, p.layer_height, _shells(p) if shells is None else shells)
 
 
-def _matching_warp(s: Session, up, p: Profile) -> dict | None:
+def _matching_warp(s: Session, up, p: Profile, shells: Shells | None = None) -> dict | None:
     """A change to the orientation or to inputs that drive shrinkage or grip needs another solve."""
     w = s.warp
-    if not w or w.get("setup") != _warp_setup(p):
+    if not w or w.get("setup") != _warp_setup(p, shells):
         return None
     return w if np.dot(w["up"], np.asarray(up, float) / np.linalg.norm(up)) >= 0.999 else None
 
@@ -2175,17 +2186,17 @@ def topology(up, loads: list[dict], profile: dict | None = None, keep: float = 0
             "explanation": text, "stl": to_binary_stl(Mesh(tris)), "triangles": tris.astype(np.float32).tobytes()}
 
 
-def _evaluate(cases, up, p: Profile, sh) -> dict:
+def _evaluate(cases, up, p: Profile, sh, *, released: ReleasedStrain | None = None) -> dict:
     """``strength.evaluate_cases`` for the cached load cases, remembered once: "Will it hold?", the
     knock check, the stronger options and the material advisor solve the same thing one after another."""
     from .strength import evaluate_cases
 
     s = _require()
     ours = s.load_case is not None and s.load_case[1] is cases
-    key = (s.load_case[0] if ours else None, tuple(np.round(np.asarray(up, float), 9)), p, sh)
+    key = (s.load_case[0] if ours else None, tuple(np.round(np.asarray(up, float), 9)), p, sh, released)
     if ours and s.solved is not None and s.solved[0] == key:
         return dict(s.solved[1])
-    r = evaluate_cases(cases, up, p, sh)
+    r = evaluate_cases(cases, up, p, sh, released=released)
     if ours:
         s.solved = (key, r)
     return dict(r)
@@ -3061,15 +3072,17 @@ def _strength_on_grid(cases, up, p, sh, detailed, h, *, trial: bool = False) -> 
 
     from .strength import evaluate_cases, material_for
 
+    w = _matching_warp(_require(), up, p, sh)
+    released = w.get("released") if w and (not detailed or w.get("from_gcode")) else None
     if not detailed:
-        return _evaluate(cases, up, p, sh)
+        return _evaluate(cases, up, p, sh, released=released)
     model = cases[0].model
     printed, missed = _printed(model, cache=not trial)
     if h is not None:
-        usual = evaluate_cases(cases, up, p, sh, printed)["safety_factor"]
+        usual = evaluate_cases(cases, up, p, sh, printed, released=released)["safety_factor"]
         bond, source = _bond_per_cube(model, _require().gcode, h, material_for(p))
         printed = replace(printed, bond=bond)
-    r = evaluate_cases(cases, up, p, sh, printed)
+    r = evaluate_cases(cases, up, p, sh, printed, released=released)
     r["detailed"] = {"missed_pct": round(missed * 100, 1), "fill_pct": round(float(printed.fill.mean()) * 100, 1)}
     if h is not None:
         r["heat"] = _heat_strength(model, h, bond, source, r, usual)
@@ -3151,7 +3164,8 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     bonding and locates the cold joint that sets the local strength. A thin feature on the normal grid
     can trigger one bounded finer solve, described in ``grid_check``. Large movement or compression
     in a thin wall can trigger further analysis, reported in ``geometry_checks``. Quick runs include a safety
-    ``range`` from rechecking the same stresses with weaker and stronger layer bonds."""
+    ``range`` from rechecking the same stresses with weaker and stronger layer bonds. A matching
+    ``warping`` run supplies the stress locked in while printing (see ``residual_stress``)."""
     from .strength import face_values, refine, safety_range, sample_nodes, surface_values
 
     s = _require()
@@ -3226,8 +3240,22 @@ def strength(up, loads: list[dict], profile: dict | None = None, walls: int | No
     s.strength_verdict = r["verdict"]
     s.stressed = None if detailed else {"model": base_case.model, "up": np.asarray(up, float) / np.linalg.norm(up),
                                        "material": json.dumps(p.material, sort_keys=True), "fi": base_fi, "ignore": base_case.ignore}
+    residual = dict(r.get("residual_stress", {"included": False}))
+    r["residual_stress"] = residual
     r["story_parts"] = _strength_story_parts(r)
     r["explanation"] = _strength_story(s.mesh, up, r, p)
+    if residual["included"]:
+        before, after = residual["safety_factor_without"], r["safety_factor"]
+        params = {}
+        status = "included"
+        if before is not None and np.isfinite(after):
+            old, new = (round(float(f"{value:.2g}"), 2) for value in (before, after))
+            if old != new:
+                status = "lower" if after < before else "higher"
+                params = {"before": old, "after": new}
+        residual["message"] = {"key": f"strength.residual.{status}", "params": params}
+        residual["detail"] = format_message(residual["message"])
+        r["explanation"] += f" {residual['detail']}"
     for check in r.get("geometry_checks", {}).values():
         if "detail" in check:
             r["explanation"] += f" {check['detail']}"

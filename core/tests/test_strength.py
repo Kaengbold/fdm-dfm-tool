@@ -259,6 +259,67 @@ def _plank():
     return [{"region": end, "kind": "fixed"}, {"region": other, "kind": "force", "kg": 1, "direction": "down"}]
 
 
+def test_released_stress_adds_to_or_opposes_a_service_load():
+    model = build_model(VoxelGrid(np.ones((20, 4, 4), dtype=bool), np.zeros(3), 1.0))
+    nodes = np.argwhere(model.node_index >= 0)
+    forces = np.zeros((model.n_nodes, 3))
+    forces[nodes[:, 0] == 20, 0] = 4.0
+    core = ((model.elems[:, 1:] >= 1) & (model.elems[:, 1:] <= 2)).all(axis=1)
+    # The axial residual stress balances across the section: +3 MPa in the
+    # four central cells and -1 MPa in the twelve surrounding cells.
+    case = strength.LoadCase(model, forces, nodes[:, 0] == 0, ~((model.elems[:, 0] == 10) & core))
+    profile = Profile.from_dict({"material": "pla"})
+    stiffness = strength.material_for(profile).stiffness_print_frame()
+    residual = np.zeros((len(model.elems), 6))
+    residual[:, 0] = np.where(core, 3.0, -1.0)
+    elastic = np.linalg.solve(stiffness, residual.T).T
+    shells = strength.Shells(infill=1)
+
+    base = strength.evaluate(case, [0, 0, 1], profile, shells)
+    add = strength.evaluate(case, [0, 0, 1], profile, shells, residual_strain=elastic)
+    oppose = strength.evaluate(case, [0, 0, 1], profile, shells, residual_strain=-elastic)
+    assert add["safety_factor"] < base["safety_factor"] < oppose["safety_factor"]
+    assert add["residual_stress"]["peak_near_weak_spot_mpa"] == pytest.approx(3.0)
+    assert np.array_equal(add["u"], base["u"])
+
+
+def test_released_strain_rotates_engineering_shear_and_uses_nearby_cells():
+    source = build_model(VoxelGrid(np.ones((1, 1, 1), dtype=bool), np.zeros(3), 2.0))
+    turn = np.array([[0.0, -1, 0], [1, 0, 0], [0, 0, 1]])
+    solid = np.zeros((6, 2, 2), dtype=bool)
+    solid[:2] = solid[-1] = True
+    target = build_model(VoxelGrid(solid, np.array([0.0, -2, 0]), 1.0))
+    released = strength.ReleasedStrain(source, turn, np.array([[1., 2, 3, 4, 5, 6]]))
+
+    mapped = released.on_grid(target)
+    assert np.allclose(mapped[:8], [2, 1, 3, -5, 4, -6])
+    assert np.all(mapped[8:] == 0)
+    assert np.array_equal(released.elastic, [[1, 2, 3, 4, 5, 6]])
+
+
+def test_strength_reuses_matching_released_warp_result(monkeypatch):
+    monkeypatch.setattr(api, "_analysis", {"fine_voxels": 2000, "warp_voxels": 1000})
+    params = {"up": [0, 0, 1], "loads": _plank(), "profile": {"material": "abs"}, "fine": True}
+    base = api.dispatch("strength", json.dumps(params))
+    assert base["residual_stress"] == {"included": False}
+
+    api.warping(params["up"], params["profile"], ranges=False)
+    with_warp = api.dispatch("strength", json.dumps(params))
+    residual = with_warp["residual_stress"]
+    assert residual["included"] and residual["peak_near_weak_spot_mpa"] > 0.1
+    assert residual["safety_factor_without"] == base["safety_factor"]
+    assert residual["safety_factor_change"] == pytest.approx(with_warp["safety_factor"] - base["safety_factor"])
+    assert abs(residual["safety_factor_change"]) > 0.001
+    assert residual["detail"] in with_warp["explanation"]
+    assert with_warp["vertex_disp"] == base["vertex_disp"]
+    json.dumps(with_warp, allow_nan=False, default=bytes.hex)
+
+    mismatched = api.dispatch("strength", json.dumps({**params, "walls": with_warp["walls"] + 1}))
+    assert mismatched["residual_stress"] == {"included": False}
+    api._require().warp = None
+    assert api.dispatch("strength", json.dumps(params)) == base
+
+
 def test_top_and_bottom_layers_carry_bending_when_printed_flat():
     loads = _plank()
     prof = {"material": "pla", "printer": "bambu_p1s"}
