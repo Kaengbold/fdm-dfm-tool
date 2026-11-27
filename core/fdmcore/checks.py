@@ -153,13 +153,14 @@ def orient(mesh: Mesh, rotation: np.ndarray) -> Mesh:
     return Mesh(t - [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
 
 
-def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict | None = None) -> dict:
+def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict | None = None,
+               *, cad_checks: bool = True, coarse: bool = False) -> dict:
     """Slice an oriented mesh and run all checks. Returns findings + stats. ``sliced``: real layer
     times and plastic from the G-code (gcode.layer_times) for the heat check."""
     T = load_data("thresholds")
     layers = slice_mesh(mesh, profile.layer_height, max_layers)
     tracker = Tracker(link=2 * profile.line_width)
-    _scan_layers(layers, profile, tracker, T)
+    _scan_layers(layers, profile, tracker, T, cad_checks=cad_checks, coarse=coarse)
 
     findings: list[dict] = []
     findings += _support_findings(layers, tracker, profile, T)
@@ -173,7 +174,7 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += _weak_findings(layers, tracker, profile, T)
     findings += _flex_findings(layers, profile, T)
     wall_layers: list = []
-    stats = shape_settings_stats(layers, profile, T["shape_settings"], wall_layers)
+    stats = shape_settings_stats(layers, profile, T["shape_settings"], wall_layers, coarse=coarse)
     findings += _wall_advice_findings(wall_layers, profile, T)
     normals, areas = mesh.normals_and_areas()
     z = mesh.triangles[..., 2]
@@ -195,10 +196,12 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += pocket_findings(mesh, profile, T)
     findings += slope_findings(mesh, profile, T)
     findings += facet_findings(mesh, T)
-    findings += _relief_findings(mesh, profile, T)
-    findings += flat_gap_findings(mesh, profile, T)
+    findings += _relief_findings(mesh, profile, T)  # also the shrinkage size check organic parts keep
+    if cad_checks:
+        findings += flat_gap_findings(mesh, profile, T)
     findings += shrink_line_findings(layers, profile, T)
-    findings += _side_relief_findings(mesh, profile, T)
+    if cad_checks:
+        findings += _side_relief_findings(mesh, profile, T)
     findings += _use_heat_findings(profile, T)
     plan, _ = shape_plan(profile, stats, findings)
     stats.update(_estimate(layers, profile, plan))
@@ -330,7 +333,8 @@ def _grid_depths(boundary, X, Y, inside, threshold: float, with_max: bool = Fals
     return d
 
 
-def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict, wall_layers: list | None = None) -> dict:
+def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict, wall_layers: list | None = None,
+                         *, coarse: bool = False) -> dict:
     """Reuse the check's slices, with height/perimeter-weighted wall widths and volume-weighted core.
 
     Width percentiles suppress tiny tips and intersections; they describe walls, not a certified
@@ -338,6 +342,13 @@ def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict, wall_la
     look like an infill-heavy block. Repeated prismatic sections share the expensive measurements.
     """
     plan = goal_plan(profile)
+    cells = S["core_grid_cells"]
+    samples = S["boundary_samples"]
+    if coarse:
+        # These are weighted estimates over the whole part. Use a coarser XY
+        # grid and fewer inward rays while still measuring every sampled height.
+        cells = min(cells, 24)
+        samples = min(samples, 48)
     widths, weights = [], []
     total = core = 0.0
     cached = None
@@ -350,8 +361,8 @@ def shape_settings_stats(layers: list[Layer], profile: Profile, S: dict, wall_la
         if cached is not None and key.equals_exact(cached[0], 1e-4):
             w, weight, area, max_thick = cached[1:]
         else:
-            w, weight = _wall_width_samples(g, S["boundary_samples"])
-            area, max_thick = _infill_core_area(g, plan["walls"] * profile.line_width, S["core_grid_cells"])
+            w, weight = _wall_width_samples(g, samples)
+            area, max_thick = _infill_core_area(g, plan["walls"] * profile.line_width, cells)
             cached = (key, w, weight, area, max_thick)
         if wall_layers is not None and len(w):
             wall_layers.append((layer, w, weight * layer.dz, max_thick))
@@ -508,7 +519,8 @@ OVERHANG_TOL_MM = 0.05
 OVERHANG_MIN_PIECE_MM2 = 0.25
 
 
-def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dict):
+def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dict,
+                 *, cad_checks: bool = True, coarse: bool = False):
     lw, nozzle = profile.line_width, float(profile.nozzle)
     tan_lim = np.tan(np.radians(profile.material["max_overhang_deg"]))
     max_bridge = profile.material["max_bridge_mm"]
@@ -532,10 +544,13 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
         # (Nothing can overhang when the layer equals the one below.)
         if prev is not None and not prev.is_empty and not (same and prev is cached[2]):
             reach = layer.dz * tan_lim + OVERHANG_TOL_MM
-            anchor_zone = prev.buffer(reach + lw, quad_segs=QUAD)  # must reach past the supported zone
             supported = prev.buffer(reach, quad_segs=QUAD)
-            held_zone = prev.buffer(reach + OVERHANG_TOL_MM, quad_segs=QUAD)
-            for piece in parts(_safe_diff(g, supported), OVERHANG_MIN_PIECE_MM2):
+            unsupported = ([] if coarse and supported.covers(g)
+                           else parts(_safe_diff(g, supported), OVERHANG_MIN_PIECE_MM2))
+            if unsupported:
+                anchor_zone = prev.buffer(reach + lw, quad_segs=QUAD)  # must reach past the supported zone
+                held_zone = prev.buffer(reach + OVERHANG_TOL_MM, quad_segs=QUAD)
+            for piece in unsupported:
                 span, anchors = _bridge_span(piece, anchor_zone, max_bridge, held_zone)
                 holes = _open_holes(piece, g)
                 if holes:
@@ -545,31 +560,29 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
                 else:
                     tracker.add("overhang", piece, layer, area=piece.area, enclosed=float(_is_enclosed(piece, g)))
         # Width/hole/pin analysis only depends on this layer's shape: reuse it while the shape repeats.
-        features = cached[1] if same else _layer_features(g, lw, vanish, rough, single, G, H, T["pins"], T["fasteners"])
+        features = cached[1] if same else _layer_features(g, lw, vanish, rough, single, G, H, T["pins"], T["fasteners"],
+                                                         cad_checks=cad_checks, coarse=coarse)
         cached = (key if not same else cached[0], features, g)
         for kind, piece, metrics in features:
             tracker.add(kind, piece, layer, **metrics)
         prev = g
 
 
-def _layer_features(g, lw, vanish, rough, single, G, H, P, F) -> list[tuple]:
+def _layer_features(g, lw, vanish, rough, single, G, H, P, F, *, cad_checks: bool = True,
+                    coarse: bool = False) -> list[tuple]:
     """(kind, piece, metrics) for one layer: thin features, narrow gaps, round and hexagonal holes, slender islands."""
-    out = []
-    # Positive features by width: vanish < rough < single-wall (morphological openings).
-    smallest = max(lw * 1.5, 0.5)
-    too_thin = _safe_diff(g, _opening(g, vanish / 2))
-    below_rough = _safe_diff(g, _opening(g, rough / 2))
-    below_single = _safe_diff(g, _opening(g, single / 2))
-    # A piece of a shape is no bigger than the shape: when all of it is below the smallest piece kept,
-    # nothing in it can be reported, so skip cutting it (most layers of a curved part, T-458).
-    thin = _safe_diff(below_rough, too_thin.buffer(0.01)) if below_rough.area > smallest else Polygon()
-    wall = _safe_diff(below_single, below_rough.buffer(0.01)) if below_single.area > smallest else Polygon()
-    for kind, geom in (("too_thin", too_thin), ("rough", thin), ("single_wall", wall)):
-        out += [(kind, piece, {"width": _strip_width(piece)}) for piece in parts(geom, smallest)]
+    # Screen dense outlines at the widest opening, with extra room for the
+    # rounded buffer's approximation, then measure hits at each actual width.
+    # Every section is screened, including small features at the first and last layers.
+    if coarse and _within_opening(g, max(vanish, rough, single) * 0.55, max(lw * 1.5, 0.5) / 2):
+        out = []
+    else:
+        out = _positive_features(g, lw, vanish, rough, single)
     # Negative features: slots/clearances that a closing with radius r fills are narrower than 2r.
-    for piece in parts(_safe_diff(_closing(g, G["fuse_below_mm"] / 2), g), 0.05):
-        if _strip_width(piece) > 0.02:
-            out.append(("gap", piece, {"width": _strip_width(piece)}))
+    if cad_checks:
+        for piece in parts(_safe_diff(_closing(g, G["fuse_below_mm"] / 2), g), 0.05):
+            if _strip_width(piece) > 0.02:
+                out.append(("gap", piece, {"width": _strip_width(piece)}))
     # Round vertical holes (interior rings), for size checks; hexagonal ones are nut traps.
     # Holes sized for an insert or for a screw cut into the plastic: how much wall is around them.
     sized = [(f["insert_hole_mm"], F["insert_match_mm"]) for f in F.values() if isinstance(f, dict)]
@@ -590,10 +603,33 @@ def _layer_features(g, lw, vanish, rough, single, G, H, P, F) -> list[tuple]:
                 out.append(("hole", hole, metrics))
     # Slender islands: pins/posts.
     for island in parts(g, 0.01):
+        if island.area >= 2 * P["max_width_mm"] ** 2:
+            continue  # even the tightest enclosing rectangle is larger than the pin limit
         w, length = _rect_sides(island)
         if w < P["max_width_mm"] and length < 2 * P["max_width_mm"]:
             out.append(("slender", island, {"width": w, "length": length}))
     return out
+
+
+def _positive_features(g, lw, vanish, rough, single) -> list[tuple]:
+    out = []
+    # Positive features by width: vanish < rough < single-wall (morphological openings).
+    smallest = max(lw * 1.5, 0.5)
+    too_thin = _safe_diff(g, _opening(g, vanish / 2))
+    below_rough = _safe_diff(g, _opening(g, rough / 2))
+    below_single = _safe_diff(g, _opening(g, single / 2))
+    # A piece of a shape is no bigger than the shape: when all of it is below the smallest piece kept,
+    # nothing in it can be reported, so skip cutting it (most layers of a curved part, T-458).
+    thin = _safe_diff(below_rough, too_thin.buffer(0.01)) if below_rough.area > smallest else Polygon()
+    wall = _safe_diff(below_single, below_rough.buffer(0.01)) if below_single.area > smallest else Polygon()
+    for kind, geom in (("too_thin", too_thin), ("rough", thin), ("single_wall", wall)):
+        out += [(kind, piece, {"width": _strip_width(piece)}) for piece in parts(geom, smallest)]
+    return out
+
+
+def _within_opening(g, radius: float, area_limit: float) -> bool:
+    opened = _opening(g, radius)
+    return opened.covers(g) or _safe_diff(g, opened).area < area_limit
 
 
 def _open_holes(piece: Polygon, layer_geom) -> list[float]:
@@ -1146,12 +1182,10 @@ def coarse_surfaces(mesh: Mesh, T: dict | None = None) -> list[dict]:
     patch = _join(adj[cos > np.cos(np.radians(0.5))], mesh.face_count)  # flat strips
     pa, pb = patch[adj[:, 0]], patch[adj[:, 1]]
     keep = pa != pb
-    pairs = np.unique(np.sort(np.stack([pa[keep], pb[keep]], axis=1), axis=1), axis=0)
-    if not len(pairs):
+    if not keep.any():
         return []
     ids, inv = np.unique(patch, return_inverse=True)  # patches as 0..k-1
     k = len(ids)
-    pairs = np.searchsorted(ids, pairs)
     n = np.stack([np.bincount(inv, normals[:, d] * areas, minlength=k) for d in range(3)], axis=1)
     n /= np.maximum(np.linalg.norm(n, axis=1), 1e-12)[:, None]
     area = np.bincount(inv, areas, minlength=k)
@@ -1159,6 +1193,12 @@ def coarse_surfaces(mesh: Mesh, T: dict | None = None) -> list[dict]:
     longest = np.zeros(k)
     np.maximum.at(longest, inv, np.linalg.norm(t - np.roll(t, 1, axis=1), axis=2).max(axis=1))
     width = area / np.maximum(longest, 1e-12)  # a strip's width across the curve
+    max_error = width / 2 * np.tan(np.radians(min(F["max_turn_deg"], 180)) / 4)
+    if np.count_nonzero(max_error >= F["error_mm"]) < 2:
+        return []  # even at the largest turn, no pair could reach the error threshold
+    a, b = pa[keep].astype(np.int64), pb[keep].astype(np.int64)
+    keys = np.unique(np.minimum(a, b) * mesh.face_count + np.maximum(a, b))
+    pairs = np.searchsorted(ids, np.column_stack(divmod(keys, mesh.face_count)))
     turn = np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", n[pairs[:, 0]], n[pairs[:, 1]]), -1, 1)))
     arc = pairs[(turn >= F["min_turn_deg"]) & (turn <= F["max_turn_deg"])]
     turn = turn[(turn >= F["min_turn_deg"]) & (turn <= F["max_turn_deg"])]
@@ -1780,8 +1820,11 @@ def _flat_hinges(layers: list[Layer], profile: Profile, X: dict, mat: str) -> li
     out, lo, hi = [], *X["hinge_gap_mm"]
     for i in range(1, len(layers)):
         below, above = layers[i - 1].geom, layers[i].geom
+        above_parts = parts(above, 2.0)
+        if len(above_parts) < 2:
+            continue
         for band in parts(below, 1.0):
-            pieces = [p for p in parts(above, 2.0) if p.intersects(band)]
+            pieces = [p for p in above_parts if p.intersects(band)]
             if len(pieces) < 2:
                 continue
             a, b = sorted(pieces, key=lambda p: -p.area)[:2]
@@ -1881,8 +1924,10 @@ def _upright_snaps(layers: list[Layer], profile: Profile, S: dict, mat: str) -> 
     for i, layer in enumerate(layers):
         live = []
         for p in parts(layer.geom, 0.3):
+            if p.area > 300:
+                continue
             w, _ = _rect_sides(p)
-            if w > hi + 3.0 or p.area > 300:
+            if w > hi + 3.0:
                 continue
             c = next((c for c in chains if c["piece"].intersects(p)), None)
             if c is None:

@@ -18,7 +18,7 @@ import numpy as np
 import shapely
 from shapely.geometry import LineString
 
-from .checks import _safe_overlay, orient
+from .checks import _join, _safe_overlay, orient
 from .mesh import Mesh
 from .messages import format_message
 from .orientation import rotation_to_z
@@ -2764,23 +2764,17 @@ def _clusters(p2: np.ndarray, link: float = 1.0) -> list[np.ndarray]:
     """Groups of 2D points closer than ``link`` (grid cells, then joined neighbours): one per thread."""
     cell = np.floor(p2 / link).astype(np.int64)
     keys, inv = np.unique(cell, axis=0, return_inverse=True)
-    inv = inv.ravel()
-    lookup = {tuple(k): i for i, k in enumerate(keys)}
-    parent = list(range(len(keys)))
-
-    def root(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    for i, k in enumerate(keys):
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                j = lookup.get((k[0] + dx, k[1] + dy))
-                if j is not None:
-                    a, b = root(i), root(j)
-                    if a != b:
-                        parent[max(a, b)] = min(a, b)
-    roots = np.array([root(i) for i in range(len(keys))])[inv]
+    if not len(keys):
+        return []
+    # Lexicographic lookup of all occupied neighbour cells for each of the four
+    # forward offsets. Joining whole arrays avoids a Python loop per cell.
+    pair_dtype = np.dtype([("x", np.int64), ("y", np.int64)])
+    packed = keys.view(pair_dtype).ravel()
+    edges = []
+    for offset in ((0, 1), (1, -1), (1, 0), (1, 1)):
+        target = (keys + offset).view(pair_dtype).ravel()
+        j = np.minimum(np.searchsorted(packed, target), len(keys) - 1)
+        i = np.flatnonzero(packed[j] == target)
+        edges.append(np.column_stack((i, j[i])))
+    roots = _join(np.concatenate(edges), len(keys))[inv.ravel()]
     return [np.flatnonzero(roots == r) for r in np.unique(roots)]
