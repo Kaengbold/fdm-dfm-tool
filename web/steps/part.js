@@ -71,7 +71,12 @@ export async function loadPart({ name, bytes, store, go, services, rerender }) {
     store.set({ part: { name, kind, size: info.size_mm, faces: info.faces, volume: info.volume_mm3, organic: info.kind === "organic", damaged } }, { undoable: false });
     view = { mode: "idle" };
     if (damaged) {
-      showToast({ message: t("part.damaged"), tone: "warn", action: { label: t("ui.more"), onClick: () => openModal({ title: t("part.damagedTitle"), body: t("part.damagedMore", health) }) } });
+      const counts = {
+        holes: { key: "part.damagedHoles", params: { count: health.holes ?? 0 } },
+        non_manifold_edges: { key: "part.damagedEdges", params: { count: health.non_manifold_edges ?? 0 } },
+        flipped_faces: { key: "part.damagedFlipped", params: { count: health.flipped_faces ?? 0 } },
+      };
+      showToast({ message: t("part.damaged"), tone: "warn", action: { label: t("ui.more"), onClick: () => openModal({ title: t("part.damagedTitle"), body: t("part.damagedMore", counts) }) } });
     }
     go("setup");
   } catch (err) {

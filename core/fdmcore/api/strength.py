@@ -118,8 +118,8 @@ def _use_story(p: Profile) -> str:
         if creep["provisional"]:
             out += " This early estimate may change as you add readings through four weeks."
     elif p.constant_load:
-        out += (f" The load stays on: plastic slowly stretches under a constant load (creep), so it needs about ×{CONSTANT_LOAD_SAFETY:.0f}"
-                " instead of ×2. Warmth makes creep much worse.")
+        out += (f" The load stays on: the check asks for at least ×{CONSTANT_LOAD_SAFETY:.0f} because plastic slowly stretches"
+                " under a steady load (creep). Warmth makes creep much worse.")
     return out
 
 
@@ -918,7 +918,7 @@ def _dynamics_story(r: dict) -> str:
         where = ("very low: it sways visibly and anything shaking nearby can rock it" if hz < 20 else
                  "in the range of motors, fans and printers (20–200 Hz): if something near it runs at that rate it can resonate and rattle loose"
                  if hz < 200 else "high: everyday shaking won't make it resonate")
-        out = f"It swings fastest-free at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
+        out = f"It vibrates naturally at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
     if r["drop_mm"] > 0 and r["impact_safety"] is not None:
         hard, soft = r["impact_safety"], r["impact_safety_soft"]
         verdict = (": still fine." if hard >= 2 else ": it will likely break." if soft < 1
@@ -1048,12 +1048,12 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             add("Round off the weak inside corners (design change)", "design", None,
                 "The strength check found a sharp inside corner near the weak spot. "
                 f"{inside_corner_load_advice(p.repeated_load)} "
-                "Preview the round or self-supporting 45° chamfer under Design changes, then check strength again.",
+                "Preview the round or self-supporting 45° chamfer as a design fix under Problems, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
             ("The plastic itself is the limit there: more cross-section is the direct fix. " if base["mode"] == "material" else "")
-            + "Adds 1.5 mm of plastic all round the weak spot as an even sleeve with 45° ends (size under Design changes). "
+            + "Adds 1.5 mm of plastic all round the weak spot as an even sleeve with 45° ends (you can adjust the size under Problems). "
             "Test it to see how much it helps.", "changes the shape", edit="thicken-weak")
 
     # Other materials: stresses don't depend on stiffness here, only the strengths change. Fibre filled

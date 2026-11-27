@@ -230,7 +230,7 @@ def _strength_split(s: _S.Session, p: Profile, gap, joint: str, weak, loads: lis
     from ..split import _half, split_plan, strength_cut
 
     if not loads:
-        raise ValueError("Set where it is held and the load first (Strength analysis)")
+        raise ValueError("Set where it is held and the load first (Holds and Loads)")
     cut = strength_cut(s.mesh, _strength._load_case(loads), p, _strength._shells(p))
     if cut is None:
         raise ValueError("No straight cut makes it clearly stronger: print it in one piece")

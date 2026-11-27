@@ -548,8 +548,9 @@ def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dic
         worse_hot = win["too_hot"] & ~_same(win0["too_hot"], h, before)
         worse_cold = win["too_cold"] & ~_same(win0["too_cold"], h, before)
         if worse_hot.any() or worse_cold.any():
-            problems.append(f"The heat check of the new file finds {int(worse_hot.sum())} spots newly too hot and "
-                            f"{int(worse_cold.sum())} newly too cold to bond")
+            n_hot, n_cold = int(worse_hot.sum()), int(worse_cold.sum())
+            problems.append(f"The heat check of the new file finds {n_hot} {'spot' if n_hot == 1 else 'spots'} newly too hot and "
+                            f"{n_cold} newly too cold to bond")
     if problems:
         return {"ok": False, "problems": problems}
     return {"ok": True, "data": new.text.encode(), "minutes": [round(m, 1) for m in new.minutes],
@@ -574,9 +575,9 @@ def _cooling_view(r: dict, imp, p: Profile) -> dict:
 
 
 CONFIDENCE_TEXT = {
-    "rough": "Rough: the limits are estimates, not yet tuned to your printer (the sag and snap tests do that).",
-    "partly tuned": "Partly tuned: one of the sag and snap tests is in, the other limit is still an estimate.",
-    "tuned": "Tuned to your printer with the sag and snap tests.",
+    "rough": "Rough: the limits are estimates, not yet tuned to your printer.",
+    "partly tuned": "Partly tuned: one heat limit is measured, the other is still an estimate.",
+    "tuned": "Tuned to your printer.",
 }
 
 
@@ -585,7 +586,8 @@ def _cooling_summary(r: dict) -> list[str]:
     b, g, sl = r["before"], r["gcode"], r["slicer"]
 
     def spots(x):
-        return f"{x['too_hot']} spots too hot, {x['too_cold']} too cold to bond well"
+        n = x["too_hot"]
+        return f"{n} {'spot' if n == 1 else 'spots'} too hot, {x['too_cold']} too cold to bond well"
 
     if not g["plan"] and b["too_hot"] == 0 and b["too_cold"] == 0:
         lines = ["Nothing to gain: every spot stays in its temperature window, and the slicer slowed no layer for cooling it didn't need."]
@@ -981,7 +983,7 @@ def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", p
     verdict = "too hot" if inside >= limit else "warm" if inside >= soft else "fine"
     name = p.material["name"]
     how = {"closed": "closed", "fan": "with a fan blowing through"}[cooling]
-    text = (f"{power_w:g} W inside this box ({how}, {area / 100:.0f} cm² outside) warm the air inside about {rise:.0f} °C above the room: "
+    text = (f"{power_w:g} W of heat inside this box ({how}, {area / 100:.0f} cm² outside) warms the air inside about {rise:.0f} °C above the room: "
             f"about {inside:.0f} °C at {ambient_c:g} °C room. ")
     text += {"fine": f"{name} stays below where it starts to soften ({soft:.0f} °C).",
              "warm": f"{name} starts to soften from about {soft:.0f} °C: screw bosses and clips may slowly give way. Add vents or a fan, or print it in PETG or ASA.",

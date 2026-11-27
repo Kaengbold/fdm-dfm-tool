@@ -192,7 +192,7 @@ def volume_solid(up, boxes: list[dict]) -> list[dict]:
         size = " × ".join(f"{v:.0f}" for v in hi - lo)
         bottom = (unit[:4] * (hi - lo) + lo) @ r0
         out.append({"id": f"solid-{i}", "rule": "design_change", "title": f"{'Add' if add else 'Cut away'} a {size} mm block",
-                    "description": "Placed under Advanced design changes.", "op": "add" if add else "cut", "param": None,
+                    "description": "Placed as a custom block.", "op": "add" if add else "cut", "param": None,
                     "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)], "placed_by_user": True,
                     "intent": _load._cad_refs(_intent("slab" if add else "void", {"size_mm": (hi - lo).tolist()},
                                                 [_prism_shape(bottom, np.array([0, 0, hi[2] - lo[2]]) @ r0, add=add)]))})

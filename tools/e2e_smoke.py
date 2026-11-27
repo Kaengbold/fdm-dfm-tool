@@ -638,7 +638,7 @@ def check_new_ui_loads(browser, port: int) -> str:
         click_at(0.55, 0.62)  # the base's top face
         page.locator(".ui-pop [role=radio]", has_text="MPa").click()
         page.locator(".ui-pop input").fill("0.5")
-        assert "MPa ×" in page.locator(".ui-pop .ui-num__hint").inner_text()
+        assert "N total" in page.locator(".ui-pop .ui-num__hint").inner_text() and "MPa" in page.locator(".ui-pop .ui-num__hint").inner_text()
         page.get_by_role("button", name="OK").click()
         page.wait_for_selector(".ui-pop", state="detached")
         loads = page.evaluate("() => fdmUI.store.get().loads.map((l) => [Math.round(l.newtons), l.unit])")
@@ -851,7 +851,7 @@ def check_new_ui_options(browser, port: int) -> str:
         # Below the target: a clear warning first, and the warning travels with the option.
         page.evaluate("() => { const r = fdmUI.store.result('optimize'); r.options[0] = { ...r.options[0], meets_target: false, safety: 1.2, target: 3 }; fdmUI.services.rerender(); }")
         page.get_by_role("button", name="Use this option").first.click()
-        assert "Below the safety target" in page.locator("dialog.ui-modal").inner_text()
+        assert "Below the strength target" in page.locator("dialog.ui-modal").inner_text()
         page.get_by_role("button", name="Use it anyway").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Simulation'")
         assert page.evaluate("() => fdmUI.store.get().option.warning") == "below_target"
@@ -908,7 +908,7 @@ def check_new_ui_simulation(browser, port: int) -> str:
         assert seen == [False, True, True, False], seen
         painted = page.evaluate("() => { const c = fdmUI.services.stage.part.geo.attributes.color.array; return new Set(Array.from(c.slice(0, 30000), (v) => v.toFixed(2))).size > 3; }")
         nxt = page.locator(".panel-foot .ui-btn--primary").inner_text()
-        assert re.match(r"Review \d+ problems?|All clear: Done", nxt), nxt
+        assert re.match(r"Review \d+ problems?|Continue to Done", nxt), nxt
         page.locator(".panel-foot .ui-btn--primary").click()
         assert page.evaluate("() => fdmUI.services.stage.field === null || fdmUI.services.stage.field === undefined")
         assert not errors, errors
@@ -1000,7 +1000,7 @@ def check_new_ui_heat(browser, port: int) -> str:
         page.screenshot(path=str(OUT / "new-ui-heat-gcode.png"))
         charts = page.locator(".heat-chart").count()
         with page.expect_download(timeout=600_000) as dl:
-            page.get_by_role("button", name="Download cooling-optimized G-code").click()
+            page.get_by_role("button", name="Download cooled G-code").click()
         name = dl.value.suggested_filename
         assert name == "part_cooled.gcode", name
         page.wait_for_selector(".heat-ok")
@@ -1057,7 +1057,7 @@ def check_new_ui_quality(browser, port: int) -> str:
         page.wait_for_selector(".ui-col")
         show_comparison_row(page, "time")
         labels = page.locator(".options-labels").inner_text()
-        assert "Safety" not in labels and "Print time" in labels, labels
+        assert "Strength" not in labels and "Print time" in labels, labels
         assert page.evaluate("() => fdmUI.services.picker.colored?.size ?? 0") == 0, "Analyse's tint stayed on the part"
         assert not errors, errors
         return f"rail without holds/loads; Fast/Extended; {guessed} faces guessed as seen, show face {marked} marked and sent; Options without Strength"

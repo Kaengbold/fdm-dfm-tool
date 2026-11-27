@@ -89,12 +89,30 @@ export class Picker {
     this.colorFor = colorFor;
     if (!this.data || !this.stage.part) return;
     const now = new Set();
-    for (let r = 0; r < this.data.regions.length; r++) if (colorFor(r)) now.add(r);
-    const base = this.stage.part.base;
-    for (const r of new Set([...before, ...now])) {
-      const c = colorFor(r) ?? base;
-      this.stage.paint(() => c, this.trianglesOf(r));
+    const colors = new Map();
+    for (let r = 0; r < this.data.regions.length; r++) {
+      const c = colorFor(r);
+      if (c) { now.add(r); colors.set(r, c); }
     }
+    const dirty = new Set([...before, ...now]);
+    if (!dirty.size) { this.colored = now; return; }
+    const attr = this.stage.part.geo.attributes.color;
+    const arr = attr.array;
+    const base = this.stage.part.base;
+    // Write every changed region into the vertex buffer before one single WebGL upload + render.
+    for (const r of dirty) {
+      const c = colors.get(r) ?? base;
+      const cr = c.r, cg = c.g, cb = c.b;
+      const tris = this.trianglesOf(r);
+      for (let k = 0; k < tris.length; k++) {
+        const o = tris[k] * 9;
+        arr[o] = cr; arr[o + 1] = cg; arr[o + 2] = cb;
+        arr[o + 3] = cr; arr[o + 4] = cg; arr[o + 5] = cb;
+        arr[o + 6] = cr; arr[o + 7] = cg; arr[o + 8] = cb;
+      }
+    }
+    attr.needsUpdate = true;
+    this.stage.render();
     this.colored = now;
   }
 

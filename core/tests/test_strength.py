@@ -75,7 +75,7 @@ def test_strength_rechecks_a_thin_wall(loaded_grid_part):
     assert check["coarse_voxel_mm"] == pytest.approx(0.896281)
     assert r["mesh"]["voxel_mm"] == r["elements"]["size_mm"] == check["fine_voxel_mm"]
     assert check["fine_voxel_mm"] == pytest.approx(0.711379)
-    assert "changed the safety factor" in r["explanation"]
+    assert "changed the strength margin" in r["explanation"]
     manual = api.strength([0, 0, 1], loads, fine=True)
     assert manual["fine"] and "grid_check" not in manual
     assert manual["mesh"]["voxel_mm"] < check["fine_voxel_mm"]
