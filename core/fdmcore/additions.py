@@ -114,7 +114,7 @@ def _below(mesh: Mesh, z: float):
 # ---------------------------------------------------------------- T-040 chamfers under ledges
 
 
-def ledge_chamfers(mesh: Mesh, profile: Profile, max_width: float) -> list[dict]:
+def ledge_chamfers(mesh: Mesh, profile: Profile, max_width: float, *, ceiling_list: list | None = None) -> list[dict]:
     """A flat ledge sticking out from a wall needs support. Filling the corner under it at 45°
     (a gusset as wide as the ledge) makes the whole underside print without support.
     Each wedge is clipped to the outline of the layers it joins and the part's Z span, so
@@ -124,7 +124,7 @@ def ledge_chamfers(mesh: Mesh, profile: Profile, max_width: float) -> list[dict]
     z_lo = float(mesh.triangles[..., 2].min())
     z_hi = float(mesh.triangles[..., 2].max())
     out = []
-    for zc, ceiling in ceilings(mesh, 2 * lh):
+    for zc, ceiling in (ceilings(mesh, 2 * lh) if ceiling_list is None else ceiling_list):
         below = _below(mesh, zc - 0.05)
         if below.is_empty:
             continue
@@ -273,13 +273,15 @@ def _reach(poly: Polygon, p: np.ndarray, n: np.ndarray, limit: float) -> float:
 # ---------------------------------------------------------------- T-042 sacrificial layers
 
 
-def sacrificial_layers(mesh: Mesh, profile: Profile) -> list[dict]:
+def sacrificial_layers(mesh: Mesh, profile: Profile, *, ceiling_list: list | None = None) -> list[dict]:
     """A hole that starts at a ceiling (counterbore printed head-down, a hole above a pocket)
     leaves the slicer a ring to bridge, which it can't anchor. One thin layer across the hole
     turns the ring into a plain bridge; the hole is opened again with a drill or a pin."""
     lh = profile.layer_height
     out = []
-    for zc, ceiling in ceilings(mesh, 2 * lh):
+    for zc, ceiling in (ceilings(mesh, 2 * lh) if ceiling_list is None else ceiling_list):
+        if not ceiling.interiors:
+            continue
         above, below = _below(mesh, zc + 0.05), _below(mesh, zc - 0.05)
         for ring in ceiling.interiors:
             hole = Polygon(ring)
@@ -351,7 +353,8 @@ def magnet_slots(mesh: Mesh, profile: Profile) -> list[dict]:
 # ---------------------------------------------------------------- T-041 thicker walls
 
 
-def thicken_walls(mesh: Mesh, profile: Profile, lines: float, max_layers: int = 160) -> list[dict]:
+def thicken_walls(mesh: Mesh, profile: Profile, lines: float, max_layers: int = 160,
+                  *, layers: list | None = None, coarse: bool = False) -> list[dict]:
     """Walls thinner than ``lines`` printed lines grow to that width (both sides), staying clear
     of other material so no gap fuses shut."""
     T = load_data("thresholds")
@@ -359,20 +362,26 @@ def thicken_walls(mesh: Mesh, profile: Profile, lines: float, max_layers: int = 
     target = lines * lw
     fuse = T["gaps"]["fuse_below_mm"]
     min_height = T["features"]["single_wall_min_height_mm"]
-    layers = slice_mesh(mesh, lh, max_layers)
+    if layers is None:
+        layers = slice_mesh(mesh, lh, min(max_layers, 80) if coarse else max_layers)
+    elif coarse and len(layers) > 80:
+        layers = layers[::2]
     tracker = Tracker(link=2 * lw)
     pieces: dict[int, list] = {}
-    for layer in layers:
+    for idx, layer in enumerate(layers):
         g = layer.geom
         if g.is_empty:
             continue
-        thin = _safe_diff(g, _opening(g, target / 2))
+        opened = _opening(g, target / 2)
+        if opened.covers(g):
+            continue
+        thin = _safe_diff(g, opened)
         for piece in parts(thin, max(lw * 1.5, 0.5)):
             w = _strip_width(piece)
             if w >= target * 0.95:
                 continue
             region = tracker.add("thin", piece, layer, min_width=w)
-            pieces.setdefault(id(region), []).append((layer.index, piece, w))
+            pieces.setdefault(id(region), []).append((idx, piece, w))
     height = float(mesh.triangles[..., 2].max())
     verts = np.unique(mesh.triangles.reshape(-1, 3), axis=0)
     out = []

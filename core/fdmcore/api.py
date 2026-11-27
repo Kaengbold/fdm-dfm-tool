@@ -3886,21 +3886,25 @@ def design(up, profile: dict | None = None, params: dict | None = None, keep_cle
     if s.regions is None:
         s.regions = find_regions(s.mesh)
     p = Profile.from_dict(profile)
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks
+    check_layers = check_rot = None
     if findings is None:
-        findings = check(up, profile)["findings"]
+        findings, check_rot, check_layers = _check_for_design(up, profile)
     rotation, _ = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
     to_print = _print_frame_map(s.mesh, rotation)
     from_print = _part_frame_map(s.mesh, rotation)
+    feats = _features()
+    design_layers = (check_layers if check_layers is not None and np.allclose(check_rot, rotation_to_z(up)) else None)
     edits = design_edits(s.mesh, s.regions, up, p, params, s.tags, *(s.weak_spot or (None, 1.0)), fits=s.fits,
                          gaps=s.gaps, hot_spots=s.hot_spots, fasteners=s.fasteners,
-                         strength_verdict=s.strength_verdict, findings=findings, to_print=to_print)
+                         strength_verdict=s.strength_verdict, findings=findings, to_print=to_print,
+                         features=feats, cad_checks=s.cad_checks, layers=design_layers, coarse=coarse)
     if not s.cad_checks:  # an organic shape (T-408), until the user turns the CAD checks back on
         edits = [e for e in edits if not e["id"].startswith(CAD_ONLY_EDITS)]
     for e in edits:
         if "intent" in e:
             _cad_refs(e["intent"])
     edits = link_to_findings(edits, findings, to_print)
-    feats = _features()
     advice = design_advice(s.mesh, edits, findings, p, to_print, from_print, features=feats, up=up)
     return {
         "features": feats,
@@ -4316,6 +4320,55 @@ def _cost(oriented: Mesh, p: Profile, part_g: float, max_layers: int = 40) -> di
         need = total * SPOOL_MARGIN[0] + SPOOL_MARGIN[1]
         out["spool_left_g"], out["spool_short"] = float(left), bool(need > left)
     return out
+
+
+def _check_for_design(up, profile: dict | None = None) -> tuple[list[dict], np.ndarray, list]:
+    """Run only what design() needs from check(): findings and the sliced layers, skipping support
+    cost, settings recommendations and face temperature."""
+    s = _require()
+    p = Profile.from_dict(profile)
+    rotation, fit = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))
+    oriented = orient(s.mesh, rotation)
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks
+    layers = slice_mesh(oriented, p.layer_height, 80 if coarse else 160)
+    result = run_checks(oriented, p, cad_checks=s.cad_checks, coarse=coarse, layers=layers)
+    findings = _finish_check_findings(s, oriented, rotation, up, p, fit, result, mode="print", faces=None, spots=None)
+    return findings, rotation, layers
+
+
+def _finish_check_findings(s: Session, oriented: Mesh, rotation: np.ndarray, up, p: Profile, fit: dict,
+                           result: dict, mode: str, faces: dict | None, spots) -> list[dict]:
+    """Post-process run_checks findings with session-level rules, risk, summaries and explanations."""
+    if spots is not None:
+        result["findings"] += _spot_findings(spots, p, result["findings"])
+    result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
+    if not s.cad_checks:
+        cad_rules = set(load_data("thresholds")["organic"]["cad_rules"])
+        result["findings"] = [f for f in result["findings"] if f["rule"] not in cad_rules]
+    result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
+    result["findings"] += _thread_findings(oriented, rotation, p)
+    result["findings"] += _grip_findings(s.name)
+    if not fit["fits"]:
+        result["findings"].insert(0, {"rule": "exceeds_build_volume", "severity": "problem", "bbox": None, "metrics": fit,
+                                      "detail": f"Doesn't fit the {p.printer['name']}: {fit['reason']}"})
+    elif fit["turned_deg"]:
+        result["findings"].append({"rule": "turned_to_fit", "severity": "info", "bbox": None, "metrics": fit,
+                                   "detail": f"Turned {fit['turned_deg']:.0f}° on the bed so it fits the {p.printer['name']}"})
+    height = float(np.ptp(oriented.triangles[..., 2])) if len(oriented.triangles) else 0.0
+    w = _matching_warp(s, up, p)
+    if w and w["peel_point"] is not None:
+        result["findings"].append(_adhesion_finding(s, w, rotation))
+    risk = print_risk(p, result["findings"], height, w["verdict"] if w else None)
+    if risk["level"] == "high":
+        result["findings"].append({"rule": "print_may_fail", "severity": "warn", "bbox": None,
+                                   "metrics": {"score": risk["score"], "hold": risk["hold"]},
+                                   "detail": "The print may come loose or fall over on the bed: " + "; ".join(risk["reasons"])})
+    for i, f in enumerate(result["findings"]):  # findings built here, outside run_checks, need impact + short text
+        f.setdefault("impact", RULE_IMPACT.get(f["rule"], "info"))
+        if "finding_id" not in f:
+            result["findings"][i] = summarize_finding(f, p)
+    findings = [explain_finding(f, mode) for f in result["findings"]]
+    return emphasize_for_goal(findings, p.goal)
 
 
 def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None, detailed: bool = False) -> dict:
@@ -4856,19 +4909,26 @@ def _unit_shape(shape: str, n: int = 32) -> np.ndarray:
 def compare_nozzles(up, profile: dict | None = None) -> list[dict]:
     """The same part with every nozzle: print time, filament, the nozzle-dependent problems (``new``:
     not there with the smallest nozzle) and the detail it can't trace (checks.lost_detail)."""
-    from .checks import NOZZLE_RULES, lost_detail
+    from .checks import NOZZLE_RULES, lost_detail, nozzle_comparison_check
+    from .holes import horizontal_holes
 
     s = _require()
     base = Profile.from_dict(profile)
     rotation, _ = print_rotation(s.mesh, up, base.printer["bed"], _moving(base))
     oriented = orient(s.mesh, rotation)
-    detail_layers = slice_mesh(oriented, 0.2, 80)  # one set of layers, so only the nozzle differs
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks
+    max_layers = 80
+    detail_layers = slice_mesh(oriented, 0.2, max_layers)  # one set of layers, so only the nozzle differs
+    hholes = horizontal_holes(oriented)
+    surface = oriented.normals_and_areas()
     out = []
     nozzles = sorted(presets()["nozzles"], key=float)
     for i, nozzle in enumerate(nozzles):
         p = Profile.from_dict({**(profile or {}), "nozzle": nozzle})
+        reuse_layers = detail_layers if abs(p.layer_height - 0.2) < 1e-6 else None
         with stage(i / len(nozzles), (i + 1) / len(nozzles)):
-            r = run_checks(oriented, p, max_layers=80)
+            r = nozzle_comparison_check(oriented, p, max_layers=max_layers, cad_checks=s.cad_checks,
+                                        coarse=coarse, hholes=hholes, layers=reuse_layers, surface=surface)
         issues = [explain_finding(f) for f in r["findings"] if f["rule"] in NOZZLE_RULES]
         out.append({
             "nozzle": nozzle,

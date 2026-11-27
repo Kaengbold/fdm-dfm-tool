@@ -154,11 +154,13 @@ def orient(mesh: Mesh, rotation: np.ndarray) -> Mesh:
 
 
 def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict | None = None,
-               *, cad_checks: bool = True, coarse: bool = False) -> dict:
+               *, cad_checks: bool = True, coarse: bool = False,
+               layers: list[Layer] | None = None) -> dict:
     """Slice an oriented mesh and run all checks. Returns findings + stats. ``sliced``: real layer
     times and plastic from the G-code (gcode.layer_times) for the heat check."""
     T = load_data("thresholds")
-    layers = slice_mesh(mesh, profile.layer_height, max_layers)
+    if layers is None:
+        layers = slice_mesh(mesh, profile.layer_height, max_layers)
     tracker = Tracker(link=2 * profile.line_width)
     _scan_layers(layers, profile, tracker, T, cad_checks=cad_checks, coarse=coarse)
 
@@ -199,8 +201,8 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += pocket_findings(mesh, profile, T)
     findings += slope_findings(mesh, profile, T)
     findings += facet_findings(mesh, T)
-    findings += _relief_findings(mesh, profile, T)  # also the shrinkage size check organic parts keep
     if cad_checks:
+        findings += _relief_findings(mesh, profile, T)
         findings += flat_gap_findings(mesh, profile, T)
     findings += shrink_line_findings(layers, profile, T)
     if cad_checks:
@@ -232,7 +234,7 @@ def nozzle_findings(mesh: Mesh, profile: Profile, max_layers: int = 80, hholes: 
     T = load_data("thresholds")
     layers = slice_mesh(mesh, profile.layer_height, max_layers)
     tracker = Tracker(link=2 * profile.line_width)
-    _scan_layers(layers, profile, tracker, T)
+    _scan_layers(layers, profile, tracker, T, nozzle_only=True)
     findings = _feature_findings(tracker, profile, T) + _hole_findings(tracker, profile, T) + _first_layer_findings(layers, profile, T)
     H = T["holes"]
     nozzle = float(profile.nozzle)
@@ -244,6 +246,59 @@ def nozzle_findings(mesh: Mesh, profile: Profile, max_layers: int = 80, hholes: 
                                      f"Sideways Ø{d:.1f} mm hole at {cz:.1f} mm height — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up",
                                      bbox=h["bbox"], nozzle=nozzle, diameter=round(d, 2), axis=h["axis"], center=h["center"]))
     return [f for f in findings if f["rule"] in NOZZLE_RULES]
+
+
+def nozzle_comparison_check(mesh: Mesh, profile: Profile, max_layers: int = 80, *,
+                            cad_checks: bool = True, coarse: bool = False,
+                            hholes: list[dict] | None = None, layers: list[Layer] | None = None,
+                            surface: tuple[np.ndarray, np.ndarray] | None = None) -> dict:
+    """Focused check for ``api.compare_nozzles``: only nozzle-dependent findings (``NOZZLE_RULES``)
+    and print-time / filament estimates, skipping unrelated checks (heat, reliefs, flex, facets,
+    overhangs, pockets, shrinkage) and reusing precomputed mesh data across nozzles."""
+    T = load_data("thresholds")
+    if layers is None:
+        layers = slice_mesh(mesh, profile.layer_height, max_layers)
+    tracker = Tracker(link=2 * profile.line_width)
+    _scan_layers(layers, profile, tracker, T, cad_checks=cad_checks, coarse=coarse, nozzle_only=True)
+
+    findings = _feature_findings(tracker, profile, T) + _hole_findings(tracker, profile, T)
+    H = T["holes"]
+    nozzle = float(profile.nozzle)
+    min_d = max(H["vertical_min_mm"] * nozzle / 0.4, H["vertical_min_nozzle"] * nozzle)
+    for h in (horizontal_holes(mesh) if hholes is None else hholes):
+        d, cz = h["diameter"], h["center"][2]
+        if d < min_d:
+            findings.append(_finding("hole_closes", "problem",
+                                     f"Sideways Ø{d:.1f} mm hole at {cz:.1f} mm height — too small for a {profile.nozzle} mm nozzle (min ~{min_d:.1f} mm), it will close up",
+                                     bbox=h["bbox"], nozzle=nozzle, diameter=round(d, 2), axis=h["axis"], center=h["center"]))
+    above = section(mesh.triangles, layers[0].z + FOOT_PROBE_MM)
+    bed_findings = _bed_findings(layers, profile, T, above)
+    if not any(f["rule"] == "small_bed_contact" for f in bed_findings):
+        findings += _first_layer_findings(layers, profile, T)
+
+    plan_findings = list(findings) + _weak_findings(layers, tracker, profile, T) + slope_findings(mesh, profile, T)
+    stats = shape_settings_stats(layers, profile, T["shape_settings"], coarse=coarse)
+    normals, areas = mesh.normals_and_areas() if surface is None else surface
+    z = mesh.triangles[..., 2]
+    top = (normals[:, 2] > 0.999) & (z.mean(axis=1) > z.max() - profile.layer_height / 2)
+    stats["top_flat_mm2"] = float(areas[top].sum())
+    S = T["shape_layers"]
+    visible = normals[:, 2] >= -S["normal_tolerance"]
+    plain = (np.abs(normals[:, 2]) <= S["normal_tolerance"]) | (normals[:, 2] >= 1 - S["normal_tolerance"])
+    area = float(areas[visible].sum())
+    stats.update(visible_surface_mm2=area, plain_surface_share=float(areas[visible & plain].sum() / area) if area else 0.0,
+                 height_mm=float(z.max()),
+                 fine_detail_surface_mm2=float(sum(2 * r.volume / r.metrics["width"] for r in tracker.of("rough")
+                                                  if r.volume >= 1 and r.z1 - r.z0 >= 2 * profile.layer_height and r.metrics["width"] > 0)))
+    plan, _ = shape_plan(profile, stats, plan_findings)
+    est = _estimate(layers, profile, plan)
+
+    issues = [f for f in findings if f["rule"] in NOZZLE_RULES]
+    for f in issues:
+        f["impact"] = RULE_IMPACT.get(f["rule"], "info")
+    issues.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), SEVERITY_ORDER[f["severity"]]))
+    issues = [summarize_finding(f, profile) for f in issues]
+    return {"findings": issues, "stats": {"print_time_min": est["print_time_min"], "filament_g": est["filament_g"]}}
 
 
 def _wall_width_samples(g, count: int) -> tuple[np.ndarray, float]:
@@ -523,7 +578,7 @@ OVERHANG_MIN_PIECE_MM2 = 0.25
 
 
 def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dict,
-                 *, cad_checks: bool = True, coarse: bool = False):
+                 *, cad_checks: bool = True, coarse: bool = False, nozzle_only: bool = False):
     lw, nozzle = profile.line_width, float(profile.nozzle)
     tan_lim = np.tan(np.radians(profile.material["max_overhang_deg"]))
     max_bridge = profile.material["max_bridge_mm"]
@@ -545,7 +600,7 @@ def _scan_layers(layers: list[Layer], profile: Profile, tracker: Tracker, T: dic
         same = cached is not None and key.equals_exact(cached[0], 1e-4)
         # Areas that need support: reach further out than the overhang limit allows.
         # (Nothing can overhang when the layer equals the one below.)
-        if prev is not None and not prev.is_empty and not (same and prev is cached[2]):
+        if not nozzle_only and prev is not None and not prev.is_empty and not (same and prev is cached[2]):
             reach = layer.dz * tan_lim + OVERHANG_TOL_MM
             supported = prev.buffer(reach, quad_segs=QUAD)
             unsupported = ([] if coarse and supported.covers(g)
@@ -923,7 +978,10 @@ def lost_detail(layers: list[Layer], nozzle: float) -> dict:
         if layer.geom.is_empty:
             continue
         for key, r in radii.items():
-            gone = _safe_diff(layer.geom, _opening(layer.geom, r))
+            opened = _opening(layer.geom, r)
+            if opened.covers(layer.geom):
+                continue
+            gone = _safe_diff(layer.geom, opened)
             area = sum(q.area for q in parts(gone) if q.area >= r * r)
             vol[key] += area * layer.dz
             if key == "lost" and area > worst[0]:
