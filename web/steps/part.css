@@ -59,7 +59,17 @@ button.big-card { cursor: pointer; }
 .sample-card { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-2); border: 1px solid transparent; border-radius: var(--r); background: none;
   color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
 .sample-card:hover { border-color: var(--line); background: var(--surface); }
-.sample-card img { width: 96px; height: 96px; border-radius: var(--r-sm); background: linear-gradient(var(--stage-top), var(--stage-bottom)); }
+.sample-thumb { position: relative; display: block; width: 96px; height: 96px; border-radius: var(--r-sm); overflow: hidden;
+  background: linear-gradient(var(--stage-top), var(--stage-bottom)); }
+.sample-thumb img { width: 96px; height: 96px; opacity: 1; transition: opacity var(--t-fast); }
+.sample-thumb.is-loading img { opacity: 0; }
+.sample-thumb.is-loading::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 25%, var(--surface-raised) 50%, transparent 75%);
+  background-size: 200% 100%; opacity: 0.45; animation: sample-pulse 1.4s ease-in-out infinite; }
+@keyframes sample-pulse { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sample-thumb.is-loading::after { animation: none; background: var(--surface-sunken); opacity: 0.6; }
+}
 
 /* Camera bar buttons (stage.js cameraBar). */
 .stage-camera { display: flex; gap: var(--s-1); padding: var(--s-1); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-pop); }

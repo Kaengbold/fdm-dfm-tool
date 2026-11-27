@@ -538,6 +538,8 @@ export function createBrowserSlicer(options = {}) {
   let maxHeapBytes = 0;
   let definitions = null;
   let profilesPromise = null;
+  let manifestPromise = null;
+  let availablePromise = null;
 
   let worker = null;
   let detachWorker = null;
@@ -630,43 +632,50 @@ export function createBrowserSlicer(options = {}) {
   }
 
   async function fetchManifest() {
-    const url = new URL("manifest.json", engineBase).href;
-    const init = verifyIntegrity ? { integrity: ENGINE_INTEGRITY.manifest } : undefined;
-    let res;
-    try {
-      res = await fetchImpl(url, init);
-    } catch (cause) {
-      const err = new Error(`Browser slicer engine is not available (${cause?.message || cause})`);
-      err.reason = "unavailable";
-      err.cause = cause;
-      throw err;
+    if (!manifestPromise) {
+      manifestPromise = (async () => {
+        const url = new URL("manifest.json", engineBase).href;
+        const init = verifyIntegrity ? { integrity: ENGINE_INTEGRITY.manifest } : undefined;
+        let res;
+        try {
+          res = await fetchImpl(url, init);
+        } catch (cause) {
+          const err = new Error(`Browser slicer engine is not available (${cause?.message || cause})`);
+          err.reason = "unavailable";
+          err.cause = cause;
+          return { ok: false, error: err };
+        }
+        if (!res.ok) {
+          const err = new Error(`Browser slicer engine is not available (${res.status})`);
+          err.reason = "unavailable";
+          return { ok: false, error: err };
+        }
+        let manifest;
+        try {
+          manifest = await res.json();
+        } catch (cause) {
+          const err = new Error("Browser slicer engine manifest is invalid");
+          err.reason = "unavailable";
+          err.cause = cause;
+          return { ok: false, error: err };
+        }
+        if (verifyIntegrity) {
+          const ok =
+            manifest?.host?.sha256 === ENGINE_SHA256.host &&
+            manifest?.variants?.st?.sha256?.mjs === ENGINE_SHA256.mjs &&
+            manifest?.variants?.st?.sha256?.wasm === ENGINE_SHA256.wasm;
+          if (!ok) {
+            const err = new Error("Browser slicer engine manifest does not match pinned hashes");
+            err.reason = "unavailable";
+            return { ok: false, error: err };
+          }
+        }
+        return { ok: true, manifest };
+      })();
     }
-    if (!res.ok) {
-      const err = new Error(`Browser slicer engine is not available (${res.status})`);
-      err.reason = "unavailable";
-      throw err;
-    }
-    let manifest;
-    try {
-      manifest = await res.json();
-    } catch (cause) {
-      const err = new Error("Browser slicer engine manifest is invalid");
-      err.reason = "unavailable";
-      err.cause = cause;
-      throw err;
-    }
-    if (verifyIntegrity) {
-      const ok =
-        manifest?.host?.sha256 === ENGINE_SHA256.host &&
-        manifest?.variants?.st?.sha256?.mjs === ENGINE_SHA256.mjs &&
-        manifest?.variants?.st?.sha256?.wasm === ENGINE_SHA256.wasm;
-      if (!ok) {
-        const err = new Error("Browser slicer engine manifest does not match pinned hashes");
-        err.reason = "unavailable";
-        throw err;
-      }
-    }
-    return manifest;
+    const outcome = await manifestPromise;
+    if (!outcome.ok) throw outcome.error;
+    return outcome.manifest;
   }
 
   async function ensureReady(onProgress = null) {
@@ -797,29 +806,34 @@ export function createBrowserSlicer(options = {}) {
     };
   }
 
-  async function checkAvailable() {
-    if (typeof WebAssembly !== "object" || typeof Worker !== "function") {
-      return {
-        available: false,
-        reason: "unavailable",
-        message: "This browser cannot run WebAssembly workers; using fast estimate instead.",
-      };
+  function checkAvailable() {
+    if (!availablePromise) {
+      availablePromise = (async () => {
+        if (typeof WebAssembly !== "object" || (!options.workerFactory && typeof Worker !== "function")) {
+          return {
+            available: false,
+            reason: "unavailable",
+            message: "This browser cannot run WebAssembly workers; using fast estimate instead.",
+          };
+        }
+        try {
+          const manifest = await fetchManifest();
+          return {
+            available: true,
+            version: manifest.version || ENGINE_VERSION,
+            orca: manifest.orca?.version || "2.5.0-dev",
+            wasmBytes: manifest.variants?.st?.wasmBytes || 0,
+          };
+        } catch (err) {
+          return {
+            available: false,
+            reason: "unavailable",
+            message: err.message || "Browser slicer engine is not available.",
+          };
+        }
+      })();
     }
-    try {
-      const manifest = await fetchManifest();
-      return {
-        available: true,
-        version: manifest.version || ENGINE_VERSION,
-        orca: manifest.orca?.version || "2.5.0-dev",
-        wasmBytes: manifest.variants?.st?.wasmBytes || 0,
-      };
-    } catch (err) {
-      return {
-        available: false,
-        reason: "unavailable",
-        message: err.message || "Browser slicer engine is not available.",
-      };
-    }
+    return availablePromise;
   }
 
   async function warmup(onProgress = null) {
@@ -848,6 +862,8 @@ export function createBrowserSlicer(options = {}) {
     tearDownWorker(new Error("Slicer disposed"));
     state = "idle";
     engineInfo = null;
+    manifestPromise = null;
+    availablePromise = null;
   }
 
   async function slice(job, { onProgress = null, signal = null } = {}) {

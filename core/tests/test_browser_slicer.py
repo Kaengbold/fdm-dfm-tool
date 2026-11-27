@@ -246,10 +246,11 @@ const manifestJson = {
   variants: { st: { mjs: "engine-st.mjs", wasm: "engine-st.wasm", wasmBytes: 100, sha256: { mjs: mod.ENGINE_SHA256.mjs, wasm: mod.ENGINE_SHA256.wasm } } },
 };
 
+let okManifestFetches = 0;
 const slicer = mod.createBrowserSlicer({
   engineBase: "http://127.0.0.1/vendor/muon3d/",
   loadProfiles: async () => snap,
-  fetchImpl: async () => ({ ok: true, status: 200, json: async () => manifestJson }),
+  fetchImpl: async () => { okManifestFetches++; return { ok: true, status: 200, json: async () => manifestJson }; },
   workerFactory: () => new MockWorker(),
 });
 
@@ -287,14 +288,27 @@ setTimeout(() => ac.abort(), 10);
 const canc = await pCancel;
 if (canc.ok || !canc.cancelled || canc.reason !== "cancelled") throw new Error("cancel failed: " + JSON.stringify(canc));
 
-// Unavailable engine (404)
+// Unavailable engine (404): slice() and checkAvailable() share the cached manifest probe (T-633)
+let deadManifestFetches = 0;
 const dead = mod.createBrowserSlicer({
   engineBase: "http://127.0.0.1/vendor/missing/",
   loadProfiles: async () => snap,
-  fetchImpl: async () => ({ ok: false, status: 404 }),
+  fetchImpl: async () => { deadManifestFetches++; return { ok: false, status: 404 }; },
 });
 const unavail = await dead.slice({ mesh: cube, printer: "Bambu Lab P1S", nozzle: "0.4", material: "pla" });
 if (unavail.ok || !unavail.fallback || unavail.reason !== "unavailable") throw new Error("unavail failed");
+const avail1 = await dead.checkAvailable();
+const avail2 = await dead.checkAvailable();
+if (avail1.available || avail2.available || deadManifestFetches !== 1) {
+  throw new Error("checkAvailable cache failed: " + JSON.stringify({ avail1, avail2, deadManifestFetches }));
+}
+
+// Available engine: checkAvailable() after slice() also reuses the single manifest fetch
+const okAvail1 = await slicer.checkAvailable();
+const okAvail2 = await slicer.checkAvailable();
+if (!okAvail1.available || !okAvail2.available || okManifestFetches !== 1) {
+  throw new Error("ok checkAvailable cache failed: " + JSON.stringify({ okAvail1, okAvail2, okManifestFetches }));
+}
 
 // Unavailable engine (offline / SRI rejection throws TypeError)
 const offline = mod.createBrowserSlicer({
