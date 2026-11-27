@@ -51,10 +51,14 @@ def test_support_on_seen_faces_ranks_an_orientation_lower():
 
 
 def test_optimize_and_check_take_the_faces(monkeypatch):
+    import importlib
+
+    api_orientation = importlib.import_module("fdmcore.api.orientation")
+
     _load("phone_stand")
     calls = []
-    real = api._face_penalty
-    monkeypatch.setattr(api, "_face_penalty", lambda *a: calls.append(a[1].up) or real(*a))
+    real = api_orientation._face_penalty
+    monkeypatch.setattr(api_orientation, "_face_penalty", lambda *a: calls.append(a[1].up) or real(*a))
     out = api.optimize("quality", None, "fast", {"printer": "bambu_p1s"}, faces={"clean": "visible"})
     assert out["options"] and calls, "every candidate orientation is scored against the seen faces"
     # The guess adds no finding of its own (support_marks already names the marks); a marked show face does.

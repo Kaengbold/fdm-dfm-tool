@@ -410,10 +410,13 @@ def test_finalist_support_and_time_use_displayed_measurements():
 
 @pytest.mark.parametrize("rule", ["tipping_risk", "small_bed_contact"])
 def test_bed_checks_override_a_better_score(monkeypatch, rule):
+    import importlib
     from fdmcore import checks
 
+    api_orientation = importlib.import_module("fdmcore.api.orientation")
+
     bed_findings = checks._bed_findings
-    refine = api._refine
+    refine = api_orientation._refine
 
     def force_score(mesh, results, placed, settings, profile, **kw):
         refine(mesh, results, placed, settings, profile, **kw)
@@ -425,7 +428,7 @@ def test_bed_checks_override_a_better_score(monkeypatch, rule):
         found = bed_findings(layers, profile, thresholds)
         return [{**finding, "rule": rule} if finding["rule"] == "tipping_risk" else finding for finding in found]
 
-    monkeypatch.setattr(api, "_refine", force_score)
+    monkeypatch.setattr(api_orientation, "_refine", force_score)
     monkeypatch.setattr(checks, "_bed_findings", bed_risk)
     api.load(sample("feature_test"), "feature_test")
     best, edge = api.orientations()["orientations"]
@@ -434,9 +437,12 @@ def test_bed_checks_override_a_better_score(monkeypatch, rule):
 
 
 def test_pareto_guard_overrides_other_score_terms(monkeypatch):
+    import importlib
     from fdmcore import checks
 
-    refine = api._refine
+    api_orientation = importlib.import_module("fdmcore.api.orientation")
+
+    refine = api_orientation._refine
 
     def force_score(mesh, results, placed, settings, profile, **kw):
         refine(mesh, results, placed, settings, profile, **kw)
@@ -445,7 +451,7 @@ def test_pareto_guard_overrides_other_score_terms(monkeypatch):
                 result.penalize("faces", 100)
 
     api.load(sample("feature_test"), "feature_test")
-    monkeypatch.setattr(api, "_refine", force_score)
+    monkeypatch.setattr(api_orientation, "_refine", force_score)
     monkeypatch.setattr(checks, "_bed_findings", lambda layers, profile, thresholds: [])
     options = api.orientations()["orientations"]
     assert_not_pareto_dominated(options)
