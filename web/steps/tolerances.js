@@ -185,7 +185,7 @@ function tint(store, services) {
   if (!picker?.data || !data || !services.stage.part) return;
   const accent = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2563EB");
   if (mode !== "round") {
-    const picked = new Set(mode === "gaps" ? gapFaces() : []);
+    const picked = new Set(mode === "gaps" ? gapFaces(store) : []);
     picker.setRegionColors((r) => (picked.has(r) ? accent : null));
     return;
   }

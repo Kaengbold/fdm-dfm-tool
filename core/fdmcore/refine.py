@@ -44,9 +44,11 @@ def support_stats(mesh: Mesh, profile: Profile, max_layers: int = 40, layers=Non
             need.append(layer.geom)
         else:
             free = _clean(_safe_diff(layer.geom, below.geom.buffer(reach, quad_segs=QUAD)))
+            if free.is_empty:
+                need.append(free)
+                continue
             anchor_zone = below.geom.buffer(reach + lw, quad_segs=QUAD)
-            keep = [piece for piece in getattr(free, "geoms", [free]) if not piece.is_empty
-                    and not _bridgeable(piece, anchor_zone, max_bridge)]
+            keep = [piece for piece in getattr(free, "geoms", [free]) if not _bridgeable(piece, anchor_zone, max_bridge)]
             need.append(shapely.union_all(keep) if keep else Polygon())
     support_area = sum(g.area for g in need)
     # Carry support columns down from the top; a column stops where it meets the part. Robust
@@ -99,5 +101,7 @@ def _clean(g):
     """Drop slivers so tiny leftovers don't grow into fake support columns."""
     if g.is_empty:
         return g
+    if isinstance(g, Polygon):
+        return g if g.area > 0.5 else Polygon()
     polys = [p for p in getattr(g, "geoms", [g]) if isinstance(p, Polygon) and p.area > 0.5]
     return shapely.union_all(polys) if polys else Polygon()

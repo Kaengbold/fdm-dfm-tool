@@ -34,7 +34,7 @@ try {
 
 const store = createStore();
 const saving = autosave(store);
-let source = null; // the part's file: {name, bytes, faceIds, kind}, to give a restarted engine the part again
+let source = null; // the part's file: {name, bytes (STL/3MF for the engine), stepBytes?, faceIds, kind}
 const engine = createEngine({ onProgress: ({ fraction, text }) => services.onProgress?.(fraction, text),
   onPartial: ({ result }) => services.onPartial?.(result) });
 engine.onRestore(async (post) => {
@@ -123,10 +123,17 @@ const picks = (s) => PICK_STEPS.has(s.step) || s.step === "tolerances" || s.step
 let regionsFor = null;
 async function preparePicker() {
   const s = store.get();
+  if (regionsFor && regionsFor !== s.part) {
+    regionsFor = null;
+    services.picker.clearData();
+  }
   const on = Boolean(s.part) && picks(s) && app.route === "flow";
   if (on && regionsFor !== s.part) {
-    regionsFor = s.part;
-    services.picker.setData(await engine.call("regions"));
+    const part = s.part;
+    regionsFor = part;
+    const data = await engine.call("regions");
+    if (store.get().part !== part) return;
+    services.picker.setData(data);
     services.rerender(); // steps tint their faces once the regions are there
   }
   services.picker.enable(on);

@@ -54,10 +54,34 @@ export class Picker {
       if (!this.enabled || !this.hit || (this.down && Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 4)) return;
       this.listeners.pick.forEach((fn) => fn(this.hit, e.clientX, e.clientY));
     });
-    stage.onRecolor = () => this.retint();
+    stage.onRecolor = () => this.recolor();
   }
 
   on(event, fn) { this.listeners[event].add(fn); return () => this.listeners[event].delete(fn); }
+
+  /** Repaint the part after a theme change: new base colour, any step region colours, then the hover highlight. */
+  recolor() {
+    // Only on picking steps: elsewhere the part may carry another step's paint (overhangs, heat), and the
+    // region colours left from an earlier step must not come back.
+    if (!this.stage.part || !this.enabled) return;
+    this.stage.paint(() => null);
+    if (this.data && this.colorFor) {
+      this.colored = null;
+      this.setRegionColors(this.colorFor);
+    }
+    this.retint();
+  }
+
+  /** Drop region data when a new part is loaded so stale regions aren't painted onto it. */
+  clearData() {
+    this.data = null;
+    this.colored = null;
+    this.tinted = null;
+    this.hit = null;
+    this.badge.hidden = true;
+    this.edgeLines.clear();
+    this.outlines = new Map();
+  }
 
   /** Colour regions a step marks (holds, loads): ``colorFor(region)`` → THREE.Color or null. Repaints them now. */
   setRegionColors(colorFor) {
@@ -76,6 +100,7 @@ export class Picker {
 
   /** Where a part-coordinate point is on screen (client px), for markers and menus. */
   toClient(point) {
+    if (!this.stage.part) return { x: 0, y: 0, behind: true };
     const v = new THREE.Vector3(...point).add(this.stage.part.offset).project(this.stage.camera);
     const r = this.stage.canvas.getBoundingClientRect();
     return { x: (v.x + 1) / 2 * r.width + r.left, y: (1 - v.y) / 2 * r.height + r.top, behind: v.z > 1 };
@@ -94,6 +119,8 @@ export class Picker {
     this.regionStart = counts;
     this.regionOrder = order;
     this.buildIdMesh();
+    this.colored = null;
+    this.tinted = null;
     this.outlines = new Map();
     this.setHit(null);
   }
@@ -101,7 +128,8 @@ export class Picker {
   /** The triangle-id twin of the part, rendered off screen for the GPU pick. */
   buildIdMesh() {
     this.idMesh?.geometry.dispose();
-    const geo = this.stage.part.geo;
+    const geo = this.stage.part?.geo;
+    if (!geo) { this.idMesh = null; this.idScene = null; return; }
     const n = geo.attributes.position.count / 3;
     const ids = new Uint8Array(n * 9);
     for (let t = 0; t < n; t++) {
@@ -130,6 +158,8 @@ export class Picker {
 
   /** The triangle under a client point, from the GPU (−1 if none). */
   triangleAt(x, y) {
+    if (!this.stage.part?.geo) return -1;
+    if (!this.idScene) this.buildIdMesh();
     const { renderer, camera, canvas } = this.stage;
     const r = canvas.getBoundingClientRect();
     const dpr = renderer.getPixelRatio();
@@ -149,6 +179,7 @@ export class Picker {
 
   /** What is under the client point: {kind: face|edge|corner, region, info, point (part coords), …} or null. */
   pickAt(x, y) {
+    if (!this.data || !this.stage.part?.geo) return null;
     const t = this.triangleAt(x, y);
     if (t < 0 || t >= this.data.faceRegion.length) return null;
     const region = this.data.faceRegion[t];
@@ -201,7 +232,7 @@ export class Picker {
     this.hit = hit;
     this.retint();
     this.badge.hidden = !hit;
-    if (hit) {
+    if (hit && this.stage.part) {
       this.badge.textContent = this.label(hit);
       const p = new THREE.Vector3(...hit.point).add(this.stage.part.offset).project(this.stage.camera);
       const host = this.badge.parentElement?.getBoundingClientRect();
@@ -217,7 +248,7 @@ export class Picker {
 
   /** Tint the hovered region (soft) or draw the hovered edge; everything else back to the part colour. */
   retint() {
-    if (!this.data || !this.stage.part) return;
+    if (!this.data || !this.stage.part?.geo) return;
     const base = this.stage.part.base;
     const tint = base.clone().lerp(this.hover, 0.55);
     // A region a step coloured (e.g. a hold) gets its own colour back, not the plain part colour.
@@ -282,6 +313,7 @@ export class Picker {
   /** Show a feature as hovered (from the keyboard list), or clear with null. */
   showFeature(hit) { this.setHit(hit); }
   pickFeature(hit) {
+    if (!this.stage.part) return;
     const p = new THREE.Vector3(...hit.point).add(this.stage.part.offset).project(this.stage.camera);
     const r = this.stage.canvas.getBoundingClientRect();
     this.listeners.pick.forEach((fn) => fn(hit, (p.x + 1) / 2 * r.width + r.left, (1 - p.y) / 2 * r.height + r.top));

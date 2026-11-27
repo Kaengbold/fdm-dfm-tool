@@ -12,7 +12,10 @@ import { registerStep } from "../shell.js";
 import { Cancelled } from "../engine.js";
 import { t } from "../i18n.js";
 import { holdToEngine, loadToEngine } from "./args.js";
+import { formatSafety } from "./format.js";
 import { simProfile } from "./simulate.js";
+
+const HIGH_SAFETY = 100;
 
 const f32 = (b) => new Float32Array(new Uint8Array(b).slice().buffer);
 let result = null; // {key, plan}
@@ -66,12 +69,21 @@ export function lighterWays(plan, minSaving = 0.5) {
   return ways;
 }
 
+function safetyConfirmLine(was, now, target) {
+  const wasHigh = was != null && was > HIGH_SAFETY;
+  const nowHigh = now != null && now > HIGH_SAFETY;
+  if (wasHigh && nowHigh) return t("light.confirmSafetyHigh", { target });
+  if (wasHigh) return t("light.confirmSafetyFromHigh", { now: formatSafety(now) ?? "0.0", target });
+  if (nowHigh) return t("light.confirmSafetyToHigh", { was: formatSafety(was) ?? "0.0", target });
+  return t("light.confirmSafety", { was: formatSafety(was ?? 0), now: formatSafety(now), target });
+}
+
 function use(store, way) {
   const s = store.get();
   const o = s.option;
   const body = h("div", { class: "light-confirm" },
     h("p", {}, t("light.confirmLine", { walls: `${o.walls} → ${way.walls}`, infill: `${Math.round(o.infill * 100)} → ${Math.round(way.infill * 100)} %` })),
-    h("p", {}, t("light.confirmSafety", { was: (o.safety ?? 0).toFixed(1), now: way.safety_factor.toFixed(1), target: o.target })),
+    h("p", {}, safetyConfirmLine(o.safety, way.safety_factor, o.target)),
     way.zones?.length ? h("p", { class: "ui-hint" }, t("light.confirmZones", { count: way.zones.length })) : null);
   openModal({ title: t("light.confirmTitle"), body, actions: [
     { label: t("ui.cancel"), variant: "ghost" },
@@ -112,7 +124,9 @@ registerStep("lighter", {
           h("span", {}, t("light.row.walls", { walls: x.walls, top: x.top, bottom: x.bottom })),
           h("span", {}, t("light.row.infill", { infill: Math.round(x.infill * 100) })),
           h("span", { class: "num" }, `${(x.grams ?? 0).toFixed(1)} g · ${minutes(x.minutes ?? 0)}`),
-          h("span", { class: "num" }, t("light.row.safety", { sf: (x.safety_factor ?? 0).toFixed(1), target })),
+          h("span", { class: "num" }, x.safety_factor != null && x.safety_factor > HIGH_SAFETY
+            ? t("light.row.safetyHigh", { target })
+            : t("light.row.safety", { sf: formatSafety(x.safety_factor) ?? "0.0", target })),
           x.zones?.length ? h("span", { class: "ui-hint" }, t("light.row.zones", { count: x.zones.length })) : null,
           action);
         body.append(h("div", { class: "light-cols" },

@@ -13,8 +13,9 @@ import { busyLine, f32, run } from "./common.js";
 const ui = { watts: 5, room: null, cooling: "closed", point: null, busy: null, error: null };
 let result = null; // {key, r}
 
-const keyOf = (store) => JSON.stringify([store.deps("model", "option", "profile"), ui.watts, ui.room, ui.cooling, ui.point]);
 const roomOf = (s) => ui.room ?? s.environment?.tempC ?? 25;
+const keyOf = (store) => JSON.stringify([store.deps("model", "option", "profile"), ui.watts, roomOf(store.get()), ui.cooling, ui.point]);
+const focusable = (field, key) => { field.input.dataset.focusKey = `box-${key}`; return field; };
 
 async function work(store, services) {
   const s = store.get();
@@ -43,8 +44,10 @@ export function render({ body, stage, store, services }) {
   const r = result?.key === keyOf(store) ? result.r : null;
   body.append(h("p", { class: "ui-hint" }, t("tools.box.intro")),
     h("div", { class: "tools-fields" },
-      NumberField({ label: t("tools.box.watts"), value: ui.watts, min: 0.1, max: 500, units: [{ value: "w", label: "W" }], onChange: (n) => { if (n != null) ui.watts = n; } }),
-      NumberField({ label: t("tools.box.room"), value: roomOf(s), min: -20, max: 80, units: [{ value: "c", label: "°C" }], onChange: (n) => { if (n != null) ui.room = n; } })),
+      focusable(NumberField({ label: t("tools.box.watts"), value: ui.watts, min: 0.1, max: 500, units: [{ value: "w", label: "W" }],
+        onChange: (n) => { if (n != null && n !== ui.watts) { ui.watts = n; services.rerender(); } } }), "watts"),
+      focusable(NumberField({ label: t("tools.box.room"), value: roomOf(s), min: -20, max: 80, units: [{ value: "c", label: "°C" }],
+        onChange: (n) => { if (n != null && n !== roomOf(s)) { ui.room = n; services.rerender(); } } }), "room")),
     SegmentedControl({ label: t("tools.box.cooling"), size: "small", value: ui.cooling, options: ["closed", "fan"].map((v) => ({ value: v, label: t(`tools.box.cooling.${v}`) })),
       onChange: (v) => { ui.cooling = v; services.rerender(); } }),
     h("p", { class: "ui-hint" }, ui.point ? t("tools.box.at") : t("tools.box.pick"),
