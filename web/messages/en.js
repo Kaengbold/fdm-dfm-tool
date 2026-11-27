@@ -865,7 +865,7 @@ export default {
   "sim.legend.true": "True size, after it comes off the bed.",
   "sim.legend.big": "Shape exaggerated so it's easy to see.",
   "sim.legend.stress": "Cooling stress left inside (peak {max} MPa)",
-  "sim.legend.stressNote": "Rough guide after cooling; warmer colours pull harder (solid PLA breaks near 50 MPa).",
+  "sim.legend.stressNote": "Rough guide after cooling; warmer colours pull harder.",
   "sim.legend.heat": "Heat build-up while printing",
   "sim.legend.heatNote": "Yellow to red: spots that stay soft when the next layer comes.",
   "sim.legend.heatFallback": "Rough estimate without G-code: add a sliced file for the full layer-by-layer heat view.",
