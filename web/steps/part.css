@@ -46,6 +46,9 @@ button.big-card { cursor: pointer; }
 .drop-icon .ui-icon { width: 26px; height: 26px; }
 .drop-progress { display: flex; align-items: center; gap: var(--s-3); }
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: ui-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-right-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface-raised); }
+}
 .drop-error { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--bad-soft); color: var(--bad); font-size: var(--fs-sm); }
 .body-list { display: grid; gap: var(--s-2); }
 .unit-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-2); padding: var(--s-3) var(--s-4); border-radius: var(--r);
