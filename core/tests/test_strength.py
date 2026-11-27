@@ -52,9 +52,10 @@ def test_thin_strip_strength_follows_its_thickness():
 
 @pytest.fixture
 def loaded_grid_part(monkeypatch):
+    from fdmcore.api import session as api_session
     from test_hold import box as solid_box, region_facing
 
-    monkeypatch.setattr(api, "_analysis", {"strength_voxels": 2000, "fine_voxels": 5000})
+    monkeypatch.setattr(api_session, "_analysis", {"strength_voxels": 2000, "fine_voxels": 5000})
 
     def load(thickness):
         api.load(solid_box(60, 20, thickness), "grid check")
@@ -105,8 +106,12 @@ def test_strength_rechecks_a_small_fillet_in_thick_stock(loaded_grid_part):
 
 @pytest.mark.parametrize("failure", ["exception", "nonconvergence"])
 def test_strength_keeps_the_original_result_if_refinement_fails(loaded_grid_part, monkeypatch, failure):
+    import importlib
+
+    api_strength = importlib.import_module("fdmcore.api.strength")
+
     loads = loaded_grid_part(1.2)
-    original_solve = api._strength_on_grid
+    original_solve = api_strength._strength_on_grid
     calls = []
 
     def solve_grid(cases, *args, trial=False):
@@ -118,7 +123,7 @@ def test_strength_keeps_the_original_result_if_refinement_fails(loaded_grid_part
             r["_cases_converged"] = False
         return r
 
-    monkeypatch.setattr(api, "_strength_on_grid", solve_grid)
+    monkeypatch.setattr(api_strength, "_strength_on_grid", solve_grid)
     r = api.strength([0, 0, 1], loads)
     check = r["grid_check"]
     assert calls == [False, True]
@@ -298,7 +303,9 @@ def test_released_strain_rotates_engineering_shear_and_uses_nearby_cells():
 
 
 def test_strength_reuses_matching_released_warp_result(monkeypatch):
-    monkeypatch.setattr(api, "_analysis", {"fine_voxels": 2000, "warp_voxels": 1000})
+    from fdmcore.api import session as api_session
+
+    monkeypatch.setattr(api_session, "_analysis", {"fine_voxels": 2000, "warp_voxels": 1000})
     params = {"up": [0, 0, 1], "loads": _plank(), "profile": {"material": "abs"}, "fine": True}
     base = api.dispatch("strength", json.dumps(params))
     assert base["residual_stress"] == {"included": False}

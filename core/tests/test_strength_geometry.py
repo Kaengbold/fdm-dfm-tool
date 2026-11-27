@@ -96,9 +96,11 @@ def test_stiff_chunk_skips_both_optional_solves(monkeypatch):
 
 
 def test_compressed_wall_buckling_sets_case_and_verdict(monkeypatch):
+    from fdmcore.api import session as api_session
+
     mesh = Mesh(extrude(box(0, 0, 40, 12), 0, 3))
     api.load(to_binary_stl(mesh), "pressed wall")
-    monkeypatch.setattr(api, "_analysis", {"strength_voxels": 1500, "fine_voxels": 2400})
+    monkeypatch.setattr(api_session, "_analysis", {"strength_voxels": 1500, "fine_voxels": 2400})
     regions = api.regions()["regions"]
     root = min(regions, key=lambda r: r["normal"][0])["id"]
     tip = max(regions, key=lambda r: r["normal"][0])["id"]

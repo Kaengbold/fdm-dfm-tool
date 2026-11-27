@@ -27,8 +27,11 @@ def test_band_boundaries(value, need, expected):
 
 
 def test_strength_story_does_not_promise_decimal_precision():
+    import importlib
+
+    api_strength = importlib.import_module("fdmcore.api.strength")
     result = {"safety_factor": 17.7, "critical_point_print": [0, 0, 2], "verdict": "fine", "mode": "material"}
-    with patch("fdmcore.api._use_story", return_value=""), patch("fdmcore.api.required_safety", return_value=2):
+    with patch.object(api_strength, "_use_story", return_value=""), patch.object(api_strength, "required_safety", return_value=2):
         story = _strength_story(None, None, result, None)
     assert story.startswith("Plenty of reserve. It should hold")
     assert "17.7" not in story
@@ -36,8 +39,11 @@ def test_strength_story_does_not_promise_decimal_precision():
 
 @pytest.mark.parametrize("mode", ["layers", "material", "lines"])
 def test_strength_story_parts_match_full_explanation(mode):
+    import importlib
+
+    api_strength = importlib.import_module("fdmcore.api.strength")
     result = {"safety_factor": 1.5, "critical_point_print": [0, 0, 12], "verdict": "borderline", "mode": mode}
-    with patch("fdmcore.api._use_story", return_value=""), patch("fdmcore.api.required_safety", return_value=2):
+    with patch.object(api_strength, "_use_story", return_value=""), patch.object(api_strength, "required_safety", return_value=2):
         story = _strength_story(None, None, result, None)
     parts = _strength_story_parts(result)
     assert parts["weakest"] == "The weakest spot is about 12 mm above the bed."
