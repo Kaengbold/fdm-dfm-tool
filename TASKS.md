@@ -557,7 +557,7 @@ A read-only audit of the web tool. Everything a task needs is written in the tas
 
 ### D. Navigation rebuild (needs the user's yes first)
 
-- [ ] **T-420 P2** [D] Split `core/fdmcore/api.py` (3,000 lines) the same way. · files: `core/fdmcore/api.py` → `core/fdmcore/api/*.py`, `tools/make_manifest.py`, `web/worker.js` (`NEEDS_SCIPY`) · owner: —
+- [~] **T-420 P2** [D] Split `core/fdmcore/api.py` (5,100 lines) the same way. · files: `core/fdmcore/api.py` → `core/fdmcore/api/*.py`, `tools/make_manifest.py`, `web/worker.js` (`NEEDS_SCIPY`) · owner: Gemini 4 Neon, reviewed by Claude (`task/T-420-split-api`)
   - Do: keep `api.dispatch` and `METHODS` as the one entry; move the methods into modules by area (load, orientation, check, strength, design, export, presets). Run `python tools/make_manifest.py` after (a test fails otherwise) and `node tools/pyodide_check.mjs`.
   - Done when: same `METHODS` keys, all tests green, MCP server and CLI unchanged.
 
