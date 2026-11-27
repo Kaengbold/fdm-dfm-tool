@@ -164,7 +164,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
       onGo: navigate,
     });
     rail.classList.add("rail");
-    const title = h("h2", { tabindex: "-1", id: "step-title" }, t(`step.${s.step}.label`));
+    const title = h("h1", { tabindex: "-1", id: "step-title" }, t(`step.${s.step}.label`));
     const body = h("div", { class: "panel-body" });
     stageUi.replaceChildren();
     stageEl.className = "stage";

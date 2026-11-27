@@ -183,9 +183,15 @@ def check_new_ui(browser, port: int) -> str:
         assert page.locator(".big-card.is-soon").evaluate("e => e.tabIndex") < 0, "Coming soon card is a tab stop"
         page.get_by_role("button", name="Optimize your print").click()
         assert page.locator("#step-title").inner_text() == "Part"
+        assert page.locator("h1").count() == 1 and page.locator("h1#step-title").count() == 1
         texts = page.locator(".drop-wrap").inner_text().split("\n")
         assert [x for x in texts if x.strip()] == ["Drop your part here", "Choose file", "STL, 3MF, STEP or a saved project", "Sample parts"], texts
         page.get_by_role("button", name="Sample parts").click()
+        page.wait_for_selector(".sample-pop")
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate("() => document.activeElement === document.querySelector('.sample-pop .sample-card:last-child')"), "Shift+Tab escaped sample dialog"
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement === document.querySelector('.sample-pop .sample-card:first-child')"), "Tab escaped sample dialog"
         assert page.locator(".sample-card .sample-thumb").count() == 8
         page.wait_for_function("() => document.querySelectorAll('.sample-thumb.is-loading').length === 0", timeout=30_000)
         page.locator(".sample-card", has_text="Wall hook").click()
@@ -286,6 +292,11 @@ def check_new_ui_picker(browser, port: int) -> str:
           document.querySelector('.feature-search').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
         })""")
         assert picked == "hole", picked
+        assert page.locator(".feature-search").get_attribute("aria-label")
+        page.wait_for_selector(".ui-radial", state="attached")
+        page.keyboard.press("Escape")
+        page.wait_for_selector(".ui-radial", state="detached")
+        assert page.evaluate("() => document.activeElement === document.querySelector('.stage-canvas')"), "Escape did not return focus to canvas"
         # Big part: the pick reads one pixel from the GPU, whatever the triangle count.
         perf = page.evaluate("""async () => {
           const THREE = await import('three');
@@ -583,6 +594,20 @@ def check_new_ui_loads(browser, port: int) -> str:
             page.wait_for_selector(".ui-pop")
 
         click_at(0.36, 0.42)  # the upright's face
+        reached_gizmo = False
+        for _ in range(12):
+            page.keyboard.press("Tab")
+            if page.evaluate("() => Boolean(document.activeElement?.closest('.gizmo-row'))"):
+                reached_gizmo = True
+                break
+        assert reached_gizmo, "Tab never reached .gizmo-row from force popover"
+        wrapped_pop = False
+        for _ in range(12):
+            page.keyboard.press("Tab")
+            if page.evaluate("() => document.activeElement === document.querySelector('.ui-pop input')"):
+                wrapped_pop = True
+                break
+        assert wrapped_pop, "Tab did not wrap from .gizmo-row back to force input"
         page.keyboard.type("50")
         assert "kg of weight" in page.locator(".ui-pop .ui-num__hint").inner_text()
         page.keyboard.press("Enter")

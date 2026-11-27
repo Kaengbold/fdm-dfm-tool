@@ -16,7 +16,7 @@ export function Select({ label, options, value = LATER, decideLater = false, cle
     text, icon(ICONS.chevron));
   const clear = h("button", { type: "button", class: "ui-select__clear", "aria-label": t("ui.clearChoice", { name: label }), hidden: true }, icon(ICONS.close));
   const search = h("input", { type: "text", class: "ui-select__search", role: "combobox", "aria-controls": listId, "aria-expanded": "true",
-    "aria-autocomplete": "list", placeholder: t("ui.search"), autocomplete: "off", spellcheck: false });
+    "aria-autocomplete": "list", "aria-label": label ? t("ui.searchOf", { name: label }) : t("ui.search"), placeholder: t("ui.search"), autocomplete: "off", spellcheck: false });
   const list = h("ul", { id: listId, role: "listbox", class: "ui-select__list", "aria-label": label });
   const empty = h("li", { class: "ui-select__empty", role: "presentation" }, t("ui.noMatches"));
   const pop = h("div", { class: "ui-select__pop", hidden: true }, searchable && search, list);

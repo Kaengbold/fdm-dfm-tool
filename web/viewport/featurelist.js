@@ -9,7 +9,7 @@ export function attachKeyboard(stage, picker, { label, placeholder, title }) {
   canvas.setAttribute("role", "application");
   canvas.setAttribute("aria-label", title);
   const listId = uid("features");
-  const search = h("input", { type: "text", class: "feature-search", placeholder, role: "combobox", "aria-controls": listId,
+  const search = h("input", { type: "text", class: "feature-search", placeholder, "aria-label": placeholder ?? title, role: "combobox", "aria-controls": listId,
     "aria-expanded": "true", autocomplete: "off", spellcheck: false });
   const list = h("ul", { id: listId, class: "feature-list", role: "listbox", "aria-label": title });
   const panel = h("div", { class: "feature-panel", hidden: true }, search, list);
@@ -33,7 +33,7 @@ export function attachKeyboard(stage, picker, { label, placeholder, title }) {
   function choose(i) {
     const f = items[i]?.f;
     if (!f) return;
-    close(false);
+    close();
     picker.pickFeature(f);
   }
   function open() {
