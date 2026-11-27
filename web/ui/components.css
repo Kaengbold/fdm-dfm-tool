@@ -181,7 +181,7 @@
 /* ---------- ProgressCard ---------- */
 .ui-progress { display: grid; gap: var(--s-4); width: 420px; padding: var(--s-5); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-raised); box-shadow: var(--shadow-pop); }
 .ui-progress__head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-3); }
-.ui-progress__head h3 { margin: 0; font-size: var(--fs-lg); }
+.ui-progress__title { margin: 0; font-size: var(--fs-lg); line-height: var(--lh-tight); font-weight: var(--fw-bold); }
 .ui-progress__time { color: var(--text-3); font-size: var(--fs-sm); }
 .ui-progress__bar { height: 6px; border-radius: var(--r-pill); background: var(--surface-sunken); overflow: hidden; }
 .ui-progress__bar i { display: block; height: 100%; background: var(--accent); transition: width var(--t); }

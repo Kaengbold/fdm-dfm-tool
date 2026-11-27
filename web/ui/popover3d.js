@@ -6,7 +6,7 @@ import { h, portal } from "./dom.js";
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
-export function openPopover3D({ anchor, project, bounds, avoid, title, content, onConfirm, onCancel, offset = 16 }) {
+export function openPopover3D({ anchor, project, bounds, avoid, extraFocus, title, content, onConfirm, onCancel, offset = 16 }) {
   const back = document.activeElement;
   const pop = h("div", { class: "ui-pop", role: "dialog", "aria-label": title }, title && h("div", { class: "ui-pop__title" }, title), content);
   portal().append(pop);
@@ -43,20 +43,26 @@ export function openPopover3D({ anchor, project, bounds, avoid, title, content, 
     pop.style.left = `${left}px`;
     pop.style.top = `${top}px`;
   }
+  function onDocKey(e) {
+    if (e.key !== "Tab") return;
+    const roots = [pop, ...(extraFocus?.() ?? [])].filter(Boolean);
+    if (!roots.some((c) => c.contains(e.target))) return;
+    const els = roots.flatMap((c) => [...c.querySelectorAll(FOCUSABLE)]);
+    if (!els.length) return;
+    const i = els.indexOf(document.activeElement);
+    const to = e.shiftKey ? (i <= 0 ? els.length - 1 : i - 1) : (i + 1) % els.length;
+    e.preventDefault();
+    els[to]?.focus();
+  }
   function close() {
+    document.removeEventListener("keydown", onDocKey);
     pop.remove();
     back?.focus?.();
   }
+  document.addEventListener("keydown", onDocKey);
   pop.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); onCancel?.(); }
     else if (e.key === "Enter" && e.target.tagName !== "BUTTON") { e.preventDefault(); if (onConfirm?.() !== false) close(); }
-    else if (e.key === "Tab") {
-      const els = [...pop.querySelectorAll(FOCUSABLE)];
-      const i = els.indexOf(document.activeElement);
-      const to = e.shiftKey ? (i <= 0 ? els.length - 1 : i - 1) : (i + 1) % els.length;
-      e.preventDefault();
-      els[to]?.focus();
-    }
   });
   update();
   (pop.querySelector("input") ?? pop.querySelector(FOCUSABLE))?.focus();

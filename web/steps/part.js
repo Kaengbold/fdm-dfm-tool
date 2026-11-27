@@ -182,6 +182,16 @@ function openSamples(anchor, services, onPick) {
   grid.querySelector("button")?.focus();
   const close = () => { pop.remove(); document.removeEventListener("pointerdown", outside, true); anchor.focus(); };
   const outside = (e) => { if (!pop.contains(e.target)) close(); };
-  pop.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.key === "Tab") {
+      const els = [...pop.querySelectorAll("button:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+      if (!els.length) return;
+      const i = els.indexOf(document.activeElement);
+      const to = e.shiftKey ? (i <= 0 ? els.length - 1 : i - 1) : (i + 1) % els.length;
+      e.preventDefault();
+      els[to]?.focus();
+    }
+  });
   setTimeout(() => document.addEventListener("pointerdown", outside, true));
 }

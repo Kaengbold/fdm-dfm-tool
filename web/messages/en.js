@@ -39,6 +39,7 @@ export default {
   "ui.decideLater": "Decide later",
   "ui.clearChoice": "Clear {name}",
   "ui.search": "Search",
+  "ui.searchOf": "Search {name}",
   "ui.noMatches": "Nothing matches",
   "ui.removeItem": "Remove {name}",
   "ui.typeNumber": "Type a number",

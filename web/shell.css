@@ -11,7 +11,8 @@
 .part-pill .num { color: var(--text-3); }
 
 .app-screen[data-layout="work"], .app-screen[data-layout="part"], .app-screen[data-layout="options"] { min-height: 0; }
-.panel-head h2:focus, .panel-head h2:focus-visible { outline: none; box-shadow: none; }  /* a focus target for keyboard users, not a control */
+.panel-head h1 { font-size: var(--fs-xl); }
+.panel-head h1:focus, .panel-head h1:focus-visible { outline: none; box-shadow: none; }  /* a focus target for keyboard users, not a control */
 .panel-foot > span:empty { flex: 1; }
 
 /* The stage: the 3D canvas fills it, steps draw in the overlay layer above it. */

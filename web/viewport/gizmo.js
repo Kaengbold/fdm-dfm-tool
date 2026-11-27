@@ -247,7 +247,7 @@ export function openGizmo(stage, { point, normal, direction = null, labels = {},
     else if (k === "p" || k === "P") { choose("push"); return e.preventDefault(); }
     else if (k === "o" || k === "O") { choose("pull"); return e.preventDefault(); }
     else if (["x", "y", "z", "X", "Y", "Z"].includes(k)) { choose(k.toLowerCase()); return e.preventDefault(); }
-    else if (k === "Enter") { e.preventDefault(); const d = current(); close(); onDone(d); return; }
+    else if (k === "Enter") { if (e.target.closest?.("button")) return; e.preventDefault(); const d = current(); close(); onDone(d); return; }
     else if (k === "Escape") { e.preventDefault(); e.stopPropagation(); close(); onCancel(); return; }
     else used = false;
     if (used) {

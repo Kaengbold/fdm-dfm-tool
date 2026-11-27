@@ -83,6 +83,7 @@ function openDraft(services, store, hit, existing = null) {
   const pop = openPopover3D({ anchor: point, title: t("loads.forceTitle"), content, offset: 90,
     project: (p) => toClient(services, p), bounds: () => services.stage.canvas.getBoundingClientRect(),
     avoid: () => gizmo.element.getBoundingClientRect(),
+    extraFocus: () => [gizmo.element],
     onConfirm: () => { commit(); return false; }, onCancel: () => closeDraft() });
   draft = { gizmo, pop };
 
