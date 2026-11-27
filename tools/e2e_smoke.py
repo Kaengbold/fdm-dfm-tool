@@ -908,7 +908,7 @@ def check_new_ui_simulation(browser, port: int) -> str:
         assert seen == [False, True, True, False], seen
         painted = page.evaluate("() => { const c = fdmUI.services.stage.part.geo.attributes.color.array; return new Set(Array.from(c.slice(0, 30000), (v) => v.toFixed(2))).size > 3; }")
         nxt = page.locator(".panel-foot .ui-btn--primary").inner_text()
-        assert re.match(r"Review \d+ problems?|All clear: Done", nxt), nxt
+        assert re.match(r"Review \d+ problems?|Continue to Done", nxt), nxt
         page.locator(".panel-foot .ui-btn--primary").click()
         assert page.evaluate("() => fdmUI.services.stage.field === null || fdmUI.services.stage.field === undefined")
         assert not errors, errors
