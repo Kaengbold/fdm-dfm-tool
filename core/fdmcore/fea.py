@@ -252,16 +252,18 @@ def cohesive_bed(k: sp.csr_matrix, loads: np.ndarray, dofs: np.ndarray, area: np
     after the bond breaks. Return the opening seen during lift, peak separation
     history and convergence. The cache reuses the linear solver across grip trials.
     """
-    u = cache["u"].copy() if "u" in cache else np.zeros(k.shape[0])
+    has_u = "u" in cache
+    u = cache["u"].copy() if has_u else np.zeros(k.shape[0])
     largest = np.zeros(len(dofs))
     lift = largest.copy()
     intact = np.ones(len(dofs))
     diagonal = np.zeros(k.shape[0])
     normal_dofs = dofs[:, 2]
     contact_k = area * contact_slope
-    for _ in range(80):
+    for it in range(80):
+        report(1 - 10 / (10 + it), "Checking whether it lifts off the bed")
         opening = u[dofs]
-        contact = opening[:, 2] < 0
+        contact = opening[:, 2] < 0 if (it > 0 or has_u) else (loads[normal_dofs] < 0)
         tension_k = area * initial_slope * intact
         diagonal[dofs] = tension_k[:, None]
         diagonal[normal_dofs] = np.where(contact, contact_k, tension_k)
@@ -311,7 +313,7 @@ def _bed_step(k: sp.csr_matrix, loads: np.ndarray, u: np.ndarray, cache: dict,
     """Reuse a factor while spring stiffness changes, with a smaller factor for large parts."""
     preconditioner = cache.get("preconditioner")
     if preconditioner is not None:
-        step, info = spla.cg(k, loads, x0=u, M=preconditioner, rtol=1e-7, maxiter=35)
+        step, info = spla.cg(k, loads, x0=u, M=preconditioner, rtol=1e-5, maxiter=80)
         if info == 0:
             return step
     try:
@@ -322,7 +324,7 @@ def _bed_step(k: sp.csr_matrix, loads: np.ndarray, u: np.ndarray, cache: dict,
         preconditioner = cache["preconditioner"] = two_level_preconditioner(k, coarse_grid)
     except RuntimeError:  # A disconnected or degenerate grid can leave a free component.
         return None
-    step, info = spla.cg(k, loads, x0=u, M=preconditioner, rtol=1e-7, maxiter=500)
+    step, info = spla.cg(k, loads, x0=u, M=preconditioner, rtol=1e-5, maxiter=500)
     return step if info == 0 else None
 
 

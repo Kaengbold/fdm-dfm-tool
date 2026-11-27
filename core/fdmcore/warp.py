@@ -44,7 +44,7 @@ from .mesh import Mesh
 from .messages import format_message
 from .orientation import rotation_to_z
 from .profile import WARPING_TEST_MM, Profile, load_data
-from .progress import report
+from .progress import report, stage
 from .slicer import parts, section
 from .strength import Shells, element_scale, material_for, von_mises
 from .thermal import chamber_air, chamber_conditions
@@ -249,70 +249,117 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     peel_failed = False
     scenarios = {}
     endpoints = {}
+    low = high = weak = strong = 1.0
     if grip is not None and peel_range:
         weak, strong = (1.0, 1.0) if grip["shear_source"] == "calibrated" else load_data("thresholds")["bed_adhesion"]["grip_factor_range"]
         low, high = shrink_factors(profile)
         nominal = grip["grip_n_mm"]
         scenarios = {"less_lift": (low, nominal * strong), "more_lift": (high, nominal * weak)}
         endpoints = dict.fromkeys(scenarios, False)
-    peel_steps: list[tuple[Model, np.ndarray, np.ndarray]] = []
+    peel_steps: list[tuple[int, int, Model, np.ndarray, np.ndarray, np.ndarray | None]] = []
     spring_scale = mat.e_xy * grid.h
-    for k, g in enumerate(groups):
-        report(k / (len(groups) + 1), "Printing it layer by layer")
-        active = elem_level <= g[-1]
-        new = active & ~done
-        solid = np.zeros_like(grid.solid)
-        solid[tuple(model.elems[active].T)] = True
-        sub = build_model(VoxelGrid(solid, grid.origin, grid.h))
-        full_e = elem_id[tuple(sub.elems.T)]
-        full_n = model.node_index[tuple(np.argwhere(sub.node_index >= 0).T)]
-        sub_scale = scale[full_e]
-        forces = np.zeros(sub.n_nodes * 3)
-        sub_new = new[full_e]
-        np.add.at(forces, sub.edof[sub_new].ravel(), ((scale * shrink)[full_e[sub_new], None] * f_unit).ravel())
-        fixed = bed[full_n]
-        u, info = solve(sub, c, sub_scale, forces.reshape(-1, 3), fixed)
-        converged &= info == 0
-        # What the bed has to hold: internal forces of the elements minus the shrink forces, at the bed nodes.
-        internal = np.zeros(sub.n_nodes * 3)
-        ue = u.ravel()[sub.edof]
-        np.add.at(internal, sub.edof.ravel(), (sub_scale[:, None] * (ue @ ke.T)).ravel())
-        held = (internal - forces).reshape(-1, 3)
-        held_total[full_n[fixed]] += held[fixed]
-        u_total[full_n] += u
-        strain[full_e] += ue @ b_mid.T
-        done = active
-        active_scenarios = {name: values for name, values in scenarios.items() if endpoints[name] is False}
-        if not grip_trial and (grip is None or (peel["may_lift"] and not active_scenarios)):
-            continue
-        # Replace the partial build's accumulated bed reactions with the bed bond.
-        bed_load = held_total[full_n[fixed]]
-        if not bed_load.any():
-            continue
-        if grip_trial:
-            peel_steps.append((sub, sub_scale, bed_load))
-            continue
-        report((k + 0.5) / (len(groups) + 1), "Checking whether it lifts off the bed")
-        nominal_grip = None if peel["may_lift"] else grip["grip_n_mm"]
-        trial = _edge_peel(sub, c, sub_scale, bed_load, spring_scale, nominal_grip, scenarios=active_scenarios,
-                           part_bed=part_nodes[full_n[fixed]] if part is not None else None)
-        for name, result in trial.pop("scenarios").items():
-            endpoints[name] = None if result["solver_failed"] else result["may_lift"]
-        if nominal_grip is None:
-            continue
-        peel = trial
-        peel_failed |= peel["solver_failed"]
-        if peel["may_lift"]:
-            z = grid.origin[2] + (bed_level + g[-1] + 1) * grid.h
-            lo, hi = print_mesh.bounds()
-            start_height = float(min(z, hi[2]) - lo[2])
-            key = "finding.bed_adhesion.brim_start_height" if peel.get("brim_lifts") else "finding.bed_adhesion.start_height"
-            message = {"key": key, "params": {"height": start_height}}
-            peel.update(start_step=k + 1, start_height_mm=start_height,
-                        message=message, detail=format_message(message))
+    has_peel = grip_trial or grip is not None
+    build_end = 0.55 if has_peel else 0.90
+    with stage(0.0, build_end):
+        for k, g in enumerate(groups):
+            report(k / len(groups), "Printing it layer by layer")
+            active = elem_level <= g[-1]
+            new = active & ~done
+            solid = np.zeros_like(grid.solid)
+            solid[tuple(model.elems[active].T)] = True
+            sub = build_model(VoxelGrid(solid, grid.origin, grid.h))
+            full_e = elem_id[tuple(sub.elems.T)]
+            full_n = model.node_index[tuple(np.argwhere(sub.node_index >= 0).T)]
+            sub_scale = scale[full_e]
+            forces = np.zeros(sub.n_nodes * 3)
+            sub_new = new[full_e]
+            np.add.at(forces, sub.edof[sub_new].ravel(), ((scale * shrink)[full_e[sub_new], None] * f_unit).ravel())
+            fixed = bed[full_n]
+            u, info = solve(sub, c, sub_scale, forces.reshape(-1, 3), fixed)
+            converged &= info == 0
+            # What the bed has to hold: internal forces of the elements minus the shrink forces, at the bed nodes.
+            internal = np.zeros(sub.n_nodes * 3)
+            ue = u.ravel()[sub.edof]
+            np.add.at(internal, sub.edof.ravel(), (sub_scale[:, None] * (ue @ ke.T)).ravel())
+            held = (internal - forces).reshape(-1, 3)
+            held_total[full_n[fixed]] += held[fixed]
+            u_total[full_n] += u
+            strain[full_e] += ue @ b_mid.T
+            done = active
+            if not has_peel:
+                continue
+            # Replace the partial build's accumulated bed reactions with the bed bond.
+            bed_load = held_total[full_n[fixed]]
+            if bed_load.any():
+                part_bed = part_nodes[full_n[fixed]] if part is not None else None
+                peel_steps.append((k, int(g[-1]), sub, sub_scale, bed_load, part_bed))
+
+    if grip is not None and peel_steps:
+        def needed_scenarios(nominal_result: dict) -> dict:
+            if not scenarios or nominal_result["solver_failed"]:
+                return {}
+            chosen = {}
+            if nominal_result["may_lift"]:
+                if "less_lift" in scenarios:
+                    chosen["less_lift"] = scenarios["less_lift"]
+                if "more_lift" in scenarios and not (high >= 1.0 and weak <= 1.0):
+                    chosen["more_lift"] = scenarios["more_lift"]
+            else:
+                if "more_lift" in scenarios:
+                    chosen["more_lift"] = scenarios["more_lift"]
+                if "less_lift" in scenarios and not (low <= 1.0 and strong >= 1.0):
+                    chosen["less_lift"] = scenarios["less_lift"]
+            return chosen
+
+        def run_step(idx: int, *, pick_scenarios: Callable[[dict], dict] | None = None) -> dict:
+            _, _, sub, sub_scale, bed_load, part_bed = peel_steps[idx]
+            return _edge_peel(sub, c, sub_scale, bed_load, spring_scale, grip["grip_n_mm"],
+                              scenarios=pick_scenarios, part_bed=part_bed)
+
+        with stage(build_end, 0.90):
+            # Test the step with the largest upward bed pull first (usually the last step).
+            # If it holds, no earlier step has a larger upward pull; if it lifts, bisect for the first.
+            peaks = [float((-step[4][:, 2]).max()) for step in peel_steps]
+            best = max(range(len(peel_steps)), key=lambda i: (peaks[i], i))
+            max_checks = best.bit_length() + 1 if best > 0 else 1
+            with stage(0.0, 1.0 / max_checks):
+                trial = run_step(best, pick_scenarios=needed_scenarios if scenarios else None)
+            ran_scenarios = trial.pop("scenarios", {})
+            peel = trial
+            peel_failed |= peel["solver_failed"]
+            if scenarios and not peel["solver_failed"]:
+                if peel["may_lift"] and "more_lift" not in ran_scenarios:
+                    endpoints["more_lift"] = True
+                elif not peel["may_lift"] and "less_lift" not in ran_scenarios:
+                    endpoints["less_lift"] = False
+                for name, result in ran_scenarios.items():
+                    endpoints[name] = None if result["solver_failed"] else result["may_lift"]
+            if peel["may_lift"]:
+                lo, hi = 0, best
+                first_idx = best
+                check_i = 1
+                while lo < hi:
+                    mid = (lo + hi) // 2
+                    with stage(check_i / max_checks, min(1.0, (check_i + 1) / max_checks)):
+                        mid_trial = run_step(mid)
+                    check_i += 1
+                    peel_failed |= mid_trial["solver_failed"]
+                    if mid_trial["may_lift"]:
+                        hi = mid
+                        first_idx, peel = mid, mid_trial
+                    else:
+                        lo = mid + 1
+                k_first, g_last = peel_steps[first_idx][:2]
+                z = grid.origin[2] + (bed_level + g_last + 1) * grid.h
+                lo_b, hi_b = print_mesh.bounds()
+                start_height = float(min(z, hi_b[2]) - lo_b[2])
+                key = "finding.bed_adhesion.brim_start_height" if peel.get("brim_lifts") else "finding.bed_adhesion.start_height"
+                message = {"key": key, "params": {"height": start_height}}
+                peel.update(start_step=k_first + 1, start_height_mm=start_height,
+                            message=message, detail=format_message(message))
 
     # Off the bed: the bed's forces go away (as if reversed), the part springs into its final shape.
-    report(len(groups) / (len(groups) + 1), "Taking it off the bed")
+    report(0.90, "Taking it off the bed")
     springs = _release_springs(np.flatnonzero(bed), spring_scale)
     u_free, info = solve(model, c, scale, -held_total, np.zeros(model.n_nodes, dtype=bool), springs=springs)
     strain += u_free.ravel()[model.edof] @ b_mid.T
@@ -327,15 +374,17 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     if grip_trial:
         # The final build often has the strongest shrink load. Start there so
         # earlier steps only need a full search if they lift at the best grip so far.
-        report(len(groups) / (len(groups) + 1), "Checking whether it lifts off the bed")
-        lift_grip = None
-        while peel_steps:
-            sub, sub_scale, bed_load = peel_steps.pop()
-            trial = _edge_peel(sub, c, sub_scale, bed_load, spring_scale, None, lift_grip)
-            if trial["solver_failed"]:
-                peel_failed = True
-                break
-            lift_grip = trial.get("lift_grip_n_mm", lift_grip)
+        with stage(build_end, 0.90):
+            lift_grip = None
+            total = len(peel_steps)
+            for done_steps in range(total):
+                _, _, sub, sub_scale, bed_load, _ = peel_steps.pop()
+                with stage(done_steps / total, (done_steps + 1) / total):
+                    trial = _edge_peel(sub, c, sub_scale, bed_load, spring_scale, None, lift_grip)
+                if trial["solver_failed"]:
+                    peel_failed = True
+                    break
+                lift_grip = trial.get("lift_grip_n_mm", lift_grip)
         out.update(lift_grip_n_mm=lift_grip, peel_solved=not peel_failed)
     elif grip is not None:
         out["adhesion"] = {**grip, **peel, "solver_failed": peel_failed}
@@ -428,7 +477,7 @@ def _shear_weight(offset_c: float) -> float:
 
 def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndarray,
                spring_scale: float, grip: float | None, lift_grip: float | None = None,
-               *, scenarios: dict | None = None, part_bed: np.ndarray | None = None) -> dict:
+               *, scenarios: dict | Callable[[dict], dict] | None = None, part_bed: np.ndarray | None = None) -> dict:
     """Let the bed bond open under the shrink already built up, with no pre-cut crack.
     Endpoint trials can share a preconditioner, but start fresh so one trial's slip cannot affect another."""
     h = model.grid.h
@@ -446,10 +495,13 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndar
     peak = settings["cohesive_peak_share"] * failure
     if not 0 < peak < failure or not isfinite(failure):
         failed = {"may_lift": False, "detached_area_mm2": 0.0, "solver_failed": True}
-        return failed if scenarios is None else {**failed, "scenarios": dict.fromkeys(scenarios, failed)}
+        if scenarios is None:
+            return failed
+        chosen = scenarios(failed) if callable(scenarios) else scenarios
+        return {**failed, "scenarios": dict.fromkeys(chosen, failed)}
     contact_slope = 30.0  # N/mm³, keeps the bed effectively rigid in compression
     k = stiffness(model, c, scale, _release_springs(nodes, spring_scale))
-    coarse = prolongation(model) if k.shape[0] > 15_000 else None
+    coarse = prolongation(model) if k.shape[0] > 3_000 else None
     cache = {}
     endpoint_cache = {}
     dofs = 3 * nodes[:, None] + np.arange(3)
@@ -486,7 +538,8 @@ def _edge_peel(model: Model, c: np.ndarray, scale: np.ndarray, bed_load: np.ndar
 
     if scenarios is not None:
         out = trial(grip) if grip is not None else {}
-        return {**out, "scenarios": {name: trial(work, factor, endpoint=True) for name, (factor, work) in scenarios.items()}}
+        chosen = scenarios(out) if callable(scenarios) else scenarios
+        return {**out, "scenarios": {name: trial(work, factor, endpoint=True) for name, (factor, work) in chosen.items()}}
     if grip is not None:
         return trial(grip)
     return _lift_threshold(trial, lift_grip)
