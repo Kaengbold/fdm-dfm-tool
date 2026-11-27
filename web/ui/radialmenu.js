@@ -25,7 +25,10 @@ export function openRadialMenu({ x, y, items, label, bounds = document.documentE
   portal().append(menu);
   buttons[0].focus();
 
+  let closed = false;
   function close() {
+    if (closed) return;
+    closed = true;
     menu.remove();
     document.removeEventListener("pointerdown", outside, true);
     back?.focus?.();
@@ -38,6 +41,6 @@ export function openRadialMenu({ x, y, items, label, bounds = document.documentE
     if (to >= 0) buttons[to].focus();
     if (e.key === "Tab") e.preventDefault();  // a menu keeps focus until it closes
   });
-  setTimeout(() => document.addEventListener("pointerdown", outside, true));
+  setTimeout(() => { if (!closed) document.addEventListener("pointerdown", outside, true); });
   return { close, element: menu };
 }

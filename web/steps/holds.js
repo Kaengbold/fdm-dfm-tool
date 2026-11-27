@@ -237,6 +237,7 @@ registerStep("holds", {
     body.append(h("div", { class: "hold-skip" }, Button({ label: t("holds.noLoads"), variant: "ghost", onClick: skip })));
   },
   leave({ services }) {
+    markers.length = 0;
     if (brush) { brush = null; services.stage.controls.enabled = true; } // the next step turns the picker on or off itself
     clearBrush(services.stage);
   },

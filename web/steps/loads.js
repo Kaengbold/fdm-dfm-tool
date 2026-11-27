@@ -194,5 +194,5 @@ registerStep("loads", {
     body.append(h("button", { type: "button", class: "ui-link", onclick: () => store.set({ nextCase: maxCase + 1 }, { undoable: false }) },
       nextCase > maxCase ? t("loads.nextIsNewCase", { n: nextCase }) : t("loads.separateCase")));
   },
-  leave() { closeDraft(); },
+  leave() { labels.length = 0; closeDraft(); },
 });

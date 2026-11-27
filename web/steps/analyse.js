@@ -74,22 +74,24 @@ export async function start(services, store, go, args, { budget = true, goAfter 
     const result = await services.engine.call("optimize", { ...args, depth, budget_s });
     if (run !== me) return false; // stopped: the partial result is in already
     store.setResult("optimize", result, deps);
-    finish();
+    finish(services);
     store.set({ optimized: Date.now() }, { undoable: false });
     if (goAfter) go("options");
     return true;
   } catch (err) {
     if (run !== me) return false; // stopped with the best so far
     const cancelled = err?.name === "Cancelled" || err?.constructor?.name === "Cancelled";
-    finish();
+    finish(services);
     if (!cancelled) lastError = err?.message ?? String(err);
     services.rerender();
     return false;
   }
 }
 
-function finish() {
+function finish(services) {
   if (run?.timer) clearInterval(run.timer);
+  if (run) { run.card = null; run.partial = null; }
+  if (services) { services.onPartial = null; services.onProgress = null; }
   run = null;
 }
 
@@ -99,8 +101,9 @@ const cardState = (r) => ({ done: r.done, share: r.share, elapsed: (performance.
 function stop(services, store, go) {
   const r = run;
   if (!r?.partial) return;
-  finish();
-  store.setResult("optimize", { ...r.partial, stopped: true }, r.deps);
+  const partial = r.partial;
+  finish(services);
+  store.setResult("optimize", { ...partial, stopped: true }, r.deps);
   services.engine.cancel();
   store.set({ optimized: Date.now() }, { undoable: false });
   go("options");

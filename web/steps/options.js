@@ -121,8 +121,10 @@ function sharedRows(keys, columns) {
 
 const rerunCardState = (r) => ({ done: r.done, share: r.share, elapsed: (performance.now() - r.started) / 1000, canStop: Boolean(r.partial) });
 
-function finishRerun() {
+function finishRerun(services) {
   if (rerun?.timer) clearInterval(rerun.timer);
+  if (rerun) { rerun.card = null; rerun.partial = null; }
+  if (services) { services.onPartial = null; services.onProgress = null; }
   rerun = null;
   busy = false;
 }
@@ -130,8 +132,9 @@ function finishRerun() {
 function stopRerun(services, store) {
   const r = rerun;
   if (!r?.partial) return;
-  finishRerun();
-  store.setResult("optimize", { ...r.partial, stopped: true }, r.deps);
+  const partial = r.partial;
+  finishRerun(services);
+  store.setResult("optimize", { ...partial, stopped: true }, r.deps);
   services.engine.cancel();
   focused = 0;
   services.rerender();
@@ -164,7 +167,7 @@ async function reoptimize(services, store) {
     const cancelled = err?.name === "Cancelled" || err?.constructor?.name === "Cancelled";
     if (!cancelled) showError = err?.message ?? String(err);
   } finally {
-    if (rerun === me) finishRerun();
+    if (rerun === me) finishRerun(services);
     services.rerender();
   }
 }
