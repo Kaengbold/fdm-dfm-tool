@@ -20,6 +20,7 @@ import { trianglesOf } from "./part.js";
 import * as F from "./fixes.js";
 import { problemPreview } from "./problemanim.js";
 import { openTool } from "./tools.js";
+import { formatSafety, formatSafetyRange } from "./format.js";
 
 const DEPENDS = ["model", "option"];
 const f32 = (b) => new Float32Array(new Uint8Array(b).slice().buffer);
@@ -167,7 +168,7 @@ async function confirmBatch(store, services, recheck) {
       if (drop) {
         work = null;
         services.rerender();
-        const keep = await ask(t("problems.dropTitle"), t("problems.dropBody", { sf: summary.safety, target: summary.target }),
+        const keep = await ask(t("problems.dropTitle"), t("problems.dropBody", { sf: formatSafety(summary.safety), target: summary.target }),
           [{ label: t("problems.undoBatch"), value: false }, { label: t("problems.keepAnyway"), variant: "primary", value: true }]);
         if (!keep) {
           batch = { undo, summary };
@@ -308,11 +309,11 @@ function batchCard(store, services) {
     card.append(h("b", {}, t("problems.rechecked", { fixed: sum.fixed, count: sum.newIds.length })));
     if (sum.safety != null) {
       const nominal = sum.before != null
-        ? t("problems.safetyWas", { sf: sum.safety, was: sum.before, target: sum.target })
-        : t("problems.safety", { sf: sum.safety, target: sum.target });
-      const [low, high] = sum.safetyRange?.map((value) => Math.round(value * 10) / 10) ?? [];
-      card.append(h("span", {}, low == null ? nominal : t("ranges.safety", { nominal, low, high })));
-      if (sum.safetyRange) card.append(h("span", { class: "ui-hint" }, t("ranges.hint")));
+        ? t("problems.safetyWas", { sf: formatSafety(sum.safety), was: formatSafety(sum.before), target: sum.target })
+        : t("problems.safety", { sf: formatSafety(sum.safety), target: sum.target });
+      const range = formatSafetyRange(sum.safetyRange);
+      card.append(h("span", {}, range ? t("ranges.safety", { nominal, ...range }) : nominal));
+      if (range) card.append(h("span", { class: "ui-hint" }, t("ranges.hint")));
     }
     if (sum.gridCheck) card.append(h("span", {}, t(sum.gridCheck.reason), " ", t(sum.gridCheck.message)));
     for (const check of Object.values(sum.geometryChecks ?? {})) {
@@ -348,7 +349,7 @@ registerStep("problems", {
 
     body.append(h("div", { class: "sim-setup" }, h("span", {}, setupLine(o, s.catalog)),
       h("button", { type: "button", class: "ui-link", onclick: () => go("options") }, t("sim.change"))));
-    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: o.safety, target: o.target })));
+    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: formatSafety(o.safety), target: o.target })));
     if (work) {
       body.append(h("div", { class: "sim-running", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, work.text),
         Button({ label: t("ui.cancel"), variant: "ghost", onClick: () => services.engine.cancel() })));

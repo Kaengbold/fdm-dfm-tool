@@ -26,6 +26,7 @@ Pyodide-safe: numpy + scipy (lazy) + shapely (lazy, only for winning edit meshes
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field, replace
 
@@ -206,22 +207,29 @@ def pick_options(cands: list[dict], goal: str, owned: list[str]) -> list[dict]:
     return picks
 
 
+def _shown_int(value: float) -> int:
+    """Whole number as the Options table displays it (matches JS Math.round for non-negative values)."""
+    return int(math.floor(value + 0.5))
+
+
 def pros_cons(opt: dict, best: dict, cons_by_material: dict[str, list[str]]) -> None:
     """At most 3 pros and 3 cons from checked numbers, relative to the recommended option (§11)."""
     pros, cons = [], []
     if opt is not best:
-        dm = opt["minutes"] - best["minutes"]
-        dg = opt["total_g"] - best["total_g"]
+        dm = _shown_int(opt["minutes"]) - _shown_int(best["minutes"])
+        dg = _shown_int(opt["total_g"]) - _shown_int(best["total_g"])
         if dm <= -1:
-            pros.append(f"{-dm:.0f} min faster")
+            pros.append(f"{-dm} min faster")
         elif dm >= 1:
-            cons.append(f"{dm:.0f} min slower")
+            cons.append(f"{dm} min slower")
         if dg <= -1:
-            pros.append(f"{-dg:.0f} g less plastic")
+            pros.append(f"{-dg} g less plastic")
         elif dg >= 1:
-            cons.append(f"{dg:.0f} g more plastic")
-        if opt["support_g"] is not None and best["support_g"] is not None and opt["support_g"] < best["support_g"] - 0.5:
-            pros.append(f"{best['support_g'] - opt['support_g']:.0f} g less support")
+            cons.append(f"{dg} g more plastic")
+        if opt["support_g"] is not None and best["support_g"] is not None:
+            ds = _shown_int(best["support_g"]) - _shown_int(opt["support_g"])
+            if ds >= 1:
+                pros.append(f"{ds} g less support")
         if (opt.get("safety") is not None and best.get("safety") is not None
                 and opt["safety"] >= best["safety"] * 1.1 and opt.get("reinforced")):
             pros.append(f"Safety ×{opt['safety']:.1f}")
