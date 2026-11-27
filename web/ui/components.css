@@ -47,8 +47,8 @@
 .ui-seg__item:hover { color: var(--text); }
 .ui-seg__item[aria-checked="true"] { background: var(--surface-raised); color: var(--text); box-shadow: 0 1px 3px rgb(0 0 0 / 0.15); }
 .ui-seg__item:disabled { opacity: 0.45; cursor: not-allowed; }
-.ui-seg--small { display: inline-flex; }
-.ui-seg--small .ui-seg__item { flex: none; padding: var(--s-1) var(--s-3); }
+.ui-seg--small { display: inline-flex; flex-wrap: wrap; max-width: 100%; }
+.ui-seg--small .ui-seg__item { flex: 1 1 auto; padding: var(--s-1) var(--s-2); }
 
 /* ---------- Chips ---------- */
 .ui-chip { display: inline-flex; align-items: center; gap: var(--s-2); min-height: 32px; padding: 0 var(--s-3); border-radius: var(--r-pill);
@@ -69,7 +69,7 @@
 .ui-select__button[aria-expanded="true"] { border-color: var(--accent); }
 .ui-select__button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ui-select__button .ui-icon { color: var(--text-3); }
-.ui-select.is-later .ui-select__text { color: var(--text-3); font-weight: var(--fw-normal); font-style: italic; }
+.ui-select.is-later .ui-select__text { color: var(--text-3); font-weight: var(--fw-normal); font-style: italic; padding-right: var(--s-1); }
 .ui-select__clear { width: 40px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); color: var(--text-2); cursor: pointer; display: grid; place-items: center; }
 .ui-select__clear:hover { color: var(--bad); border-color: var(--line-strong); }
 .ui-select__pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; min-width: 240px; display: grid; gap: var(--s-1); padding: var(--s-2);
@@ -216,7 +216,7 @@
 
 /* ---------- StepRail ---------- */
 .ui-rail__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
-.ui-rail__step { width: 100%; display: flex; align-items: center; gap: var(--s-3); min-height: var(--hit); padding: var(--s-2) var(--s-3); border: 0; border-radius: var(--r);
+.ui-rail__step { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: var(--s-3); min-height: var(--hit); padding: var(--s-2) var(--s-3); border: 0; border-radius: var(--r);
   background: none; color: var(--text-3); font: inherit; text-align: left; }
 button.ui-rail__step { cursor: pointer; color: var(--text-2); }
 button.ui-rail__step:hover { background: var(--surface-sunken); color: var(--text); }
@@ -224,8 +224,8 @@ button.ui-rail__step:hover { background: var(--surface-sunken); color: var(--tex
 .is-done .ui-rail__mark { border-color: var(--good); background: var(--good); }
 .is-current .ui-rail__step { background: var(--accent-soft); color: var(--accent-text); font-weight: var(--fw-bold); }
 .is-current .ui-rail__mark { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.ui-rail__stale { margin-left: auto; white-space: nowrap; font-size: var(--fs-xs); color: var(--warn); font-weight: var(--fw-bold); }
-.ui-rail.is-collapsed .ui-rail__step { justify-content: center; padding: var(--s-2) 0; }
+.ui-rail__stale { grid-column: 2; font-size: var(--fs-xs); color: var(--warn); font-weight: var(--fw-bold); line-height: var(--lh-tight); }
+.ui-rail.is-collapsed .ui-rail__step { grid-template-columns: auto; justify-content: center; padding: var(--s-2) 0; }
 .ui-rail.is-collapsed .ui-rail__label, .ui-rail.is-collapsed .ui-rail__stale { display: none; }
 
 /* hidden always wins over a component's display rule. */

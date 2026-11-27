@@ -61,6 +61,7 @@ function closeDraft() {
 /** Place a new load at ``hit``, or edit ``existing``. */
 function openDraft(services, store, hit, existing = null) {
   closeDraft();
+  services.picker.setHit(null);
   let done = false; // Enter reaches both the field and the popover: set the load once
   const regions = services.picker.data?.regions;
   const normal = existing?.normal ?? hitNormal(hit, regions);
@@ -81,6 +82,7 @@ function openDraft(services, store, hit, existing = null) {
   const content = h("div", { class: "force-pop" }, field, h("div", { class: "force-actions" }, cancel, ok));
   const pop = openPopover3D({ anchor: point, title: t("loads.forceTitle"), content, offset: 90,
     project: (p) => toClient(services, p), bounds: () => services.stage.canvas.getBoundingClientRect(),
+    avoid: () => gizmo.element.getBoundingClientRect(),
     onConfirm: () => { commit(); return false; }, onCancel: () => closeDraft() });
   draft = { gizmo, pop };
 
@@ -111,7 +113,7 @@ function wire(services, store) {
     if (store.get().step !== "loads" || draft) return;
     openDraft(services, store, hit);
   });
-  services.stage.controls.addEventListener("change", () => placeLabels(services));
+  services.stage.controls.addEventListener("change", () => { placeLabels(services); draft?.pop?.update(); });
 }
 
 function drawArrows(services, loads) {

@@ -93,7 +93,7 @@ a { color: var(--accent-text); }
   border-left: 1px solid var(--line);
 }
 .panel-head { padding: var(--s-5) var(--s-5) var(--s-4); border-bottom: 1px solid var(--line); display: grid; gap: var(--s-1); }
-.panel-body { overflow: auto; padding: var(--s-5); display: grid; align-content: start; gap: var(--gap-groups); }
+.panel-body { overflow: auto; padding: var(--s-5); display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--gap-groups); }
 .panel-foot {
   display: flex;
   align-items: center;

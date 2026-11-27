@@ -70,6 +70,7 @@ button.big-card { cursor: pointer; }
 /* Hover picker badge and the keyboard feature list (T-540). */
 .pick-badge { position: absolute; z-index: 5; padding: var(--s-1) var(--s-2); border-radius: var(--r-sm); background: var(--text); color: var(--surface-raised);
   font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums; }
+body:has(#portal-root > .ui-pop, #portal-root > .ui-radial) .pick-badge { display: none; }
 .stage-canvas:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .feature-panel { position: absolute; z-index: 6; top: var(--s-4); left: var(--s-4); width: 280px; display: grid; gap: var(--s-1); padding: var(--s-2);
   border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); box-shadow: var(--shadow-pop); }
