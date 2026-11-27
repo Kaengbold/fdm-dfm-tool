@@ -4332,13 +4332,14 @@ def _check_for_design(up, profile: dict | None = None) -> tuple[list[dict], np.n
     coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks
     layers = slice_mesh(oriented, p.layer_height, 80 if coarse else 160)
     result = run_checks(oriented, p, cad_checks=s.cad_checks, coarse=coarse, layers=layers)
-    findings = _finish_check_findings(s, oriented, rotation, up, p, fit, result, mode="print", faces=None, spots=None)
+    findings, _ = _finish_check_findings(s, oriented, rotation, up, p, fit, result, mode="print", faces=None, spots=None)
     return findings, rotation, layers
 
 
 def _finish_check_findings(s: Session, oriented: Mesh, rotation: np.ndarray, up, p: Profile, fit: dict,
-                           result: dict, mode: str, faces: dict | None, spots) -> list[dict]:
-    """Post-process run_checks findings with session-level rules, risk, summaries and explanations."""
+                           result: dict, mode: str, faces: dict | None, spots) -> tuple[list[dict], dict]:
+    """Post-process run_checks findings with session-level rules, risk, summaries and explanations.
+    ``result["findings"]`` keeps the raw findings (recommend_settings reads them); returns (explained, risk)."""
     if spots is not None:
         result["findings"] += _spot_findings(spots, p, result["findings"])
     result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
@@ -4368,7 +4369,7 @@ def _finish_check_findings(s: Session, oriented: Mesh, rotation: np.ndarray, up,
         if "finding_id" not in f:
             result["findings"][i] = summarize_finding(f, p)
     findings = [explain_finding(f, mode) for f in result["findings"]]
-    return emphasize_for_goal(findings, p.goal)
+    return emphasize_for_goal(findings, p.goal), risk
 
 
 def check(up, profile: dict | None = None, mode: str = "print", faces: dict | None = None, detailed: bool = False) -> dict:
@@ -4389,36 +4390,7 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
     result["stats"]["heat_from_gcode"] = sliced is not None
     result["stats"].update(_cost(oriented, p, result["stats"]["filament_g"], max_layers=20 if coarse else 40))
     spots = _spot_heat(rotation, p) if sliced is not None else None
-    if spots is not None:
-        result["findings"] += _spot_findings(spots, p, result["findings"])
-    result["findings"] = _drop_rejected(result["findings"], s.mesh, rotation)
-    if not s.cad_checks:
-        cad_rules = set(load_data("thresholds")["organic"]["cad_rules"])
-        result["findings"] = [f for f in result["findings"] if f["rule"] not in cad_rules]
-    result["findings"] += _clean_face_findings(s.mesh, up, p, _marked_faces(faces), rotation)
-    result["findings"] += _thread_findings(oriented, rotation, p)
-    result["findings"] += _grip_findings(s.name)
-    if not fit["fits"]:
-        result["findings"].insert(0, {"rule": "exceeds_build_volume", "severity": "problem", "bbox": None, "metrics": fit,
-                                      "detail": f"Doesn't fit the {p.printer['name']}: {fit['reason']}"})
-    elif fit["turned_deg"]:
-        result["findings"].append({"rule": "turned_to_fit", "severity": "info", "bbox": None, "metrics": fit,
-                                   "detail": f"Turned {fit['turned_deg']:.0f}° on the bed so it fits the {p.printer['name']}"})
-    height = float(np.ptp(oriented.triangles[..., 2])) if len(oriented.triangles) else 0.0
-    w = _matching_warp(s, up, p)
-    if w and w["peel_point"] is not None:
-        result["findings"].append(_adhesion_finding(s, w, rotation))
-    risk = print_risk(p, result["findings"], height, w["verdict"] if w else None)
-    if risk["level"] == "high":
-        result["findings"].append({"rule": "print_may_fail", "severity": "warn", "bbox": None,
-                                   "metrics": {"score": risk["score"], "hold": risk["hold"]},
-                                   "detail": "The print may come loose or fall over on the bed: " + "; ".join(risk["reasons"])})
-    for i, f in enumerate(result["findings"]):  # findings built here, outside run_checks, need impact + short text
-        f.setdefault("impact", RULE_IMPACT.get(f["rule"], "info"))
-        if "finding_id" not in f:
-            result["findings"][i] = summarize_finding(f, p)
-    findings = [explain_finding(f, mode) for f in result["findings"]]
-    findings = emphasize_for_goal(findings, p.goal)
+    findings, risk = _finish_check_findings(s, oriented, rotation, up, p, fit, result, mode=mode, faces=faces, spots=spots)
     return {
         "up": list(map(float, up)),
         "rotation": rotation.tolist(),

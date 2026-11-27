@@ -201,8 +201,8 @@ def run_checks(mesh: Mesh, profile: Profile, max_layers: int = 160, sliced: dict
     findings += pocket_findings(mesh, profile, T)
     findings += slope_findings(mesh, profile, T)
     findings += facet_findings(mesh, T)
+    findings += _relief_findings(mesh, profile, T)  # also the shrinkage size check organic parts keep
     if cad_checks:
-        findings += _relief_findings(mesh, profile, T)
         findings += flat_gap_findings(mesh, profile, T)
     findings += shrink_line_findings(layers, profile, T)
     if cad_checks:
