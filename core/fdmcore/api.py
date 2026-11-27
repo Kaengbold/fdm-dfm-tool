@@ -92,7 +92,7 @@ def custom_presets(printers: dict | None = None, materials: dict | None = None) 
 
 # Analysis grids (Expert settings): more cubes are more exact and slower (about linear in the browser).
 ANALYSIS = {
-    "strength_voxels": (12_000, 2_000, 200_000, "Cubes in the strength grid (strength analysis, shaking, the optimiser). Seconds in the browser at 12 000."),
+    "strength_voxels": (12_000, 2_000, 200_000, "Cubes in the strength grid (strength check, shaking, the optimiser). Seconds in the browser at 12 000."),
     "fine_voxels": (40_000, 5_000, 400_000, "Cubes for \"Check accuracy with a finer grid\": about 1.5× finer than the normal grid."),
     "warp_voxels": (6_000, 1_000, 100_000, "Cubes in the warping simulation: it solves once per group of layers, so a coarser grid."),
 }
@@ -1193,8 +1193,8 @@ def _use_story(p: Profile) -> str:
         if creep["provisional"]:
             out += " This early estimate may change as you add readings through four weeks."
     elif p.constant_load:
-        out += (f" The load stays on: plastic slowly stretches under a constant load (creep), so it needs about ×{CONSTANT_LOAD_SAFETY:.0f}"
-                " instead of ×2. Warmth makes creep much worse.")
+        out += (f" The load stays on: the check asks for at least ×{CONSTANT_LOAD_SAFETY:.0f} because plastic slowly stretches"
+                " under a steady load (creep). Warmth makes creep much worse.")
     return out
 
 
@@ -1516,7 +1516,7 @@ def volume_solid(up, boxes: list[dict]) -> list[dict]:
         size = " × ".join(f"{v:.0f}" for v in hi - lo)
         bottom = (unit[:4] * (hi - lo) + lo) @ r0
         out.append({"id": f"solid-{i}", "rule": "design_change", "title": f"{'Add' if add else 'Cut away'} a {size} mm block",
-                    "description": "Placed under Advanced design changes.", "op": "add" if add else "cut", "param": None,
+                    "description": "Placed as a custom block.", "op": "add" if add else "cut", "param": None,
                     "mesh": tris.astype("<f4").tobytes(), "pieces": [len(tris)], "placed_by_user": True,
                     "intent": _cad_refs(_intent("slab" if add else "void", {"size_mm": (hi - lo).tolist()},
                                                 [_prism_shape(bottom, np.array([0, 0, hi[2] - lo[2]]) @ r0, add=add)]))})
@@ -2820,8 +2820,9 @@ def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dic
         worse_hot = win["too_hot"] & ~_same(win0["too_hot"], h, before)
         worse_cold = win["too_cold"] & ~_same(win0["too_cold"], h, before)
         if worse_hot.any() or worse_cold.any():
-            problems.append(f"The heat check of the new file finds {int(worse_hot.sum())} spots newly too hot and "
-                            f"{int(worse_cold.sum())} newly too cold to bond")
+            n_hot, n_cold = int(worse_hot.sum()), int(worse_cold.sum())
+            problems.append(f"The heat check of the new file finds {n_hot} {'spot' if n_hot == 1 else 'spots'} newly too hot and "
+                            f"{n_cold} newly too cold to bond")
     if problems:
         return {"ok": False, "problems": problems}
     return {"ok": True, "data": new.text.encode(), "minutes": [round(m, 1) for m in new.minutes],
@@ -2846,9 +2847,9 @@ def _cooling_view(r: dict, imp, p: Profile) -> dict:
 
 
 CONFIDENCE_TEXT = {
-    "rough": "Rough: the limits are estimates, not yet tuned to your printer (the sag and snap tests do that).",
-    "partly tuned": "Partly tuned: one of the sag and snap tests is in, the other limit is still an estimate.",
-    "tuned": "Tuned to your printer with the sag and snap tests.",
+    "rough": "Rough: the limits are estimates, not yet tuned to your printer.",
+    "partly tuned": "Partly tuned: one heat limit is measured, the other is still an estimate.",
+    "tuned": "Tuned to your printer.",
 }
 
 
@@ -2857,7 +2858,8 @@ def _cooling_summary(r: dict) -> list[str]:
     b, g, sl = r["before"], r["gcode"], r["slicer"]
 
     def spots(x):
-        return f"{x['too_hot']} spots too hot, {x['too_cold']} too cold to bond well"
+        n = x["too_hot"]
+        return f"{n} {'spot' if n == 1 else 'spots'} too hot, {x['too_cold']} too cold to bond well"
 
     if not g["plan"] and b["too_hot"] == 0 and b["too_cold"] == 0:
         lines = ["Nothing to gain: every spot stays in its temperature window, and the slicer slowed no layer for cooling it didn't need."]
@@ -3494,7 +3496,7 @@ def _dynamics_story(r: dict) -> str:
         where = ("very low: it sways visibly and anything shaking nearby can rock it" if hz < 20 else
                  "in the range of motors, fans and printers (20–200 Hz): if something near it runs at that rate it can resonate and rattle loose"
                  if hz < 200 else "high: everyday shaking won't make it resonate")
-        out = f"It swings fastest-free at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
+        out = f"It vibrates naturally at about {hz:.0f} Hz — {where}. Shown: how it swings (exaggerated)."
     if r["drop_mm"] > 0 and r["impact_safety"] is not None:
         hard, soft = r["impact_safety"], r["impact_safety_soft"]
         verdict = (": still fine." if hard >= 2 else ": it will likely break." if soft < 1
@@ -3624,12 +3626,12 @@ def _beyond_settings(base: dict, p: Profile, profile: dict | None, loads: list[d
             add("Round off the weak inside corners (design change)", "design", None,
                 "The strength check found a sharp inside corner near the weak spot. "
                 f"{inside_corner_load_advice(p.repeated_load)} "
-                "Preview the round or self-supporting 45° chamfer under Design changes, then check strength again.",
+                "Preview the round or self-supporting 45° chamfer as a design fix under Problems, then check strength again.",
                 "changes the shape a little", edit="stress-chamfer")
     if s.weak_spot is not None:
         add("Make the weak spot thicker (design change)", "design", None,
             ("The plastic itself is the limit there: more cross-section is the direct fix. " if base["mode"] == "material" else "")
-            + "Adds 1.5 mm of plastic all round the weak spot as an even sleeve with 45° ends (size under Design changes). "
+            + "Adds 1.5 mm of plastic all round the weak spot as an even sleeve with 45° ends (you can adjust the size under Problems). "
             "Test it to see how much it helps.", "changes the shape", edit="thicken-weak")
 
     # Other materials: stresses don't depend on stiffness here, only the strengths change. Fibre filled
@@ -3903,7 +3905,7 @@ def box_heat(power_w: float, ambient_c: float = 25.0, cooling: str = "closed", p
     verdict = "too hot" if inside >= limit else "warm" if inside >= soft else "fine"
     name = p.material["name"]
     how = {"closed": "closed", "fan": "with a fan blowing through"}[cooling]
-    text = (f"{power_w:g} W inside this box ({how}, {area / 100:.0f} cm² outside) warm the air inside about {rise:.0f} °C above the room: "
+    text = (f"{power_w:g} W of heat inside this box ({how}, {area / 100:.0f} cm² outside) warms the air inside about {rise:.0f} °C above the room: "
             f"about {inside:.0f} °C at {ambient_c:g} °C room. ")
     text += {"fine": f"{name} stays below where it starts to soften ({soft:.0f} °C).",
              "warm": f"{name} starts to soften from about {soft:.0f} °C: screw bosses and clips may slowly give way. Add vents or a fan, or print it in PETG or ASA.",
@@ -4143,7 +4145,7 @@ def _strength_split(s: Session, p: Profile, gap, joint: str, weak, loads: list[d
     from .split import _half, split_plan, strength_cut
 
     if not loads:
-        raise ValueError("Set where it is held and the load first (Strength analysis)")
+        raise ValueError("Set where it is held and the load first (Holds and Loads)")
     cut = strength_cut(s.mesh, _load_case(loads), p, _shells(p))
     if cut is None:
         raise ValueError("No straight cut makes it clearly stronger: print it in one piece")

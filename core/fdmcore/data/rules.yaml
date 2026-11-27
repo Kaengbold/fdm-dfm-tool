@@ -129,7 +129,7 @@ rules:
       lines, blobs, or print failure.
     fixes:
     - domain: geometry
-      text: Thicken the pin or add gussets and ribs around the base to stiffen it against bending forces.
+      text: Thicken the tall section or add gussets and ribs around the base to stiffen it against bending forces.
     - domain: slicer
       text: Turn on tree supports around the tall column to physically brace it as it grows upward.
       settings:
@@ -522,7 +522,7 @@ rules:
     fixes:
     - domain: geometry
       text: Add a sacrificial layer — one layer that closes the small hole where it starts. The layer below then bridges
-        cleanly across the opening; poke or drill the thin skin open after printing. (The design panel can add it.)
+        cleanly across the opening; poke or drill the thin skin open after printing. (You can add it as a design fix under Problems.)
     - domain: geometry
       text: Or turn the part over so the counterbore faces up; then the hole starts on solid plastic.
     - domain: slicer
@@ -545,7 +545,7 @@ rules:
     fixes:
     - domain: geometry
       text: Give the hole a teardrop top (a 45° point instead of the round ceiling), or make it 0.3–0.4 mm taller
-        than the nominal size. The design panel can add the teardrop for you.
+        than the nominal size. You can add the teardrop as a design fix under Problems.
     - domain: slicer
       text: Slow down bridges and run the part fan at full speed over bridges so the ceiling strands set before they
         sag.
@@ -1043,11 +1043,11 @@ rules:
     - CNC Kitchen — The Influence of Extrusion Temperature on Layer Adhesion — https://www.cnckitchen.com/blog/the-influence-of-extrusion-temperature-on-layer-adhesion
   single_line_wall:
     title: Wall is only one line thick
-    why: This wall is thinner than two nozzle passes, under 0.8 mm on a 0.4 mm nozzle. The slicer prints only a single
+    why: This wall is thinner than two nozzle widths (under 0.8 mm on a 0.4 mm nozzle). The slicer prints only a single
       bead of plastic, leaving the wall weak, full of pinholes, and easy to crack.
     fixes:
     - domain: geometry
-      text: Thicken the wall in CAD to at least 1.2 mm (or at least 0.85 mm for a 0.4 mm nozzle) so the slicer fits
+      text: Thicken the wall in CAD to at least two nozzle widths (at least 0.8 mm on a 0.4 mm nozzle) so the slicer fits
         inner and outer perimeter loops with solid overlap.
     - domain: slicer
       text: Turn on the Arachne wall generator to dynamically widen extrusion paths and eliminate hollow gaps in
@@ -1188,7 +1188,7 @@ rules:
       text: Pause before the layer the check names (OrcaSlicer, PrusaSlicer, Bambu Studio - right-click that layer in
         the preview and add a pause), drop the part in, check it sits below the top of the pocket, and resume. A
         drop of glue keeps a magnet from jumping to the nozzle. Bambu Studio ignores the pause in our 3MF, so slice it
-        there, then add the pause to the sliced file (Download, "Add the pause to a file sliced in Bambu Studio").
+        there and add the pause in its preview.
     - domain: slicer
       text: Put supports on the build plate only, so none are printed inside the pocket.
       settings:
@@ -1198,7 +1198,7 @@ rules:
         without force and nothing sticks up into the nozzle's path.
     - domain: geometry
       text: No pause at all - open the pocket to the side with a slot the part slides into after printing, with two
-        small bumps (about 0.3 mm) at the pocket's mouth that it clicks past (Design changes offers it). Or a pocket
+        small bumps (about 0.3 mm) at the pocket's mouth that it clicks past (offered as a design fix under Problems). Or a pocket
         open at the top with a thin snap lip or grip fins.
     tags:
     - process
