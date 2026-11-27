@@ -43,3 +43,18 @@
 .start .row { display: flex; gap: var(--s-3); }
 .part-pill[hidden] { display: none; }
 .screen-body h1:focus, .screen-body h1:focus-visible { outline: none; box-shadow: none; }  /* focus target, not a control */
+
+/* Help dialog (T-631). */
+.help-modal { width: min(600px, 90vw); }
+.help-modal[open] { display: flex; flex-direction: column; max-height: 90vh; }
+.help-modal .ui-modal__body { padding: var(--s-4) var(--s-5); overflow: auto; }
+.help-body { display: grid; gap: var(--s-2); font-size: var(--fs-sm); }
+.help-body p { margin: 0; }
+.help-intro { color: var(--text); font-size: var(--fs-md); }
+.help-heading { margin: var(--s-2) 0 0; font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--text); }
+.help-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
+.help-steps li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: var(--s-2); align-items: baseline; }
+.help-steps b { color: var(--text); font-weight: var(--fw-bold); }
+.help-list { margin: 0; padding-left: var(--s-4); display: grid; gap: var(--s-1); }
+.help-note { padding-top: var(--s-2); border-top: 1px solid var(--line); color: var(--text-2); }
+.help-report { color: var(--text-3); }

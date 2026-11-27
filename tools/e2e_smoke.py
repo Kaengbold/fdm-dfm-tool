@@ -171,6 +171,14 @@ def check_new_ui(browser, port: int) -> str:
     try:
         page.goto(f"http://127.0.0.1:{port}/web/")
         page.wait_for_selector("body[data-ready]")
+        # Header Help dialog (T-631): opens and closes cleanly.
+        page.locator(".app-header").get_by_role("button", name="Help", exact=True).click()
+        help_dlg = page.locator("dialog.help-modal")
+        help_dlg.wait_for(state="visible")
+        assert "How FDM Check works" in help_dlg.inner_text()
+        assert "github.com/Kaengbold/fdm-dfm-tool/issues" in (help_dlg.locator("a").get_attribute("href") or "")
+        help_dlg.locator(".ui-modal__foot").get_by_role("button", name="Close", exact=True).click()
+        help_dlg.wait_for(state="detached")
         assert page.locator(".big-card.is-soon").get_attribute("aria-disabled") == "true"
         assert page.locator(".big-card.is-soon").evaluate("e => e.tabIndex") < 0, "Coming soon card is a tab stop"
         page.get_by_role("button", name="Optimize your print").click()
