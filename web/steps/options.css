@@ -10,7 +10,7 @@
 .options-labels > span { display: flex; align-items: center; }
 .options-cols .ui-col__head { grid-template-rows: 1fr auto auto; align-items: start; padding: var(--s-2) 0; }
 .options-cols .ui-col__head .ui-btn { white-space: normal; padding-inline: var(--s-2); }
-.options-cols .ui-col__value { overflow-wrap: anywhere; text-align: start; }
+.options-cols .ui-col__value { overflow-wrap: normal; text-align: start; }
 .options-cols .ui-col__pc { display: flex; flex-wrap: wrap; gap: 0 var(--s-2); padding: var(--s-1) 0; }
 .options-cols .ui-col__pc li::before { width: auto; margin-inline-end: var(--s-1); }
 .options-cols .ui-col__cell.is-editing { z-index: 1; }

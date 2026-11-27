@@ -867,8 +867,10 @@ export default {
   "sim.legend.stressNote": "After it cools. A rough guide.",
   "sim.legend.heat": "Heat build-up while printing",
   "sim.legend.heatNote": "Yellow to red: spots that stay soft when the next layer comes.",
+  "sim.legend.heatFallback": "Rough estimate without G-code: add a sliced file for the full layer-by-layer heat view.",
   "sim.legend.overhang": "Overhangs steeper than the material manages",
   "sim.legend.overhangNote": "Orange to red: these need support or a gentler angle.",
+  "sim.legend.overhangHint": "View tilted to show undersides; drag to look around.",
   "sim.review": {"one": "Review {count} problem", "other": "Review {count} problems"},
   "sim.allClear": "All clear: Done",
 
@@ -1058,6 +1060,7 @@ export default {
   "done.gcodePlain": "Standard",
   "done.gcodeCooled": "With heat optimization",
   "done.gcodeSafety": "Sliced with OrcaSlicer's stock printer and filament profile. Check nozzle size, build plate and temperatures before printing (use 3MF if your printer is modified).",
+  "done.gcodeUnavailable": "Browser slicing isn't available here: export the 3MF and slice it in your slicer instead.",
   "done.slicing": "Slicing with OrcaSlicer…",
   "done.slicingCooled": "Slicing and applying cooling optimization…",
   "done.tol.title": "Tolerances & fits",
