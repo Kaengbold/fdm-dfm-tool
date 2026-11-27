@@ -21,8 +21,9 @@
   /* Text: main, secondary, hints. */
   --text: #111827;
   --text-2: #4B5563;
-  --text-3: #6B7280;
+  --text-3: #606774;
   --text-on-accent: #FFFFFF;
+  --text-on-load: #FFFFFF;
 
   /* One accent, for actions only. */
   --accent: #2563EB;
@@ -31,8 +32,8 @@
   --accent-text: #1D4ED8;   /* accent used as text (links, current step) */
 
   /* Status colours, for status only (text-safe on --surface-raised) with soft backgrounds. */
-  --good: #15803D;  --good-soft: #DCF3E4;
-  --warn: #B45309;  --warn-soft: #FCEBD5;
+  --good: #147B3B;  --good-soft: #DCF3E4;
+  --warn: #AE5009;  --warn-soft: #FCEBD5;
   --bad:  #B91C1C;  --bad-soft:  #FBE0E0;
 
   /* 3D overlays (viewport materials read these). */
@@ -123,8 +124,9 @@
 
   --text: #E8EBF0;
   --text-2: #B3BAC5;
-  --text-3: #8A93A0;
+  --text-3: #9099A6;
   --text-on-accent: #FFFFFF;
+  --text-on-load: #14171C;
 
   --accent: #2F6BEB;
   --accent-hover: #4C82F7;
