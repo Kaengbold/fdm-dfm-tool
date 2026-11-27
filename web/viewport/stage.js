@@ -359,7 +359,7 @@ export class Stage {
     const size = box.getSize(new THREE.Vector3());
     const centre = box.getCenter(new THREE.Vector3());
     const dist = Math.max(size.length() / 2, 10) / Math.sin(THREE.MathUtils.degToRad(15)) * 1.1;
-    const dir = { top: [0, -0.001, 1], front: [0, -1, 0.15], iso: [0.62, -0.78, 0.55], fit: null }[name] ?? null;
+    const dir = { top: [0, -0.001, 1], front: [0, -1, 0.15], iso: [0.62, -0.78, 0.55], under: [0.62, -0.78, -0.35], fit: null }[name] ?? null;
     const d = dir ? new THREE.Vector3(...dir).normalize() : this.camera.position.clone().sub(this.controls.target).normalize();
     this.controls.target.copy(centre);
     this.camera.position.copy(centre).addScaledVector(d, dist);

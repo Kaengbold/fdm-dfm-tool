@@ -17,6 +17,7 @@ import { Cancelled } from "../engine.js";
 import { fieldColor } from "../viewport/stage.js";
 import { t } from "../i18n.js";
 import { markedFaces, optimizeArgs, targetSlicer } from "./args.js";
+import { formatSafety } from "./format.js";
 
 export const DEPENDS = ["model", "option"];
 const COOLING = /^(heat_|small_layers_cooling$)/;
@@ -257,13 +258,20 @@ function showOverlay(store, services, legend) {
       stage.paint(() => null);
     }
   }
-  if (overlay === "heat") legend.append(h("b", {}, t("sim.legend.heat")), h("span", {}, t("sim.legend.heatNote")));
-  if (overlay === "overhang") legend.append(h("b", {}, t("sim.legend.overhang")), h("span", {}, t("sim.legend.overhangNote")));
+  if (overlay === "heat") {
+    legend.append(h("b", {}, t("sim.legend.heat")), h("span", {}, t("sim.legend.heatNote")));
+    if (!result?.detailed) legend.append(h("span", { class: "sim-legend__note" }, t("sim.legend.heatFallback")));
+  }
+  if (overlay === "overhang") {
+    legend.append(h("b", {}, t("sim.legend.overhang")), h("span", {}, t("sim.legend.overhangNote")),
+      h("span", { class: "sim-legend__note" }, t("sim.legend.overhangHint")));
+  }
   shown = key;
 }
 
 function clearOverlay(services) {
   for (const sim of extra) sim.clearHeat?.(services);
+  if (overlay === "overhang" && services.stage?.camera?.position?.z < 0) services.stage.view("iso");
   if (shown == null) return;
   services.stage.hideField();
   services.stage.paint(() => null);
@@ -287,7 +295,7 @@ registerStep("sim", {
     body.append(h("div", { class: "sim-setup" },
       h("span", {}, setupLine(o, s.catalog)),
       h("button", { type: "button", class: "ui-link", onclick: () => go("options") }, t("sim.change"))));
-    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: o.safety, target: o.target })));
+    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: formatSafety(o.safety), target: o.target })));
 
     const printer = s.catalog?.printers?.[s.profile?.printer];
     const material = s.catalog?.materials?.[o.material];
@@ -358,8 +366,11 @@ registerStep("sim", {
     const legend = h("div", { class: "sim-legend" });
     const bar = h("div", { class: "sim-views" },
       SegmentedControl({ label: t("sim.view.label"), size: "small", options: choices, value: overlay, onChange: (v) => {
-        const toHeat = v === "heat" && overlay !== "heat";
+        const prev = overlay;
+        const toHeat = v === "heat" && prev !== "heat";
         overlay = v;
+        if (v === "overhang" && prev !== "overhang") services.stage?.view("under");
+        else if (prev === "overhang" && v !== "overhang" && services.stage?.camera?.position?.z < 0) services.stage.view("iso");
         services.rerender();
         if (toHeat) requestAnimationFrame(() => document.querySelector(".heat-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }));
       } }));

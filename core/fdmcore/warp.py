@@ -242,6 +242,7 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     u_total = np.zeros((model.n_nodes, 3))
     held_total = np.zeros((model.n_nodes, 3))  # force the bed puts on the part
     strain = np.zeros((len(model.elems), 6))  # each element's strain since it was printed
+    converged = True
     done = np.zeros(len(model.elems), dtype=bool)
     grip = bed_grip(profile) if adhesion and not grip_trial else None
     peel = {"may_lift": False, "detached_area_mm2": 0.0}
@@ -270,7 +271,8 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
         sub_new = new[full_e]
         np.add.at(forces, sub.edof[sub_new].ravel(), ((scale * shrink)[full_e[sub_new], None] * f_unit).ravel())
         fixed = bed[full_n]
-        u, _ = solve(sub, c, sub_scale, forces.reshape(-1, 3), fixed)
+        u, info = solve(sub, c, sub_scale, forces.reshape(-1, 3), fixed)
+        converged &= info == 0
         # What the bed has to hold: internal forces of the elements minus the shrink forces, at the bed nodes.
         internal = np.zeros(sub.n_nodes * 3)
         ue = u.ravel()[sub.edof]
@@ -312,11 +314,12 @@ def simulate(mesh: Mesh, up, profile: Profile, shells: Shells = Shells(), target
     # Off the bed: the bed's forces go away (as if reversed), the part springs into its final shape.
     report(len(groups) / (len(groups) + 1), "Taking it off the bed")
     springs = _release_springs(np.flatnonzero(bed), spring_scale)
-    u_free, _ = solve(model, c, scale, -held_total, np.zeros(model.n_nodes, dtype=bool), springs=springs)
+    u_free, info = solve(model, c, scale, -held_total, np.zeros(model.n_nodes, dtype=bool), springs=springs)
     strain += u_free.ravel()[model.edof] @ b_mid.T
     pull = -(held_total @ up)  # the bed pulling the part down = the part pulling away from the bed
     out = {"model": model, "u": u_total + u_free, "pull": pull, "bed": bed, "up": up, "rotation": rotation,
-           "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat}
+           "strain": strain, "shrink": shrink, "scale": scale, "c": c, "material": mat,
+           "solver_converged": converged and info == 0}
     if has_brim:
         out["brim_modeled"] = part is not None
     if part is not None:
@@ -580,11 +583,21 @@ def calibrate_bed_grip(profile: Profile, longest_flat_mm: int, shells: Shells = 
     return {**record, **bounds, "status": "calibrated", "grip_n_mm": grip}
 
 
+def residual_strain(result: dict) -> np.ndarray:
+    """Elastic strain in the released part, so strength can recover the locked-in stress.
+
+    Strains use engineering shear in the print frame. Free shrinkage is negative,
+    so subtracting it adds to the strain that was actually reached.
+    """
+    elastic = result["strain"].copy()
+    elastic[:, :3] += result["shrink"][:, None]
+    return elastic
+
+
 def residual_stress(result: dict) -> np.ndarray:
     """Stress left in each element once the part is off the bed and cool (MPa, von Mises): the
     element's own strain minus the shrink it wanted (stress = C · (strain + shrink))."""
-    free = result["strain"] + result["shrink"][:, None] * np.array([1, 1, 1, 0, 0, 0.0])
-    return von_mises(result["scale"][:, None] * (free @ result["c"].T))
+    return von_mises(result["scale"][:, None] * (residual_strain(result) @ result["c"].T))
 
 
 def fade_length(profile: Profile, area_per_perimeter_mm: float | np.ndarray) -> float | np.ndarray:

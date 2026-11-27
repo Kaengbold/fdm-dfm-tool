@@ -16,6 +16,7 @@ import { holdToEngine, loadToEngine, markedFaces, optimizeArgs, SLICERS, SLICER_
 import { optionGcode, setupLine, simProfile } from "./simulate.js";
 import { openTool } from "./tools.js";
 import { exportZones } from "./tools/zones.js";
+import { formatLayerHeight, formatSafety } from "./format.js";
 
 const CURA_GLOBAL_LABELS = {
   layer_height: "Layer Height",
@@ -29,6 +30,18 @@ let busy = null; // {what, text} while an export runs
 let error = null;
 let checked = null; // {key, check, design} when Done had to run the check itself
 let gcodeCooled = false; // Download G-code on Done: plain vs cooling-optimized (T-615)
+let slicerAvail = null; // null | true | false: whether the browser OrcaSlicer WASM is available
+let slicerChecking = false;
+
+function checkSlicer(services) {
+  if (slicerAvail !== null || slicerChecking) return;
+  slicerChecking = true;
+  import("../slicer-worker.js")
+    .then((m) => m.checkAvailable())
+    .then((r) => { slicerAvail = Boolean(r?.available); services.rerender(); })
+    .catch(() => { slicerAvail = false; services.rerender(); })
+    .finally(() => { slicerChecking = false; });
+}
 
 function setTargetSlicer(v) {
   try { localStorage.setItem(SLICER_KEY, v); } catch { /* storage blocked: this visit only */ }
@@ -69,7 +82,7 @@ export function settingRows(state, check) {
   const fine = fineLayers(check);
   if (fine.length) {
     rows.set("fine_layers", { key: "fine_layers", value: fine.map((f) => `${f.z0}–${f.z1} mm`).join(", "), label: t("done.key.fine"),
-      reason: t("done.fineWhy", { height: fine[0].layer_height }) });
+      reason: t("done.fineWhy", { height: formatLayerHeight(fine[0].layer_height) ?? fine[0].layer_height }) });
   }
   return [...rows.values()];
 }
@@ -193,7 +206,7 @@ async function shareReport(store, services) {
       : { kind: "ok", head: t("done.ready"), text: t("done.report.okText") },
     overview: thumbnail(services.stage.partTriangles(), 480),
     orientation: { label: o?.orientation ?? t("sim.custom"), reasons: o?.reasons ?? [] },
-    stats: o ? t("done.report.stats", { time: minutes(o.minutes), grams: Math.round(o.total_g ?? o.part_g ?? 0) }) : "",
+    stats: o ? t("done.report.stats", { time: minutes(printMinutes(store)), grams: Math.round(o.total_g ?? o.part_g ?? 0) }) : "",
     problems: problems.map((f) => ({ title: f.title ?? f.short_title, severity: f.severity, picture: null, details: [f.one_liner ?? f.detail], why: f.why ?? "",
       fixes: (f.fixes ?? []).map((x) => ({ kind: t(`ui.tag.${x.domain === "geometry" ? "design" : x.domain}`), text: x.text })) })),
     strength: o?.safety != null ? { kind: o.meets_target === false ? "bad" : "ok", head: o.meets_target === false ? t("done.report.below") : t("done.report.strong"),
@@ -240,18 +253,29 @@ async function downloadGcode(store, services, cooled = gcodeCooled) {
   download(opt.data, `${baseName(s)}_cooled.gcode`, "text/x.gcode");
 }
 
-const minutes = (m) => (m == null ? "—" : m >= 60 ? t("done.hours", { h: Math.floor(m / 60), m: Math.round(m % 60) }) : t("done.minutes", { m: Math.round(m) }));
+const minutes = (m) => {
+  if (m == null) return "—";
+  const total = Math.round(m);
+  return total >= 60 ? t("done.hours", { h: Math.floor(total / 60), m: total % 60 }) : t("done.minutes", { m: total });
+};
 
-function summaryGrid(s) {
+/** Simulation's real G-code print time when fresh, else the chosen option's estimate (T-621). */
+function printMinutes(store) {
+  const sim = store.isStale("simulate") ? null : store.result("simulate");
+  return sim?.detailed && sim.gcode?.print_time_min != null ? sim.gcode.print_time_min : store.get().option?.minutes;
+}
+
+function summaryGrid(store) {
+  const s = store.get();
   const o = s.option;
   const cell = (label, value) => h("div", { class: "done-cell" }, h("span", {}, label), h("b", {}, value));
   return h("div", { class: "done-grid" },
     cell(t("done.sum.material"), o.material_name ?? s.catalog?.materials?.[o.material]?.name ?? o.material),
-    cell(t("done.sum.nozzle"), t("done.sum.nozzleValue", { nozzle: o.nozzle, layer: o.layer_height })),
+    cell(t("done.sum.nozzle"), t("done.sum.nozzleValue", { nozzle: o.nozzle, layer: formatLayerHeight(o.layer_height) ?? "—" })),
     cell(t("done.sum.walls"), t("done.sum.wallsValue", { walls: o.walls, infill: Math.round((o.infill ?? 0) * 100) })),
-    cell(t("done.sum.time"), minutes(o.minutes)),
+    cell(t("done.sum.time"), minutes(printMinutes(store))),
     cell(t("done.sum.plastic"), o.support_g ? t("done.sum.plasticSupport", { g: Math.round(o.part_g ?? o.total_g), s: Math.round(o.support_g) }) : `${Math.round(o.total_g ?? o.part_g ?? 0)} g`),
-    o.safety != null ? cell(t("done.sum.safety"), t("done.sum.safetyValue", { sf: o.safety, target: o.target ?? "—" })) : cell(t("done.sum.safety"), t("done.sum.noStrength")));
+    o.safety != null ? cell(t("done.sum.safety"), t("done.sum.safetyValue", { sf: formatSafety(o.safety), target: o.target ?? "—" })) : cell(t("done.sum.safety"), t("done.sum.noStrength")));
 }
 
 function settingsList(store, rows) {
@@ -275,8 +299,9 @@ registerStep("done", {
       body.append(h("p", { class: "ui-hint" }, t("sim.noOption")), Button({ label: t("sim.toOptions"), onClick: () => go("options") }));
       return;
     }
-    body.append(summaryGrid(s));
-    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: o.safety, target: o.target })));
+    checkSlicer(services);
+    body.append(summaryGrid(store));
+    if (o.warning === "below_target") body.append(h("p", { class: "analyse-stale" }, t("sim.belowTarget", { sf: formatSafety(o.safety), target: o.target })));
     if (s.pending?.length) body.append(h("p", { class: "analyse-stale" }, t("done.pendingLeft", { count: s.pending.length }), " ",
       h("button", { type: "button", class: "ui-link", onclick: () => go("problems") }, t("done.toProblems"))));
 
@@ -312,16 +337,18 @@ registerStep("done", {
 
     // Extras (§15.1): Tuned settings, Tolerances, Make it lighter; then More tools.
     const card = (title, text, action) => h("div", { class: "done-card" }, h("b", {}, title), h("span", {}, text), action);
+    const noSlicer = slicerAvail === false;
     const extras = h("div", { class: "done-cards" },
       card(t("done.tuned.title"), o.cooling ? t("done.tuned.on") : t("done.tuned.text"), h("div", { class: "done-gcode" },
-        SegmentedControl({ label: t("done.gcodeMode"), size: "small", value: gcodeCooled ? "cooled" : "plain",
+        noSlicer ? null : SegmentedControl({ label: t("done.gcodeMode"), size: "small", value: gcodeCooled ? "cooled" : "plain",
           options: [{ value: "plain", label: t("done.gcodePlain") }, { value: "cooled", label: t("done.gcodeCooled") }],
           onChange: (v) => { gcodeCooled = v === "cooled"; services.rerender(); } }),
         h("div", { class: "row" },
-          Button({ label: gcodeCooled ? t("done.gcodeDownloadCooled") : t("done.gcode"), size: "small", disabled: Boolean(busy),
+          Button({ label: gcodeCooled && !noSlicer ? t("done.gcodeDownloadCooled") : t("done.gcode"), size: "small",
+            disabled: Boolean(busy) || noSlicer, title: noSlicer ? t("done.gcodeUnavailable") : null,
             onClick: () => run("gcode", gcodeCooled ? t("done.slicingCooled") : t("done.slicing"), () => downloadGcode(store, services, gcodeCooled), services) }),
           Button({ label: t("done.tuned.open"), size: "small", variant: "ghost", onClick: () => go("tuned") })),
-        h("small", { class: "ui-hint" }, t("done.gcodeSafety")))),
+        h("small", { class: "ui-hint" }, t(noSlicer ? "done.gcodeUnavailable" : "done.gcodeSafety")))),
       card(t("done.tol.title"), t("done.tol.text"), Button({ label: t("done.tol.open"), size: "small", onClick: () => go("tolerances") })),
       s.goal === "quality" ? null : card(t("done.lighter.title"), o.lighter ? t("done.lighter.on") : t("done.lighter.text"),
         Button({ label: t("done.lighter.open"), size: "small", onClick: () => go("lighter") })));

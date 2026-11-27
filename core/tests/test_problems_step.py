@@ -135,3 +135,31 @@ def test_a_finding_box_maps_back_to_the_part():
     corners = np.asarray(out)
     assert np.allclose(corners.min(axis=0), soup.min(axis=0), atol=1e-3)
     assert np.allclose(corners.max(axis=0), soup.max(axis=0), atol=1e-3)
+
+
+def test_shared_number_formatters():
+    """Safety factors, safety ranges and layer heights share one format across Options, Problems and Done (T-632)."""
+    if not NODE:
+        pytest.skip("node not installed")
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        (tmp / "format.mjs").write_text((ROOT / "web" / "steps" / "format.js").read_text(encoding="utf-8"), encoding="utf-8")
+        script = (
+            f'import {{ formatSafety, formatSafetyRange, formatLayerHeight }} from "{(tmp / "format.mjs").as_uri()}";\n'
+            "const out = {\n"
+            "  sf: [formatSafety(3.86), formatSafety(4), formatSafety(3.32), formatSafety(null)],\n"
+            "  rangeSame: [formatSafetyRange([3.96, 4.04]), formatSafetyRange([3.28, 3.31]), formatSafetyRange(null)],\n"
+            "  rangeDiff: formatSafetyRange([3.14, 4.02]),\n"
+            "  layer: [formatLayerHeight(0.2), formatLayerHeight(0.16), formatLayerHeight(null)],\n"
+            "};\n"
+            "console.log(JSON.stringify(out));"
+        )
+        proc = subprocess.run([NODE, "--input-type=module", "-e", script], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
+        out = json.loads(proc.stdout.strip().splitlines()[-1])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    assert out["sf"] == ["3.9", "4.0", "3.3", None]
+    assert out["rangeSame"] == [None, None, None]
+    assert out["rangeDiff"] == {"low": "3.1", "high": "4.0"}
+    assert out["layer"] == ["0.20", "0.16", None]

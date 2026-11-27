@@ -441,6 +441,16 @@ def test_residual_stress_in_the_result():
     assert "stress" in r["explanation"]
 
 
+def test_uniform_shrink_releases_the_stress_from_the_bed():
+    # At one voxel thick, every cube wants to shrink by the same amount.
+    # It pulls while held but can shrink freely after release.
+    r = warp.simulate(bar(12, height=1), [0, 0, 1], Profile.from_dict(ABS_OPEN), h=1)
+    assert r["solver_converged"]
+    assert np.abs(r["pull"]).max() > 1
+    assert np.abs(warp.residual_strain(r)).max() < r["shrink"].min() / 100
+    assert warp.residual_stress(r).max() < 0.02
+
+
 def test_tilted_part_curls_like_the_flat_one():
     """A bar stored tilted but printed flat (``up`` along its own bottom normal) must warp like the
     flat bar: voxelised in the print frame it sits on the bed, not on one stair-step corner."""
