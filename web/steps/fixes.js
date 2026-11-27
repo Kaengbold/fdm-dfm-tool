@@ -22,8 +22,14 @@ const designFix = (edit, findingId, modelLocked) => ({
 
 /** Design edits that the engine offers without a finding. */
 export function optionalImprovements(design, { modelLocked = false } = {}) {
-  return (design?.edits ?? []).filter((e) => e.source === "other" && !e.clash)
-    .map((e) => designFix(e, "other", modelLocked));
+  const fixes = new Map();
+  for (const e of design?.edits ?? []) {
+    if (e.source !== "other" || e.clash) continue;
+    const fix = fixes.get(e.title);
+    if (fix) fix.editIds.push(e.id);
+    else fixes.set(e.title, designFix(e, "other", modelLocked));
+  }
+  return [...fixes.values()];
 }
 
 /**

@@ -108,11 +108,11 @@ def test_unattached_bracket_corner_edits_can_go_into_pending_batch():
       const fixes = F.optionalImprovements(D, { modelLocked: true });
       return { fixes, pending: F.pendingItem(fixes[0], null, {}) };""",
                  _no_bytes({**design, "edits": [*design["edits"], blocked]}))
-    assert [fix["editIds"] for fix in out["fixes"]] == [[id_] for id_ in corner_ids]
+    assert sorted(i for fix in out["fixes"] for i in fix["editIds"]) == sorted(corner_ids)
     assert all(fix["changesModel"] for fix in out["fixes"])
     first = out["fixes"][0]
     assert out["pending"] == {"id": first["id"], "kind": "design", "findingId": None,
-                              "title": first["text"], "editIds": [corner_ids[0]]}
+                              "title": first["text"], "editIds": first["editIds"]}
 
 
 def test_new_and_fixed_problems():
