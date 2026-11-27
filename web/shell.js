@@ -14,6 +14,39 @@ const GEAR = ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M12 2v3m0 14v3M2 12h3m14 0
 const UNDO = ["M9 14 4 9l5-5", "M4 9h10a6 6 0 0 1 0 12h-3"];
 const REDO = ["m15 14 5-5-5-5", "M20 9H10a6 6 0 0 0 0 12h3"];
 const MOON = ["M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"];
+const ISSUES_URL = "https://github.com/Kaengbold/fdm-dfm-tool/issues";
+
+function openHelp() {
+  const steps = [
+    [t("step.part.label"), t("help.step.part")],
+    [t("step.setup.label"), t("help.step.setup")],
+    [t("step.env.label"), t("help.step.env")],
+    [t("step.holds.label"), t("help.step.holds")],
+    [t("step.loads.label"), t("help.step.loads")],
+    [t("step.details.label"), t("help.step.details")],
+    [t("step.analyse.label"), t("help.step.analyse")],
+    [t("step.options.label"), t("help.step.options")],
+    [t("step.sim.label"), t("help.step.sim")],
+    [t("step.problems.label"), t("help.step.problems")],
+    [t("step.done.label"), t("help.step.done")],
+  ];
+  const body = h("div", { class: "help-body" },
+    h("p", { class: "help-intro" }, t("help.intro")),
+    h("h3", { class: "help-heading" }, t("help.stepsTitle")),
+    h("ol", { class: "help-steps" }, steps.map(([name, text]) =>
+      h("li", {}, h("b", {}, name), h("span", {}, text)))),
+    h("h3", { class: "help-heading" }, t("help.viewTitle")),
+    h("ul", { class: "help-list" },
+      h("li", {}, t("help.viewMove")),
+      h("li", {}, t("help.viewPick")),
+      h("li", {}, t("help.viewBar"))),
+    h("p", { class: "help-note" }, t("help.privacy")),
+    h("p", { class: "help-report" },
+      t("help.report"), " ",
+      h("a", { class: "ui-link", href: ISSUES_URL, target: "_blank", rel: "noopener noreferrer" }, t("help.reportLink"))));
+  const dialog = openModal({ title: t("help.title"), body, actions: [{ label: t("ui.close"), variant: "primary" }] });
+  dialog.classList.add("help-modal");
+}
 
 /** Light by default, a switch for dark (§16.6), remembered in this browser (main.js reads it at start). */
 function toggleTheme() {
@@ -187,7 +220,7 @@ export function startShell(root, { store = createStore(), saving = autosave(stor
     const settings = Button({ label: t("shell.settings"), variant: "ghost", iconPath: GEAR, onClick: () => openRoute("settings") });
     const theme = Button({ iconPath: MOON, variant: "ghost", title: t("shell.theme"), onClick: () => theme.setAttribute("aria-pressed", String(toggleTheme())) });
     theme.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "dark"));
-    const help = Button({ label: t("shell.help"), variant: "ghost" });
+    const help = Button({ label: t("shell.help"), variant: "ghost", onClick: openHelp });
     const el = h("header", { class: "app-header" }, brand, workflow, pill, h("span", { class: "ui-grow" }), undo, redo, exportBtn, settings, theme, help);
     brand.addEventListener("click", () => {
       const s = store.get();
