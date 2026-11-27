@@ -1422,6 +1422,16 @@ Found from owner screenshot review (`l_bracket.stl`) and Flash subagent normal-u
 - [~] **T-633 P2** [UI] Missing feedback: face tint, sample thumbnails, repeated slicer probe. · serves: 1, 2 · files: `web/steps/showfaces.js`, `web/steps/part.js`, `web/steps/part.css`, `web/slicer-worker.js`, `web/steps/done.js` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-633-feedback`)
   - Do: Analyse (Quality) says the outer faces are tinted but none show on mushroom / cable_clip; sample picker shows blank grey squares while thumbnails render (add a placeholder); cache `checkAvailable()` in slicer-worker.js so Done doesn't repeat the failed manifest fetch Simulation already made.
 
+
+### Phase 13: accessibility, keyboard and dark-theme review (2026-11-27)
+
+Gemini 4 Neon at 1440×900 with axe-core 4.10.2, light and dark, keyboard only, reduced motion. Every step can be finished with the keyboard alone; these are what's left.
+
+- [~] **T-634 P1** [A11y] Keyboard focus and screen-reader names. · serves: 1, 2 · files: `web/ui/popover3d.js`, `web/steps/loads.js`, `web/viewport/gizmo.js`, `web/viewport/featurelist.js`, `web/ui/radialmenu.js`, `web/steps/part.js`, `web/ui/select.js`, `web/shell.js`, `web/ui/progress.js` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-634-keyboard-focus`)
+  - Do: (1) the load direction bar can't be reached with Tab while the force popover is open (popover traps focus, gizmo keys are off in the input); (2) Escape on a radial menu / load popover opened from the keyboard feature list drops focus to <body> (featurelist `choose()` closes without returning focus first); (3) the Sample parts dialog doesn't trap Tab; (4) combobox inputs (`.ui-select__search`, `.feature-search`) are named only by placeholder; (5) no <h1> on flow steps and ProgressCard's <h3> comes before the step's <h2>; (6) ProgressCard's whole card is aria-live while the timer ticks every 500 ms (announce stage changes only).
+- [~] **T-635 P2** [A11y] Contrast below WCAG AA and spinners under reduced motion. · serves: 1, 2 · files: `web/tokens.css`, `web/steps/loads.css`, `web/viewport/gizmo.css`, `web/ui/components.css`, `web/steps/part.css` · owner: Gemini 4 Neon, reviewed by Claude (`task/T-635-contrast-motion`)
+  - Do: dark-theme load badges and the active gizmo button (white on #b26bf5, 3.32:1); `--text-3` on accent-soft / good-soft / sunken surfaces (3.85–4.47:1 light, 4.26:1 dark); light `--good` / `--warn` on their soft fills (4.29 / 4.30:1); `.spinner` and the running ProgressCard stage keep spinning under prefers-reduced-motion.
+
 ## Done
 
   - Outcome: `thermal.simulate(snapshots=True)` keeps every spot's temperature when each layer is done (uint8, at most 150 layers; about 90 KB on the test part), for the run as sliced and the G-code plan's run (`api._replay`). The heat panel opens on **Replay**: 1 · Watch it print (beads coloured set / good to build on / too soft, clock, layer, fan; as sliced or with the plan), 2 · What we found (the worst layers, each with Show), 3 · What we change (the plan in sentences, Replay with the plan). Logic in `heatlogic.js` (Node-tested), e2e checks the story, the jump and that the plan's replay differs.
