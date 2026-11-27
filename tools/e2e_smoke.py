@@ -347,6 +347,8 @@ def check_new_ui_settings(browser, port: int) -> str:
 
         page.get_by_role("button", name="All calibration tests").click()
         page.locator('[data-cal-card="creep"]').click()
+        creep_text = page.locator(".cal-detail").inner_text()
+        assert "undefined" not in creep_text and "false" not in creep_text, creep_text
         assert "9.19 MPa" in page.locator(".cal-steps + .hint").inner_text()
         with page.expect_download(timeout=60_000) as creep_download:
             page.get_by_role("button", name="Download model").click()
@@ -372,6 +374,8 @@ def check_new_ui_settings(browser, port: int) -> str:
           fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: "my_test_pei" } });
         }""")
         page.locator('[data-cal-card="warping"]').click()
+        warp_text = page.locator(".cal-detail").inner_text()
+        assert "undefined" not in warp_text and "false" not in warp_text, warp_text
         page.locator('.cal-pick[data-pick-value="40"]').click()
         page.get_by_role("button", name="Save result").click()
         page.get_by_text("Bed grip calibrated for Textured PEI at 100 °C.").wait_for(timeout=120_000)
@@ -1394,6 +1398,11 @@ def check_new_ui_tools(browser, port: int) -> str:
         assert "°C inside" in verdict, verdict
         assert page.evaluate("() => fdmUI.services.stage.field != null"), "walls not coloured"
         assert page.locator(".sim-legend").count() == 1
+        # Changing Power inside marks the old heat result stale and restores the primary button.
+        page.get_by_role("textbox", name="Power inside").fill("10")
+        assert page.locator(".tools-verdict").count() == 0, "stale box heat verdict stayed visible"
+        assert page.evaluate("() => fdmUI.services.stage.field == null"), "stale box heat field stayed on"
+        assert "ui-btn--primary" in (page.get_by_role("button", name="Work out the heat").get_attribute("class") or "")
         done.append("box heat: " + verdict.split("\n")[0])
         # Versions: keep, change the walls, keep again; the second row shows the difference.
         page.get_by_role("radio", name="Versions").click()
