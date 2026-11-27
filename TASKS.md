@@ -1454,6 +1454,9 @@ Gemini 4 Neon: Settings & calibration, Done extras, project files, undo/redo, ST
   - Seen (Pyodide, `bumpy_blob_80k.stl`, after T-458): design 22.2 s, nozzle comparison 54.0 s (`node tools/pyodide_check.mjs core/tests/corpus/bumpy_blob_80k.stl`).
   - Do: profile both in Pyodide; reuse T-458's dense-organic tier (same findings, approximations only on parts ≥ 50k faces with CAD checks off); goal: design under 10 s and nozzles under 25 s with the same suggestions and the same nozzle ranking.
 
+- [ ] **T-640 P3** Simulation's warping run uses the chosen option's walls and infill. · files: `core/fdmcore/api.py` (`warping`, `check`), `web/steps/simulate.js` · owner: — · after #299 (T-603) merges
+  - Seen: the app calls `warping` with the default shells, so a strength check with the option's own walls/infill finds no matching warp and leaves out the locked-in printing stress (T-602); T-603's brim recommendation step calls `check()` with default shells too. Do: pass the option's walls / infill / top / bottom / zones from Simulation, and let the recommendation check match them.
+
 ## Done
 
   - Outcome: `thermal.simulate(snapshots=True)` keeps every spot's temperature when each layer is done (uint8, at most 150 layers; about 90 KB on the test part), for the run as sliced and the G-code plan's run (`api._replay`). The heat panel opens on **Replay**: 1 · Watch it print (beads coloured set / good to build on / too soft, clock, layer, fan; as sliced or with the plan), 2 · What we found (the worst layers, each with Show), 3 · What we change (the plan in sentences, Replay with the plan). Logic in `heatlogic.js` (Node-tested), e2e checks the story, the jump and that the plan's replay differs.
