@@ -17,6 +17,7 @@ import { registerStep } from "../shell.js";
 import { t } from "../i18n.js";
 import { activeNozzles, optimizeArgs, orderedMaterials } from "./args.js";
 import { STAGES, STAGE_OF, start as startAnalysis } from "./analyse.js";
+import { formatLayerHeight, formatSafety, formatSafetyRange } from "./format.js";
 
 // Comparison order: [row key, label key].
 export const ROWS = [
@@ -26,7 +27,10 @@ export const ROWS = [
   ["layer", "options.row.layer"], ["walls", "options.row.walls"], ["support", "options.row.support"],
 ];
 
-const minutes = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, "0")}` : `${Math.round(m)} min`);
+const minutes = (m) => {
+  const total = Math.round(m);
+  return total >= 60 ? `${Math.floor(total / 60)} h ${String(total % 60).padStart(2, "0")}` : `${total} min`;
+};
 const grams = (g) => (g == null ? t("options.unknown") : `${Math.round(g)} g`);
 
 /** One option's cells (§11 rows) and the value each pin would lock. */
@@ -34,14 +38,14 @@ export function optionRows(o, constraints = {}) {
   const pinned = (key, value) => key != null && JSON.stringify(constraints[key]) === JSON.stringify(value);
   const cell = (key, value, pinKey, pinValue, tone) => ({ key, value, pinnable: pinKey != null, pinKey, pinValue, pinned: pinned(pinKey, pinValue), tone });
   const nominal = o.safety == null ? t("options.noStrength")
-    : t(o.meets_target ? "options.safetyOk" : "options.safetyLow", { sf: o.safety.toFixed(1), target: o.target });
-  const [low, high] = o.safety_range?.map((value) => Number(value.toFixed(1))) ?? [];
-  const safety = low == null ? nominal : t("ranges.safety", { nominal, low, high });
+    : t(o.meets_target ? "options.safetyOk" : "options.safetyLow", { sf: formatSafety(o.safety), target: o.target });
+  const range = formatSafetyRange(o.safety_range);
+  const safety = range ? t("ranges.safety", { nominal, ...range }) : nominal;
   return [
     cell("orientation", o.orientation, "up", o.up),
     cell("material", `${o.material_name ?? o.material}${o.owned ? ` · ${t("options.owned")}` : ""}`, "material", o.material),
     cell("nozzle", `${o.nozzle} mm`, "nozzle", o.nozzle),
-    cell("layer", `${o.layer_height.toFixed(2)} mm`, "layer_height", o.layer_height),
+    cell("layer", `${formatLayerHeight(o.layer_height)} mm`, "layer_height", o.layer_height),
     cell("walls", String(o.walls), "walls", o.walls),
     cell("topBottom", `${o.top} / ${o.bottom}`, null),
     cell("changes", o.reinforcements?.map((r) => r.label).join(" · ") || t("options.noChanges"), null),
@@ -78,7 +82,8 @@ function chipLabel(key, value, options) {
   if (key === "up") return `${label}: ${options.find((o) => JSON.stringify(o.up) === JSON.stringify(value))?.orientation ?? "…"}`;
   if (key === "material") return `${label}: ${options.find((o) => o.material === value)?.material_name ?? value}`;
   if (key === "infill") return `${label}: ${Math.round(value * 100)} %`;
-  if (key === "nozzle" || key === "layer_height") return `${label}: ${value} mm`;
+  if (key === "layer_height") return `${label}: ${formatLayerHeight(value)} mm`;
+  if (key === "nozzle") return `${label}: ${value} mm`;
   return `${label}: ${value}`;
 }
 
@@ -220,7 +225,7 @@ function use(store, go, o) {
   const pick = () => { store.set({ option: o }); go("sim"); };
   if (o.meets_target === false || o.below_target) {
     // Decision 2: usable after a clear warning, and the warning travels with the export.
-    openModal({ title: t("options.lowTitle"), body: t("options.lowBody", { sf: o.safety?.toFixed(1), target: o.target }),
+    openModal({ title: t("options.lowTitle"), body: t("options.lowBody", { sf: formatSafety(o.safety), target: o.target }),
       actions: [{ label: t("ui.cancel"), variant: "ghost" }, { label: t("options.useAnyway"), variant: "primary", onClick: () => { store.set({ option: { ...o, warning: "below_target" } }); go("sim"); } }] });
   } else pick();
 }
@@ -272,7 +277,7 @@ registerStep("options", {
         h("div", { class: "row" }, Button({ label: t("options.continue"), variant: "secondary", size: "small", onClick: goOn }))));
     }
     if (stale) body.append(h("p", { class: "analyse-stale" }, t("options.stale")));
-    if (s.goal !== "quality" && options.some((o) => o.safety_range)) body.append(h("p", { class: "ui-hint" }, t("ranges.hint")));
+    if (s.goal !== "quality" && options.some((o) => formatSafetyRange(o.safety_range))) body.append(h("p", { class: "ui-hint" }, t("ranges.hint")));
 
     const shown = ROWS.filter(([key]) => (key !== "safety" || s.goal !== "quality")
       && (key !== "changes" || options.some((o) => o.reinforcements?.length)));
