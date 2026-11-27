@@ -153,8 +153,17 @@ function turnedNote(s) {
 const app = startShell(document.getElementById("app"), { store, saving, services });
 // Load persisted settings, populate store.catalog (printers + nozzles + owned materials), and push to the engine once ready.
 initSettings({ store, saving, engine, services });
+const deferIdle = globalThis.requestIdleCallback ?? ((fn) => setTimeout(fn, 0));
+let thumbGen = 0;
 store.subscribe((_, changed) => {
-  if (changed.includes("part") && services.stage.part) saving.putExtra("thumb", thumbnail(services.stage.part.geo.attributes.position.array));
+  if (!changed.includes("part") || !services.stage.part) return;
+  const gen = ++thumbGen;
+  const partRef = services.stage.part;
+  deferIdle(() => {
+    if (gen !== thumbGen || services.stage.part !== partRef) return;
+    const url = services.stage.snapshot(112) ?? thumbnail(partRef.geo.attributes.position.array);
+    if (url) saving.putExtra("thumb", url);
+  });
 });
 store.subscribe((_, changed) => { if (["step", "part", "goal", "option"].some((k) => changed.includes(k))) preparePicker(); });
 globalThis.fdmUI = app; // for the browser tests and for agents driving the page

@@ -18,7 +18,8 @@ function tint(store, services) {
   const guessed = new Set(marked.size ? [] : guess.regions ?? []);
   const strong = color("--accent", "#2563EB");
   // Linear-RGB lerp at 0.62 reads as a clear soft blue tint on both light and dark stages, still lighter than a mark.
-  picker.setRegionColors((r) => (marked.has(r) ? strong : guessed.has(r) ? services.stage.part.base.clone().lerp(strong, 0.62) : null));
+  const soft = services.stage.part.base.clone().lerp(strong, 0.62);
+  picker.setRegionColors((r) => (marked.has(r) ? strong : guessed.has(r) ? soft : null));
 }
 
 function wire(store, services) {
