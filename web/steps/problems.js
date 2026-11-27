@@ -128,7 +128,11 @@ async function confirmBatch(store, services, recheck) {
         const name = `${original.replace(/\.(stl|3mf|step|stp)$/i, "")}_dfm.stl`;
         const bytes = stlBytes(soup);
         const info = await engine.call("load", { name }, bytes);
-        services.setPart?.({ name, bytes, kind: "stl" });
+        // A STEP part keeps its original file and every edit made so far, for the changed STEP on Done (T-637).
+        const src = undo.source;
+        const step = src?.stepBytes ? { stepBytes: src.stepBytes, stepVolume: src.stepVolume,
+          stepEdits: [...(src.stepEdits ?? []), ...edits.filter((e) => !refused.some((r) => r.id === e.id))] } : {};
+        services.setPart?.({ name, bytes, kind: "stl", ...step });
         stage.showPart(trianglesOf(info));
         patch.part = { ...s.part, name, kind: "stl", original, size: info.size_mm, faces: info.faces, volume: info.volume_mm3 };
         patch.design = [...s.design, ...applied.map((p) => ({ id: p.id, title: p.title, findingId: p.findingId }))];
