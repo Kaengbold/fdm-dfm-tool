@@ -1359,8 +1359,9 @@ Not reachable: Pollák & Goryl 2025.
   - Outcome: published stress-relaxation curves (PLA, PETG, ABS) scale each layer's shrink by its temperature and time; PLA was over-predicted (published 140/170 mm blocks: 0.85/1.01 → 0.72/0.84 mm vs ~0.61/0.83 measured), no extra runtime. Notes in `research/warp_relaxation.md`.
 - [x] **T-602 P3** Built-in warping stress in the strength check. · files: `core/fdmcore/warp.py`, `core/fdmcore/strength.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-602-warp-stress`)
   - Outcome: after a warping run with the same settings, the strength check adds the stress locked in while printing (estimated a few MPa for ABS, under 1 MPa for PLA) and says when it changes the safety margin; without a matching warping run the result is unchanged.
-- [~] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-603-brim-shapes`)
+- [x] **T-603 P3** Brim and mouse ears as real shapes in the warping run. · files: `core/fdmcore/warp.py`, `core/fdmcore/api.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-603-brim-shapes`)
   - Do: add the brim / ears the 3MF will get to the warp model's first layer (more bed contact, different peel front) instead of a rule of thumb.
+  - Outcome: The chosen brim or mouse ears add first-layer plastic and bed contact. The curl and shape view show the part, with a message if the brim lifts first or is too small for the grid.
 - [x] **T-604 P3** Finer heat tier prototype. · files: `core/fdmcore/thermal.py` · owner: GPT-6.2 Sol, reviewed by Claude (`task/T-604-fine-heat-tier`)
   - Do: the plan in `research/thermal_optimizer_later.md`: quick-run temperatures as the edges of a finer local model around hot spots; compare on a pin, a bridge and a thick-to-thin part; time and memory in Pyodide; then decide on GPU.
 

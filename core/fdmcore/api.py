@@ -1893,7 +1893,8 @@ WARP_VERDICT = ((0.7, "fine"), (1.3, "might lift"))  # lift ratio below these, l
 _warp_reference: dict = {}
 
 
-def warping(up, profile: dict | None = None, detailed: bool = False, ranges: bool = True, *,
+def warping(up, profile: dict | None = None, detailed: bool = False, ranges: bool = True,
+            settings: dict | None = None, slicer: str = "orca", excluded_settings: list[str] | None = None, *,
             walls: int | None = None, infill: float | None = None, top: int | None = None,
             bottom: int | None = None, zones: list[dict] | None = None) -> dict:
     """Warping simulation (warp.py): how hard the base wants to curl off the bed, as a ratio to the
@@ -1904,7 +1905,8 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
     ``detailed``: with the loaded G-code's real layer times (layers that come quickly are still warm
     when the next go on and shrink less); ``from_gcode`` says whether it was used. ``ranges`` includes
     a curl range in mm and, for quick runs where both peel trials settle, possible bed lift verdicts.
-    Walls, infill, top, bottom and zones use the same settings as ``strength``."""
+    Brim settings, if given, override the recommendations, just as on download. Walls, infill, top,
+    bottom and zones use the same settings as ``strength``."""
     from . import warp
     from .gcode import layer_times
     from .strength import ReleasedStrain, refine, sample_nodes, surface_values
@@ -1919,32 +1921,74 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
     climate = chamber_conditions(p, toolpath=tp)
     sliced = layer_times(tp) if tp is not None else None
     warm = _warm_layers(up, p, sliced, climate) if detailed and sliced is not None else None
-    r = warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, climate=climate, sliced=sliced, adhesion=True,
-                      peel_range=ranges and not detailed)
-    model, turn = r["model"], r["rotation"]  # model in the print frame; turn: part -> print
-    s.warp = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"] @ turn, "turn": turn}  # set_fit / set_gap use it
-    elastic = warp.residual_strain(r)
-    if r["solver_converged"] and np.isfinite(elastic).all():
-        s.warp.update(released=ReleasedStrain(model, turn, elastic), from_gcode=warm is not None)
+
+    def simulate(brim: dict | None = None) -> dict:
+        return warp.simulate(s.mesh, up, p, sh, _grid("warp_voxels"), warm=warm, climate=climate, sliced=sliced,
+                             adhesion=True, peel_range=ranges and not detailed, brim=brim)
+
     setup = _warp_setup(p, sh)
-    key = (*setup, round(model.grid.h, 3))
-    if key not in _warp_reference:
-        _warp_reference[key] = warp.reference(p, model.grid.h, sh)
-    ref = _warp_reference[key]
-    curl = warp.curl(r)
-    ratio = float(np.sqrt(curl / ref)) if ref else None
-    verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
-    adhesion = r.get("adhesion")
-    peel_point = adhesion["point"] @ turn if adhesion and adhesion.get("may_lift") else None
-    s.warp.update(verdict=verdict, setup=setup, adhesion=adhesion, peel_point=peel_point)
+
+    def summarize(r: dict) -> tuple[dict, float, float | None]:
+        part = r.get("part_nodes", slice(None))
+        model, turn = r.get("part_model", r["model"]), r["rotation"]
+        h = model.grid.h
+        key = (*setup, round(h, 3))
+        if key not in _warp_reference:
+            _warp_reference[key] = warp.reference(p, h, sh)
+        ref = _warp_reference[key]
+        curl = warp.curl(r)
+        ratio = float(np.sqrt(curl / ref)) if ref else None
+        verdict = next((v for limit, v in WARP_VERDICT if ratio is not None and ratio < limit), "likely to lift")
+        adhesion = r.get("adhesion")
+        peel_point = adhesion["point"] @ turn if adhesion and adhesion.get("may_lift") else None
+        # set_fit and set_gap need displacement on the part alone.
+        saved = {"up": np.asarray(up, float) / np.linalg.norm(up), "model": model, "u": r["u"][part] @ turn,
+                 "turn": turn, "verdict": verdict, "setup": setup, "adhesion": adhesion, "peel_point": peel_point}
+        # Strength reads the stress locked into the part; the brim is cut off after printing.
+        elastic = warp.residual_strain(r)[r.get("part_elems", slice(None))]
+        if r["solver_converged"] and np.isfinite(elastic).all():
+            saved.update(released=ReleasedStrain(model, turn, elastic), from_gcode=warm is not None)
+        return saved, curl, ratio
+
+    settings = settings or {}
+    excluded = set(excluded_settings or ())
+    chosen = None
+    initial = None
+    if "brim_type" not in settings and not {"brim_type", "brim_width"} & excluded:
+        # A recommendation based on the bare part stays in place after we test its effect.
+        with stage(0.0, 0.45):
+            r = simulate()
+        initial, curl, ratio = summarize(r)
+        previous = s.warp
+        try:
+            s.warp = initial
+            with stage(0.45, 0.5):
+                recommendation = check(up, profile)
+        finally:
+            s.warp = previous
+        chosen = recommendation["print_risk"]["hold"]
+        settings = {**{row["key"]: row["value"] for row in recommendation["settings"]}, **settings}
+    settings = _export_brim_settings(p, settings, excluded, slicer=slicer)
+    has_brim = (settings.get("brim_type") in warp.BRIM_TYPES and 0 < float(settings.get("brim_width") or 0) < float("inf")
+                and not float(settings.get("raft_layers") or 0))
+    if initial is None or has_brim:
+        with stage(0.0 if initial is None else 0.5, 1.0):
+            r = simulate(settings if has_brim else None)
+        s.warp, curl, ratio = summarize(r)
+        if initial is not None:
+            s.warp["recommended_hold"] = chosen
+    else:
+        s.warp = initial
+    model, turn, u = (s.warp[key] for key in ("model", "turn", "u"))
+    verdict, adhesion, peel_point = (s.warp[key] for key in ("verdict", "adhesion", "peel_point"))
     # Shape for the view: the part's own movement without the rigid shift and tilt it gets off the bed.
     pos = (model.grid.origin + np.argwhere(model.node_index >= 0) * model.grid.h) @ turn  # part frame
-    u = _without_rigid_motion(pos, r["u"] @ turn)
+    u = _without_rigid_motion(pos, u)
     fine = refine(s.mesh.triangles, model.grid.h)
     disp = sample_nodes(model, u, fine.reshape(-1, 3) @ turn.T)
     size = np.linalg.norm(disp, axis=1)
     rot = print_rotation(s.mesh, up, p.printer["bed"], _moving(p))[0]
-    pull = r["pull"]
+    pull = r["pull"][r.get("part_nodes", slice(None))]
     order = np.argsort(-pull)
     spots = [peel_point] if peel_point is not None else []
     for i in order[: 40]:
@@ -1957,6 +2001,14 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
            "vertex_value": size.astype(np.float32).tobytes(), "max_mm": float(size.max(initial=0)),
            "lift_points_print": [_to_print_frame(s.mesh, rot, q) for q in spots], "material": p.material["name"],
            "from_gcode": warm is not None}
+    if has_brim:
+        kind = settings["brim_type"]
+        width = float(settings["brim_width"])
+        modeled = r["brim_modeled"]
+        key = ("warp.mouse_ears" if kind == "brim_ears" else "warp.outer_brim") if modeled else "warp.brim_unresolved"
+        message = {"key": key, "params": {"width": width} if modeled else {}}
+        out["brim"] = {"type": kind, "width_mm": width, "modeled": modeled,
+                       "message": message, "detail": format_message(message)}
     if ranges:
         values = [out["curl_mm"], *(round(curl * factor, 3) for factor in warp.shrink_factors(p))]
         out["range"] = {"curl_mm": [min(values), max(values)]}
@@ -1965,7 +2017,7 @@ def warping(up, profile: dict | None = None, detailed: bool = False, ranges: boo
         if peel_point is not None:
             out["lift_points_print"][0][2] = 0
             out["adhesion"]["point_print"] = out["lift_points_print"][0]
-    vm = warp.residual_stress(r)
+    vm = warp.residual_stress(r)[r.get("part_elems", slice(None))]
     out["stress_value"] = surface_values(model, vm, fine @ turn.T).astype(np.float32).tobytes()
     out["stress_max"] = round(float(np.percentile(vm, 99)), 2) if len(vm) else 0.0
     out["stress_share"] = round(out["stress_max"] / r["material"].strength_z, 2)
@@ -2035,8 +2087,17 @@ def _warp_story(r: dict, p: Profile) -> str:
         "might lift": f"The corners might lift: the base pulls on the bed like a {ratio * ref:.0f} mm bar, and in {name} on the {where} bars longer than about {ref:.0f} mm tend to lift.",
         "likely to lift": f"The corners will likely lift: the base pulls on the bed like a {ratio * ref:.0f} mm bar, past the {ref:.0f} mm that stays down in {name} on the {where}.",
     }[r["verdict"]]
-    fix = "" if r["verdict"] == "fine" else (" A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
-                                              " or rounding the corners of the base help. Upper layers shrinking onto the warm bottom cause it.")
+    brim = r.get("brim")
+    fix = ""
+    if r["verdict"] != "fine":
+        fix = (" A warmer bed or an enclosure, glue stick, or rounding the corners of the base can help."
+               if brim and brim["modeled"] else " A brim or mouse ears at the marked spots, a warmer bed or an enclosure, glue stick,"
+               " or rounding the corners of the base help.")
+        fix += " Upper layers shrinking onto the warm bottom cause it."
+    if brim:
+        head += " " + brim["detail"]
+        if r.get("adhesion", {}).get("brim_lifts"):
+            head += " " + r["adhesion"]["detail"]
     return head + fix + f" Off the bed it would curl up to {r['max_mm']:.2f} mm." + _stress_story(r)
 
 
@@ -4365,6 +4426,8 @@ def _finish_check_findings(s: Session, oriented: Mesh, rotation: np.ndarray, up,
     if w and w["peel_point"] is not None:
         result["findings"].append(_adhesion_finding(s, w, rotation))
     risk = print_risk(p, result["findings"], height, w["verdict"] if w else None)
+    if w and "recommended_hold" in w:
+        risk["hold"] = w["recommended_hold"]
     if risk["level"] == "high":
         result["findings"].append({"rule": "print_may_fail", "severity": "warn", "bbox": None,
                                    "metrics": {"score": risk["score"], "hold": risk["hold"]},
@@ -4771,10 +4834,7 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
     if any(m[2] == "support" for m in modifiers) and str(settings.get("enable_support", "0")) == "0":
         # Supports only where the user put them: the slicer's own placement stays off.
         settings = {**settings, "enable_support": "1", "support_type": "tree(manual)"}
-    excluded = set(excluded_settings or ())
-    settings = {k: v for k, v in settings.items() if k not in excluded}
-    if bambu(p.printer) and settings.get("brim_type") == "brim_ears":  # e.g. from a finding's fix: Bambu Studio would print no brim
-        settings = {**settings, "brim_type": "outer_only"}
+    settings = _export_brim_settings(p, settings, set(excluded_settings or ()))
     layer = float(settings.get("layer_height") or p.layer_height)
     part = orient(s.mesh, rotation)
     seam = _seam_block(faces)
@@ -4786,6 +4846,14 @@ def export(up, profile: dict | None = None, settings: dict | None = None, zones:
                       pauses=[{"top": float(z), "layer_height": layer, "note": "Put the part into the pocket"} for z in pauses or []],
                       ranges=[{k: float(r[k]) for k in ("z0", "z1", "layer_height")} for r in fine_layers or []] + cooling_ranges(cooling or {}),
                       seam_block=seam, copies=plate(up, profile, copies)["offsets"] if copies > 1 else ((0.0, 0.0),))
+
+
+def _export_brim_settings(p: Profile, settings: dict, excluded: set[str], *, slicer: str = "orca") -> dict:
+    """Use the export's Bambu fallback, and mirror the Prusa metadata when simulating it."""
+    out = {k: v for k, v in settings.items() if k not in excluded}
+    if out.get("brim_type") == "brim_ears" and (bambu(p.printer) or slicer == "prusa"):
+        out["brim_type"] = "outer_only"
+    return out
 
 
 TOWER_GAP_MM = 5.0  # between the part and a cooling tower
