@@ -220,6 +220,29 @@ def check_new_ui(browser, port: int) -> str:
           return { kind: fdmUI.store.get().part.kind, faces: p.faceIds?.length ?? 0, stepLen: p.stepBytes?.length ?? 0, regions: r.regions.length };
         }""")
         assert after_step == {"kind": "step", **before_step}, (before_step, after_step)
+        # The kept STEP takes a design change back as STEP (T-637): the stored file and body volume plus an engine
+        # edit through stepwrite.js (OpenCascade from the CDN, so it needs the network; skipped offline).
+        step_out = page.evaluate("""async () => {
+          const p = fdmUI.services.getPart();
+          const design = await fdmUI.services.engine.call('design', { up: [0, 0, 1], profile: {} });
+          const e = (design.edits ?? []).find((x) => !x.clash && x.mesh);
+          if (!e) return { skip: 'no design edit on the bracket' };
+          const edit = { ...e, mesh: new Float32Array(new Uint8Array(e.mesh).slice().buffer) };
+          if (!(p.stepVolume > 0) || !Array.isArray(p.stepEdits)) return { bad: { volume: p.stepVolume, edits: p.stepEdits } };
+          try {
+            const { stepWithEdits } = await import('./stepwrite.js');
+            const r = await stepWithEdits(p.stepBytes, p.stepVolume, [edit]);
+            return { head: new TextDecoder().decode(r.out.slice(0, 13)), size: r.out.length, notes: r.notes.map((n) => n.how) };
+          } catch (err) {
+            const why = String(err.message ?? err);
+            return /fetch|network|load/i.test(why) ? { skip: why } : { error: why };
+          }
+        }""")
+        assert "bad" not in step_out, step_out
+        if "skip" in step_out:
+            print(f"  (STEP write-back not run: {step_out['skip']})")
+        else:
+            assert step_out["head"] == "ISO-10303-21;" and step_out["size"] > 1000 and step_out["notes"] != ["skipped"], step_out
         # A broken file: a plain reason and "Try another file", the flow stays on Part.
         page.locator(".part-pill").click()
         page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "broken.stl", "mimeType": "model/stl", "buffer": b"not a mesh at all"}])

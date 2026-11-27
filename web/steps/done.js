@@ -30,6 +30,7 @@ const CURA_GLOBAL_LABELS = {
 const SLICER_KEY = "fdm-target-slicer";
 let busy = null; // {what, text} while an export runs
 let error = null;
+let stepNotes = null; // {count, notes}: how the last changed STEP came out, for the design changes it was made for
 let checked = null; // {key, check, design} when Done had to run the check itself
 let gcodeCooled = false; // Download G-code on Done: plain vs cooling-optimized (T-615)
 let slicerAvail = null; // null | true | false: whether the browser OrcaSlicer WASM is available
@@ -169,6 +170,24 @@ export function openExport(store, services) {
   openModal({ title: t("done.exportTitle"), body, actions: [
     { label: t("ui.cancel"), variant: "ghost" },
     { label: t("done.export"), variant: "primary", onClick: () => { run("3mf", t("done.exporting"), () => export3mf(store, services, slicer), services); } }] });
+}
+
+/** The original STEP with the design changes made by OpenCascade (stepwrite.js, T-045 / T-529); STL stays the fallback. */
+async function downloadStep(store, services) {
+  const s = store.get();
+  const src = services.getPart();
+  const { stepWithEdits } = await import("../stepwrite.js");
+  const r = await stepWithEdits(src.stepBytes, src.stepVolume, src.stepEdits);
+  download(r.out, `${baseName(s)}.step`, "model/step");
+  stepNotes = { count: s.design.length, notes: r.notes ?? [] };
+}
+
+/** What the last changed STEP couldn't make exactly, in words (stepfile.* messages). */
+function stepNoteLines(notes) {
+  const titles = (pick) => notes.filter(pick).map((n) => n.title.replace(/ \(.*\)$/, ""));
+  return [["stepfile.skipped", titles((n) => n.how === "skipped")], ["stepfile.faceted", titles((n) => n.how === "mesh")],
+    ["stepfile.smaller", titles((n) => n.how !== "skipped" && n.scale != null && n.scale < 1)]]
+    .filter(([, list]) => list.length).map(([key, list]) => t(key, { list }));
 }
 
 /** The part as it is now, as binary STL (the shown triangles in part coordinates). */
@@ -331,15 +350,24 @@ registerStep("done", {
     const original = s.part.original ?? s.part.name;
     const fromStep = /\.(step|stp)$/i.test(original);
     const actions = h("div", { class: "done-actions" });
+    const src = services.getPart?.();
+    const canStep = Boolean(s.design?.length && src?.stepBytes && src.stepEdits?.length);
+    if (canStep) {
+      actions.append(Button({ label: t("done.step"), disabled: Boolean(busy), onClick: () => run("step", t("done.stepWorking"), () => downloadStep(store, services), services) }));
+    }
     if (s.design?.length) {
-      actions.append(Button({ label: t("done.stl"), disabled: Boolean(busy), onClick: () => run("stl", t("done.exporting"), async () => download(await partStl(services), `${baseName(s)}.stl`, "model/stl"), services) }));
+      actions.append(Button({ label: t("done.stl"), disabled: Boolean(busy),
+        onClick: () => run("stl", t("done.exporting"), async () => download(await partStl(services), `${baseName(s)}.stl`, "model/stl"), services) }));
     }
     actions.append(
       Button({ label: t("done.save"), variant: "secondary", disabled: Boolean(busy), onClick: () => run("project", t("done.saving"), async () => download(await projectText(store, services), `${baseName(s)}.fdmcheck.json`, "application/json"), services) }),
       Button({ label: t("done.share"), variant: "secondary", disabled: Boolean(busy), onClick: () => run("report", t("done.reporting"), () => shareReport(store, services), services) }),
       Button({ label: t("done.cad"), variant: "ghost", disabled: Boolean(busy), onClick: () => run("cad", t("done.cadWorking"), () => cadChecklist(store, services), services) }));
     body.append(actions);
-    if (s.design?.length && fromStep) body.append(h("p", { class: "ui-hint" }, t("done.stepNote")));
+    if (canStep) {
+      const lines = stepNotes?.count === s.design.length ? stepNoteLines(stepNotes.notes) : [];
+      body.append(h("p", { class: "ui-hint" }, t("done.stepFirst")), ...lines.map((line) => h("p", { class: "ui-hint" }, line)));
+    } else if (s.design?.length && fromStep) body.append(h("p", { class: "ui-hint" }, t("done.stepNote")));
     if (busy) body.append(h("div", { class: "sim-running", role: "status" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", {}, busy.text)));
     if (error) body.append(h("p", { class: "drop-error", role: "alert" }, error));
 
