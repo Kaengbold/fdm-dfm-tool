@@ -174,16 +174,18 @@ async function partStl(services) {
 /** The project file (project.js, the format agents read too): the part as it is now, its setup, loads and settings. */
 async function projectText(store, services) {
   const s = store.get();
-  const { writeProject } = await import("../project.js");
+  const { writeProject, stateToProject } = await import("../project.js");
   const { check } = await currentCheck(store, services);
   const off = new Set(s.exportOff ?? []);
   const rows = settingRows(s, check).filter((r) => r.key !== "fine_layers");
   const loads = s.noLoads || s.goal === "quality" ? [] : [...s.holds.map(holdToEngine), ...s.loads.map(loadToEngine)];
   return writeProject({
     name: `${baseName(s)}.stl`, stl: await partStl(services), faceIds: s.design?.length ? null : services.getPart?.()?.faceIds,
-    profile: profileOf(s), up: upOf(s), loads, faces: markedFaces(s),
-    settings: Object.fromEntries(rows.filter((r) => !off.has(r.key)).map((r) => [r.key, r.value])),
-    excluded_settings: rows.filter((r) => off.has(r.key)).map((r) => r.key),
+    ...stateToProject(s, {
+      profile: profileOf(s), up: upOf(s), loads, faces: markedFaces(s),
+      settings: Object.fromEntries(rows.filter((r) => !off.has(r.key)).map((r) => [r.key, r.value])),
+      zones: exportZones(s),
+    }),
   });
 }
 

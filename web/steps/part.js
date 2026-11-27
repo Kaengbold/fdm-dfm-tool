@@ -19,8 +19,6 @@ export const SAMPLES = [
 export const trianglesOf = (info) => new Float32Array(new Uint8Array(info.triangles).slice().buffer);
 const kindOf = (name) => (/\.(step|stp)$/i.test(name) ? "step" : /\.3mf$/i.test(name) ? "3mf" : "stl");
 const isProject = (name) => /\.(json|html?)$/i.test(name);
-// Old projects named goals the old way (T-580).
-const OLD_GOALS = { strength: "strong", speed: "fast", material: "light" };
 
 // What the step shows between renders (a load in progress, a question, an error). Not in the store: it isn't
 // the user's input and shouldn't be undone or saved.
@@ -50,15 +48,20 @@ export async function loadPart({ name, bytes, store, go, services, rerender }) {
       set({ mode: "loading", text: t("part.reading") });
     }
     let info = await engine.call("load", { name, face_ids: faceIds }, data);
+    let bodyChanged = false;
     if (!stepBodies && info.bodies.length > 1) {
       const index = await new Promise((resolve) => set({ mode: "bodies", bodies: info.bodies.map((b) => ({ name: b.name, volume: b.volume_mm3 })), pick: resolve }));
-      if (index) info = await engine.call("select_body", { index });
+      if (index) { info = await engine.call("select_body", { index }); bodyChanged = true; }
     }
     if (info.unit_hint) {
       const factor = await new Promise((resolve) => set({ mode: "unit", hint: info.unit_hint, pick: resolve }));
-      if (factor !== 1) info = await engine.call("scale", { factor });
+      if (factor !== 1) { info = await engine.call("scale", { factor }); bodyChanged = true; }
     }
-    services.setPart?.({ name, bytes, faceIds, kind });
+    if (bodyChanged) {
+      const { stlBytes } = await import("../geometry.js");
+      data = stlBytes(trianglesOf(info));
+    }
+    services.setPart?.({ name, bytes: data, ...(kind === "step" ? { stepBytes: bytes } : {}), faceIds, kind });
     stage?.showPart(trianglesOf(info));
     const health = info.mesh_health ?? {};
     const damaged = ["holes", "non_manifold_edges", "flipped_faces"].some((k) => health[k] > 0);
@@ -89,7 +92,7 @@ async function openProject({ name, bytes, store, go, services, set }) {
       text = projectInReport(text);
       if (!text) throw new Error(t("part.noProject"));
     }
-    const { readProject } = await import("../project.js");
+    const { readProject, projectToState } = await import("../project.js");
     const p = readProject(text);
     const info = await engine.call("load", { name: p.name, face_ids: p.faceIds ?? undefined }, p.stl);
     services.setPart?.({ name: p.name, bytes: p.stl, faceIds: p.faceIds ?? undefined, kind: "stl" });
@@ -102,14 +105,11 @@ async function openProject({ name, bytes, store, go, services, set }) {
     const { migrateLoads } = await import("./loads.js");
     const loads = migrateLoads((p.loads ?? []).filter((l) => l.kind === "force")).map((l, i) => ({ ...l, id: `load-p${i}`,
       edgeKind: l.edge_kind ?? null, point: centre(l) }));
-    const pr = p.profile ?? {};
     const was = store.get();
     store.set({
       part: { name: p.name, kind: "stl", size: info.size_mm, faces: info.faces, volume: info.volume_mm3, organic: info.kind === "organic", damaged: false },
-      profile: { ...was.profile, ...(pr.printer ? { printer: pr.printer } : {}), ...(pr.material ? { material: pr.material } : {}), ...(pr.nozzle ? { nozzle: String(pr.nozzle) } : {}) },
-      ...(pr.goal ? { goal: OLD_GOALS[pr.goal] ?? pr.goal } : {}),
-      ...(pr.use_temp_c != null ? { environment: { ...was.environment, temp: "custom", tempC: pr.use_temp_c } } : {}),
-      holds, loads, noLoads: false, showFaces: p.faces?.clean ?? [],
+      ...projectToState(p, was),
+      holds, loads, noLoads: false,
     }, { undoable: false });
     view = { mode: "idle" };
     go("setup");

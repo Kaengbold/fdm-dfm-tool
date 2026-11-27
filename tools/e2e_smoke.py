@@ -201,6 +201,25 @@ def check_new_ui(browser, port: int) -> str:
                                timeout=240_000)
         part = page.evaluate("() => fdmUI.store.get().part")
         assert part["kind"] == "step" and round(part["size"][0]) == 60, part
+        # Reload and "Continue where you left off" restores the STEP part (T-636).
+        before_step = page.evaluate("""async () => {
+          await fdmUI.saving.flush();
+          const p = fdmUI.services.getPart();
+          const r = await fdmUI.services.engine.call('regions');
+          return { faces: p.faceIds?.length ?? 0, stepLen: p.stepBytes?.length ?? 0, regions: r.regions.length };
+        }""")
+        assert before_step["faces"] > 0 and before_step["stepLen"] > 0, before_step
+        page.reload()
+        page.wait_for_selector("body[data-ready]")
+        page.locator(".recent-card", has_text="l_bracket.step").click()
+        page.wait_for_function("() => fdmUI.store.get().part?.name === 'l_bracket.step' && document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.services.stage.part !== null",
+                               timeout=240_000)
+        after_step = page.evaluate("""async () => {
+          const p = fdmUI.services.getPart();
+          const r = await fdmUI.services.engine.call('regions');
+          return { kind: fdmUI.store.get().part.kind, faces: p.faceIds?.length ?? 0, stepLen: p.stepBytes?.length ?? 0, regions: r.regions.length };
+        }""")
+        assert after_step == {"kind": "step", **before_step}, (before_step, after_step)
         # A broken file: a plain reason and "Try another file", the flow stays on Part.
         page.locator(".part-pill").click()
         page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "broken.stl", "mimeType": "model/stl", "buffer": b"not a mesh at all"}])
@@ -347,6 +366,8 @@ def check_new_ui_settings(browser, port: int) -> str:
 
         page.get_by_role("button", name="All calibration tests").click()
         page.locator('[data-cal-card="creep"]').click()
+        creep_text = page.locator(".cal-detail").inner_text()
+        assert "undefined" not in creep_text and "false" not in creep_text, creep_text
         assert "9.19 MPa" in page.locator(".cal-steps + .hint").inner_text()
         with page.expect_download(timeout=60_000) as creep_download:
             page.get_by_role("button", name="Download model").click()
@@ -372,6 +393,8 @@ def check_new_ui_settings(browser, port: int) -> str:
           fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: "my_test_pei" } });
         }""")
         page.locator('[data-cal-card="warping"]').click()
+        warp_text = page.locator(".cal-detail").inner_text()
+        assert "undefined" not in warp_text and "false" not in warp_text, warp_text
         page.locator('.cal-pick[data-pick-value="40"]').click()
         page.get_by_role("button", name="Save result").click()
         page.get_by_text("Bed grip calibrated for Textured PEI at 100 °C.").wait_for(timeout=120_000)
@@ -1109,9 +1132,16 @@ def check_new_ui_done(browser, port: int) -> str:
         assert dl.value.suggested_filename == "hole_block.3mf", dl.value.suggested_filename
         assert "elefant_foot_compensation" in config and "ironing_type" not in config, config[:400]
         assert page.evaluate("() => localStorage.getItem('fdm-target-slicer')") == "prusa"
+        page.evaluate("""() => fdmUI.store.set({
+          environment: { temp: 'car', tempC: 70, touches: ['water', 'outdoors'] },
+          details: { duration: 'always', vibration: 'vibration', mountedKg: 0.5 },
+          copies: 3, pauses: [4.2],
+          boxes: [{ id: 'box-e2e', kind: 'void', up: [0, 0, 1], region: 0, box: { kind: 'void', lo: [0, 0, 0], hi: [4, 4, 4] }, notes: ['Hidden gap'] }],
+        }, { undoable: false })""")
         with page.expect_download(timeout=120_000) as dl:
             page.get_by_role("button", name="Save project").click()
-        project = json.loads(open(dl.value.path(), encoding="utf-8").read())
+        project_bytes = open(dl.value.path(), "rb").read()
+        project = json.loads(project_bytes.decode("utf-8"))
         assert project["format"] == "fdm-check-project" and project["up"] == [0, 0, 1] and "ironing_type" in project["excluded_settings"], project.keys()
         with page.expect_download(timeout=120_000) as dl:
             page.get_by_role("button", name="Share report").click()
@@ -1142,6 +1172,25 @@ def check_new_ui_done(browser, port: int) -> str:
             page.locator("dialog.ui-modal").get_by_role("button", name="Export 3MF").click()
         assert dl.value.suggested_filename.endswith(".3mf")
         assert len(manifest_reqs) == 1, f"expected 1 slicer manifest probe across sim+done, got {len(manifest_reqs)}: {manifest_reqs}"
+        # Reopening the saved project brings back goal, touches, load details, copies, pauses, boxes and exportOff (T-636).
+        page.evaluate("""() => fdmUI.store.set({
+          goal: 'balanced', environment: { temp: 'indoors', tempC: 20, touches: [] },
+          details: { duration: 'often', vibration: 'no' }, copies: 1, pauses: [], boxes: [], exportOff: [],
+        }, { undoable: false })""")
+        page.locator(".part-pill").click()
+        page.set_input_files(".drop-wrap input[type=file]", files=[{"name": "hole_block.fdmcheck.json", "mimeType": "application/json", "buffer": project_bytes}])
+        page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
+        restored = page.evaluate("""() => { const s = fdmUI.store.get();
+          return { goal: s.goal, env: s.environment, details: s.details, copies: s.copies, pauses: s.pauses,
+            boxes: s.boxes.map((b) => [b.kind, b.box.lo, b.box.hi]), exportOff: s.exportOff }; }""")
+        assert restored == {
+            "goal": "fast",
+            "env": {"temp": "car", "tempC": 70, "touches": ["water", "outdoors"]},
+            "details": {"duration": "always", "vibration": "vibration", "mountedKg": 0.5},
+            "copies": 3, "pauses": [4.2],
+            "boxes": [["void", [0, 0, 0], [4, 4, 4]]],
+            "exportOff": ["ironing_type"],
+        }, restored
         assert not errors, errors
         return f"{grid}; {len(labels)} slicer changes, unticked ironing stays out; 3MF for PrusaSlicer remembered; project, report, {got}; header export"
     finally:
@@ -1394,6 +1443,11 @@ def check_new_ui_tools(browser, port: int) -> str:
         assert "°C inside" in verdict, verdict
         assert page.evaluate("() => fdmUI.services.stage.field != null"), "walls not coloured"
         assert page.locator(".sim-legend").count() == 1
+        # Changing Power inside marks the old heat result stale and restores the primary button.
+        page.get_by_role("textbox", name="Power inside").fill("10")
+        assert page.locator(".tools-verdict").count() == 0, "stale box heat verdict stayed visible"
+        assert page.evaluate("() => fdmUI.services.stage.field == null"), "stale box heat field stayed on"
+        assert "ui-btn--primary" in (page.get_by_role("button", name="Work out the heat").get_attribute("class") or "")
         done.append("box heat: " + verdict.split("\n")[0])
         # Versions: keep, change the walls, keep again; the second row shows the difference.
         page.get_by_role("radio", name="Versions").click()

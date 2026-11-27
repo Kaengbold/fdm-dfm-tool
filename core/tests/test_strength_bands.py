@@ -2,13 +2,22 @@ from unittest.mock import patch
 
 import pytest
 
-from fdmcore.api import _dynamics_story, _format_safety, _strength_band, _strength_story, _strength_story_parts
+from fdmcore.api import _dynamics_story, _format_safety, _optimise_story, _strength_band, _strength_story, _strength_story_parts
 
 
 @pytest.mark.parametrize(("value", "expected"), [(1, "about ×1.0"), (9.9, "about ×9.9"),
-                                                  (9.99, "about ×10"), (10, "about ×10"), (17.7, "about ×18")])
+                                                  (9.99, "about ×10"), (10, "about ×10"), (17.7, "about ×18"),
+                                                  (100, "about ×100"), (100.1, "over ×100"), (12540.1, "over ×100")])
 def test_safety_precision(value, expected):
     assert _format_safety(value) == expected
+
+
+def test_optimise_story_caps_extreme_safety():
+    best = dict(met=True, safety_factor=12540.1, walls=2, top=3, bottom=3, infill=0.1, grams=18.2,
+                orientation="this one", alternatives=[])
+    story = _optimise_story(best, 2.0, compared=False)
+    assert "far above the ×2 target" in story
+    assert "12540" not in story
 
 
 @pytest.mark.parametrize(("value", "need", "expected"), [(0.9, 2, "Likely to break"), (1, 2, "Marginal"),
