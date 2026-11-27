@@ -34,7 +34,16 @@ CYLINDER_MIN_COVERAGE = 0.4  # arc share above which a convex cylinder is "cylin
 def weld(mesh: Mesh, decimals: int = 5) -> np.ndarray:
     """Vertex index per triangle corner (M, 3)."""
     pts = np.round(mesh.triangles.reshape(-1, 3), decimals)
-    _, inverse = np.unique(pts, axis=0, return_inverse=True)
+    if len(pts) == 0:
+        return np.empty((0, 3), dtype=np.intp)
+    # Sort coordinate columns directly. Sorting NumPy records (unique with
+    # axis=0) is much slower in Pyodide for large triangle soups.
+    x, y, z = pts.T
+    order = np.lexsort((z, y, x))
+    sorted_pts = pts[order]
+    starts = np.r_[False, (sorted_pts[1:] != sorted_pts[:-1]).any(axis=1)]
+    inverse = np.empty(len(pts), dtype=np.intp)
+    inverse[order] = np.cumsum(starts)
     return inverse.reshape(-1, 3)
 
 

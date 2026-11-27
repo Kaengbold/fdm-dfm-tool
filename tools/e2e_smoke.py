@@ -171,6 +171,14 @@ def check_new_ui(browser, port: int) -> str:
     try:
         page.goto(f"http://127.0.0.1:{port}/web/")
         page.wait_for_selector("body[data-ready]")
+        # Header Help dialog (T-631): opens and closes cleanly.
+        page.locator(".app-header").get_by_role("button", name="Help", exact=True).click()
+        help_dlg = page.locator("dialog.help-modal")
+        help_dlg.wait_for(state="visible")
+        assert "How FDM Check works" in help_dlg.inner_text()
+        assert "github.com/Kaengbold/fdm-dfm-tool/issues" in (help_dlg.locator("a").get_attribute("href") or "")
+        help_dlg.locator(".ui-modal__foot").get_by_role("button", name="Close", exact=True).click()
+        help_dlg.wait_for(state="detached")
         assert page.locator(".big-card.is-soon").get_attribute("aria-disabled") == "true"
         assert page.locator(".big-card.is-soon").evaluate("e => e.tabIndex") < 0, "Coming soon card is a tab stop"
         page.get_by_role("button", name="Optimize your print").click()
@@ -178,6 +186,8 @@ def check_new_ui(browser, port: int) -> str:
         texts = page.locator(".drop-wrap").inner_text().split("\n")
         assert [x for x in texts if x.strip()] == ["Drop your part here", "Choose file", "STL, 3MF, STEP or a saved project", "Sample parts"], texts
         page.get_by_role("button", name="Sample parts").click()
+        assert page.locator(".sample-card .sample-thumb").count() == 8
+        page.wait_for_function("() => document.querySelectorAll('.sample-thumb.is-loading').length === 0", timeout=30_000)
         page.locator(".sample-card", has_text="Wall hook").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
         assert page.evaluate("() => fdmUI.store.get().part.name") == "hook.stl"
@@ -309,6 +319,8 @@ def check_new_ui_settings(browser, port: int) -> str:
         # Load a sample part so we can verify "Back to your part" preserves it.
         page.get_by_role("button", name="Optimize your print").click()
         page.get_by_role("button", name="Sample parts").click()
+        assert page.locator(".sample-card .sample-thumb").count() == 8
+        page.wait_for_function("() => document.querySelectorAll('.sample-thumb.is-loading').length === 0", timeout=30_000)
         page.locator(".sample-card", has_text="Wall hook").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup'", timeout=240_000)
 
@@ -602,6 +614,8 @@ def check_new_ui_analyse(browser, port: int) -> str:
         page.wait_for_selector("body[data-ready]")
         page.get_by_role("button", name="Optimize your print").click()
         page.get_by_role("button", name="Sample parts").click()
+        assert page.locator(".sample-card .sample-thumb").count() == 8
+        page.wait_for_function("() => document.querySelectorAll('.sample-thumb.is-loading').length === 0", timeout=30_000)
         page.locator(".sample-card", has_text="Wall hook").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
         page.evaluate("() => { fdmUI.store.set({ profile: { ...fdmUI.store.get().profile, printer: 'bambu_p1s' }, goal: 'quality' }); fdmUI.go('analyse'); }")
@@ -680,6 +694,8 @@ def check_new_ui_options(browser, port: int) -> str:
         page.wait_for_selector("body[data-ready]")
         page.get_by_role("button", name="Optimize your print").click()
         page.get_by_role("button", name="Sample parts").click()
+        assert page.locator(".sample-card .sample-thumb").count() == 8
+        page.wait_for_function("() => document.querySelectorAll('.sample-thumb.is-loading').length === 0", timeout=30_000)
         page.locator(".sample-card", has_text="Wall hook").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
         page.evaluate("""async () => {
@@ -786,6 +802,8 @@ def check_new_ui_simulation(browser, port: int) -> str:
         page.wait_for_selector("body[data-ready]")
         page.get_by_role("button", name="Optimize your print").click()
         page.get_by_role("button", name="Sample parts").click()
+        assert page.locator(".sample-card .sample-thumb").count() == 8
+        page.wait_for_function("() => document.querySelectorAll('.sample-thumb.is-loading').length === 0", timeout=30_000)
         page.locator(".sample-card", has_text="Wall hook").click()
         page.wait_for_function("() => document.getElementById('step-title')?.textContent === 'Setup' && fdmUI.store.get().catalog", timeout=240_000)
         page.evaluate("""() => {
@@ -794,7 +812,7 @@ def check_new_ui_simulation(browser, port: int) -> str:
               walls: 3, top: 4, bottom: 3, infill: 0.15, safety: 2.4, target: 2,
               settings: { wall_loops: '3', top_shell_layers: '4', bottom_shell_layers: '3', sparse_infill_density: '15%', layer_height: '0.20' } } });
           fdmUI.go('sim'); }""")
-        assert "Flat · PLA · 0.4 mm · 3 walls · 15 % infill" in page.locator(".sim-setup").inner_text()
+        assert "Flat · PLA · 0.4 mm · 3 walls · 15 % infill" in page.locator(".sim-setup").inner_text().replace("\u00a0", " ")
         assert page.get_by_role("button", name="Next").count() == 1, "Next before a run (skipping is allowed)"
         page.wait_for_function("() => !/Slicing|Getting ready/.test(document.querySelector('.sim-slice__text')?.textContent ?? 'Slicing')", timeout=180_000)
         sliced = page.locator(".sim-slice__text").inner_text()
@@ -862,7 +880,7 @@ def check_new_ui_heat(browser, port: int) -> str:
         status = page.locator(".sim-status").inner_text()
         outside = re.search(r"(\d+) spots outside their window, (\d+) with the plan", status)
         assert "Cooling plan" in status and outside and int(outside[1]) > int(outside[2]), status
-        assert re.search(r"Base curl: [\d.]+ mm \([\d.]+–[\d.]+ mm\)", page.locator("aside.panel").inner_text())
+        assert re.search(r"Base curl: [\d.]+\s+mm \([\d.]+–[\d.]+\s+mm\)", page.locator("aside.panel").inner_text())
         summary = page.locator(".heat-summary").inner_text()
         hot_spots = re.search(r"Too hot: (\d+) spots before, (\d+) after", summary)
         assert hot_spots and int(hot_spots[1]) > int(hot_spots[2]) and "Rough" in summary, summary
@@ -943,8 +961,15 @@ def check_new_ui_quality(browser, port: int) -> str:
         assert not any(w in rail for w in ("Holds", "Loads", "Load details")), rail
         assert page.get_by_role("radio", name=re.compile("Complete")).count() == 0
         page.wait_for_selector(".showfaces")
-        assert "We assume the tinted outer faces" in page.locator(".showfaces").inner_text()
         page.wait_for_function("() => fdmUI.services.picker.colored?.size > 0", timeout=120_000)
+        assert "We assume the tinted outer faces" in page.locator(".showfaces").inner_text()
+        tinted = page.evaluate("""() => {
+          const st = fdmUI.services.stage, base = st.part.base, c = st.part.geo.attributes.color.array;
+          let diff = 0;
+          for (let i = 0; i < c.length; i += 3) if (Math.abs(c[i] - base.r) + Math.abs(c[i + 1] - base.g) + Math.abs(c[i + 2] - base.b) > 0.15) diff++;
+          return diff;
+        }""")
+        assert tinted > 0, "guessed show faces were not tinted on the part"
         guessed = page.evaluate("() => fdmUI.services.picker.colored.size")
         box = page.locator(".stage-canvas").bounding_box()
         page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
@@ -1047,7 +1072,9 @@ def check_new_ui_done(browser, port: int) -> str:
 
     page = browser.new_page(viewport={"width": 1280, "height": 720})
     errors: list[str] = []
+    manifest_reqs: list[str] = []
     page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("request", lambda r: manifest_reqs.append(r.url) if "muon3d-slicer-engine@" in r.url and r.url.endswith("/manifest.json") else None)
     try:
         page.goto(f"http://127.0.0.1:{port}/web/")
         page.wait_for_selector("body[data-ready]")
@@ -1060,7 +1087,10 @@ def check_new_ui_done(browser, port: int) -> str:
             option: { up: [0, 0, 1], orientation: 'Flat', material: 'pla', material_name: 'PLA', nozzle: '0.4', layer_height: 0.2,
               walls: 3, top: 4, bottom: 3, infill: 0.15, minutes: 41, part_g: 12, total_g: 12, support_g: 0,
               settings: { wall_loops: '3', top_shell_layers: '4', bottom_shell_layers: '3', sparse_infill_density: '15%', layer_height: '0.20' } } });
-          fdmUI.go('done'); }""")
+          fdmUI.go('sim'); }""")
+        page.wait_for_selector(".sim-slice__text", timeout=30_000)
+        page.wait_for_function("() => !/Getting ready|Slicing with/.test(document.querySelector('.sim-slice__text')?.textContent ?? '')", timeout=120_000)
+        page.evaluate("() => fdmUI.go('done')")
         page.wait_for_selector(".done-grid")
         grid = " ".join(page.locator(".done-grid").inner_text().split())
         assert "PLA" in grid and "41 min" in grid, grid
@@ -1111,6 +1141,7 @@ def check_new_ui_done(browser, port: int) -> str:
         with page.expect_download(timeout=120_000) as dl:
             page.locator("dialog.ui-modal").get_by_role("button", name="Export 3MF").click()
         assert dl.value.suggested_filename.endswith(".3mf")
+        assert len(manifest_reqs) == 1, f"expected 1 slicer manifest probe across sim+done, got {len(manifest_reqs)}: {manifest_reqs}"
         assert not errors, errors
         return f"{grid}; {len(labels)} slicer changes, unticked ironing stays out; 3MF for PrusaSlicer remembered; project, report, {got}; header export"
     finally:

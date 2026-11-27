@@ -688,6 +688,9 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     s = _require()
     p = Profile.from_dict(profile)
     settings = orientation_settings(p)
+    dense_organic = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES
+    if dense_organic:
+        settings.coarse_faces = 10_000  # the shortlisted directions still get the fine mesh score
     progress.report(0, "Scoring directions")
     candidates = find_orientations(s.mesh, settings, top=3 * top)  # extra, some get filtered out below
     as_loaded = evaluate(s.mesh, [0, 0, 1], settings)
@@ -760,12 +763,16 @@ def orientations(profile: dict | None = None, top: int = 5, loads: list[dict] | 
     placed = {id(r): _placement(s.mesh, r, p) for r in [*candidates, as_loaded]}
     from .orientation import rank_finalists
 
+    layer_budget = ORGANIC_REFINE_BUDGET if dense_organic else REFINE_BUDGET
+    layer_samples = {} if dense_organic else None
     with stage(0.95 if loads or p.goal == "strength" else 0.2, 1.0):
         with stage(0.0, 0.6):
-            _refine(s.mesh, [*candidates, as_loaded], placed, settings, p)
+            _refine(s.mesh, [*candidates, as_loaded], placed, settings, p,
+                    layer_budget=layer_budget, layer_samples=layer_samples)
         with stage(0.6, 1.0):
             candidates = rank_finalists(s.mesh, candidates, placed, settings, p, SUPPORT_FILL, extra=(as_loaded,),
-                                       layer_budget=REFINE_BUDGET)
+                                       layer_budget=layer_budget,
+                                       layer_samples=layer_samples)
     candidates = candidates[:top]
     if kept is not None and all(r is not kept for r in candidates):
         candidates.append(kept)
@@ -961,20 +968,28 @@ def _face_penalty(mesh: Mesh, r, marked: dict, settings: OrientationSettings) ->
 
 SCAR_WEIGHT = 1.0  # support resting on the part: rough marks on a visible surface, hard to remove
 REFINE_BUDGET = 3e7  # faces × layers for all finalists together
+DENSE_ORGANIC_FACES = 50_000
+# Curved supports are costly to overlay. Use a shorter shared stack for support,
+# bed and time estimates on dense sculpts. The subsequent bed check slices afresh.
+ORGANIC_REFINE_BUDGET = 6.4e6
 
 
-def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettings, p: Profile) -> None:
+def _refine(mesh: Mesh, results: list, placed: dict, settings: OrientationSettings, p: Profile,
+            layer_budget: float = REFINE_BUDGET, layer_samples: dict | None = None) -> None:
     """Re-score the finalists with sliced layers: real bed contact, real support volume, and
     support that lands on the part instead of the bed (see refine.py)."""
     from .orientation import _size, explain, stability_term
     from .refine import support_stats
-
     L = _size(mesh)
     # Slicing cost ~ faces × layers: keep the whole refinement within a fixed budget on big parts.
-    layers = int(np.clip(REFINE_BUDGET / (mesh.face_count * len(results)), 8, 40))
+    count = int(np.clip(layer_budget / (mesh.face_count * len(results)), 8, 40))
     for i, r in enumerate(results):
         progress.report(i / len(results), "Checking supports layer by layer")
-        st = support_stats(orient(mesh, placed[id(r)][0]), p, max_layers=layers)
+        oriented = orient(mesh, placed[id(r)][0])
+        layers = slice_mesh(oriented, p.layer_height, count)
+        if layer_samples is not None:
+            layer_samples[id(r)] = layers
+        st = support_stats(oriented, p, layers=layers)
         frac = st["bed_area"] / L**2
         new = {
             "support": settings.w_support_area * st["support_area"] / L**2
@@ -4347,12 +4362,12 @@ SUPPORT_FILL = 0.25
 SPOOL_MARGIN = (1.1, 5.0)  # a print needs × this + g on the spool: estimate error, purge line and skirt
 
 
-def _cost(oriented: Mesh, p: Profile, part_g: float) -> dict:
+def _cost(oriented: Mesh, p: Profile, part_g: float, max_layers: int = 40) -> dict:
     """Support grams for this orientation and, with the user's price per kg / grams left on the spool
     (My materials), the cost and whether the spool will last."""
     from .refine import support_stats
 
-    support_g = support_stats(oriented, p)["support_volume"] * SUPPORT_FILL / 1000 * p.material["density_g_cm3"]
+    support_g = support_stats(oriented, p, max_layers=max_layers)["support_volume"] * SUPPORT_FILL / 1000 * p.material["density_g_cm3"]
     total = part_g + support_g
     out = {"support_g": round(support_g, 1), "total_g": round(total, 1)}
     if p.material.get("price_per_kg"):
@@ -4377,9 +4392,10 @@ def check(up, profile: dict | None = None, mode: str = "print", faces: dict | No
         from .gcode import layer_times
 
         sliced = layer_times(s.gcode["toolpath"])
-    result = run_checks(oriented, p, sliced=sliced)
+    coarse = s.kind == "organic" and s.mesh.face_count >= DENSE_ORGANIC_FACES and not s.cad_checks and not detailed
+    result = run_checks(oriented, p, sliced=sliced, cad_checks=s.cad_checks, coarse=coarse)
     result["stats"]["heat_from_gcode"] = sliced is not None
-    result["stats"].update(_cost(oriented, p, result["stats"]["filament_g"]))
+    result["stats"].update(_cost(oriented, p, result["stats"]["filament_g"], max_layers=20 if coarse else 40))
     spots = _spot_heat(rotation, p) if sliced is not None else None
     if spots is not None:
         result["findings"] += _spot_findings(spots, p, result["findings"])

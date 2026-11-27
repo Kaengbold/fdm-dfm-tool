@@ -8,8 +8,10 @@
 .prob-stale { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
 .prob-batch { display: grid; gap: var(--s-1); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); font-size: var(--fs-sm); }
 .prob-batch .is-warn { color: var(--warn); }
-.prob-bar { position: sticky; bottom: 0; display: grid; justify-items: start; gap: var(--s-1); padding: var(--s-2) 0; background: var(--surface-raised); }
-.prob-bar .ui-pending { flex-wrap: wrap; }
+.prob-bar { position: sticky; bottom: calc(-1 * var(--s-5)); z-index: 2; margin: 0 calc(-1 * var(--s-5)) calc(-1 * var(--s-5)); padding: var(--s-3) var(--s-5) var(--s-4);
+  background: var(--surface-raised); border-top: 1px solid var(--line); }
+.prob-bar .ui-pending { display: flex; flex-wrap: wrap; width: 100%; }
+.prob-bar__skip { flex-basis: 100%; text-align: left; }
 .prob-review { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
 .prob-review li { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-2); border-radius: var(--r); background: var(--surface-sunken); font-size: var(--fs-sm); }
 .prob-review li.is-conflict { outline: 2px solid var(--warn); }

@@ -95,6 +95,26 @@ def test_pending_batch_conflicts_and_settings():
     assert out["status"] == ["fixed", "pending", "accepted"]
 
 
+def test_unattached_bracket_corner_edits_can_go_into_pending_batch():
+    api.load((SAMPLES / "l_bracket.stl").read_bytes(), "l_bracket")
+    up = [0, 0, 1]
+    findings = api.check(up, PROFILE)["findings"]
+    assert not any(f["rule"] == "warping" for f in findings)
+    design = api.design(up, PROFILE, findings=findings)
+    corner_ids = [e["id"] for e in design["edits"] if e["rule"] == "sharp_bed_corners"]
+    assert len(corner_ids) == 4
+    blocked = {**design["edits"][0], "id": "blocked", "source": "other", "clash": True}
+    out = run_js("""
+      const fixes = F.optionalImprovements(D, { modelLocked: true });
+      return { fixes, pending: F.pendingItem(fixes[0], null, {}) };""",
+                 _no_bytes({**design, "edits": [*design["edits"], blocked]}))
+    assert sorted(i for fix in out["fixes"] for i in fix["editIds"]) == sorted(corner_ids)
+    assert all(fix["changesModel"] for fix in out["fixes"])
+    first = out["fixes"][0]
+    assert out["pending"] == {"id": first["id"], "kind": "design", "findingId": None,
+                              "title": first["text"], "editIds": first["editIds"]}
+
+
 def test_new_and_fixed_problems():
     before = [{"finding_id": "x1", "rule": "hole", "severity": "warn"}, {"finding_id": "x2", "rule": "hole", "severity": "warn"},
               {"finding_id": "i1", "rule": "note", "severity": "info"}]

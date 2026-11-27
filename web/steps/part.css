@@ -46,6 +46,9 @@ button.big-card { cursor: pointer; }
 .drop-icon .ui-icon { width: 26px; height: 26px; }
 .drop-progress { display: flex; align-items: center; gap: var(--s-3); }
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: ui-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-right-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--surface-raised); }
+}
 .drop-error { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r); background: var(--bad-soft); color: var(--bad); font-size: var(--fs-sm); }
 .body-list { display: grid; gap: var(--s-2); }
 .unit-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-2); padding: var(--s-3) var(--s-4); border-radius: var(--r);
@@ -59,7 +62,17 @@ button.big-card { cursor: pointer; }
 .sample-card { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-2); border: 1px solid transparent; border-radius: var(--r); background: none;
   color: var(--text); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
 .sample-card:hover { border-color: var(--line); background: var(--surface); }
-.sample-card img { width: 96px; height: 96px; border-radius: var(--r-sm); background: linear-gradient(var(--stage-top), var(--stage-bottom)); }
+.sample-thumb { position: relative; display: block; width: 96px; height: 96px; border-radius: var(--r-sm); overflow: hidden;
+  background: linear-gradient(var(--stage-top), var(--stage-bottom)); }
+.sample-thumb img { width: 96px; height: 96px; opacity: 1; transition: opacity var(--t-fast); }
+.sample-thumb.is-loading img { opacity: 0; }
+.sample-thumb.is-loading::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(110deg, transparent 25%, var(--surface-raised) 50%, transparent 75%);
+  background-size: 200% 100%; opacity: 0.45; animation: sample-pulse 1.4s ease-in-out infinite; }
+@keyframes sample-pulse { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sample-thumb.is-loading::after { animation: none; background: var(--surface-sunken); opacity: 0.6; }
+}
 
 /* Camera bar buttons (stage.js cameraBar). */
 .stage-camera { display: flex; gap: var(--s-1); padding: var(--s-1); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-pop); }
@@ -70,6 +83,7 @@ button.big-card { cursor: pointer; }
 /* Hover picker badge and the keyboard feature list (T-540). */
 .pick-badge { position: absolute; z-index: 5; padding: var(--s-1) var(--s-2); border-radius: var(--r-sm); background: var(--text); color: var(--surface-raised);
   font-size: var(--fs-xs); font-weight: var(--fw-bold); white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums; }
+body:has(#portal-root > .ui-pop, #portal-root > .ui-radial) .pick-badge { display: none; }
 .stage-canvas:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .feature-panel { position: absolute; z-index: 6; top: var(--s-4); left: var(--s-4); width: 280px; display: grid; gap: var(--s-1); padding: var(--s-2);
   border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-raised); box-shadow: var(--shadow-pop); }

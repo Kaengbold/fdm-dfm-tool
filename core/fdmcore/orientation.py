@@ -224,7 +224,12 @@ def resting_directions(mesh: Mesh, n: int, starts: int = 96, hull_dirs: int = 60
 def _extreme_points(points: np.ndarray, dirs: np.ndarray, block: int = 16384) -> np.ndarray:
     """Indices of the points farthest along each of ``dirs`` (hull corners). Float32 in blocks of
     points, directions × points so the arg-max runs along memory: 240k points × 600 directions 0.3 s."""
-    pts = np.ascontiguousarray(points.T, dtype=np.float32)
+    # STL repeats every shared vertex. Score each position once, in order of first
+    # occurrence so ties still select the same hull corners and resting directions.
+    points = np.ascontiguousarray(points, dtype=np.float32)
+    _, first = np.unique(points.view(np.dtype((np.void, 12))).ravel(), return_index=True)
+    first.sort()
+    pts = np.ascontiguousarray(points[first].T)
     d = dirs.astype(np.float32)
     best = np.full(len(d), -np.inf, np.float32)
     index = np.zeros(len(d), dtype=np.intp)
@@ -235,7 +240,7 @@ def _extreme_points(points: np.ndarray, dirs: np.ndarray, block: int = 16384) ->
         top = along[rows, arg]
         better = top > best
         best[better], index[better] = top[better], arg[better] + start
-    return np.unique(index)
+    return first[np.unique(index)]
 
 
 def _roll(points: np.ndarray, centre: np.ndarray, g: np.ndarray, steps: int = 40) -> np.ndarray | None:
@@ -466,7 +471,8 @@ def _contact_width(tris: np.ndarray, z: np.ndarray, zmin: np.ndarray, ups: np.nd
 
 def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, settings: OrientationSettings,
                    profile: Profile, support_fill: float,
-                   extra: tuple[OrientationResult, ...] = (), layer_budget: float = 3e7) -> list[OrientationResult]:
+                   extra: tuple[OrientationResult, ...] = (), layer_budget: float = 3e7,
+                   layer_samples: dict | None = None) -> list[OrientationResult]:
     """Replace search proxies with the numbers shown to the user, only for finalists.
 
     Lower is better. Support costs w_support_volume (1 balanced, 1.5 speed, 2.5
@@ -482,9 +488,9 @@ def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, s
 
     Time uses the app's existing _estimate, including walls, infill, cooling and
     layer-change overhead, on up to 160 sections like its bed checks; big meshes get fewer
-    (faces x sections within layer_budget for all finalists, at least 40) so the browser
-    doesn't spend more on ranking than on the search. The bed checks use only the first
-    layer, the top and the widest section, and time is only compared between finalists.
+    (faces x sections within layer_budget for all finalists, at least 40); dense sculpts
+    reuse the stack from support refinement. The bed checks use only the first layer,
+    the top and the widest section, and time is only compared between finalists.
     It costs w_print_time=0.25 times minutes / the fastest finalist's minutes.
     Thus a twice-as-long print costs 0.25 extra, not just a taller bounding box.
     Existing penalties stay: stability up to 1, small spots 0.5 each (up to 3),
@@ -506,7 +512,8 @@ def rank_finalists(mesh: Mesh, results: list[OrientationResult], placed: dict, s
     sections = int(np.clip(layer_budget / (mesh.face_count * (len(results) + len(extra))), 40, 160))
     for index, result in enumerate([*results, *extra]):
         report(index / (len(results) + len(extra)), "Checking bed contact and print time")
-        layers = slice_mesh(orient(mesh, placed[id(result)][0]), profile.layer_height, sections)
+        layers = (layer_samples[id(result)] if layer_samples is not None else
+                  slice_mesh(orient(mesh, placed[id(result)][0]), profile.layer_height, sections))
         findings = _bed_findings(layers, profile, thresholds)
         result.bed_rules = tuple(finding["rule"] for finding in findings
                                  if finding["rule"] in {"tipping_risk", "small_bed_contact"})

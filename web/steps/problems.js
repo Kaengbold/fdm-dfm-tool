@@ -8,7 +8,7 @@
 // puts the last version back. The logic without the page is in fixes.js.
 import { h } from "../ui/dom.js";
 import { Button } from "../ui/button.js";
-import { FindingRow, PendingBar } from "../ui/finding.js";
+import { FindingRow, FixRow, PendingBar } from "../ui/finding.js";
 import { Disclosure } from "../ui/disclosure.js";
 import { openModal } from "../ui/overlay.js";
 import { registerStep } from "../shell.js";
@@ -367,6 +367,10 @@ registerStep("problems", {
     const left = F.openProblems(findings, ctx);
     if (ctx.newIds.length) body.append(h("p", { class: "prob-new", role: "alert" }, t("problems.caused", { count: ctx.newIds.length })));
     const modelLocked = s.change === "slicer";
+    const displayFix = (fix) => ({
+      ...fix, added: s.pending.some((p) => p.id === fix.id),
+      text: fix.changesModel ? t("problems.changesModel", { text: fix.text }) : fix.text,
+    });
     const row = (f) => {
       const isOpen = openId === f.finding_id;
       const preview = isOpen ? problemPreview(f) : null;
@@ -374,8 +378,7 @@ registerStep("problems", {
         finding: {
           title: f.short_title ?? f.title, place: f.instance_label, line: f.one_liner ?? f.detail, severity: F.severityOf(f),
           state: ((st) => (st === "open" ? "pending" : st))(F.statusOf(f, ctx)),
-          fixes: [...F.fixesFor(f, res.design, { modelLocked }).map((fx) => ({ ...fx, added: s.pending.some((p) => p.id === fx.id),
-            text: fx.changesModel ? t("problems.changesModel", { text: fx.text }) : fx.text })), ...toolFixes(f, s)],
+          fixes: [...F.fixesFor(f, res.design, { modelLocked }).map(displayFix), ...toolFixes(f, s)],
         },
         expanded: isOpen,
         preview,
@@ -396,6 +399,16 @@ registerStep("problems", {
       if (g.impact === "info" && worse) list.append(Disclosure({ label, summary: String(g.findings.length), content: rows }));
       else list.append(h("section", { class: "prob-group" }, h("h3", {}, label, " ", h("small", {}, String(g.findings.length))), rows));
     }
+    const improvements = F.optionalImprovements(res.design, { modelLocked });
+    if (improvements.length) {
+      const rows = improvements.map((fix) => FixRow({
+        fix: displayFix(fix),
+        onHoverFix: (fx) => showGhosts(store, services, fx),
+        onAdd: () => addFix(fix, null, store),
+      }));
+      list.append(h("section", { class: "prob-group" }, h("h3", {}, t("problems.optionalImprovements")),
+        h("div", { class: "prob-rows" }, rows)));
+    }
     if (!left.length) {
       const notRun = [];
       if (s.goal === "quality" || s.noLoads) notRun.push(t("problems.notRun.strength"));
@@ -406,10 +419,10 @@ registerStep("problems", {
 
     if (s.pending.length) {
       const clashes = F.conflicts(s.pending).length;
-      body.append(h("div", { class: "prob-bar" },
-        PendingBar({ count: s.pending.length, conflicts: clashes, onReview: () => review(store), onDiscard: () => store.set({ pending: [] }),
-          onConfirm: () => !work && confirmBatch(store, services, true) }),
-        h("button", { type: "button", class: "ui-link is-quiet", disabled: clashes > 0 || Boolean(work), onclick: () => confirmBatch(store, services, false) }, t("problems.noRecheck"))));
+      const bar = PendingBar({ count: s.pending.length, conflicts: clashes, onReview: () => review(store), onDiscard: () => store.set({ pending: [] }),
+        onConfirm: () => !work && confirmBatch(store, services, true) });
+      bar.append(h("button", { type: "button", class: "ui-link is-quiet prob-bar__skip", disabled: clashes > 0 || Boolean(work), onclick: () => confirmBatch(store, services, false) }, t("problems.noRecheck")));
+      body.append(h("div", { class: "prob-bar" }, bar));
     }
     showGhosts(store, services);
   },

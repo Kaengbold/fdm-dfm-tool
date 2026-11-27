@@ -6,7 +6,7 @@ import { h, portal } from "./dom.js";
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
-export function openPopover3D({ anchor, project, bounds, title, content, onConfirm, onCancel, offset = 16 }) {
+export function openPopover3D({ anchor, project, bounds, avoid, title, content, onConfirm, onCancel, offset = 16 }) {
   const back = document.activeElement;
   const pop = h("div", { class: "ui-pop", role: "dialog", "aria-label": title }, title && h("div", { class: "ui-pop__title" }, title), content);
   portal().append(pop);
@@ -15,8 +15,31 @@ export function openPopover3D({ anchor, project, bounds, title, content, onConfi
     const { x, y } = project(anchor);
     const box = bounds?.() ?? document.documentElement.getBoundingClientRect();
     const w = pop.offsetWidth, hgt = pop.offsetHeight;
-    const left = Math.min(Math.max(x + offset, box.left + 8), box.right - w - 8);
-    const top = Math.min(Math.max(y - hgt / 2, box.top + 8), box.bottom - hgt - 8);
+    const clampX = (v) => Math.min(Math.max(v, box.left + 8), box.right - w - 8);
+    const clampY = (v) => Math.min(Math.max(v, box.top + 8), box.bottom - hgt - 8);
+    let left = clampX(x + offset);
+    let top = clampY(y - hgt / 2);
+    const skip = avoid?.();
+    if (skip && skip.width > 0 && skip.height > 0) {
+      const pad = 8;
+      const hits = (l, t) => l < skip.right + pad && l + w > skip.left - pad && t < skip.bottom + pad && t + hgt > skip.top - pad;
+      if (hits(left, top)) {
+        const tries = [
+          [clampX(x - offset - w), top],
+          [skip.right + pad, top],
+          [skip.left - w - pad, top],
+          [left, skip.top - hgt - pad],
+          [left, skip.bottom + pad],
+        ];
+        const ok = tries.find(([l, t]) => l >= box.left + 8 && l + w <= box.right - 8 && t >= box.top + 8 && t + hgt <= box.bottom - 8 && !hits(l, t));
+        if (ok) [left, top] = ok;
+        else {
+          top = skip.top - box.top >= box.bottom - skip.bottom
+            ? Math.max(box.top + 8, skip.top - hgt - pad)
+            : Math.min(box.bottom - hgt - 8, skip.bottom + pad);
+        }
+      }
+    }
     pop.style.left = `${left}px`;
     pop.style.top = `${top}px`;
   }
