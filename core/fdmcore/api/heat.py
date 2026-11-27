@@ -314,7 +314,7 @@ def optimize_cooling(up, profile: dict | None = None, loads: list[dict] | None =
 
     with_ranges = ranges and not fine
     with stage(0, 0.75 if with_ranges else 1):
-        r = _strength.optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
+        r = optimize(tp, p, lambda h: mark(h)[2], lambda h: mark(h)[1], "fine" if fine else "quick")
     out = _cooling_view(r, _importance_map(up, p, loads), p)
     if with_ranges:
         summary = _heat_summary(r["heat"]["before"])
@@ -534,12 +534,12 @@ def optimize_gcode(up, data: bytes, profile: dict | None = None, loads: list[dic
 
     weight_at, intents_at = (lambda h: mark(h)[2]), (lambda h: mark(h)[1])
     tier = "fine" if fine else "quick"
-    r = _strength.optimize(tp, p, weight_at, intents_at, tier)
+    r = optimize(tp, p, weight_at, intents_at, tier)
     if not r["gcode"]["plan"]:
         return {"ok": False, "problems": ["Nothing to change. " + _cooling_view(r, _importance_map(up, p, loads), p)["summary"][0]]}
     new = rewrite(data, tp, r["plans"]["gcode"], [f"Spots too hot {r['before']['too_hot']} -> {r['gcode']['too_hot']}, "
                                                   f"too cold to bond {r['before']['too_cold']} -> {r['gcode']['too_cold']} (estimated limits)."])
-    problems = _check.check(tp, new.text, new.toolpath)
+    problems = check(tp, new.text, new.toolpath)
     if not problems:
         back = parse(new.text, loaded.settings)
         h = simulate(back, timing(back), p, tier)

@@ -425,7 +425,7 @@ def tuning_gcode(kind: str, data: bytes, profile: dict | None = None) -> dict:
         plan.fan[2:] = np.asarray(SNAP_FANS)[band[2:len(plan.fan)]]
         note = "Snap test: the part fan steps " + " / ".join(f"{f:.0%}" for f in SNAP_FANS) + f" every {SNAP_BAND_MM:g} mm."
     new = rewrite(data, tp, plan, [note])
-    problems = _check.check(tp, new.text, new.toolpath)
+    problems = check(tp, new.text, new.toolpath)
     if problems:
         raise ValueError("The test G-code didn't pass its check: " + "; ".join(problems))
     return {"data": new.text.encode(), "name": f"{kind}_test_tuning.gcode", "minutes": [round(m, 1) for m in new.minutes]}
