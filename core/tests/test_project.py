@@ -70,10 +70,21 @@ def test_old_project_has_no_suggestion_overrides():
     assert opened["holes"]["fits"]["4"]["partner_mm"] == 8
 
 
-@pytest.mark.parametrize("choices", [{}, {"load_settings": {"values": {"wall_loops": "2"}, "met": True, "kept": False}}, {"excluded_settings": ["wall_loops", "layer_height"]},
-                                       {"edit_selections": {"fit-4": False, "teardrop-8": True},
-                                        "suggested_boxes": {'["support",4,null,null]': {
-                                            "kind": "support", "from": {"region": 4}, "use": False}}}])
+@pytest.mark.parametrize("choices", [
+    {},
+    {"load_settings": {"values": {"wall_loops": "2"}, "met": True, "kept": False}},
+    {"excluded_settings": ["wall_loops", "layer_height"]},
+    {"edit_selections": {"fit-4": False, "teardrop-8": True},
+     "suggested_boxes": {'["support",4,null,null]': {"kind": "support", "from": {"region": 4}, "use": False}}},
+    {"profile": {"printer": "bambu_p1s", "material": "petg", "goal": "strong", "use_temp_c": 70, "constant_load": True},
+     "environment": {"temp": "car", "temp_c": 70, "touches": ["outdoors", "water"]},
+     "details": {"duration": "always", "vibration": "vibration", "mounted_kg": 0.5, "temp_ok": True},
+     "excluded_settings": ["ironing_type"],
+     "copies": 4,
+     "pauses": [4.2, 8.0],
+     "boxes": [{"id": "box-1", "kind": "void", "up": [0, 0, 1], "region": 2,
+                "box": {"kind": "void", "lo": [1, 2, 3], "hi": [4, 5, 6]}, "notes": ["Hidden gap"]}]},
+])
 def test_browser_and_python_project_round_trip(choices):
     node = shutil.which("node")
     if not node:
@@ -89,6 +100,86 @@ def test_browser_and_python_project_round_trip(choices):
     result = subprocess.run([node, "--input-type=module", "-e", script, str(PART.parents[1] / "project.js")],
                             input=text, text=True, capture_output=True, check=True, timeout=30)
     assert project.read(result.stdout) == project.read(text)
+
+
+def test_round_trip_keeps_setup_and_extras():
+    stl = PART.read_bytes()
+    env = {"temp": "car", "temp_c": 70, "touches": ["water", "outdoors"]}
+    details = {"duration": "always", "vibration": "drop", "drop_mm": 1200, "temp_ok": True}
+    boxes = [{"id": "box-a", "kind": "stronger", "up": [0, 0, 1], "region": 3,
+              "box": {"kind": "stronger", "lo": [0, 0, 0], "hi": [10, 10, 10], "walls": 5, "infill": 0.4},
+              "notes": ["Stronger spot"]}]
+    text = project.dump(
+        PART.name, stl,
+        profile={"printer": "bambu_p1s", "material": "petg", "nozzle": "0.6", "goal": "strong", "use_temp_c": 70, "constant_load": True},
+        environment=env, details=details, excluded_settings=["ironing_type", "fine_layers"],
+        copies=3, pauses=[5.2, 11.4], boxes=boxes,
+    )
+    opened = project.read(text)
+    assert opened["profile"]["goal"] == "strong"
+    assert opened["environment"] == env
+    assert opened["details"] == details
+    assert opened["excluded_settings"] == ["ironing_type", "fine_layers"]
+    assert opened["copies"] == 3
+    assert opened["pauses"] == [5.2, 11.4]
+    assert opened["boxes"] == boxes
+    # Older projects without the new fields still read without them.
+    old = project.read(project.dump(PART.name, stl, profile={"material": "pla"}))
+    for k in ("environment", "details", "copies", "pauses", "boxes"):
+        assert k not in old
+
+
+def test_browser_state_round_trip_and_old_project_compat():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed to exercise the browser state mapping")
+    script = """
+      import fs from 'node:fs';
+      const source = fs.readFileSync(process.argv[1]).toString('base64');
+      const { writeProject, readProject, stateToProject, projectToState } = await import('data:text/javascript;base64,' + source);
+      const stl = new Uint8Array([1, 2, 3, 4]);
+      const state = {
+        goal: 'strong',
+        environment: { temp: 'car', tempC: 70, touches: ['water', 'outdoors'] },
+        details: { duration: 'always', vibration: 'vibration', mountedKg: 0.8, tempOk: true },
+        exportOff: ['ironing_type', 'fine_layers'],
+        copies: 4,
+        pauses: [4.2, 9.6],
+        boxes: [{ id: 'box-1', kind: 'void', up: [0, 0, 1], region: 2, box: { kind: 'void', lo: [0, 0, 0], hi: [5, 5, 5] }, notes: ['gap'] }],
+      };
+      const text = writeProject({
+        name: 'part.stl', stl,
+        ...stateToProject(state, { profile: { printer: 'bambu_p1s', material: 'petg', nozzle: '0.6', use_temp_c: 70, constant_load: true }, up: [0, 0, 1] }),
+      });
+      const restored = projectToState(readProject(text), { profile: {}, environment: { temp: 'indoors', tempC: 20, touches: [] } });
+      // Older project without environment/details/copies/pauses/boxes, only profile.goal + constant_load + use_temp_c + excluded_settings.
+      const oldText = writeProject({
+        name: 'old.stl', stl, up: [0, 0, 1],
+        profile: { printer: 'bambu_p1s', material: 'abs', goal: 'strength', use_temp_c: 65, constant_load: true },
+        excluded_settings: ['brim_type'],
+        zones: [{ kind: 'stronger', lo: [1, 1, 1], hi: [3, 3, 3], walls: 5, infill: 0.4 }],
+      });
+      const oldRestored = projectToState(readProject(oldText), { profile: {}, environment: { temp: 'indoors', tempC: 20, touches: [] } });
+      console.log(JSON.stringify({ restored, oldRestored }));
+    """
+    result = subprocess.run([node, "--input-type=module", "-e", script, str(PART.parents[1] / "project.js")],
+                            text=True, capture_output=True, check=True, timeout=30)
+    out = json.loads(result.stdout)
+    r = out["restored"]
+    assert r["goal"] == "strong"
+    assert r["environment"] == {"temp": "car", "tempC": 70, "touches": ["water", "outdoors"]}
+    assert r["details"] == {"duration": "always", "vibration": "vibration", "mountedKg": 0.8, "tempOk": True}
+    assert r["exportOff"] == ["ironing_type", "fine_layers"]
+    assert r["copies"] == 4
+    assert r["pauses"] == [4.2, 9.6]
+    assert len(r["boxes"]) == 1 and r["boxes"][0]["kind"] == "void"
+    old = out["oldRestored"]
+    assert old["goal"] == "strong"
+    assert old["environment"] == {"temp": "custom", "tempC": 65, "touches": []}
+    assert old["details"] == {"duration": "always", "vibration": "no"}
+    assert old["exportOff"] == ["brim_type"]
+    assert old["copies"] == 1 and old["pauses"] == []
+    assert len(old["boxes"]) == 1 and old["boxes"][0]["kind"] == "stronger"
 
 
 def test_not_a_project():

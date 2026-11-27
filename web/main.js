@@ -34,7 +34,7 @@ try {
 
 const store = createStore();
 const saving = autosave(store);
-let source = null; // the part's file: {name, bytes, faceIds, kind}, to give a restarted engine the part again
+let source = null; // the part's file: {name, bytes (STL/3MF for the engine), stepBytes?, faceIds, kind}
 const engine = createEngine({ onProgress: ({ fraction, text }) => services.onProgress?.(fraction, text),
   onPartial: ({ result }) => services.onPartial?.(result) });
 engine.onRestore(async (post) => {
