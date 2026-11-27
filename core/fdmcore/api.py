@@ -1115,6 +1115,8 @@ MAX_SCORE_GAP = 3.0  # options scoring this much worse than the best are not sho
 
 def _format_safety(value: float) -> str:
     """Avoid implying more precision than the strength estimate supports."""
+    if value > 100:
+        return "over ×100"
     return f"about ×{value:.0f}" if value >= 10 or round(value, 1) >= 10 else f"about ×{value:.1f}"
 
 
@@ -1875,7 +1877,10 @@ def _optimise_story(best: dict, target: float, compared: bool) -> str:
     where = " Printed in the strongest orientation." if best["orientation"] == "strongest" else ""
     setting = f"{best['walls']} walls, {best['top']} top / {best['bottom']} bottom layers and {best['infill']:.0%} infill"
     if best["met"]:
-        out = f"{setting} reach {_format_safety(best['safety_factor'])} (you need ×{target:.0f}) with about {best['grams']:.0f} g of plastic.{where}"
+        if best["safety_factor"] > 100:
+            out = f"{setting} are far above the ×{target:.0f} target with about {best['grams']:.0f} g of plastic.{where}"
+        else:
+            out = f"{setting} reach {_format_safety(best['safety_factor'])} (you need ×{target:.0f}) with about {best['grams']:.0f} g of plastic.{where}"
         alt = best["alternatives"]
         if compared and alt and alt[0]["met"]:
             out += f" The other orientation needs {alt[0]['grams']:.0f} g for the same."
@@ -4611,7 +4616,7 @@ def clearance(data: bytes, profile: dict | None = None) -> dict:
         if nxt:
             text += f" For them to {FIT_WORDS[nxt]}, leave {side[nxt]:.2f} mm."
     measured = bool(p.material.get("fit_gap_mm"))
-    text += " (Gaps from your fit test print.)" if measured else " (Typical gaps: “Tune to my printer” gives your printer's with one test print.)"
+    text += " (Gaps from your fit test print.)" if measured else " (Typical gaps: “Settings & calibration” gives your printer's with one test print.)"
     return {**r, "explanation": text}
 
 

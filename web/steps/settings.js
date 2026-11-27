@@ -1805,19 +1805,21 @@ function renderCalibrationDetail() {
   } else if (testDef.id === "warping") {
     const grip = info.spec?.bed_grip_calibration?.[info.enc];
     const surface = info.printer?.bed_surface ?? "unknown";
-    pickerBox.append(h("div", { class: "cal-picker-group" },
-      h("span", { class: "ui-label" }, t("settings.cal.warping.pick")),
-      visualRadioGroup({
-        label: t("settings.cal.warping.pick"),
-        value: view.calDraft.mm,
-        options: [{ value: 0, label: t("settings.cal.warping.noneFlat") },
-          ...WARP_LENGTHS.map((mm) => ({ value: mm, label: t("settings.active.mm", { v: mm }) }))],
-        onChange: (val) => { view.calDraft.mm = Number(val); },
-        renderVisual: (o) => o.value ? h("span", { class: "cal-bar-vis", style: { width: `${18 + o.value * 0.35}px` } }) : null,
-      })),
+    pickerBox.append(...[
+      h("div", { class: "cal-picker-group" },
+        h("span", { class: "ui-label" }, t("settings.cal.warping.pick")),
+        visualRadioGroup({
+          label: t("settings.cal.warping.pick"),
+          value: view.calDraft.mm,
+          options: [{ value: 0, label: t("settings.cal.warping.noneFlat") },
+            ...WARP_LENGTHS.map((mm) => ({ value: mm, label: t("settings.active.mm", { v: mm }) }))],
+          onChange: (val) => { view.calDraft.mm = Number(val); },
+          renderVisual: (o) => o.value ? h("span", { class: "cal-bar-vis", style: { width: `${18 + o.value * 0.35}px` } }) : null,
+        })),
       surface === "unknown" && h("p", { class: "hint" }, t("settings.cal.warping.grip.unknown_plate")),
       grip && (grip.status !== "unknown_plate" || surface !== "unknown") && h("p", { class: "hint" },
-        t(`settings.cal.warping.grip.${grip.status}`, { plate: plateLabel(grip.surface), c: grip.bed_temp_c })));
+        t(`settings.cal.warping.grip.${grip.status}`, { plate: plateLabel(grip.surface), c: grip.bed_temp_c })),
+    ].filter(Boolean));
   } else if (testDef.id === "fit") {
     const gaps = [0, 0.1, 0.2, 0.3, 0.4, 0.5];
     const holeOpts = gaps.map((g) => ({
@@ -1924,10 +1926,11 @@ function renderCalibrationDetail() {
       units: [{ value: "mm", label: "mm" }],
       onChange: (value) => { view.calDraft[minutes] = value; },
     }));
-    pickerBox.append(
+    pickerBox.append(...[
       h("p", { class: "hint" }, t("settings.cal.creep.readingsHint")),
       h("div", { class: "set-grid-2" }, creepFields),
-      status.measured && h("p", { class: "hint" }, status.summary));
+      status.measured && h("p", { class: "hint" }, status.summary),
+    ].filter(Boolean));
   } else if (testDef.id === "starter") {
     const lookSeg = SegmentedControl({
       label: t("settings.cal.starter.firstLayer"),

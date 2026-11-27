@@ -17,8 +17,35 @@ import { clearFeeler, clearTight, showFeeler, showTight } from "../viewport/tole
 const GAP_FITS = ["press", "snug", "sliding", "loose"];
 const f32 = (b) => new Float32Array(new Uint8Array(b).slice().buffer);
 
-const gap = { faces: [], answer: null, partner: null, fit: "sliding", busy: null, error: null, shown: null };
-const mate = { result: null, name: null, show: true, busy: null, error: null };
+const gap = { key: null, faces: [], answer: null, partner: null, fit: "sliding", busy: null, error: null, shown: null };
+const mate = { key: null, result: null, name: null, show: true, busy: null, error: null };
+
+const keyOf = (store) => {
+  const s = store.get();
+  return JSON.stringify([store.deps("model", "profile"), s.option?.up, s.option?.material]);
+};
+
+function syncGap(store, services) {
+  const key = keyOf(store);
+  if (gap.key === key) return;
+  gap.key = key;
+  gap.faces = [];
+  gap.answer = null;
+  gap.partner = null;
+  gap.error = null;
+  gap.shown = null;
+  if (services) clearFeeler(services.stage);
+}
+
+function syncMate(store, services) {
+  const key = keyOf(store);
+  if (mate.key === key) return;
+  mate.key = key;
+  mate.result = null;
+  mate.name = null;
+  mate.error = null;
+  if (services) hideMate(services);
+}
 
 /**
  * What a ``partner`` mm part does in a flat gap ``distance`` mm wide (a slot) or over a tab ``distance`` mm thick,
@@ -37,15 +64,21 @@ export const gapShade = (mm, range) => Math.min(1, Math.max(0, mm / range));
 async function measure(ctx) {
   const { store, services, upOf, profileOf } = ctx;
   const s = store.get();
+  const key = keyOf(store);
+  gap.key = key;
   const [a, b] = gap.faces;
   gap.busy = t("tol.gap.measuring");
   gap.error = null;
   services.rerender();
   try {
     const first = await services.engine.call("set_gap", { face_a: a, face_b: b, up: upOf(s), profile: profileOf(s) });
+    if (gap.key !== key) return;
     if (gap.partner == null) gap.partner = first.kind === "slot" ? Math.max(0.5, Math.floor(first.distance_mm * 2) / 2 - 0.5) : Math.ceil(first.distance_mm * 2) / 2 + 0.5;
-    gap.answer = await services.engine.call("set_gap", { face_a: a, face_b: b, up: upOf(s), profile: profileOf(s), partner_mm: gap.partner, fit: gap.fit });
+    const answer = await services.engine.call("set_gap", { face_a: a, face_b: b, up: upOf(s), profile: profileOf(s), partner_mm: gap.partner, fit: gap.fit });
+    if (gap.key !== key) return;
+    gap.answer = answer;
   } catch (e) {
+    if (gap.key !== key) return;
     if (!(e instanceof Cancelled)) gap.error = e.message;
     gap.faces = [];
     gap.answer = null;
@@ -57,6 +90,7 @@ async function measure(ctx) {
 
 /** A click in Flat gaps: the first face, then the second (then measure); a third click starts over. */
 export function pickGapFace(hit, ctx) {
+  syncGap(ctx.store, ctx.services);
   if (hit.region == null || gap.busy) return;
   const info = ctx.services.picker.data?.regions?.[hit.region];
   if (info && info.kind !== "flat") { showToast({ message: t("tol.gap.flatOnly") }); return; }
@@ -66,7 +100,7 @@ export function pickGapFace(hit, ctx) {
   if (gap.faces.length === 2) measure(ctx);
 }
 
-export const gapFaces = () => gap.faces;
+export const gapFaces = (store) => (store && gap.key !== keyOf(store) ? [] : gap.faces);
 
 async function addGap(ctx) {
   const { store, services, upOf, profileOf } = ctx;
@@ -95,6 +129,7 @@ const busyLine = (x) => [
 
 export function renderGaps(ctx) {
   const { body, store, services, tolerance, designOk } = ctx;
+  syncGap(store, services);
   const s = store.get();
   body.append(h("p", { class: "ui-hint" }, t(gap.faces.length === 1 ? "tol.gap.pickSecond" : "tol.gap.pick")), ...busyLine(gap));
   const r = gap.answer;
@@ -130,14 +165,19 @@ export function renderGaps(ctx) {
 async function loadMate(file, ctx) {
   const { store, services, profileOf } = ctx;
   if (!file) return;
+  const key = keyOf(store);
+  mate.key = key;
   mate.busy = t("tol.mate.measuring");
   mate.error = null;
   services.rerender();
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    mate.result = await services.engine.call("clearance_map", { profile: profileOf(store.get()) }, bytes);
+    const r = await services.engine.call("clearance_map", { profile: profileOf(store.get()) }, bytes);
+    if (mate.key !== key) return;
+    mate.result = r;
     mate.name = file.name;
   } catch (e) {
+    if (mate.key !== key) return;
     if (!(e instanceof Cancelled)) mate.error = e.message;
   } finally {
     mate.busy = null;
@@ -147,6 +187,7 @@ async function loadMate(file, ctx) {
 
 export function renderMate(ctx) {
   const { body, stage, store, services } = ctx;
+  syncMate(store, services);
   const input = h("input", { type: "file", accept: ".stl,.3mf,.obj", class: "visually-hidden", tabindex: "-1", "aria-hidden": "true",
     onchange: (e) => { loadMate(e.target.files[0], ctx); e.target.value = ""; } });
   body.append(h("p", { class: "ui-hint" }, t("tol.mate.intro")),

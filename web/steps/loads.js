@@ -42,6 +42,7 @@ export function directionWord(dir, normal) {
 /** Where a part-coordinate point is on screen (client px). */
 function toClient(services, point) {
   const { stage } = services;
+  if (!stage.part) return { x: 0, y: 0 };
   const v = new THREE.Vector3(...point).add(stage.part.offset).project(stage.camera);
   const r = stage.canvas.getBoundingClientRect();
   return { x: (v.x + 1) / 2 * r.width + r.left, y: (1 - v.y) / 2 * r.height + r.top };
@@ -118,7 +119,7 @@ function wire(services, store) {
 
 function drawArrows(services, loads) {
   const stage = services.stage;
-  if (!stage.part) return;
+  if (!stage.part?.geo?.boundingSphere) return;
   if (!arrows) { arrows = new THREE.Group(); arrows.renderOrder = 8; }
   // Attach to part.group so force arrows rotate and shift with the part whenever print orientation changes (T-607).
   if (arrows.parent !== stage.part.group) stage.part.group.add(arrows);
